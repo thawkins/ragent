@@ -1,0 +1,1305 @@
+# ragent — Specification
+
+**An open-source AI coding agent built for the terminal, implemented in Rust.**
+
+ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/opencode) — the open-source AI coding agent. It provides the same core capabilities (multi-provider LLM orchestration, tool execution, TUI, client/server architecture, MCP support, LSP integration) rewritten from TypeScript/Bun into idiomatic, high-performance Rust.
+
+---
+
+## Table of Contents
+
+1. [Goals & Non-Goals](#1-goals--non-goals)
+2. [Architecture Overview](#2-architecture-overview)
+3. [Core Modules](#3-core-modules)
+   - 3.1 [CLI & Entry Point](#31-cli--entry-point)
+   - 3.2 [Configuration](#32-configuration)
+   - 3.3 [Provider System](#33-provider-system)
+   - 3.4 [Agent System](#34-agent-system)
+   - 3.5 [Session Management](#35-session-management)
+   - 3.6 [Message Model](#36-message-model)
+   - 3.7 [Tool System](#37-tool-system)
+   - 3.8 [Permission System](#38-permission-system)
+   - 3.9 [HTTP Server](#39-http-server)
+   - 3.10 [Terminal UI (TUI)](#310-terminal-ui-tui)
+   - 3.11 [MCP Client](#311-mcp-client)
+   - 3.12 [LSP Integration](#312-lsp-integration)
+   - 3.13 [Event Bus](#313-event-bus)
+   - 3.14 [Storage & Database](#314-storage--database)
+   - 3.15 [Shell Execution](#315-shell-execution)
+   - 3.16 [Snapshot & Undo](#316-snapshot--undo)
+4. [Data Flow](#4-data-flow)
+5. [Configuration File Format](#5-configuration-file-format)
+6. [Rust Crate Map](#6-rust-crate-map)
+7. [Project Layout](#7-project-layout)
+8. [Build & Distribution](#8-build--distribution)
+9. [Testing Strategy](#9-testing-strategy)
+10. [Future / Stretch Goals](#10-future--stretch-goals)
+
+---
+
+## 1. Goals & Non-Goals
+
+### Goals
+
+| # | Goal |
+|---|------|
+| G1 | Feature parity with OpenCode's core CLI agent (agents, tools, providers, sessions, permissions, MCP, LSP). |
+| G2 | Single statically-linked binary — no runtime dependencies (Node, Bun, Python). |
+| G3 | Cross-platform: Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64). |
+| G4 | Sub-second cold start; low memory footprint. |
+| G5 | Client/server architecture: a local HTTP/WebSocket server that any frontend (TUI, web, mobile) can drive. |
+| G6 | Provider-agnostic: first-class support for Anthropic, OpenAI, Google, Azure, AWS Bedrock, OpenRouter, and any OpenAI-compatible endpoint. |
+| G7 | Safe tool execution with a permission system that gates file writes, shell commands, and external access. |
+| G8 | Configuration-file compatible with OpenCode's `opencode.json` / `opencode.jsonc` format. |
+| G9 | MCP (Model Context Protocol) client for extending tool capabilities via external servers. |
+| G10 | LSP integration for code intelligence (diagnostics, go-to-definition, references). |
+
+### Non-Goals (v1)
+
+| # | Non-Goal |
+|---|----------|
+| N1 | Desktop GUI (Tauri/Electron) — TUI and HTTP server only. |
+| N2 | Cloud-hosted multi-tenant service — ragent is a local-first tool. |
+| N3 | Plugin system via dynamic loading (`.so`/`.dll`) — MCP is the extension point. |
+| N4 | Enterprise/managed config (`/etc/opencode/`) — deferred to a later release. |
+| N5 | Slack or third-party chat integrations. |
+
+---
+
+## 2. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                        ragent                           │
+│                                                         │
+│  ┌──────────┐   ┌──────────────┐   ┌────────────────┐  │
+│  │   CLI    │──▶│  HTTP Server │◀──│  TUI (ratatui) │  │
+│  │ (clap)   │   │  (axum)      │   │                │  │
+│  └──────────┘   └──────┬───────┘   └────────────────┘  │
+│                        │                                │
+│            ┌───────────┴───────────┐                    │
+│            ▼                       ▼                    │
+│     ┌─────────────┐       ┌──────────────┐             │
+│     │  Session     │       │  Event Bus   │             │
+│     │  Manager     │       │  (tokio      │             │
+│     │              │       │   broadcast) │             │
+│     └──────┬──────┘       └──────────────┘             │
+│            │                                            │
+│     ┌──────┴──────┐                                     │
+│     │   Agent     │                                     │
+│     │   Loop      │                                     │
+│     └──────┬──────┘                                     │
+│            │                                            │
+│   ┌────────┼─────────┬──────────┐                       │
+│   ▼        ▼         ▼          ▼                       │
+│ ┌──────┐ ┌──────┐ ┌───────┐ ┌──────────┐               │
+│ │ LLM  │ │Tools │ │Permis-│ │ MCP      │               │
+│ │Stream│ │      │ │sions  │ │ Client   │               │
+│ └──┬───┘ └──────┘ └───────┘ └──────────┘               │
+│    │                                                    │
+│ ┌──┴────────────────────────────────────┐               │
+│ │         Provider Adapters             │               │
+│ │  Anthropic │ OpenAI │ Google │ Azure  │               │
+│ │  Bedrock   │ OpenRouter │ Custom     │               │
+│ └───────────────────────────────────────┘               │
+│                                                         │
+│ ┌───────────────────────────────────────┐               │
+│ │  Storage (SQLite via rusqlite)        │               │
+│ └───────────────────────────────────────┘               │
+└─────────────────────────────────────────────────────────┘
+```
+
+All async work runs on the **tokio** runtime. LLM responses are streamed via Server-Sent Events (SSE) / chunked HTTP. The TUI connects to the server over a local Unix socket or TCP, so the same binary can serve headless CI, interactive terminal, and remote web clients.
+
+---
+
+## 3. Core Modules
+
+### 3.1 CLI & Entry Point
+
+| Aspect | Detail |
+|--------|--------|
+| Crate | `clap` (derive) |
+| Binary name | `ragent` |
+| Entry | `src/main.rs` → `src/cli/mod.rs` |
+
+#### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| *(default)* | Launch interactive TUI session |
+| `run <prompt>` | Execute a one-shot agent run, print result, exit |
+| `serve` | Start HTTP/WebSocket server only (headless) |
+| `session list` | List saved sessions |
+| `session resume <id>` | Resume a previous session |
+| `session export <id>` | Export session to JSON |
+| `session import <file>` | Import session from JSON |
+| `auth <provider>` | Configure API key for a provider |
+| `models` | List available models across configured providers |
+| `config` | Print resolved configuration |
+| `mcp list` | List configured MCP servers and their status |
+| `upgrade` | Self-update the binary |
+| `uninstall` | Remove ragent and its data |
+
+#### Global Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config <path>` | auto-detected | Path to config file |
+| `--model <provider/model>` | from config | Override model for this run |
+| `--agent <name>` | `build` | Override default agent |
+| `--log-level <level>` | `warn` | Logging verbosity (`trace`, `debug`, `info`, `warn`, `error`) |
+| `--print-logs` | `false` | Print logs to stderr |
+| `--no-tui` | `false` | Disable TUI, use plain stdout |
+| `--yes` | `false` | Auto-approve all permission prompts |
+| `--server <addr>` | n/a | Connect to an existing ragent server |
+
+---
+
+### 3.2 Configuration
+
+#### File Format
+
+ragent reads `ragent.json` / `ragent.jsonc` (JSON with comments) and also supports OpenCode-compatible `opencode.json` / `opencode.jsonc` for drop-in migration.
+
+#### Load Precedence (lowest → highest)
+
+1. Compiled-in defaults
+2. Global config: `$XDG_CONFIG_HOME/ragent/ragent.json` (or `~/.config/ragent/ragent.json`)
+3. Custom path: `$RAGENT_CONFIG` environment variable
+4. Project config: `./ragent.json` (or `./opencode.json`) in the working directory
+5. `.ragent/` directory (instructions, agents, hooks)
+6. Inline: `$RAGENT_CONFIG_CONTENT` environment variable (JSON string)
+7. CLI flags (highest priority)
+
+#### Schema
+
+```rust
+/// Top-level configuration.
+pub struct Config {
+    /// Display name shown in prompts.
+    pub username: Option<String>,
+
+    /// Default agent to use when starting a session.
+    pub default_agent: Option<String>,
+
+    /// Provider configurations keyed by provider ID.
+    pub provider: HashMap<String, ProviderConfig>,
+
+    /// Global permission rules.
+    pub permission: PermissionRuleset,
+
+    /// Agent definitions / overrides.
+    pub agent: HashMap<String, AgentConfig>,
+
+    /// Custom slash-commands.
+    pub command: HashMap<String, CommandDef>,
+
+    /// MCP server definitions.
+    pub mcp: HashMap<String, McpServerConfig>,
+
+    /// Additional system instructions (paths or inline strings).
+    pub instructions: Vec<String>,
+
+    /// Experimental feature flags.
+    pub experimental: ExperimentalFlags,
+}
+```
+
+Merging follows **deep-merge** semantics: maps are merged key-by-key, vectors are concatenated, scalars are overwritten.
+
+---
+
+### 3.3 Provider System
+
+The provider system abstracts LLM API differences behind a unified streaming interface.
+
+#### Supported Providers
+
+| Provider ID | SDK / Protocol | Auth |
+|-------------|---------------|------|
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` |
+| `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` |
+| `google` | Google Generative AI API | `GOOGLE_API_KEY` |
+| `azure` | Azure OpenAI (OpenAI-compatible) | `AZURE_OPENAI_API_KEY` + endpoint |
+| `bedrock` | AWS Bedrock (SigV4) | AWS credentials chain |
+| `openrouter` | OpenAI-compatible | `OPENROUTER_API_KEY` |
+| `xai` | OpenAI-compatible | `XAI_API_KEY` |
+| `mistral` | OpenAI-compatible | `MISTRAL_API_KEY` |
+| `groq` | OpenAI-compatible | `GROQ_API_KEY` |
+| `ollama` | OpenAI-compatible (local) | None |
+| `custom` | Any OpenAI-compatible endpoint | User-defined |
+
+#### Model Descriptor
+
+```rust
+pub struct ModelInfo {
+    pub id: String,              // e.g. "claude-sonnet-4-20250514"
+    pub provider_id: String,     // e.g. "anthropic"
+    pub name: String,            // Human-friendly name
+    pub cost: Cost,              // { input_per_mtok, output_per_mtok }
+    pub capabilities: Capabilities, // { reasoning, streaming, vision, tool_use }
+    pub context_window: usize,   // Max tokens
+    pub max_output: Option<usize>,
+}
+```
+
+#### Streaming Interface
+
+```rust
+#[async_trait]
+pub trait LlmStream {
+    /// Send messages and stream back events.
+    async fn chat(
+        &self,
+        request: ChatRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamEvent> + Send>>>;
+}
+
+pub enum StreamEvent {
+    ReasoningStart,
+    ReasoningDelta { text: String },
+    ReasoningEnd,
+    TextDelta { text: String },
+    ToolCallStart { id: String, name: String },
+    ToolCallDelta { id: String, args_json: String },
+    ToolCallEnd { id: String },
+    Usage { input_tokens: u64, output_tokens: u64 },
+    Error { error: anyhow::Error },
+    Finish { reason: FinishReason },
+}
+
+pub enum FinishReason {
+    Stop,
+    ToolUse,
+    Length,
+    ContentFilter,
+}
+```
+
+Each provider implements `LlmStream`. Internally, the Anthropic adapter uses the native Messages API; all OpenAI-compatible providers share a single `OpenAiCompatibleStream` implementation parameterized by base URL and auth.
+
+---
+
+### 3.4 Agent System
+
+Agents define *personas* — a combination of system prompt, model selection, tool access, and permission rules.
+
+#### Agent Definition
+
+```rust
+pub struct AgentInfo {
+    /// Unique identifier (e.g. "build", "plan", "general").
+    pub name: String,
+    /// Human-readable description.
+    pub description: Option<String>,
+    /// Whether this agent appears in the Tab-switch menu ("primary")
+    /// or is invokable as a sub-agent ("subagent").
+    pub mode: AgentMode,  // Primary | Subagent | All
+    /// Whether this agent is hidden from the UI.
+    pub hidden: bool,
+    /// LLM sampling temperature.
+    pub temperature: Option<f32>,
+    /// LLM top-p sampling.
+    pub top_p: Option<f32>,
+    /// Override model for this agent.
+    pub model: Option<ModelRef>,  // { provider_id, model_id }
+    /// System prompt (can include template variables).
+    pub prompt: Option<String>,
+    /// Permission ruleset specific to this agent.
+    pub permission: PermissionRuleset,
+    /// Maximum tool-call iterations before stopping.
+    pub max_steps: Option<u32>,
+    /// Additional provider-specific options (e.g. extended_thinking).
+    pub options: HashMap<String, serde_json::Value>,
+}
+```
+
+#### Built-in Agents
+
+| Name | Mode | Description | Key Permission Traits |
+|------|------|-------------|----------------------|
+| `build` | Primary | Default development agent; full read/write/execute access | Allows all tools; denies editing `.env*` files |
+| `plan` | Primary | Read-only analysis & planning agent | Denies all edit/write tools; asks before bash |
+| `general` | Subagent | Multi-step sub-task executor (invoked via `@general`) | Full access minus TODO operations |
+| `explore` | Subagent | Fast codebase search (invoked via `@explore`) | Read-only: grep, glob, list, read, bash, web |
+| `title` | Internal | Generates session titles | Hidden, no tools |
+| `summary` | Internal | Generates session summaries | Hidden, no tools |
+| `compaction` | Internal | Compresses long conversation history | Hidden, no tools |
+
+#### Agent Resolution
+
+Agents are merged from multiple sources (lowest → highest priority):
+1. Built-in defaults (compiled in)
+2. Global config `~/.config/ragent/ragent.json` → `agent.*`
+3. Project config `./ragent.json` → `agent.*`
+4. `.ragent/agent-*.md` files (prompt overrides)
+5. CLI `--agent` flag
+
+---
+
+### 3.5 Session Management
+
+A **session** is a persistent conversation between the user and an agent, stored in SQLite.
+
+```rust
+pub struct Session {
+    pub id: String,           // ULID
+    pub title: String,
+    pub project_id: String,
+    pub directory: PathBuf,
+    pub parent_id: Option<String>,  // For sub-agent sessions
+    pub version: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub archived_at: Option<DateTime<Utc>>,
+    pub summary: Option<SessionSummary>,
+}
+
+pub struct SessionSummary {
+    pub additions: u32,
+    pub deletions: u32,
+    pub files_changed: u32,
+    pub diffs: Vec<FileDiff>,
+}
+```
+
+#### Session Lifecycle
+
+1. **Create** — allocate ID, set working directory, choose agent
+2. **Chat** — user sends message → agent loop runs → response stored
+3. **Continue** — user sends follow-up → messages appended, agent re-enters loop
+4. **Compact** — when context nears limit, compress old messages via `compaction` agent
+5. **Archive** — mark session as archived (soft delete)
+6. **Resume** — load session by ID, restore full message history
+7. **Export / Import** — serialize to/from JSON for portability
+
+---
+
+### 3.6 Message Model
+
+Messages use a **parts-based** structure supporting text, tool calls, and reasoning traces.
+
+```rust
+pub struct Message {
+    pub id: String,           // ULID
+    pub session_id: String,
+    pub role: Role,           // User | Assistant
+    pub parts: Vec<MessagePart>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub enum Role {
+    User,
+    Assistant,
+}
+
+pub enum MessagePart {
+    Text {
+        text: String,
+    },
+    ToolCall {
+        tool: String,
+        call_id: String,
+        state: ToolCallState,
+    },
+    Reasoning {
+        text: String,
+    },
+}
+
+pub struct ToolCallState {
+    pub status: ToolCallStatus, // Pending | Running | Completed | Error
+    pub input: serde_json::Value,
+    pub output: Option<serde_json::Value>,
+    pub error: Option<String>,
+    pub duration_ms: Option<u64>,
+}
+```
+
+---
+
+### 3.7 Tool System
+
+Tools are the capabilities available to agents for interacting with the filesystem, running commands, and searching code.
+
+#### Tool Registry
+
+Each tool implements the `Tool` trait:
+
+```rust
+#[async_trait]
+pub trait Tool: Send + Sync {
+    /// Unique tool name.
+    fn name(&self) -> &str;
+
+    /// Human-readable description for the LLM.
+    fn description(&self) -> &str;
+
+    /// JSON Schema for tool parameters.
+    fn parameters_schema(&self) -> serde_json::Value;
+
+    /// Permission category (e.g. "read", "edit", "bash").
+    fn permission_category(&self) -> &str;
+
+    /// Execute the tool and return output.
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        context: &ToolContext,
+    ) -> Result<ToolOutput>;
+}
+
+pub struct ToolOutput {
+    pub content: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
+pub struct ToolContext {
+    pub session_id: String,
+    pub working_dir: PathBuf,
+    pub permission_checker: Arc<dyn PermissionChecker>,
+    pub event_bus: Arc<EventBus>,
+}
+```
+
+#### Built-in Tools
+
+| Tool | Permission | Description |
+|------|-----------|-------------|
+| `read` | `read` | Read file contents (with optional line range) |
+| `write` | `edit` | Create or overwrite a file |
+| `edit` | `edit` | Replace a specific string in a file |
+| `multiedit` | `edit` | Apply multiple edits to one or more files |
+| `patch` | `edit` | Apply a unified diff patch |
+| `grep` | `read` | Search file contents using ripgrep patterns |
+| `glob` | `read` | Find files matching glob patterns |
+| `list` | `read` | List directory contents (with depth control) |
+| `bash` | `bash` | Execute a shell command and capture output |
+| `webfetch` | `web` | Fetch a URL and return its content |
+| `websearch` | `web` | Perform a web search and return results |
+| `question` | `question` | Ask the user a question and wait for a response |
+| `plan_enter` | `plan_enter` | Switch the active agent to the plan agent |
+| `plan_exit` | `plan_exit` | Switch back from plan agent to the previous agent |
+| `todo_read` | `todo` | Read the current TODO list |
+| `todo_write` | `todo` | Update the TODO list |
+
+#### Tool Execution Flow
+
+1. LLM emits a `tool_use` block with tool name + JSON arguments
+2. Deserialize arguments against the tool's parameter schema
+3. Determine permission category and file patterns involved
+4. Evaluate permission rules → `Allow`, `Deny`, or `Ask`
+5. If `Ask` → emit `PermissionRequested` event → TUI shows prompt → wait for reply
+6. If denied → return error to LLM ("permission denied")
+7. If allowed → call `tool.execute(input, context)`
+8. Capture output (stdout, file contents, search results, etc.)
+9. Return `ToolOutput` → serialize into the next LLM request as a tool result
+10. LLM processes the result and decides whether to call another tool or respond
+
+---
+
+### 3.8 Permission System
+
+Permissions gate every tool invocation. Rules are pattern-matched against file paths and tool categories.
+
+#### Rule Structure
+
+```rust
+pub enum PermissionAction {
+    Allow,
+    Deny,
+    Ask,
+}
+
+pub struct PermissionRule {
+    /// Permission category: "read", "edit", "bash", "web", etc.
+    pub permission: String,
+    /// Glob pattern for matching paths (e.g. "*.env*", "src/**/*.rs").
+    pub pattern: String,
+    /// Action to take when the rule matches.
+    pub action: PermissionAction,
+}
+
+pub type PermissionRuleset = Vec<PermissionRule>;
+```
+
+#### Evaluation Order
+
+1. Agent-specific rules (most specific)
+2. Project config rules
+3. Global config rules
+4. Built-in defaults (most general)
+
+First matching rule wins. If no rule matches, the default is `Ask`.
+
+#### Special Permissions
+
+| Permission | Triggers On |
+|------------|------------|
+| `edit` | `write`, `edit`, `multiedit`, `patch` tools |
+| `bash` | `bash` tool (all shell commands) |
+| `external_directory` | Any file access outside the project root |
+| `doom_loop` | Agent exceeding `max_steps` iterations |
+| `read` | `read`, `grep`, `glob`, `list` tools |
+| `web` | `webfetch`, `websearch` tools |
+
+#### Ask Flow (Interactive)
+
+```
+Agent requests tool "edit" on "src/main.rs"
+  → PermissionChecker evaluates rules → result: Ask
+  → EventBus emits PermissionRequested { id, tool, paths }
+  → TUI displays: "Allow editing src/main.rs? [once / always / deny]"
+  → User selects "always"
+  → EventBus emits PermissionReplied { id, decision: Always }
+  → PermissionChecker records "always" rule in memory for this session
+  → Tool executes
+```
+
+---
+
+### 3.9 HTTP Server
+
+The server exposes a REST + SSE API so any client can drive ragent.
+
+| Aspect | Detail |
+|--------|--------|
+| Framework | `axum` |
+| Transport | HTTP/1.1 over TCP or Unix socket |
+| Auth | Optional HTTP Basic Auth |
+| Streaming | Server-Sent Events (SSE) for LLM output |
+| Spec | OpenAPI 3.1 auto-generated |
+
+#### Route Map
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/config` | Get resolved config |
+| `PUT` | `/config` | Update config |
+| `GET` | `/providers` | List providers and models |
+| `PUT` | `/auth/:provider` | Set API key |
+| `GET` | `/sessions` | List sessions |
+| `POST` | `/sessions` | Create session |
+| `GET` | `/sessions/:id` | Get session details |
+| `DELETE` | `/sessions/:id` | Archive session |
+| `GET` | `/sessions/:id/messages` | Get message history |
+| `POST` | `/sessions/:id/messages` | Send user message (SSE response) |
+| `POST` | `/sessions/:id/abort` | Abort running agent loop |
+| `POST` | `/sessions/:id/permission/:req_id` | Reply to permission request |
+| `GET` | `/mcp` | List MCP servers |
+| `POST` | `/mcp/:id/restart` | Restart MCP server |
+| `GET` | `/events` | Global SSE event stream |
+
+#### SSE Event Types
+
+```
+event: message.start
+data: {"session_id":"...","message_id":"..."}
+
+event: text.delta
+data: {"text":"Hello, "}
+
+event: reasoning.delta
+data: {"text":"Let me think..."}
+
+event: tool.start
+data: {"call_id":"...","tool":"read","input":{...}}
+
+event: tool.end
+data: {"call_id":"...","output":"...","duration_ms":42}
+
+event: permission.requested
+data: {"id":"...","permission":"edit","paths":["src/main.rs"]}
+
+event: usage
+data: {"input_tokens":1234,"output_tokens":567}
+
+event: message.end
+data: {"finish_reason":"stop"}
+
+event: error
+data: {"message":"Rate limit exceeded","code":"rate_limit"}
+```
+
+---
+
+### 3.10 Terminal UI (TUI)
+
+| Aspect | Detail |
+|--------|--------|
+| Crate | `ratatui` + `crossterm` |
+| Layout | Single full-screen view with panels |
+
+#### Layout
+
+```
+┌─────────────────────────────────────────────────┐
+│ ● ragent  session: abc123  agent: build  ▸ plan │  ← Status bar
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  User: Build me a REST API for managing tasks   │  ← Message
+│                                                 │     history
+│  Assistant: I'll create a task management API.  │     (scrollable)
+│  Let me start by setting up the project...      │
+│                                                 │
+│  ┌─ bash ──────────────────────────────────┐    │  ← Tool call
+│  │ $ cargo init --name task-api            │    │     (collapsible)
+│  │ Created binary (application) package    │    │
+│  └─────────────────────────────────────────┘    │
+│                                                 │
+├─────────────────────────────────────────────────┤
+│ ┌─ Permission ─────────────────────────────┐    │  ← Permission
+│ │ Allow editing Cargo.toml?                │    │     dialog
+│ │ [y] once  [a] always  [n] deny           │    │     (modal)
+│ └──────────────────────────────────────────┘    │
+├─────────────────────────────────────────────────┤
+│ > type your message...                     Tab ▸│  ← Input area
+│                                        tokens:$ │     (multi-line)
+└─────────────────────────────────────────────────┘
+```
+
+#### Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message (Shift+Enter for newline) |
+| `Tab` | Switch between primary agents (build ↔ plan) |
+| `Ctrl+C` | Abort current agent run / exit |
+| `Ctrl+L` | Clear screen |
+| `Esc` | Cancel current input / close dialog |
+| `Up/Down` | Scroll message history |
+| `@` | Invoke sub-agent (e.g. `@general`, `@explore`) |
+| `/` | Slash commands (e.g. `/clear`, `/compact`, `/session`) |
+| `y/a/n` | Permission dialog responses |
+
+#### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/clear` | Clear the current session and start fresh |
+| `/compact` | Compact the conversation history |
+| `/session [list\|new\|resume]` | Session management |
+| `/model <provider/model>` | Switch model mid-conversation |
+| `/agent <name>` | Switch agent |
+| `/config` | Show current configuration |
+| `/help` | Show available commands |
+| `/quit` | Exit ragent |
+
+---
+
+### 3.11 MCP Client
+
+ragent acts as an MCP (Model Context Protocol) **client**, connecting to external MCP servers that provide additional tools, resources, and prompts.
+
+#### MCP Server Configuration
+
+```jsonc
+{
+  "mcp": {
+    "github": {
+      "type": "stdio",          // "stdio" | "sse" | "http"
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${env.GITHUB_TOKEN}"
+      }
+    },
+    "database": {
+      "type": "sse",
+      "url": "http://localhost:3001/sse"
+    },
+    "remote-api": {
+      "type": "http",
+      "url": "https://api.example.com/mcp"
+    }
+  }
+}
+```
+
+#### MCP Server Lifecycle
+
+```rust
+pub enum McpStatus {
+    Connected,
+    Disabled,
+    Failed { error: String },
+    NeedsAuth,
+}
+
+pub struct McpServer {
+    pub id: String,
+    pub config: McpServerConfig,
+    pub status: McpStatus,
+    pub tools: Vec<McpToolDef>,
+}
+```
+
+1. **Start** — spawn stdio process or connect to SSE/HTTP endpoint
+2. **Initialize** — exchange capabilities, negotiate protocol version
+3. **List Tools** — query available tools, convert to ragent `Tool` trait objects
+4. **Execute** — proxy tool calls from the agent to the MCP server
+5. **Reconnect** — automatic retry on transient failures
+6. **Shutdown** — graceful disconnect on ragent exit
+
+MCP-provided tools are subject to the same permission rules as built-in tools.
+
+---
+
+### 3.12 LSP Integration
+
+ragent can optionally spawn and communicate with Language Server Protocol servers to provide code intelligence to the agent.
+
+#### Supported Language Servers
+
+| Language | Server | Detection |
+|----------|--------|-----------|
+| Rust | `rust-analyzer` | `Cargo.toml` |
+| TypeScript / JavaScript | `typescript-language-server` | `package.json`, `tsconfig.json` |
+| Python | `pylsp` or `pyright` | `pyproject.toml`, `setup.py` |
+| Go | `gopls` | `go.mod` |
+| C/C++ | `clangd` | `compile_commands.json`, `CMakeLists.txt` |
+
+#### LSP Capabilities Used
+
+| Capability | Use Case |
+|------------|----------|
+| `textDocument/diagnostics` | Feed compiler errors/warnings to the agent |
+| `textDocument/definition` | Navigate to symbol definitions |
+| `textDocument/references` | Find all references to a symbol |
+| `textDocument/hover` | Get type information |
+| `textDocument/completion` | (Future) code completion suggestions |
+
+The agent can invoke LSP queries through a built-in `lsp` tool or ragent can automatically include diagnostics in the prompt context when the agent edits a file.
+
+---
+
+### 3.13 Event Bus
+
+The event bus is the central nervous system connecting the server, agent loop, TUI, and permission system.
+
+```rust
+pub enum Event {
+    // Session events
+    SessionCreated { session: Session },
+    SessionUpdated { session: Session },
+
+    // Message events
+    MessageStart { session_id: String, message_id: String },
+    TextDelta { session_id: String, text: String },
+    ReasoningDelta { session_id: String, text: String },
+    ToolCallStart { session_id: String, call_id: String, tool: String },
+    ToolCallEnd { session_id: String, call_id: String, output: String },
+    MessageEnd { session_id: String, message_id: String, finish_reason: FinishReason },
+
+    // Permission events
+    PermissionRequested { request: PermissionRequest },
+    PermissionReplied { request_id: String, decision: PermissionDecision },
+
+    // Agent events
+    AgentSwitched { from: String, to: String },
+    AgentError { session_id: String, error: String },
+
+    // MCP events
+    McpStatusChanged { server_id: String, status: McpStatus },
+
+    // Usage events
+    TokenUsage { session_id: String, input_tokens: u64, output_tokens: u64, cost_usd: f64 },
+}
+```
+
+Implementation: `tokio::sync::broadcast` channel with configurable buffer size. Multiple consumers (TUI, SSE endpoint, logger) can subscribe independently.
+
+---
+
+### 3.14 Storage & Database
+
+| Aspect | Detail |
+|--------|--------|
+| Engine | SQLite via `rusqlite` (bundled) |
+| Location | `$XDG_DATA_HOME/ragent/ragent.db` (or `~/.local/share/ragent/ragent.db`) |
+| Migrations | Embedded SQL, run at startup |
+
+#### Schema
+
+```sql
+CREATE TABLE sessions (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL DEFAULT 'New Session',
+    project_id  TEXT NOT NULL,
+    directory   TEXT NOT NULL,
+    parent_id   TEXT REFERENCES sessions(id),
+    version     TEXT NOT NULL,
+    summary     TEXT,  -- JSON blob
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    archived_at TEXT
+);
+
+CREATE TABLE messages (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES sessions(id),
+    role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    parts       TEXT NOT NULL,  -- JSON array of MessagePart
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_messages_session ON messages(session_id, created_at);
+
+CREATE TABLE provider_auth (
+    provider_id TEXT PRIMARY KEY,
+    api_key     TEXT NOT NULL,        -- Encrypted at rest
+    base_url    TEXT,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE mcp_servers (
+    id          TEXT PRIMARY KEY,
+    config      TEXT NOT NULL,         -- JSON blob
+    status      TEXT NOT NULL DEFAULT 'disabled',
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE snapshots (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL REFERENCES sessions(id),
+    message_id  TEXT NOT NULL REFERENCES messages(id),
+    data        BLOB NOT NULL,         -- Compressed tarball of changed files
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+```
+
+---
+
+### 3.15 Shell Execution
+
+The `bash` tool executes commands in a sandboxed environment.
+
+#### Execution Model
+
+```rust
+pub struct BashTool;
+
+impl Tool for BashTool {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let command: String = // extract from input
+        let timeout: Duration = // extract or default (120s)
+
+        let output = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(&command)
+            .current_dir(&ctx.working_dir)
+            .env("RAGENT", "1")
+            .env("RAGENT_SESSION_ID", &ctx.session_id)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?
+            .wait_with_output()
+            .timeout(timeout)
+            .await??;
+
+        // Combine stdout + stderr, truncate if too long
+        Ok(ToolOutput { content, metadata })
+    }
+}
+```
+
+#### Safety Features
+
+- Commands execute with `kill_on_drop(true)` — orphan processes are cleaned up
+- Configurable timeout (default 120 seconds)
+- Output truncation to prevent context window overflow
+- Working directory locked to project root (unless `external_directory` permission granted)
+- Environment variables sanitized (secrets not forwarded)
+- Permission system gates execution (default: `Ask` for all bash commands)
+
+---
+
+### 3.16 Snapshot & Undo
+
+Before executing edit/write/patch tools, ragent captures a snapshot of affected files so changes can be reverted.
+
+#### Snapshot Flow
+
+1. Agent requests `edit` on `src/main.rs`
+2. Before executing, capture current contents of `src/main.rs`
+3. Store snapshot in `snapshots` table (compressed)
+4. Execute the edit
+5. If user requests undo → restore from snapshot
+6. Snapshots are associated with the message that triggered them
+
+#### Undo Granularity
+
+| Level | Description |
+|-------|-------------|
+| Per-tool-call | Revert a single tool call's changes |
+| Per-message | Revert all changes from one assistant message |
+| Per-session | Revert all changes from the entire session |
+
+---
+
+## 4. Data Flow
+
+```
+User Input (TUI / HTTP)
+       │
+       ▼
+┌──────────────┐
+│ Session Mgr  │── Create/load session, store user message
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│ Prompt Build │── Assemble: system prompt + instructions + message history
+│              │   + tool definitions + workspace context
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│ LLM Stream   │── Send to provider API, receive streaming response
+└──────┬───────┘
+       │
+       ├──▶ TextDelta → accumulate text → emit events
+       │
+       ├──▶ ReasoningDelta → accumulate reasoning → emit events
+       │
+       └──▶ ToolCall → ┌─────────────────────────────────┐
+                        │ 1. Validate arguments            │
+                        │ 2. Check permissions              │
+                        │ 3. If Ask → prompt user           │
+                        │ 4. Take snapshot (for edits)      │
+                        │ 5. Execute tool                   │
+                        │ 6. Return output to LLM           │
+                        └──────────┬──────────────────────┘
+                                   │
+                                   ▼
+                          LLM receives tool result
+                          → may call more tools
+                          → eventually emits final text
+                                   │
+                                   ▼
+                        ┌─────────────────────┐
+                        │ Store assistant msg  │
+                        │ Update session       │
+                        │ Generate title/summ  │
+                        └─────────────────────┘
+```
+
+#### Doom Loop Protection
+
+If the agent calls more than `max_steps` tools (default: 100) without producing a final response, ragent triggers the `doom_loop` permission check. If denied, the loop terminates with an error message to the LLM.
+
+---
+
+## 5. Configuration File Format
+
+### Minimal `ragent.json`
+
+```jsonc
+{
+  // Simplest config: just set your provider and go
+  "provider": {
+    "anthropic": {}
+  }
+}
+```
+
+### Full Example
+
+```jsonc
+{
+  "username": "developer",
+  "default_agent": "build",
+
+  "provider": {
+    "anthropic": {
+      "env": ["ANTHROPIC_API_KEY"],
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet 4",
+          "cost": { "input": 3.0, "output": 15.0 }
+        }
+      }
+    },
+    "openai": {
+      "env": ["OPENAI_API_KEY"]
+    },
+    "ollama": {
+      "api": { "base_url": "http://localhost:11434/v1" },
+      "models": {
+        "llama3.3": {
+          "name": "Llama 3.3 70B",
+          "cost": { "input": 0, "output": 0 }
+        }
+      }
+    }
+  },
+
+  "permission": {
+    "*": "allow",
+    "edit": {
+      "*": "allow",
+      "*.env*": "deny"
+    },
+    "bash": {
+      "*": "ask"
+    },
+    "external_directory": {
+      "*": "ask"
+    }
+  },
+
+  "agent": {
+    "build": {
+      "model": "anthropic/claude-sonnet-4-20250514"
+    },
+    "architect": {
+      "name": "System Architect",
+      "model": "anthropic/claude-sonnet-4-20250514",
+      "mode": "primary",
+      "prompt": "You are a senior system architect. Focus on design patterns, scalability, and maintainability.",
+      "permission": {
+        "edit": { "*": "ask" }
+      }
+    }
+  },
+
+  "command": {
+    "test": {
+      "command": "cargo test",
+      "description": "Run the test suite"
+    },
+    "lint": {
+      "command": "cargo clippy --all-targets",
+      "description": "Run linter"
+    }
+  },
+
+  "mcp": {
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${env.GITHUB_TOKEN}"
+      }
+    }
+  },
+
+  "instructions": [
+    "Always write idiomatic Rust code.",
+    "Prefer returning Result over panicking.",
+    ".ragent/instructions.md"
+  ],
+
+  "experimental": {
+    "open_telemetry": false
+  }
+}
+```
+
+---
+
+## 6. Rust Crate Map
+
+| Module | Crate(s) | Purpose |
+|--------|----------|---------|
+| CLI | `clap` | Command-line argument parsing |
+| HTTP Server | `axum`, `tower`, `tower-http` | REST API + SSE |
+| TUI | `ratatui`, `crossterm` | Terminal user interface |
+| Async Runtime | `tokio` | Async I/O, tasks, channels |
+| HTTP Client | `reqwest` | LLM API calls, web fetch |
+| JSON | `serde`, `serde_json` | Serialization/deserialization |
+| Config | `serde_json`, `jsonc-parser` or `json5` | Config file parsing (with comments) |
+| Database | `rusqlite` (bundled) | SQLite storage |
+| Logging | `tracing`, `tracing-subscriber` | Structured logging |
+| File Search | `grep-regex`, `globset`, `ignore` | ripgrep-style search |
+| Diff/Patch | `similar`, `diffy` | Unified diff generation and application |
+| Markdown | `termimad` or `pulldown-cmark` | Render markdown in TUI |
+| Syntax Highlight | `syntect` | Code highlighting in TUI |
+| UUID/ULID | `ulid` | Unique ID generation |
+| MCP | Custom implementation (JSON-RPC 2.0 over stdio/SSE/HTTP) | Model Context Protocol client |
+| LSP | `lsp-types`, `tokio::process` | Language Server Protocol client |
+| Process | `tokio::process` | Shell command execution |
+| Compression | `flate2` or `zstd` | Snapshot compression |
+| Template | `minijinja` or `handlebars` | System prompt templates |
+| Glob | `globset` | File pattern matching |
+| Error | `anyhow`, `thiserror` | Error handling |
+| Streaming | `tokio-stream`, `async-stream` | Async stream utilities |
+| AWS | `aws-config`, `aws-sdk-bedrockruntime` | AWS Bedrock provider |
+
+---
+
+## 7. Project Layout
+
+```
+ragent/
+├── Cargo.toml                  # Workspace root
+├── Cargo.lock
+├── SPEC.md                     # This file
+├── README.md
+├── LICENSE                     # MIT
+├── ragent.json                 # Default/example config
+│
+├── crates/
+│   ├── ragent-core/            # Core library (all business logic)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── agent/          # Agent definitions, resolution, prompt building
+│   │       │   ├── mod.rs
+│   │       │   ├── builtin.rs  # Built-in agents (build, plan, general, explore)
+│   │       │   └── prompt.rs   # System prompt construction
+│   │       ├── config/         # Configuration loading, merging, schema
+│   │       │   ├── mod.rs
+│   │       │   └── schema.rs
+│   │       ├── event/          # Event bus (tokio broadcast)
+│   │       │   └── mod.rs
+│   │       ├── llm/            # LLM streaming trait + shared utilities
+│   │       │   ├── mod.rs
+│   │       │   └── stream.rs
+│   │       ├── mcp/            # MCP client (stdio, SSE, HTTP transports)
+│   │       │   ├── mod.rs
+│   │       │   ├── stdio.rs
+│   │       │   ├── sse.rs
+│   │       │   └── http.rs
+│   │       ├── message/        # Message model, parts, serialization
+│   │       │   └── mod.rs
+│   │       ├── permission/     # Permission rules, evaluation, ask flow
+│   │       │   └── mod.rs
+│   │       ├── provider/       # Provider adapters
+│   │       │   ├── mod.rs
+│   │       │   ├── anthropic.rs
+│   │       │   ├── openai.rs   # Also used by OpenRouter, Groq, etc.
+│   │       │   ├── google.rs
+│   │       │   ├── azure.rs
+│   │       │   ├── bedrock.rs
+│   │       │   └── ollama.rs
+│   │       ├── session/        # Session lifecycle, processor (agent loop)
+│   │       │   ├── mod.rs
+│   │       │   ├── processor.rs
+│   │       │   └── compaction.rs
+│   │       ├── snapshot/       # File snapshot and undo
+│   │       │   └── mod.rs
+│   │       ├── storage/        # SQLite database, migrations
+│   │       │   ├── mod.rs
+│   │       │   └── migrations/
+│   │       └── tool/           # Tool trait, built-in tools
+│   │           ├── mod.rs
+│   │           ├── bash.rs
+│   │           ├── edit.rs
+│   │           ├── grep.rs
+│   │           ├── glob.rs
+│   │           ├── list.rs
+│   │           ├── patch.rs
+│   │           ├── question.rs
+│   │           ├── read.rs
+│   │           ├── webfetch.rs
+│   │           ├── websearch.rs
+│   │           └── write.rs
+│   │
+│   ├── ragent-server/          # HTTP/SSE server
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── routes/         # Axum route handlers
+│   │       └── sse.rs          # SSE event stream
+│   │
+│   └── ragent-tui/             # Terminal UI
+│       ├── Cargo.toml
+│       └── src/
+│           ├── lib.rs
+│           ├── app.rs          # Application state
+│           ├── input.rs        # Input handling
+│           ├── layout.rs       # Screen layout
+│           ├── widgets/        # Custom ratatui widgets
+│           │   ├── message.rs  # Message display (with markdown)
+│           │   ├── tool_call.rs # Tool call display
+│           │   └── permission.rs # Permission dialog
+│           └── theme.rs        # Colors, styles
+│
+├── src/
+│   └── main.rs                 # Binary entry point (thin wrapper)
+│
+└── tests/
+    ├── integration/            # End-to-end tests
+    └── fixtures/               # Test data
+```
+
+---
+
+## 8. Build & Distribution
+
+### Build
+
+```bash
+# Debug build
+cargo build
+
+# Release build (optimized, stripped)
+cargo build --release
+
+# Cross-compile (via cross)
+cross build --release --target aarch64-unknown-linux-musl
+cross build --release --target x86_64-apple-darwin
+cross build --release --target x86_64-pc-windows-msvc
+```
+
+### Binary Size Optimization
+
+- LTO (Link-Time Optimization) enabled in release profile
+- `strip = true` in Cargo.toml release profile
+- `opt-level = "z"` for size optimization (or `"3"` for speed)
+- `codegen-units = 1` for maximum optimization
+
+### Distribution Channels
+
+| Channel | Format |
+|---------|--------|
+| GitHub Releases | Pre-built binaries per platform |
+| Homebrew | `brew install ragent` |
+| Cargo | `cargo install ragent` |
+| AUR | `pacman -S ragent` |
+| Nix | `nix run github:user/ragent` |
+| Docker | `ghcr.io/user/ragent:latest` |
+
+---
+
+## 9. Testing Strategy
+
+| Layer | Approach | Crates |
+|-------|----------|--------|
+| Unit | Test individual functions (config parsing, permission eval, prompt building) | Built-in `#[test]` |
+| Integration | Test tool execution, session lifecycle, provider streaming (with mock HTTP) | `tokio::test`, `wiremock` |
+| E2E | Full binary execution against mock LLM server | `assert_cmd`, `predicates` |
+| TUI | Snapshot testing of rendered frames | `ratatui::backend::TestBackend` |
+| Fuzzing | Fuzz config parsing, tool input deserialization | `cargo-fuzz` |
+
+### Mock LLM Server
+
+A built-in mock server (feature-gated behind `#[cfg(test)]`) replays canned LLM responses including tool calls, enabling deterministic integration tests without real API calls.
+
+---
+
+## 10. Future / Stretch Goals
+
+| # | Feature | Description |
+|---|---------|-------------|
+| F1 | Web UI | SolidJS-based web frontend connecting to the ragent server |
+| F2 | Mobile client | Remote control ragent from a phone via the HTTP API |
+| F3 | Plugin system | WASM-based plugin execution for custom tools |
+| F4 | Git worktree isolation | Run each session in a separate git worktree for parallel work |
+| F5 | OpenTelemetry | Trace spans for LLM calls, tool execution, and session lifecycle |
+| F6 | Multi-agent orchestration | Multiple agents collaborating on a single task |
+| F7 | Code generation benchmarks | Automated evaluation harness for measuring agent quality |
+| F8 | Enterprise features | Managed config, audit logging, SSO |
+| F9 | Voice input | Microphone input transcribed to text for hands-free coding |
+| F10 | Image/screenshot input | Vision model support for UI debugging |
+
+---
+
+*This specification is a living document. It will evolve as implementation progresses and requirements are refined.*

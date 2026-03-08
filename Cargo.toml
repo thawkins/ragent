@@ -1,0 +1,70 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0-alpha.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/user/ragent"
+
+[package]
+name = "ragent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[workspace.dependencies]
+ragent-core = { path = "crates/ragent-core" }
+ragent-server = { path = "crates/ragent-server" }
+ragent-tui = { path = "crates/ragent-tui" }
+
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+rusqlite = { version = "0.32", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+ratatui = "0.29"
+crossterm = "0.28"
+globset = "0.4"
+similar = "2"
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
+futures = "0.3"
+dirs = "6"
+pin-project-lite = "0.2"
+bytes = "1"
+
+[[bin]]
+name = "ragent"
+path = "src/main.rs"
+
+[dependencies]
+ragent-core = { workspace = true }
+ragent-server = { workspace = true }
+ragent-tui = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"
