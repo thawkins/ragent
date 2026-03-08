@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -60,7 +60,7 @@ impl Tool for ListTool {
 }
 
 fn list_recursive(
-    dir: &PathBuf,
+    dir: &Path,
     prefix: &str,
     depth: usize,
     max_depth: usize,
@@ -141,7 +141,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-fn resolve_path(working_dir: &PathBuf, path_str: &str) -> PathBuf {
+fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
         p

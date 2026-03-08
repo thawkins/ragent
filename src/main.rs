@@ -17,7 +17,7 @@ use ragent_core::{
 };
 
 #[derive(Parser)]
-#[command(name = "ragent", about = "An AI coding agent for the terminal")]
+#[command(name = "ragent", about = "An Rust AI coding agent for the terminal")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

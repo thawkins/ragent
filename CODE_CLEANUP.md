@@ -50,7 +50,7 @@ Clippy warns about nested `if` blocks that should use `&&` chains.
 
 **Fix**: Collapse nested `if` blocks into single `if ... && ...` expressions.
 
-### 1.3 🟡 Use `&Path` instead of `&PathBuf` (6 warnings)
+### 1.3 ✅ ~~Use `&Path` instead of `&PathBuf` (6 warnings)~~
 
 Functions accepting `&PathBuf` should accept `&Path` — a `PathBuf` auto-derefs to `&Path`, but `&Path` is more general (accepts both `Path` and `PathBuf`).
 

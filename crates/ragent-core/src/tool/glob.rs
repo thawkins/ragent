@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -85,8 +85,8 @@ impl Tool for GlobTool {
 }
 
 fn collect_matches(
-    root: &PathBuf,
-    dir: &PathBuf,
+    root: &Path,
+    dir: &Path,
     matcher: &globset::GlobMatcher,
     matches: &mut Vec<String>,
     max: usize,
@@ -136,7 +136,7 @@ fn collect_matches(
     Ok(())
 }
 
-fn resolve_path(working_dir: &PathBuf, path_str: &str) -> PathBuf {
+fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
         p
