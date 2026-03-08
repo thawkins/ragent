@@ -170,10 +170,10 @@ fn search_directory(
             )?;
         } else if path.is_file() {
             // Check glob filter
-            if let Some(matcher) = glob_matcher {
-                if !matcher.is_match(&path) {
-                    continue;
-                }
+            if let Some(matcher) = glob_matcher
+                && !matcher.is_match(&path)
+            {
+                continue;
             }
 
             // Skip binary files (check first 512 bytes)

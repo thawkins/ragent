@@ -212,11 +212,10 @@ impl Config {
             base.username = overlay.username;
         }
         if overlay.default_agent != default_agent_name()
-            || base.default_agent == default_agent_name()
+            && (overlay.default_agent != default_agent_name()
+                || base.default_agent == default_agent_name())
         {
-            if overlay.default_agent != default_agent_name() {
-                base.default_agent = overlay.default_agent;
-            }
+            base.default_agent = overlay.default_agent;
         }
         // Merge hash maps by extending (overlay wins on conflicts)
         for (k, v) in overlay.provider {

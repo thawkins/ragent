@@ -63,12 +63,12 @@ impl PermissionChecker {
         // Evaluate ruleset (last matching rule wins, like CSS specificity)
         let mut result = PermissionAction::Ask;
         for rule in &self.ruleset {
-            if rule.permission == permission || rule.permission == "*" {
-                if let Ok(glob) = globset::Glob::new(&rule.pattern) {
-                    let matcher = glob.compile_matcher();
-                    if matcher.is_match(path) {
-                        result = rule.action.clone();
-                    }
+            if (rule.permission == permission || rule.permission == "*")
+                && let Ok(glob) = globset::Glob::new(&rule.pattern)
+            {
+                let matcher = glob.compile_matcher();
+                if matcher.is_match(path) {
+                    result = rule.action.clone();
                 }
             }
         }

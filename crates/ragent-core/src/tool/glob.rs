@@ -126,10 +126,10 @@ fn collect_matches(
             collect_matches(root, &path, matcher, matches, max)?;
         } else {
             // Match relative path against glob
-            if let Ok(rel) = path.strip_prefix(root) {
-                if matcher.is_match(rel) {
-                    matches.push(rel.display().to_string());
-                }
+            if let Ok(rel) = path.strip_prefix(root)
+                && matcher.is_match(rel)
+            {
+                matches.push(rel.display().to_string());
             }
         }
     }

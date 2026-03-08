@@ -290,13 +290,13 @@ impl LlmClient for OpenAiClient {
                     };
 
                     // Handle usage info (sent with stream_options.include_usage)
-                    if let Some(usage) = parsed.get("usage") {
-                        if !usage.is_null() {
-                            let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
-                            let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
-                            if input_tokens > 0 || output_tokens > 0 {
-                                yield StreamEvent::Usage { input_tokens, output_tokens };
-                            }
+                    if let Some(usage) = parsed.get("usage")
+                        && !usage.is_null()
+                    {
+                        let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
+                        let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
+                        if input_tokens > 0 || output_tokens > 0 {
+                            yield StreamEvent::Usage { input_tokens, output_tokens };
                         }
                     }
 
@@ -309,10 +309,10 @@ impl LlmClient for OpenAiClient {
                         let delta = &choice["delta"];
 
                         // Text content
-                        if let Some(content) = delta["content"].as_str() {
-                            if !content.is_empty() {
-                                yield StreamEvent::TextDelta { text: content.to_string() };
-                            }
+                        if let Some(content) = delta["content"].as_str()
+                            && !content.is_empty()
+                        {
+                            yield StreamEvent::TextDelta { text: content.to_string() };
                         }
 
                         // Tool calls
@@ -336,16 +336,16 @@ impl LlmClient for OpenAiClient {
                                         };
                                     }
 
-                                    if let Some(args) = function["arguments"].as_str() {
-                                        if !args.is_empty() {
-                                            let tc_id = tool_call_ids.get(&index)
-                                                .cloned()
-                                                .unwrap_or_else(|| format!("tc_{}", index));
-                                            yield StreamEvent::ToolCallDelta {
-                                                id: tc_id,
-                                                args_json: args.to_string(),
-                                            };
-                                        }
+                                    if let Some(args) = function["arguments"].as_str()
+                                        && !args.is_empty()
+                                    {
+                                        let tc_id = tool_call_ids.get(&index)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("tc_{}", index));
+                                        yield StreamEvent::ToolCallDelta {
+                                            id: tc_id,
+                                            args_json: args.to_string(),
+                                        };
                                     }
                                 }
                             }

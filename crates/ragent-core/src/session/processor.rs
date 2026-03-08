@@ -321,10 +321,10 @@ impl SessionProcessor {
         };
 
         for var in env_vars {
-            if let Ok(key) = std::env::var(var) {
-                if !key.is_empty() {
-                    return Ok(key);
-                }
+            if let Ok(key) = std::env::var(var)
+                && !key.is_empty()
+            {
+                return Ok(key);
             }
         }
 

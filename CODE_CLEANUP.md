@@ -36,7 +36,7 @@ And in each crate's `Cargo.toml`:
 workspace = true
 ```
 
-### 1.2 🟡 Fix collapsible `if` statements (12 warnings)
+### 1.2 ✅ ~~Fix collapsible `if` statements (12 warnings)~~
 
 Clippy warns about nested `if` blocks that should use `&&` chains.
 

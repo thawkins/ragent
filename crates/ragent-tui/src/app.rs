@@ -188,21 +188,21 @@ impl App {
     }
 
     fn append_assistant_text(&mut self, text: &str) {
-        if let Some(last) = self.messages.last_mut() {
-            if last.role == Role::Assistant {
-                // Append to the last text part if it exists
-                for part in last.parts.iter_mut().rev() {
-                    if let MessagePart::Text { text: t } = part {
-                        t.push_str(text);
-                        return;
-                    }
+        if let Some(last) = self.messages.last_mut()
+            && last.role == Role::Assistant
+        {
+            // Append to the last text part if it exists
+            for part in last.parts.iter_mut().rev() {
+                if let MessagePart::Text { text: t } = part {
+                    t.push_str(text);
+                    return;
                 }
-                // No text part yet, add one
-                last.parts.push(MessagePart::Text {
-                    text: text.to_string(),
-                });
-                return;
             }
+            // No text part yet, add one
+            last.parts.push(MessagePart::Text {
+                text: text.to_string(),
+            });
+            return;
         }
         // Create new assistant message
         if let Some(ref sid) = self.session_id {
@@ -218,19 +218,19 @@ impl App {
     }
 
     fn append_reasoning_text(&mut self, text: &str) {
-        if let Some(last) = self.messages.last_mut() {
-            if last.role == Role::Assistant {
-                for part in last.parts.iter_mut().rev() {
-                    if let MessagePart::Reasoning { text: t } = part {
-                        t.push_str(text);
-                        return;
-                    }
+        if let Some(last) = self.messages.last_mut()
+            && last.role == Role::Assistant
+        {
+            for part in last.parts.iter_mut().rev() {
+                if let MessagePart::Reasoning { text: t } = part {
+                    t.push_str(text);
+                    return;
                 }
-                last.parts.push(MessagePart::Reasoning {
-                    text: text.to_string(),
-                });
-                return;
             }
+            last.parts.push(MessagePart::Reasoning {
+                text: text.to_string(),
+            });
+            return;
         }
         if let Some(ref sid) = self.session_id {
             let msg = Message::new(
@@ -247,21 +247,21 @@ impl App {
     fn add_tool_call_part(&mut self, tool: &str, call_id: &str) {
         use ragent_core::message::{ToolCallState, ToolCallStatus};
 
-        if let Some(last) = self.messages.last_mut() {
-            if last.role == Role::Assistant {
-                last.parts.push(MessagePart::ToolCall {
-                    tool: tool.to_string(),
-                    call_id: call_id.to_string(),
-                    state: ToolCallState {
-                        status: ToolCallStatus::Running,
-                        input: serde_json::Value::Null,
-                        output: None,
-                        error: None,
-                        duration_ms: None,
-                    },
-                });
-                return;
-            }
+        if let Some(last) = self.messages.last_mut()
+            && last.role == Role::Assistant
+        {
+            last.parts.push(MessagePart::ToolCall {
+                tool: tool.to_string(),
+                call_id: call_id.to_string(),
+                state: ToolCallState {
+                    status: ToolCallStatus::Running,
+                    input: serde_json::Value::Null,
+                    output: None,
+                    error: None,
+                    duration_ms: None,
+                },
+            });
+            return;
         }
         if let Some(ref sid) = self.session_id {
             let msg = Message::new(
@@ -293,15 +293,14 @@ impl App {
                     state,
                     ..
                 } = part
+                    && cid == call_id
                 {
-                    if cid == call_id {
-                        state.status = if success {
-                            ToolCallStatus::Completed
-                        } else {
-                            ToolCallStatus::Error
-                        };
-                        return;
-                    }
+                    state.status = if success {
+                        ToolCallStatus::Completed
+                    } else {
+                        ToolCallStatus::Error
+                    };
+                    return;
                 }
             }
         }
