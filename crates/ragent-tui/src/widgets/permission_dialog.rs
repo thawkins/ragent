@@ -1,3 +1,8 @@
+//! Permission approval dialog widget.
+//!
+//! Renders a centered popup over the TUI asking the user to approve or deny a
+//! tool permission request with `[y]es`, `[a]lways`, or `[n]o` options.
+
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -15,6 +20,7 @@ pub struct PermissionDialog<'a> {
 }
 
 impl<'a> PermissionDialog<'a> {
+    /// Create a new [`PermissionDialog`] for the given permission request.
     pub fn new(request: &'a PermissionRequest) -> Self {
         Self { request }
     }

@@ -68,6 +68,7 @@ pub struct AgentInfo {
     /// Maximum number of agentic loop iterations.
     pub max_steps: Option<u32>,
     /// Arbitrary key-value options forwarded to the provider.
+    // TODO: Replace `Value` with typed agent option structs.
     pub options: HashMap<String, Value>,
 }
 

@@ -1,7 +1,12 @@
+//! SSE event serialization.
+//!
+//! Converts [`ragent_core::event::Event`] variants into Axum SSE events with
+//! typed event names and JSON payloads for streaming to HTTP clients.
+
 use axum::response::sse::Event as SseEvent;
 use ragent_core::event::Event;
 
-/// Convert a ragent_core Event into an axum SSE Event.
+/// Convert a ragent_core [`Event`] into an Axum [`SseEvent`].
 pub fn event_to_sse(event: &Event) -> SseEvent {
     let (event_type, data) = match event {
         Event::SessionCreated { session_id } => (
@@ -127,7 +132,5 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
         ),
     };
 
-    SseEvent::default()
-        .event(event_type)
-        .data(data.to_string())
+    SseEvent::default().event(event_type).data(data.to_string())
 }

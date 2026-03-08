@@ -1,3 +1,9 @@
+//! Terminal user interface for ragent.
+//!
+//! Provides a ratatui-based interactive TUI that displays agent messages,
+//! tool call status, permission dialogs, and a text input prompt. The TUI
+//! reacts to real-time events from the ragent [`EventBus`](ragent_core::event::EventBus).
+
 pub mod app;
 pub mod input;
 pub mod layout;
@@ -20,6 +26,13 @@ use tokio_stream::wrappers::BroadcastStream;
 use ragent_core::event::EventBus;
 
 /// Run the TUI application.
+///
+/// Enters the alternate screen, creates an [`App`], and runs the main event
+/// loop until the user quits. The terminal is restored on exit.
+///
+/// # Errors
+///
+/// Returns an error if terminal setup, drawing, or event reading fails.
 pub async fn run_tui(event_bus: Arc<EventBus>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();

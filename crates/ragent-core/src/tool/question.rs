@@ -1,9 +1,16 @@
+//! User interaction tool for asking questions.
+//!
+//! Provides [`QuestionTool`], which publishes a permission-request event to
+//! prompt the user for clarification or confirmation during an agent session.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
 
+/// Asks the user a question by publishing a [`Event::PermissionRequested`] event
+/// and returns a pending-response marker with a unique request ID.
 pub struct QuestionTool;
 
 #[async_trait::async_trait]

@@ -1,3 +1,9 @@
+//! Application state and event handling for the TUI.
+//!
+//! The [`App`] struct holds the current session, message history, input buffer,
+//! scroll position, and permission state. It processes both terminal key events
+//! and agent bus events to drive the UI.
+
 use std::sync::Arc;
 
 use crossterm::event::KeyEvent;
@@ -10,6 +16,10 @@ use ragent_core::{
 
 use crate::input::{self, InputAction};
 
+/// Core TUI application state.
+///
+/// Holds the message list, input buffer, scroll offset, permission dialogs,
+/// token usage counters, and a reference to the shared [`EventBus`].
 pub struct App {
     pub messages: Vec<Message>,
     pub input: String,
@@ -24,6 +34,7 @@ pub struct App {
 }
 
 impl App {
+    /// Create a new [`App`] with default state and the given event bus.
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
             messages: Vec::new(),
@@ -39,6 +50,7 @@ impl App {
         }
     }
 
+    /// Process a terminal key event and execute the resulting [`InputAction`], if any.
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         if let Some(action) = input::handle_key(self, key) {
             match action {
@@ -69,6 +81,7 @@ impl App {
         }
     }
 
+    /// Handle an [`Event`] from the agent event bus and update application state.
     pub fn handle_event(&mut self, event: Event) {
         match event {
             Event::SessionCreated { ref session_id } => {
@@ -112,16 +125,12 @@ impl App {
                     self.update_tool_call_status(call_id, error.is_none());
                 }
             }
-            Event::MessageStart {
-                ref session_id, ..
-            } => {
+            Event::MessageStart { ref session_id, .. } => {
                 if self.is_current_session(session_id) {
                     self.status = "thinking...".to_string();
                 }
             }
-            Event::MessageEnd {
-                ref session_id, ..
-            } => {
+            Event::MessageEnd { ref session_id, .. } => {
                 if self.is_current_session(session_id) {
                     self.status = "ready".to_string();
                 }
@@ -144,9 +153,7 @@ impl App {
                     self.status = "awaiting permission".to_string();
                 }
             }
-            Event::PermissionReplied {
-                ref session_id, ..
-            } => {
+            Event::PermissionReplied { ref session_id, .. } => {
                 if self.is_current_session(session_id) {
                     self.permission_pending = None;
                     self.status = "processing...".to_string();

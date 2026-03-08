@@ -12,6 +12,7 @@ pub mod agent;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod id;
 pub mod llm;
 pub mod mcp;
 pub mod message;

@@ -1,3 +1,8 @@
+//! TUI layout and rendering.
+//!
+//! Builds the three-row layout (status bar, messages, input) and draws each
+//! section plus an optional permission dialog overlay.
+
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,12 +15,13 @@ use ragent_core::message::{MessagePart, Role};
 
 use crate::app::App;
 
+/// Render the full TUI: status bar, message list, input box, and permission dialog.
 pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // status bar
-            Constraint::Min(3),   // messages
+            Constraint::Min(3),    // messages
             Constraint::Length(3), // input
         ])
         .split(frame.area());
@@ -38,11 +44,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let status_text = format!(
         " ● ragent  session: {}  agent: {}  tokens: {}/{}  [{}]",
-        session_display,
-        app.agent_name,
-        app.token_usage.0,
-        app.token_usage.1,
-        app.status,
+        session_display, app.agent_name, app.token_usage.0, app.token_usage.1, app.status,
     );
 
     let bar = Paragraph::new(Line::from(Span::styled(
@@ -93,9 +95,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
                         }
                     }
                 }
-                MessagePart::ToolCall {
-                    tool, state, ..
-                } => {
+                MessagePart::ToolCall { tool, state, .. } => {
                     let status_str = format!("{:?}", state.status);
                     lines.push(Line::from(vec![
                         Span::styled("  ┌─ ", Style::default().fg(Color::Yellow)),

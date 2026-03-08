@@ -1,8 +1,16 @@
+//! Model Context Protocol (MCP) client and types.
+//!
+//! Defines [`McpClient`] for managing MCP server connections, along with
+//! supporting types such as [`McpServer`], [`McpToolDef`], and [`McpStatus`].
+//! The current implementation is a stub that registers servers without
+//! establishing real connections.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::McpServerConfig;
 
+/// Connection status of an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum McpStatus {
@@ -12,6 +20,8 @@ pub enum McpStatus {
     NeedsAuth,
 }
 
+/// A registered MCP server with its configuration, connection status, and
+/// advertised tools.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServer {
     pub id: String,
@@ -20,10 +30,12 @@ pub struct McpServer {
     pub tools: Vec<McpToolDef>,
 }
 
+/// Definition of a tool exposed by an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolDef {
     pub name: String,
     pub description: String,
+    // TODO: Replace `Value` with a typed JSON Schema struct.
     pub parameters: Value,
 }
 
@@ -33,6 +45,7 @@ pub struct McpClient {
 }
 
 impl McpClient {
+    /// Creates a new `McpClient` with no registered servers.
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),

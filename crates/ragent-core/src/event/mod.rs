@@ -24,6 +24,10 @@ pub enum FinishReason {
 }
 
 /// A discrete occurrence in the lifecycle of a session.
+///
+/// TODO: Consider using `Cow<'static, str>` for string fields that are
+/// often static (e.g., `tool`, `permission`, `status`) to avoid
+/// unnecessary allocations when the value is a known constant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {

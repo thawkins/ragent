@@ -1,9 +1,18 @@
-use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+//! Surgical text replacement tool for file editing.
+//!
+//! Provides [`EditTool`], which replaces exactly one occurrence of a search
+//! string with a replacement string in a file, ensuring precise edits.
+
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Replaces an exact, unique occurrence of `old_str` with `new_str` in a file.
+///
+/// The search string must match exactly once; zero or multiple matches are
+/// treated as errors to prevent ambiguous edits.
 pub struct EditTool;
 
 #[async_trait::async_trait]
@@ -43,9 +52,7 @@ impl Tool for EditTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"]
-            .as_str()
-            .context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
         let old_str = input["old_str"]
             .as_str()
             .context("Missing 'old_str' parameter")?;

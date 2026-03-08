@@ -111,6 +111,7 @@ pub struct PermissionRequest {
     pub session_id: String,
     pub permission: String,
     pub patterns: Vec<String>,
+    // TODO: Replace `Value` with a typed `PermissionMetadata` struct.
     pub metadata: Value,
     pub tool_call_id: Option<String>,
 }

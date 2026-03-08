@@ -1,3 +1,8 @@
+//! Widget for rendering a single chat message.
+//!
+//! Formats user and assistant messages with role-colored prefixes, renders
+//! tool call status badges and reasoning blocks with distinct styles.
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -14,6 +19,7 @@ pub struct MessageWidget<'a> {
 }
 
 impl<'a> MessageWidget<'a> {
+    /// Create a new [`MessageWidget`] for the given message reference.
     pub fn new(message: &'a Message) -> Self {
         Self { message }
     }

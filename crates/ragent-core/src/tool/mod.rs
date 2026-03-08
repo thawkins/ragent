@@ -32,6 +32,8 @@ pub struct ToolOutput {
     /// Human-readable output text returned to the agent.
     pub content: String,
     /// Optional structured metadata (e.g., exit codes, byte counts) as JSON.
+    // TODO: Replace `Value` with a typed `ToolMetadata` struct once the set of metadata
+    // fields stabilises across tools.
     pub metadata: Option<Value>,
 }
 

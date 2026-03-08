@@ -1,9 +1,18 @@
+//! File discovery tool using glob patterns.
+//!
+//! Provides [`GlobTool`], which recursively searches directories for files
+//! matching a glob pattern (e.g., `**/*.rs`), skipping hidden and generated directories.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Finds files matching a glob pattern by recursively walking directories.
+///
+/// Hidden entries and common generated directories (`node_modules`, `target`, etc.)
+/// are skipped. Results are capped at 1 000 matches.
 pub struct GlobTool;
 
 #[async_trait::async_trait]

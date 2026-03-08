@@ -1,9 +1,17 @@
+//! File writing tool.
+//!
+//! Provides [`WriteTool`], which writes content to a file, creating parent
+//! directories as needed. Returns a summary of bytes and lines written.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Writes string content to a file, creating parent directories if they do not exist.
+///
+/// Returns a summary including the number of bytes and lines written.
 pub struct WriteTool;
 
 #[async_trait::async_trait]
@@ -38,9 +46,7 @@ impl Tool for WriteTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"]
-            .as_str()
-            .context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
         let content = input["content"]
             .as_str()
             .context("Missing 'content' parameter")?;

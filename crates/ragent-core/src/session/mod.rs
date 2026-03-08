@@ -134,10 +134,26 @@ impl From<crate::storage::SessionRow> for Session {
     fn from(row: crate::storage::SessionRow) -> Self {
         let created_at = DateTime::parse_from_rfc3339(&row.created_at)
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    session_id = %row.id,
+                    raw = %row.created_at,
+                    error = %e,
+                    "failed to parse created_at timestamp, falling back to Utc::now()"
+                );
+                Utc::now()
+            });
         let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
             .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    session_id = %row.id,
+                    raw = %row.updated_at,
+                    error = %e,
+                    "failed to parse updated_at timestamp, falling back to Utc::now()"
+                );
+                Utc::now()
+            });
         let archived_at = row.archived_at.and_then(|s| {
             DateTime::parse_from_rfc3339(&s)
                 .ok()

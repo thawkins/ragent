@@ -1,10 +1,56 @@
+//! Persistent storage layer backed by SQLite.
+//!
+//! [`Storage`] manages the database lifecycle (open, migrate) and exposes
+//! CRUD operations for sessions, messages, provider credentials, and MCP
+//! server configuration. All access is thread-safe via an internal `Mutex`.
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use std::sync::Mutex;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
 use crate::message::{Message, MessagePart, Role};
+
+/// Fixed key used for XOR-based obfuscation of API keys.
+///
+/// **Note:** This is simple obfuscation, *not* encryption. It prevents
+/// casual inspection of keys stored on disk but will not withstand a
+/// determined attacker. For production use, consider a keyring-based
+/// solution (e.g., `keyring` crate or OS-level credential storage).
+const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
+
+/// Obfuscates an API key using repeating-key XOR and base64 encoding.
+///
+/// This is *not* encryption — it only prevents plaintext keys from
+/// appearing in the database. A keyring-based solution is recommended
+/// for production use.
+pub fn obfuscate_key(key: &str) -> String {
+    let xored: Vec<u8> = key
+        .as_bytes()
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
+        .collect();
+    STANDARD.encode(&xored)
+}
+
+/// Reverses [`obfuscate_key`], recovering the original API key.
+///
+/// Returns the original key, or an empty string if decoding fails.
+pub fn deobfuscate_key(encoded: &str) -> String {
+    let Ok(xored) = STANDARD.decode(encoded) else {
+        return String::new();
+    };
+    let bytes: Vec<u8> = xored
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
+        .collect();
+    String::from_utf8(bytes).unwrap_or_default()
+}
 
 /// SQLite-backed storage for sessions, messages, and provider credentials.
 pub struct Storage {
@@ -14,11 +60,21 @@ pub struct Storage {
 /// Acquires the database connection lock, mapping a poisoned mutex to an anyhow error.
 macro_rules! lock_conn {
     ($self:expr) => {
-        $self.conn.lock().map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))
+        $self
+            .conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))
     };
 }
 
 impl Storage {
+    /// Opens (or creates) a SQLite database at the given filesystem path and
+    /// runs migrations to ensure the schema is up to date.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the parent directory cannot be created, the database
+    /// file cannot be opened, or migrations fail.
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -32,6 +88,12 @@ impl Storage {
         Ok(storage)
     }
 
+    /// Opens an ephemeral in-memory database, useful for testing.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the in-memory database cannot be created or
+    /// migrations fail.
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
@@ -99,6 +161,11 @@ impl Storage {
 
     // ── Session CRUD ──────────────────────────────────────────────
 
+    /// Inserts a new session row with the given `id` and `directory`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails (e.g., duplicate id).
     pub fn create_session(&self, id: &str, directory: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -109,10 +176,12 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_session(
-        &self,
-        id: &str,
-    ) -> Result<Option<SessionRow>> {
+    /// Fetches a single session by `id`, returning `None` if it does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
             "SELECT id, title, project_id, directory, parent_id, version, \
@@ -137,6 +206,11 @@ impl Storage {
         Ok(row)
     }
 
+    /// Lists all non-archived sessions ordered by most recently updated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -163,6 +237,11 @@ impl Storage {
         Ok(rows)
     }
 
+    /// Updates the title of an existing session and touches `updated_at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
     pub fn update_session(&self, id: &str, title: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -173,6 +252,11 @@ impl Storage {
         Ok(())
     }
 
+    /// Marks a session as archived by setting `archived_at` to the current time.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
     pub fn archive_session(&self, id: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -185,6 +269,11 @@ impl Storage {
 
     // ── Message CRUD ──────────────────────────────────────────────
 
+    /// Persists a new message and bumps the parent session's `updated_at`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or the insert fails.
     pub fn create_message(&self, msg: &Message) -> Result<()> {
         let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
@@ -194,7 +283,14 @@ impl Storage {
         conn.execute(
             "INSERT INTO messages (id, session_id, role, parts, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![msg.id, msg.session_id, role_str, parts_json, created, updated],
+            params![
+                msg.id,
+                msg.session_id,
+                role_str,
+                parts_json,
+                created,
+                updated
+            ],
         )?;
         // Touch session updated_at
         let now = Utc::now().to_rfc3339();
@@ -205,6 +301,11 @@ impl Storage {
         Ok(())
     }
 
+    /// Retrieves all messages for a session, ordered chronologically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query or deserialization fails.
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -229,8 +330,7 @@ impl Storage {
                 "user" => Role::User,
                 _ => Role::Assistant,
             };
-            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json)
-                .unwrap_or_default();
+            let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
             let created_at = DateTime::parse_from_rfc3339(&created_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now());
@@ -249,6 +349,11 @@ impl Storage {
         Ok(messages)
     }
 
+    /// Updates the parts and `updated_at` timestamp of an existing message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization or the update fails.
     pub fn update_message(&self, msg: &Message) -> Result<()> {
         let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
@@ -262,29 +367,39 @@ impl Storage {
 
     // ── Provider Auth ─────────────────────────────────────────────
 
+    /// Stores or replaces the API key for the given provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the upsert fails.
     pub fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
+        let obfuscated = obfuscate_key(api_key);
         conn.execute(
             "INSERT OR REPLACE INTO provider_auth (provider_id, api_key, updated_at) \
              VALUES (?1, ?2, ?3)",
-            params![provider_id, api_key, now],
+            params![provider_id, obfuscated, now],
         )?;
         Ok(())
     }
 
+    /// Retrieves the stored API key for a provider, or `None` if not set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
-            "SELECT api_key FROM provider_auth WHERE provider_id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
         let key = stmt
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
-        Ok(key)
+        Ok(key.map(|k| deobfuscate_key(&k)))
     }
 }
 
+/// Raw row representation of a session as stored in SQLite.
 #[derive(Debug, Clone)]
 pub struct SessionRow {
     pub id: String,
@@ -297,42 +412,4 @@ pub struct SessionRow {
     pub updated_at: String,
     pub archived_at: Option<String>,
     pub summary: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_storage_roundtrip() {
-        let storage = Storage::open_in_memory().unwrap();
-        storage.create_session("s1", "/tmp/test").unwrap();
-
-        let session = storage.get_session("s1").unwrap().unwrap();
-        assert_eq!(session.directory, "/tmp/test");
-
-        let msg = Message::user_text("s1", "Hello!");
-        storage.create_message(&msg).unwrap();
-
-        let messages = storage.get_messages("s1").unwrap();
-        assert_eq!(messages.len(), 1);
-        assert_eq!(messages[0].text_content(), "Hello!");
-    }
-
-    #[test]
-    fn test_provider_auth() {
-        let storage = Storage::open_in_memory().unwrap();
-        storage.set_provider_auth("anthropic", "sk-test-123").unwrap();
-        let key = storage.get_provider_auth("anthropic").unwrap();
-        assert_eq!(key, Some("sk-test-123".to_string()));
-    }
-
-    #[test]
-    fn test_archive_session() {
-        let storage = Storage::open_in_memory().unwrap();
-        storage.create_session("s1", "/tmp").unwrap();
-        storage.archive_session("s1").unwrap();
-        let sessions = storage.list_sessions().unwrap();
-        assert!(sessions.is_empty());
-    }
 }

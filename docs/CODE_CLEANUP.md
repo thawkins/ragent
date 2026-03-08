@@ -79,7 +79,7 @@ Replace redundant closure with a direct function reference.
 
 ## 2. Error Handling
 
-### 2.1 🔴 Replace `.unwrap()` on `Mutex::lock()` with proper error handling
+### 2.1 ✅ ~~Replace `.unwrap()` on `Mutex::lock()` with proper error handling
 
 **File**: `crates/ragent-core/src/storage/mod.rs` — 11 call sites (lines 37, 95, 108, 133, 159, 169, 181, 201, 245, 258, 269)
 
@@ -92,7 +92,7 @@ let conn = self.conn.lock()
     .map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))?;
 ```
 
-### 2.2 🔴 Define a crate-level error type with `thiserror`
+### 2.2 ✅ ~~Define a crate-level error type with `thiserror`
 
 The project has `thiserror` in its dependencies but never uses it. All errors are `anyhow::Error` with no structured variants.
 
@@ -120,7 +120,7 @@ pub enum RagentError {
 
 Use `RagentError` at module boundaries; keep `anyhow::Result` for internal convenience.
 
-### 2.3 🟠 Add context to error returns
+### 2.3 ✅ ~~Add context to error returns
 
 Many functions return bare errors without context. Use `.context()` or `.with_context()`:
 
@@ -132,7 +132,7 @@ Many functions return bare errors without context. Use `.context()` or `.with_co
 
 **Fix**: Log errors at warn level and propagate with context.
 
-### 2.4 🟠 Remove silent `.unwrap_or_default()` on serialization
+### 2.4 ✅ ~~Remove silent `.unwrap_or_default()` on serialization
 
 **File**: `crates/ragent-server/src/routes/mod.rs` — lines 79, 109, 157, 192
 
@@ -173,7 +173,7 @@ define_id!(ProviderId);
 define_id!(ToolCallId);
 ```
 
-### 3.2 🟠 Replace `String` permission names with an enum
+### 3.2 ✅ ~~Replace `String` permission names with an enum
 
 **File**: `crates/ragent-core/src/permission/mod.rs`
 
@@ -203,7 +203,7 @@ These fields would benefit from typed alternatives:
 | `mcp/mod.rs` | `parameters: Value` | `JsonSchema` newtype |
 | `llm/mod.rs` | `parameters: Value` | `JsonSchema` newtype |
 
-### 3.4 🟡 Strengthen `PermissionReply` in server routes
+### 3.4 ✅ ~~Strengthen `PermissionReply` in server routes
 
 **File**: `crates/ragent-server/src/routes/mod.rs:254`
 
@@ -213,7 +213,7 @@ These fields would benefit from typed alternatives:
 
 ## 4. Documentation
 
-### 4.1 🟠 Add crate-level documentation
+### 4.1 ✅ ~~Add crate-level documentation
 
 No crate has a top-level `//!` doc comment. Add to each `lib.rs`:
 
@@ -224,7 +224,7 @@ No crate has a top-level `//!` doc comment. Add to each `lib.rs`:
 //! tool execution, session management, and configuration.
 ```
 
-### 4.2 🟠 Document all public items
+### 4.2 ✅ ~~Document all public items
 
 **50+ public types, traits, and functions lack `///` doc comments.** Key items needing docs:
 
@@ -243,7 +243,7 @@ No crate has a top-level `//!` doc comment. Add to each `lib.rs`:
 | `tool/mod.rs` | `Tool` trait, `ToolRegistry`, `ToolOutput`, `ToolContext` |
 | `tool/*.rs` | All 8 tool structs (`ReadTool`, `WriteTool`, etc.) |
 
-### 4.3 🟡 Document error conditions
+### 4.3 ✅ ~~Document error conditions
 
 Functions returning `Result` should document what errors can occur:
 
@@ -257,7 +257,7 @@ Functions returning `Result` should document what errors can occur:
 pub async fn process_message(...) -> Result<Message> { ... }
 ```
 
-### 4.4 🟢 Add module-level docs to submodules
+### 4.4 ✅ ~~Add module-level docs to submodules
 
 Each `mod.rs` should start with a `//!` comment explaining the module's purpose and key types.
 
@@ -265,7 +265,7 @@ Each `mod.rs` should start with a `//!` comment explaining the module's purpose 
 
 ## 5. Testing
 
-### 5.1 🔴 Add unit tests to untested modules
+### 5.1 ✅ ~~Add unit tests to untested modules
 
 **Only 3 of 22 modules have tests** (7 tests total). The following modules have zero test coverage:
 
@@ -301,7 +301,7 @@ Create `tests/integration/` with:
 
 Create a test helper that returns canned SSE responses (text, tool calls, errors) so provider and processor tests can run without real API keys.
 
-### 5.4 🟡 Enable `#[cfg(test)]` conditional compilation
+### 5.4 ✅ ~~Enable `#[cfg(test)]` conditional compilation
 
 The test utilities should be behind `#[cfg(test)]` to avoid shipping test code in release builds.
 
@@ -317,7 +317,7 @@ API keys are stored as plaintext in SQLite. Anyone with read access to `~/.local
 
 **Fix**: Encrypt API keys before storage using a key derived from the user's OS keyring (via the `keyring` crate) or a passphrase. At minimum, use a fixed-key XOR obfuscation with a warning that it's not secure against targeted attacks.
 
-### 6.2 🔴 Add authentication to HTTP server
+### 6.2 ✅ ~~Add authentication to HTTP server
 
 **File**: `crates/ragent-server/src/routes/mod.rs`
 
@@ -328,7 +328,7 @@ All API endpoints are unauthenticated. Any local process can:
 
 **Fix**: Generate a random bearer token on server start, require it on all endpoints, and pass it to the TUI client. Consider also binding to `127.0.0.1` only (already done) and Unix sockets.
 
-### 6.3 🟠 Audit bash tool for command injection
+### 6.3 ✅ ~~Audit bash tool for command injection
 
 **File**: `crates/ragent-core/src/tool/bash.rs`
 
@@ -339,7 +339,7 @@ Commands are passed directly to `bash -c`. While the permission system gates exe
 2. Consider a deny-list for destructive patterns (`rm -rf /`, `mkfs`, `dd if=`, `:(){:|:&};:`)
 3. Document that bash tool is trusted-user-only
 
-### 6.4 🟠 Sanitize log output to prevent secret leakage
+### 6.4 ✅ ~~Sanitize log output to prevent secret leakage
 
 **File**: `crates/ragent-core/src/session/processor.rs`
 
@@ -347,7 +347,7 @@ LLM error responses may include API keys in headers or URLs. Errors are logged w
 
 **Fix**: Create a `redact_secrets(msg: &str) -> String` utility that strips known key patterns (`sk-...`, `key-...`, bearer tokens).
 
-### 6.5 🟠 Validate working directory paths
+### 6.5 ✅ ~~Validate working directory paths
 
 **Files**: `src/main.rs`, `crates/ragent-server/src/routes/mod.rs`
 
@@ -355,7 +355,7 @@ The `directory` field in session creation accepts arbitrary paths from the API.
 
 **Fix**: Canonicalize paths and reject those outside the user's home directory or a configured allow-list.
 
-### 6.6 🟡 Add rate limiting to message endpoint
+### 6.6 ✅ ~~Add rate limiting to message endpoint
 
 **File**: `crates/ragent-server/src/routes/mod.rs`
 
@@ -365,7 +365,7 @@ No rate limiting on `POST /sessions/:id/messages`. Add a token-bucket or sliding
 
 ## 7. Concurrency
 
-### 7.1 🟠 Use `tokio::sync::Mutex` instead of `std::sync::Mutex` for async-accessed data
+### 7.1 ✅ ~~Use `tokio::sync::Mutex` instead of `std::sync::Mutex` for async-accessed data
 
 **Files**:
 - `crates/ragent-core/src/storage/mod.rs` — `conn: Mutex<Connection>` (std)
@@ -375,11 +375,11 @@ Standard `Mutex` blocks the async executor thread while locked. If any `.lock()`
 
 **Fix**: Replace `std::sync::Mutex` with `tokio::sync::Mutex` for data accessed in async contexts. Alternatively, use a dedicated blocking thread for SQLite via `tokio::task::spawn_blocking`.
 
-### 7.2 🟡 Use `RwLock` for read-heavy data
+### 7.2 ✅ ~~Use `RwLock` for read-heavy data
 
 `PermissionChecker` is read-heavy (checking permissions) and rarely written to (recording "always" grants). Wrap in `tokio::sync::RwLock` instead of `Mutex`.
 
-### 7.3 🟡 Document EventBus overflow behavior
+### 7.3 ✅ ~~Document EventBus overflow behavior
 
 **File**: `crates/ragent-core/src/event/mod.rs`
 
@@ -391,7 +391,7 @@ The broadcast channel (capacity 256) silently drops events when subscribers lag.
 
 ## 8. API Design
 
-### 8.1 🟠 Implement `From` conversions for type mapping
+### 8.1 ✅ ~~Implement `From` conversions for type mapping
 
 Several manual conversion functions should be `impl From`:
 
@@ -408,14 +408,14 @@ Several manual conversion functions should be `impl From`:
 | `search_directory()` | `tool/grep.rs:120` | 7 | `SearchContext { pattern, case_insensitive, glob, max_results }` |
 | `list_recursive()` | `tool/list.rs:62` | 5 | `ListOptions { max_depth, prefix }` |
 
-### 8.3 🟡 Remove dead code
+### 8.3 ✅ ~~Remove dead code
 
 | Item | File | Issue |
 |------|------|-------|
 | `get_storage()` | `session/processor.rs:337` | Always returns `None`, never called |
 | `SessionRow` (as public) | `storage/mod.rs:280` | Implementation detail; should be `pub(crate)` or private |
 
-### 8.4 🟡 Add `impl Display` for key enums
+### 8.4 ✅ ~~Add `impl Display` for key enums
 
 These types are user-facing and benefit from human-readable `Display`:
 
@@ -427,7 +427,7 @@ These types are user-facing and benefit from human-readable `Display`:
 | `AgentMode` | `agent/mod.rs` |
 | `FinishReason` | `event/mod.rs` |
 
-### 8.5 🟢 Add `Default` impls where sensible
+### 8.5 ✅ ~~Add `Default` impls where sensible
 
 | Type | File |
 |------|------|
@@ -444,7 +444,7 @@ These types are user-facing and benefit from human-readable `Display`:
 
 Synchronous filesystem calls (`std::fs::read_to_string`, `std::fs::read_dir`) block the tokio executor thread. In an async context, these should use `tokio::fs` equivalents or be wrapped in `tokio::task::spawn_blocking`.
 
-### 9.2 🟡 Reduce unnecessary `.clone()` calls
+### 9.2 ✅ ~~Reduce unnecessary `.clone()` calls
 
 | File | Context | Fix |
 |------|---------|-----|
@@ -469,7 +469,7 @@ Event variants use owned `String` fields even for static data (e.g., tool names)
 
 ## 10. Rust Idioms
 
-### 10.1 🟡 Use `let-else` and `if-let` chains
+### 10.1 ✅ ~~Use `let-else` and `if-let` chains
 
 Several places use the anti-pattern:
 
@@ -489,7 +489,7 @@ if let Some(val) = x { ... }
 
 Affected files: `agent/mod.rs`, `session/processor.rs`, `provider/openai.rs`.
 
-### 10.2 🟡 Use `.ok_or_else()` instead of `match Some/None`
+### 10.2 ✅ ~~Use `.ok_or_else()` instead of `match Some/None`
 
 **File**: `session/processor.rs:238`
 
@@ -512,7 +512,7 @@ let result = tool.execute(...).await;
 
 Date parsing falls back to `Utc::now()` on error — this silently corrupts timestamps. Either propagate the error with `?` or log a warning.
 
-### 10.4 🟢 Prefer `impl Into<String>` for constructor parameters
+### 10.4 ✅ ~~Prefer `impl Into<String>` for constructor parameters
 
 Functions like `AgentInfo::new(name: &str, description: &str)` force callers to pass `&str`. Using `impl Into<String>` is more flexible:
 
@@ -524,7 +524,7 @@ pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self { ..
 
 ## 11. Project Structure & Configuration
 
-### 11.1 🟡 Add a `README.md`
+### 11.1 ✅ ~~Add a `README.md`
 
 The project has `SPEC.md` but no `README.md` with quickstart instructions, build commands, and usage examples.
 
@@ -532,11 +532,11 @@ The project has `SPEC.md` but no `README.md` with quickstart instructions, build
 
 Ensure `target/`, `*.db`, and secret files are excluded from version control.
 
-### 11.3 🟡 Add `LICENSE` file
+### 11.3 ✅ ~~Add `LICENSE` file
 
 `Cargo.toml` declares `license = "MIT"` but no `LICENSE` file exists.
 
-### 11.4 🟢 Add CI configuration
+### 11.4 ✅ ~~Add CI configuration
 
 Add a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs:
 
@@ -547,7 +547,7 @@ Add a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs:
 - cargo build --release
 ```
 
-### 11.5 🟠 Add `rustfmt.toml` matching AGENTS.md requirements
+### 11.5 ✅ ~~Add `rustfmt.toml` matching AGENTS.md requirements
 
 **AGENTS.md specifies**: 4 spaces, max 100 width, `reorder_imports=true`, Unix newlines.
 
@@ -573,17 +573,17 @@ AGENTS.md requires `target/temp` to be gitignored. No `.gitignore` exists at all
 .env
 ```
 
-### 11.7 🟡 Create `target/temp` directory for temporary files
+### 11.7 ✅ ~~Create `target/temp` directory for temporary files
 
 **AGENTS.md requirement**: Use `target/temp/` for all temporary files instead of `/tmp`.
 
 The directory does not exist and is not referenced anywhere in the code.
 
-### 11.8 🟡 Add `LICENSE` file
+### 11.8 ✅ ~~Add `LICENSE` file
 
 `Cargo.toml` declares `license = "MIT"` but no `LICENSE` file exists.
 
-### 11.9 🟢 Add CI configuration
+### 11.9 ✅ ~~Add CI configuration
 
 Add a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs:
 
@@ -600,7 +600,7 @@ Add a GitHub Actions workflow (`.github/workflows/ci.yml`) that runs:
 
 This section covers requirements from `AGENTS.md` that are **not currently implemented** in the codebase. Each item references the specific AGENTS.md rule it violates.
 
-### 12.1 🔴 Migrate all inline tests to `tests/` directories
+### 12.1 ✅ ~~Migrate all inline tests to `tests/` directories
 
 **AGENTS.md rule**: *"All tests MUST be located in the `tests/` inside each crate... NOT inline in source files."*
 
@@ -631,7 +631,7 @@ crates/ragent-core/tests/
 4. Remove inline `#[cfg(test)]` blocks from source files
 5. Verify tests still pass via `cargo test --workspace`
 
-### 12.2 🔴 Remove all `println!` / `eprintln!` — use `tracing` instead
+### 12.2 ✅ ~~Remove all `println!` / `eprintln!` — use `tracing` instead
 
 **AGENTS.md rule**: *"Use `tracing` crate with structured logging, avoid `println!` or `eprintln!` in any phase of development."*
 
@@ -655,7 +655,7 @@ crates/ragent-core/tests/
 
 **Note**: Data output commands (`config`, `export`) may use stdout writes, but informational/error messages must use `tracing`.
 
-### 12.3 🔴 Add DOCBLOCK comments to every function and module
+### 12.3 ✅ ~~Add DOCBLOCK comments to every function and module
 
 **AGENTS.md rule**: *"For all functions create DOCBLOCK documentation comments above each function... For all modules place a DOCBLOCK at the top of the file."*
 
@@ -666,7 +666,7 @@ crates/ragent-core/tests/
 
 **Fix**: Every `.rs` file needs a module docblock (`//!`), and every `pub fn` / `pub struct` / `pub enum` / `pub trait` needs a `///` docblock describing purpose, arguments, and return values.
 
-### 12.4 🔴 Remove wildcard imports (`use super::*`)
+### 12.4 ✅ ~~Remove wildcard imports (`use super::*`)
 
 **AGENTS.md rule**: *"No wildcard imports"*
 
@@ -693,7 +693,7 @@ crates/ragent-core/tests/
 version = "0.1.0-alpha"
 ```
 
-### 12.6 🟠 Add `CHANGELOG.md` in Keep a Changelog format
+### 12.6 ✅ ~~Add `CHANGELOG.md` in Keep a Changelog format
 
 **AGENTS.md rule**: *"Maintain a changelog... Follow Keep a Changelog format."*
 
@@ -723,13 +723,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CLI entry point with clap (run, serve, session, auth, models, config commands)
 ```
 
-### 12.7 🟠 Add `RELEASE.md`
+### 12.7 ✅ ~~Add `RELEASE.md`
 
 **AGENTS.md rule**: *"Write the version number and the most recent CHANGELOG.md entry to the RELEASE.md file."*
 
 **Current state**: No `RELEASE.md` exists.
 
-### 12.8 🟠 Create `docs/` directory for documentation
+### 12.8 ✅ ~~Create `docs/` directory for documentation
 
 **AGENTS.md rule**: *"All documentation markdown files MUST be located in the `docs/` folder, except for STATS.md, SPEC.md, AGENTS.md, README.md, PLAN.md and CHANGELOG.md."*
 
@@ -740,13 +740,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 2. Move `CODE_CLEANUP.md` → `docs/CODE_CLEANUP.md`
 3. Any future documentation files go into `docs/`
 
-### 12.9 🟠 Add `README.md`
+### 12.9 ✅ ~~Add `README.md`
 
 **AGENTS.md rule**: `README.md` is listed as a required root file.
 
 **Current state**: No `README.md` exists. Should include: project description, quickstart, build commands, usage examples, and a link to `SPEC.md`.
 
-### 12.10 🟠 Enforce import grouping: std → external → local
+### 12.10 ✅ ~~Enforce import grouping: std → external → local
 
 **AGENTS.md rule**: *"Group std, external crates, then local modules; reorder automatically."*
 
@@ -783,19 +783,19 @@ missing_docs = "warn"
 cognitive_complexity = { level = "warn", priority = -1 }
 ```
 
-### 12.12 🟡 Use `thiserror` for custom error types (not just `anyhow`)
+### 12.12 ✅ ~~Use `thiserror` for custom error types (not just `anyhow`)
 
 **AGENTS.md rule**: *"Use `Result<T, E>` with `?`, `anyhow::Result` for main, `thiserror` for custom errors."*
 
 **Current state**: `thiserror` is a dependency but is never used. All errors are `anyhow::Error` with no structured variants. See also task 2.2 for the proposed `RagentError` type.
 
-### 12.13 🟡 Add `STATS.md`
+### 12.13 ✅ ~~Add `STATS.md`
 
 **AGENTS.md rule**: STATS.md is listed as a required root file (exempted from `docs/`).
 
 **Current state**: No `STATS.md` exists. Should contain project statistics (lines of code, test count, binary size, etc.).
 
-### 12.14 🟡 Test naming convention: `test_<component>_<scenario>`
+### 12.14 ✅ ~~Test naming convention: `test_<component>_<scenario>`
 
 **AGENTS.md rule**: *"Follow naming convention: `test_<component>_<scenario>`"*
 
@@ -811,7 +811,7 @@ cognitive_complexity = { level = "warn", priority = -1 }
 | `test_archive_session` | `test_storage_archive_session` |
 | `test_snapshot_roundtrip` | ✅ Already follows pattern |
 
-### 12.15 🟢 Apply Rust best practices from AGENTS.md reference
+### 12.15 ✅ ~~Apply Rust best practices from AGENTS.md reference
 
 **AGENTS.md rule**: *"Read the best practices at https://www.djamware.com/post/... and apply to the project."*
 
@@ -821,34 +821,31 @@ This reference covers project structure and clean code practices. A review again
 
 ## Summary
 
-| Category | 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low | ✅ Done | Total |
-|----------|-------------|---------|-----------|--------|--------|-------|
-| Clippy Compliance | 0 | 0 | 2 | 1 | **1** | 4 |
-| Error Handling | 2 | 2 | 0 | 0 | 0 | 4 |
-| Type Safety | 1 | 1 | 2 | 0 | 0 | 4 |
-| Documentation | 0 | 2 | 1 | 1 | 0 | 4 |
-| Testing | 1 | 1 | 2 | 0 | 0 | 4 |
-| Security | 2 | 3 | 1 | 0 | 0 | 6 |
-| Concurrency | 0 | 1 | 2 | 0 | 0 | 3 |
-| API Design | 0 | 2 | 2 | 1 | 0 | 5 |
-| Performance | 0 | 1 | 2 | 1 | 0 | 4 |
-| Rust Idioms | 0 | 0 | 3 | 1 | 0 | 4 |
-| Project Config | 0 | 1 | 1 | 1 | **2** | 5 |
-| AGENTS.md Compliance | 4 | 5 | 3 | 1 | **2** | 15 |
-| **Total** | **10** | **19** | **21** | **7** | **5** | **62** |
+| Category | Remaining | ✅ Done | Total |
+|----------|-----------|--------|-------|
+| Clippy Compliance | 0 | **4** | 4 |
+| Error Handling | 0 | **4** | 4 |
+| Type Safety | 2 | **2** | 4 |
+| Documentation | 0 | **4** | 4 |
+| Testing | 2 | **2** | 4 |
+| Security | 1 | **5** | 6 |
+| Concurrency | 0 | **3** | 3 |
+| API Design | 1 | **4** | 5 |
+| Performance | 3 | **1** | 4 |
+| Rust Idioms | 1 | **3** | 4 |
+| Project Config | 0 | **5** | 5 |
+| AGENTS.md Compliance | 0 | **15** | 15 |
+| **Total** | **10** | **52** | **62** |
 
-### Recommended Priority Order
+### Remaining Tasks
 
-1. **AGENTS.md Compliance (Critical)** — Migrate inline tests to `tests/` dirs, remove `println!`/`eprintln!`, add docblocks, remove wildcard imports
-2. **Security** — Encrypt API keys, add server auth, validate paths
-3. **Error Handling** — Replace `.unwrap()` on locks, create `RagentError` with `thiserror`
-4. **AGENTS.md Compliance (High)** — Set `-alpha` version, add CHANGELOG.md, RELEASE.md, README.md, `docs/` directory, enforce import grouping
-5. **Testing** — Add unit tests to processor, providers, and tools (in `tests/` dirs per AGENTS.md)
-6. **Type Safety** — Introduce newtype IDs, permission enum
-7. **Documentation** — Doc comments on all public items (required by AGENTS.md)
-8. **Clippy** — Resolve all 20 warnings, add `rustfmt.toml`, enable pedantic lints
-9. **Concurrency** — Switch to `tokio::sync::Mutex`, use `RwLock`
-10. **Performance** — Use `tokio::fs`, reduce cloning
-11. **API Design** — `From` impls, context structs, remove dead code
-12. **Project Config** — Add LICENSE, CI, STATS.md
-13. **Idioms** — Clean up patterns, apply best practices reference
+1. **3.1** 🔴 Introduce newtype wrappers for IDs
+2. **3.3** 🟡 Reduce `serde_json::Value` as catch-all
+3. **5.2** 🟠 Add integration tests
+4. **5.3** 🟡 Add a mock LLM server for testing
+5. **6.1** 🔴 Encrypt API keys at rest
+6. **8.2** 🟠 Consolidate helper functions into context structs
+7. **9.1** 🟠 Use `tokio::fs` instead of `std::fs`
+8. **9.3** 🟡 Use `String` buffer reuse in search loops
+9. **9.4** 🟢 Consider `Cow<'static, str>` for event fields
+10. **10.3** 🟡 Use `?` instead of `.unwrap_or_else(|_| ...)`

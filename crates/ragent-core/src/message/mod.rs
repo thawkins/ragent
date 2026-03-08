@@ -52,6 +52,8 @@ impl fmt::Display for ToolCallStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallState {
     pub status: ToolCallStatus,
+    // TODO: Replace `Value` with a typed struct for tool call input/output once
+    // tool schemas are well-defined.
     pub input: Value,
     pub output: Option<Value>,
     pub error: Option<String>,

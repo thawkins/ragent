@@ -59,6 +59,7 @@ dirs = "6"
 pin-project-lite = "0.2"
 bytes = "1"
 regex = "1"
+base64 = "0.22"
 
 [[bin]]
 name = "ragent"

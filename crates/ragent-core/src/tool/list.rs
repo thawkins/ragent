@@ -1,9 +1,18 @@
+//! Directory listing tool with tree-style output.
+//!
+//! Provides [`ListTool`], which displays directory contents in a tree format
+//! with configurable recursion depth, file sizes, and sorted entries.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Lists directory contents in a tree-like format with file sizes.
+///
+/// Directories are listed before files, hidden entries are excluded, and
+/// common generated directories are skipped. Depth defaults to 2 levels.
 pub struct ListTool;
 
 #[async_trait::async_trait]
@@ -87,11 +96,7 @@ fn list_recursive(
     });
 
     // Filter hidden files
-    entries.retain(|e| {
-        e.file_name()
-            .to_str()
-            .is_none_or(|n| !n.starts_with('.'))
-    });
+    entries.retain(|e| e.file_name().to_str().is_none_or(|n| !n.starts_with('.')));
 
     let count = entries.len();
     for (i, entry) in entries.iter().enumerate() {
@@ -111,10 +116,7 @@ fn list_recursive(
                 continue;
             }
             lines.push(format!("{}{}{}/", prefix, connector, name_str));
-            let new_prefix = format!("{}{}",
-                prefix,
-                if is_last { "    " } else { "│   " }
-            );
+            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
             list_recursive(&path, &new_prefix, depth + 1, max_depth, lines)?;
         } else {
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);

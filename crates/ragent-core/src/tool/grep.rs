@@ -1,9 +1,20 @@
+//! Text search tool for file contents.
+//!
+//! Provides [`GrepTool`], which searches files for a text pattern, returning
+//! matching lines with file paths and line numbers. Supports optional file-type
+//! filtering and case-insensitive search.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Searches file contents for a text pattern across a directory tree.
+///
+/// Binary files are automatically skipped, and results are capped at 500 matches.
+/// Hidden entries and common generated directories are excluded from the search.
 pub struct GrepTool;
 
 #[async_trait::async_trait]
@@ -103,7 +114,11 @@ impl Tool for GrepTool {
                 results.len(),
                 if results.len() == 1 { "" } else { "es" },
                 files_searched,
-                if truncated { " (results truncated)" } else { "" }
+                if truncated {
+                    " (results truncated)"
+                } else {
+                    ""
+                }
             );
             Ok(ToolOutput {
                 content: format!("{}\n\n{}", summary, content),
@@ -190,6 +205,7 @@ fn search_directory(
             *files_searched += 1;
 
             if let Ok(content) = std::fs::read_to_string(&path) {
+                let mut buf = String::new();
                 for (line_num, line) in content.lines().enumerate() {
                     if results.len() >= max_results {
                         break;
@@ -200,12 +216,9 @@ fn search_directory(
                         line.contains(pattern)
                     };
                     if matches {
-                        results.push(format!(
-                            "{}:{}:{}",
-                            path.display(),
-                            line_num + 1,
-                            line.trim()
-                        ));
+                        buf.clear();
+                        let _ = write!(buf, "{}:{}:{}", path.display(), line_num + 1, line.trim());
+                        results.push(buf.clone());
                     }
                 }
             }

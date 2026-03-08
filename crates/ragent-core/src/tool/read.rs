@@ -1,9 +1,18 @@
+//! File reading tool.
+//!
+//! Provides [`ReadTool`], which reads file contents and returns them with
+//! line numbers. Supports optional line-range selection for viewing subsets.
+
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Reads a file's contents and returns them with line numbers prefixed.
+///
+/// Supports optional `start_line` and `end_line` parameters (1-based, inclusive)
+/// for reading a specific range of lines.
 pub struct ReadTool;
 
 #[async_trait::async_trait]
@@ -42,9 +51,7 @@ impl Tool for ReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"]
-            .as_str()
-            .context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
@@ -77,14 +84,12 @@ impl Tool for ReadTool {
                     .collect::<Vec<_>>()
                     .join("\n")
             }
-            _ => {
-                content
-                    .lines()
-                    .enumerate()
-                    .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
+            _ => content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
+                .collect::<Vec<_>>()
+                .join("\n"),
         };
 
         Ok(ToolOutput {
