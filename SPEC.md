@@ -219,6 +219,7 @@ The provider system abstracts LLM API differences behind a unified streaming int
 | Provider ID | SDK / Protocol | Auth | Status |
 |-------------|---------------|------|--------|
 | `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` | ✅ Implemented |
+| `copilot` | OpenAI-compatible (GitHub Copilot) | Copilot OAuth token (auto-discovered) | ✅ Implemented |
 | `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` | ✅ Implemented |
 | `ollama` | OpenAI-compatible (local/remote) | None (optional `OLLAMA_API_KEY`) | ✅ Implemented |
 | `google` | Google Generative AI API | `GOOGLE_API_KEY` | Planned |
@@ -351,6 +352,67 @@ ragent run --agent local "Write a unit test"
 
 # Point at a remote Ollama server
 OLLAMA_HOST=http://gpu-server:11434 ragent run --model ollama/deepseek-r1:70b "Refactor this"
+```
+
+#### GitHub Copilot Provider
+
+The Copilot provider connects to the [GitHub Copilot](https://github.com/features/copilot) API at `https://api.githubcopilot.com`. It uses the same OpenAI-compatible chat completions format and includes automatic token discovery from your IDE's Copilot configuration.
+
+**Key characteristics:**
+
+| Feature | Detail |
+|---------|--------|
+| API endpoint | `https://api.githubcopilot.com/v1/chat/completions` (OpenAI-compatible) |
+| Model discovery | `https://api.githubcopilot.com/models` — queries available models at runtime |
+| Authentication | Copilot OAuth token (`ghu_*` / `gho_*`), auto-discovered from IDE config |
+| Cost | Included with GitHub Copilot subscription |
+| Streaming | SSE via `data:` lines, identical to OpenAI format |
+| Tool calls | Supported |
+
+**Authentication flow:**
+
+1. `GITHUB_COPILOT_TOKEN` environment variable (highest priority)
+2. Auto-discovery from `~/.config/github-copilot/apps.json` (Linux/macOS)
+3. Auto-discovery from `%LOCALAPPDATA%/github-copilot/apps.json` (Windows)
+
+The token is automatically read from your IDE's GitHub Copilot extension configuration — no manual setup required if you already have Copilot active in VS Code or JetBrains.
+
+**Default models:**
+
+| Model ID | Name | Context | Capabilities |
+|----------|------|---------|-------------|
+| `gpt-4o` | GPT-4o | 128K | streaming, vision, tool_use |
+| `gpt-4o-mini` | GPT-4o Mini | 128K | streaming, vision, tool_use |
+| `claude-sonnet-4` | Claude Sonnet 4 | 200K | reasoning, streaming, vision, tool_use |
+| `o3-mini` | o3-mini | 200K | reasoning, streaming, tool_use |
+
+**Usage:**
+
+```bash
+# Use Copilot with auto-discovered token
+ragent run --model copilot/gpt-4o "Explain this code"
+
+# Use Claude via Copilot
+ragent run --model copilot/claude-sonnet-4 "Refactor this module"
+
+# Explicit token
+GITHUB_COPILOT_TOKEN=ghu_xxxx ragent run --model copilot/o3-mini "Write tests"
+```
+
+**Configuration example:**
+
+```jsonc
+{
+  "provider": {
+    "copilot": {}
+  },
+  "agent": {
+    "copilot-agent": {
+      "model": "copilot/claude-sonnet-4",
+      "prompt": "You are an expert code reviewer."
+    }
+  }
+}
 ```
 
 ---
@@ -1248,7 +1310,9 @@ ragent/
 │   │       ├── provider/       # Provider adapters
 │   │       │   ├── mod.rs
 │   │       │   ├── anthropic.rs
+│   │       │   ├── copilot.rs   # GitHub Copilot (OpenAI-compatible)
 │   │       │   ├── openai.rs   # Also used by OpenRouter, Groq, etc.
+│   │       │   ├── ollama.rs
 │   │       │   ├── google.rs
 │   │       │   ├── azure.rs
 │   │       │   ├── bedrock.rs

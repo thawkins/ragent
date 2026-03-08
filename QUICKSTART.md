@@ -41,7 +41,21 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 ```
 
-### Option C: Ollama (Local — No API Key Required)
+### Option C: GitHub Copilot (No Extra API Key)
+
+If you have an active [GitHub Copilot](https://github.com/features/copilot)
+subscription and the extension installed in VS Code or JetBrains, ragent will
+auto-discover your Copilot token. No configuration needed.
+
+```bash
+# Just works if Copilot is configured in your IDE
+ragent run --model copilot/gpt-4o "Explain this code"
+
+# Or set the token explicitly
+export GITHUB_COPILOT_TOKEN="ghu_your_token_here"
+```
+
+### Option D: Ollama (Local — No API Key Required)
 
 ```bash
 # Install Ollama: https://ollama.com/download
@@ -107,13 +121,16 @@ ragent models --provider openai
 
 **Default models:**
 
-| Provider   | Model ID                        | Context  | Cost (per 1M tokens) |
-|------------|---------------------------------|----------|----------------------|
-| Anthropic  | `claude-sonnet-4-20250514`      | 200K     | $3 / $15             |
-| Anthropic  | `claude-3-5-haiku-latest`       | 200K     | $0.80 / $4           |
-| OpenAI     | `gpt-4o`                        | 128K     | $2.50 / $10          |
-| OpenAI     | `gpt-4o-mini`                   | 128K     | $0.15 / $0.60        |
-| Ollama     | *(discovered from server)*      | varies   | Free (local)         |
+| Provider   | Model ID                        | Context  | Cost (per 1M tokens)     |
+|------------|---------------------------------|----------|--------------------------|
+| Anthropic  | `claude-sonnet-4-20250514`      | 200K     | $3 / $15                 |
+| Anthropic  | `claude-3-5-haiku-latest`       | 200K     | $0.80 / $4               |
+| Copilot    | `gpt-4o`                        | 128K     | Included with subscription |
+| Copilot    | `claude-sonnet-4`               | 200K     | Included with subscription |
+| Copilot    | `o3-mini`                       | 200K     | Included with subscription |
+| OpenAI     | `gpt-4o`                        | 128K     | $2.50 / $10              |
+| OpenAI     | `gpt-4o-mini`                   | 128K     | $0.15 / $0.60            |
+| Ollama     | *(discovered from server)*      | varies   | Free (local)             |
 
 ---
 
@@ -292,6 +309,7 @@ Rate limit: 60 requests per minute per session on the messages endpoint.
 |------------------------|------------------------------------------------|----------------------------|
 | `ANTHROPIC_API_KEY`    | Anthropic API key                              | —                          |
 | `OPENAI_API_KEY`       | OpenAI API key                                 | —                          |
+| `GITHUB_COPILOT_TOKEN` | Copilot OAuth token (auto-discovered from IDE) | —                          |
 | `OLLAMA_HOST`          | Ollama server URL                              | `http://localhost:11434`   |
 | `OLLAMA_API_KEY`       | Optional auth for remote Ollama                | —                          |
 | `RAGENT_CONFIG`        | Path to a config file                          | —                          |
@@ -388,6 +406,9 @@ ragent run "Add input validation to the create_user endpoint"
 ---
 
 ## Troubleshooting
+
+**"No Copilot token found"**
+→ Ensure GitHub Copilot is active in VS Code or JetBrains, or set `GITHUB_COPILOT_TOKEN`. The token is read from `~/.config/github-copilot/apps.json`.
 
 **"No API key found for provider"**
 → Set the environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) or run `ragent auth <provider> <key>`.

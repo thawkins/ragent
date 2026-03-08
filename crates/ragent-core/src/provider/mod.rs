@@ -4,6 +4,7 @@
 //! and [`ProviderRegistry`] for managing and querying available providers and models.
 
 pub mod anthropic;
+pub mod copilot;
 pub mod ollama;
 pub mod openai;
 
@@ -125,6 +126,7 @@ impl Default for ProviderRegistry {
 pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));
+    registry.register(Box::new(copilot::CopilotProvider::new()));
     registry.register(Box::new(openai::OpenAiProvider));
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry

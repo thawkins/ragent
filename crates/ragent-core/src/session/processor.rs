@@ -330,6 +330,22 @@ impl SessionProcessor {
             );
         }
 
+        // Copilot: check env var, then try to discover from IDE config
+        if provider_id == "copilot" {
+            if let Ok(token) = std::env::var("GITHUB_COPILOT_TOKEN") {
+                if !token.is_empty() {
+                    return Ok(token);
+                }
+            }
+            if let Some(token) = crate::provider::copilot::find_copilot_token() {
+                return Ok(token);
+            }
+            bail!(
+                "No Copilot token found. Set GITHUB_COPILOT_TOKEN or ensure GitHub Copilot \
+                 is configured in your IDE (~/.config/github-copilot/apps.json)."
+            );
+        }
+
         // Check common environment variable names
         let env_vars = match provider_id {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],
