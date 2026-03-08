@@ -142,7 +142,7 @@ Many functions return bare errors without context. Use `.context()` or `.with_co
 
 ## 3. Type Safety
 
-### 3.1 🔴 Introduce newtype wrappers for IDs
+### 3.1 ✅ ~~Introduce newtype wrappers for IDs
 
 Bare `String` is used for session IDs, message IDs, provider IDs, and tool call IDs — making it easy to accidentally swap them.
 
@@ -192,7 +192,7 @@ pub enum Permission {
 }
 ```
 
-### 3.3 🟡 Reduce `serde_json::Value` as catch-all
+### 3.3 ✅ ~~Reduce `serde_json::Value` as catch-all
 
 These fields would benefit from typed alternatives:
 
@@ -309,7 +309,7 @@ The test utilities should be behind `#[cfg(test)]` to avoid shipping test code i
 
 ## 6. Security
 
-### 6.1 🔴 Encrypt API keys at rest
+### 6.1 ✅ ~~Encrypt API keys at rest
 
 **File**: `crates/ragent-core/src/storage/mod.rs`
 
@@ -438,7 +438,7 @@ These types are user-facing and benefit from human-readable `Display`:
 
 ## 9. Performance
 
-### 9.1 🟠 Use `tokio::fs` instead of `std::fs` in async functions
+### 9.1 ✅ ~~Use `tokio::fs` instead of `std::fs` in async functions
 
 **Files**: `session/processor.rs`, `tool/read.rs`, `tool/write.rs`, `tool/edit.rs`, `tool/grep.rs`, `tool/glob.rs`, `tool/list.rs`
 
@@ -453,13 +453,13 @@ Synchronous filesystem calls (`std::fs::read_to_string`, `std::fs::read_dir`) bl
 | `session/processor.rs:156` | `id.clone(), name.clone()` on already-owned values | Use `std::mem::take` or move |
 | `routes/mod.rs:108` | `SessionRow → Session` conversion allocates per row | Pre-allocate vec with capacity |
 
-### 9.3 🟡 Use `String` buffer reuse in search loops
+### 9.3 ✅ ~~Use `String` buffer reuse in search loops
 
 **File**: `crates/ragent-core/src/tool/grep.rs:193`
 
 Each search match creates a new `format!()` allocation. Use a reusable `String` buffer with `write!`.
 
-### 9.4 🟢 Consider `Cow<'static, str>` for event fields
+### 9.4 ✅ ~~Consider `Cow<'static, str>` for event fields
 
 **File**: `crates/ragent-core/src/event/mod.rs`
 
@@ -506,7 +506,7 @@ let tool = self.tool_registry.get(&tc.name)
 let result = tool.execute(...).await;
 ```
 
-### 10.3 🟡 Use `?` operator instead of `.unwrap_or_else(|_| ...)`
+### 10.3 ✅ ~~Use `?`?` operator instead of `.unwrap_or_else(|_| ...)`
 
 **File**: `session/mod.rs:94-104`
 
@@ -825,27 +825,20 @@ This reference covers project structure and clean code practices. A review again
 |----------|-----------|--------|-------|
 | Clippy Compliance | 0 | **4** | 4 |
 | Error Handling | 0 | **4** | 4 |
-| Type Safety | 2 | **2** | 4 |
+| Type Safety | 0 | **4** | 4 |
 | Documentation | 0 | **4** | 4 |
 | Testing | 2 | **2** | 4 |
-| Security | 1 | **5** | 6 |
+| Security | 0 | **6** | 6 |
 | Concurrency | 0 | **3** | 3 |
 | API Design | 1 | **4** | 5 |
-| Performance | 3 | **1** | 4 |
-| Rust Idioms | 1 | **3** | 4 |
+| Performance | 0 | **4** | 4 |
+| Rust Idioms | 0 | **4** | 4 |
 | Project Config | 0 | **5** | 5 |
 | AGENTS.md Compliance | 0 | **15** | 15 |
-| **Total** | **10** | **52** | **62** |
+| **Total** | **3** | **59** | **62** |
 
 ### Remaining Tasks
 
-1. **3.1** 🔴 Introduce newtype wrappers for IDs
-2. **3.3** 🟡 Reduce `serde_json::Value` as catch-all
-3. **5.2** 🟠 Add integration tests
-4. **5.3** 🟡 Add a mock LLM server for testing
-5. **6.1** 🔴 Encrypt API keys at rest
-6. **8.2** 🟠 Consolidate helper functions into context structs
-7. **9.1** 🟠 Use `tokio::fs` instead of `std::fs`
-8. **9.3** 🟡 Use `String` buffer reuse in search loops
-9. **9.4** 🟢 Consider `Cow<'static, str>` for event fields
-10. **10.3** 🟡 Use `?` instead of `.unwrap_or_else(|_| ...)`
+1. **5.2** 🟠 Add integration tests
+2. **5.3** 🟡 Add a mock LLM server for testing
+3. **8.2** 🟠 Consolidate helper functions into context structs
