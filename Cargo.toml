@@ -14,6 +14,17 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
 [workspace.dependencies]
 ragent-core = { path = "crates/ragent-core" }
 ragent-server = { path = "crates/ragent-server" }
@@ -62,6 +73,9 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 dirs = { workspace = true }
+
+[lints]
+workspace = true
 
 [profile.release]
 lto = true
