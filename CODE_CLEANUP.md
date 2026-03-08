@@ -69,7 +69,7 @@ Functions accepting `&PathBuf` should accept `&Path` — a `PathBuf` auto-derefs
 
 `ExperimentalFlags::default()` manually sets all fields to their zero values. Replace with `#[derive(Default)]`.
 
-### 1.5 🟢 Remove redundant closure
+### 1.5 ✅ ~~Remove redundant closure~~
 
 **File**: `crates/ragent-core/src/session/mod.rs:72`
 

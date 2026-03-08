@@ -69,7 +69,7 @@ impl SessionManager {
 
     pub fn get_session(&self, id: &str) -> anyhow::Result<Option<Session>> {
         let row = self.storage.get_session(id)?;
-        Ok(row.map(|r| row_to_session(r)))
+        Ok(row.map(row_to_session))
     }
 
     pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
