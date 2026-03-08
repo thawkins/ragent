@@ -1,44 +1,82 @@
+//! Agent definitions, built-in agent registry, and prompt construction.
+//!
+//! This module defines the [`AgentInfo`] type that describes an agent's
+//! identity, model binding, permissions, and system prompt. It also provides
+//! [`create_builtin_agents`] for the default agent roster and
+//! [`resolve_agent`] for merging built-in definitions with user config.
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt;
 use std::path::Path;
 
 use crate::permission::{PermissionAction, PermissionRule, PermissionRuleset};
 
+/// Determines when an agent is available for use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentMode {
+    /// Agent can be used as the top-level (primary) agent.
     Primary,
+    /// Agent runs as a child of another agent.
     Subagent,
+    /// Agent may be used in either role.
     All,
 }
 
+impl fmt::Display for AgentMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AgentMode::Primary => write!(f, "primary"),
+            AgentMode::Subagent => write!(f, "subagent"),
+            AgentMode::All => write!(f, "all"),
+        }
+    }
+}
+
+/// Reference to a specific model offered by a provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelRef {
+    /// Identifier of the LLM provider (e.g. `"anthropic"`).
     pub provider_id: String,
+    /// Model identifier within the provider (e.g. `"claude-sonnet-4-20250514"`).
     pub model_id: String,
 }
 
+/// Complete definition of an agent, including its model, prompt, and permissions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInfo {
+    /// Unique name used to select this agent.
     pub name: String,
+    /// Human-readable description of the agent's purpose.
     pub description: String,
+    /// Whether this agent runs as primary, subagent, or both.
     pub mode: AgentMode,
+    /// If `true`, the agent is omitted from user-facing listings.
     pub hidden: bool,
+    /// Sampling temperature override for the model.
     pub temperature: Option<f32>,
+    /// Top-p (nucleus) sampling override.
     pub top_p: Option<f32>,
+    /// Model binding for this agent.
     pub model: Option<ModelRef>,
+    /// System prompt injected at the start of conversations.
     pub prompt: Option<String>,
+    /// Permission rules governing tool access.
     pub permission: PermissionRuleset,
+    /// Maximum number of agentic loop iterations.
     pub max_steps: Option<u32>,
+    /// Arbitrary key-value options forwarded to the provider.
     pub options: HashMap<String, Value>,
 }
 
 impl AgentInfo {
-    pub fn new(name: &str, description: &str) -> Self {
+    /// Creates a new agent with the given name and description, using default values.
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
-            name: name.to_string(),
-            description: description.to_string(),
+            name: name.into(),
+            description: description.into(),
             mode: AgentMode::Primary,
             hidden: false,
             temperature: None,
@@ -52,6 +90,16 @@ impl AgentInfo {
     }
 }
 
+impl Default for AgentInfo {
+    fn default() -> Self {
+        Self::new("", "")
+    }
+}
+
+/// Returns the full set of built-in agents shipped with ragent.
+///
+/// Includes `general`, `build`, `plan`, `explore`, `title`, `summary`,
+/// and `compaction` agents.
 pub fn create_builtin_agents() -> Vec<AgentInfo> {
     vec![
         AgentInfo {
@@ -210,17 +258,17 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
 fn default_permissions() -> PermissionRuleset {
     vec![
         PermissionRule {
-            permission: "file:read".to_string(),
+            permission: "file:read".into(),
             pattern: "**".to_string(),
             action: PermissionAction::Allow,
         },
         PermissionRule {
-            permission: "file:write".to_string(),
+            permission: "file:write".into(),
             pattern: "**".to_string(),
             action: PermissionAction::Ask,
         },
         PermissionRule {
-            permission: "bash:execute".to_string(),
+            permission: "bash:execute".into(),
             pattern: "*".to_string(),
             action: PermissionAction::Ask,
         },
@@ -230,17 +278,17 @@ fn default_permissions() -> PermissionRuleset {
 fn read_only_permissions() -> PermissionRuleset {
     vec![
         PermissionRule {
-            permission: "file:read".to_string(),
+            permission: "file:read".into(),
             pattern: "**".to_string(),
             action: PermissionAction::Allow,
         },
         PermissionRule {
-            permission: "file:write".to_string(),
+            permission: "file:write".into(),
             pattern: "**".to_string(),
             action: PermissionAction::Deny,
         },
         PermissionRule {
-            permission: "bash:execute".to_string(),
+            permission: "bash:execute".into(),
             pattern: "*".to_string(),
             action: PermissionAction::Deny,
         },
@@ -248,10 +296,11 @@ fn read_only_permissions() -> PermissionRuleset {
 }
 
 /// Resolve an agent by name, merging built-in definition with config overrides.
-pub fn resolve_agent(
-    name: &str,
-    config: &crate::config::Config,
-) -> anyhow::Result<AgentInfo> {
+///
+/// # Errors
+///
+/// Returns an error if config overlay parsing fails (e.g. invalid model string format).
+pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Result<AgentInfo> {
     let builtins = create_builtin_agents();
     let mut agent = builtins
         .into_iter()
@@ -294,11 +343,7 @@ pub fn resolve_agent(
 }
 
 /// Build the system prompt for an agent invocation.
-pub fn build_system_prompt(
-    agent: &AgentInfo,
-    working_dir: &Path,
-    file_tree: &str,
-) -> String {
+pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &str) -> String {
     let mut prompt = String::new();
 
     // Agent identity and role

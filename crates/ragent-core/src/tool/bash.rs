@@ -1,13 +1,30 @@
-use anyhow::{Context, Result};
-use serde_json::{json, Value};
+//! Shell command execution tool.
+//!
+//! Provides [`BashTool`], which runs shell commands via `bash -c` in the
+//! agent's working directory with configurable timeouts.
+
+use anyhow::{Context, Result, bail};
+use serde_json::{Value, json};
 use std::time::Instant;
 use tokio::process::Command;
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Executes shell commands via `bash -c` and returns combined stdout/stderr output.
+///
+/// Output is truncated to 100 KB to avoid overwhelming the agent context.
+/// Commands that exceed the configured timeout (default 120 s) are terminated.
 pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+
+const DENIED_PATTERNS: &[&str] = &[
+    "rm -rf /",
+    "mkfs",
+    "dd if=",
+    ":(){ :|:&};:",
+    "> /dev/sd",
+];
 
 #[async_trait::async_trait]
 impl Tool for BashTool {
@@ -45,9 +62,15 @@ impl Tool for BashTool {
         let command = input["command"]
             .as_str()
             .context("Missing 'command' parameter")?;
-        let timeout_secs = input["timeout"]
-            .as_u64()
-            .unwrap_or(DEFAULT_TIMEOUT_SECS);
+        let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
+
+        tracing::info!(command = %command, working_dir = %ctx.working_dir.display(), "Executing bash command");
+
+        for pattern in DENIED_PATTERNS {
+            if command.contains(pattern) {
+                bail!("Command denied: contains dangerous pattern '{pattern}'");
+            }
+        }
 
         let start = Instant::now();
 
@@ -102,24 +125,17 @@ impl Tool for BashTool {
                     })),
                 })
             }
-            Ok(Err(e)) => {
-                Ok(ToolOutput {
-                    content: format!("Failed to execute command: {}", e),
-                    metadata: None,
-                })
-            }
-            Err(_) => {
-                Ok(ToolOutput {
-                    content: format!(
-                        "Command timed out after {} seconds",
-                        timeout_secs
-                    ),
-                    metadata: Some(json!({
-                        "timeout": true,
-                        "timeout_secs": timeout_secs,
-                    })),
-                })
-            }
+            Ok(Err(e)) => Ok(ToolOutput {
+                content: format!("Failed to execute command: {}", e),
+                metadata: None,
+            }),
+            Err(_) => Ok(ToolOutput {
+                content: format!("Command timed out after {} seconds", timeout_secs),
+                metadata: Some(json!({
+                    "timeout": true,
+                    "timeout_secs": timeout_secs,
+                })),
+            }),
         }
     }
 }

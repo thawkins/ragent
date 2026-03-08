@@ -27,3 +27,4 @@ futures = { workspace = true }
 dirs = { workspace = true }
 pin-project-lite = { workspace = true }
 bytes = { workspace = true }
+regex = { workspace = true }

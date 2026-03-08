@@ -1,16 +1,20 @@
-use anyhow::{bail, Context, Result};
+//! OpenAI provider implementation.
+//!
+//! Implements the [`Provider`] trait for the OpenAI Chat Completions API, supporting
+//! streaming responses, tool calls, and usage tracking.
+
+use anyhow::{Context, Result, bail};
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
 use crate::config::{Capabilities, Cost};
 use crate::event::FinishReason;
-use crate::llm::{
-    ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent,
-};
+use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::{ModelInfo, Provider};
 
+/// Provider implementation for the OpenAI Chat Completions API.
 pub struct OpenAiProvider;
 
 impl OpenAiProvider {
@@ -19,14 +23,17 @@ impl OpenAiProvider {
 
 #[async_trait::async_trait]
 impl Provider for OpenAiProvider {
+    /// Returns `"openai"`.
     fn id(&self) -> &str {
         "openai"
     }
 
+    /// Returns `"OpenAI"`.
     fn name(&self) -> &str {
         "OpenAI"
     }
 
+    /// Returns default OpenAI models (GPT-4o, GPT-4o Mini).
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![
             ModelInfo {
@@ -66,6 +73,11 @@ impl Provider for OpenAiProvider {
         ]
     }
 
+    /// Creates an [`OpenAiClient`] configured with the given API key and optional base URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be constructed.
     async fn create_client(
         &self,
         api_key: &str,
@@ -84,6 +96,7 @@ impl Provider for OpenAiProvider {
     }
 }
 
+/// HTTP client for the OpenAI Chat Completions API with streaming SSE support.
 pub struct OpenAiClient {
     api_key: String,
     base_url: String,
@@ -113,7 +126,10 @@ impl OpenAiClient {
                                 "type": "text",
                                 "text": text
                             })),
-                            ContentPart::ToolResult { tool_use_id: _, content: _ } => None,
+                            ContentPart::ToolResult {
+                                tool_use_id: _,
+                                content: _,
+                            } => None,
                             ContentPart::ToolUse { .. } => None,
                         })
                         .collect();
@@ -160,7 +176,11 @@ impl OpenAiClient {
                         }));
                     } else if !tool_results.is_empty() {
                         for result in tool_results {
-                            if let ContentPart::ToolResult { tool_use_id, content } = result {
+                            if let ContentPart::ToolResult {
+                                tool_use_id,
+                                content,
+                            } = result
+                            {
                                 messages.push(json!({
                                     "role": "tool",
                                     "tool_call_id": tool_use_id,
@@ -242,7 +262,10 @@ impl LlmClient for OpenAiClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response.text().await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to read response body");
+                String::new()
+            });
             bail!("OpenAI API error ({}): {}", status, body);
         }
 

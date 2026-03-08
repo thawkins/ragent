@@ -1,32 +1,51 @@
+//! Message processing pipeline for agent sessions.
+//!
+//! [`SessionProcessor`] orchestrates the agentic loop: it accepts a user message,
+//! streams an LLM response, executes any requested tool calls, and iterates
+//! until the model signals completion or the step limit is reached.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, error, warn};
 
-use crate::agent::{build_system_prompt, AgentInfo};
+use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
-use crate::llm::{
-    ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent,
-};
+use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
+use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
 use crate::tool::{ToolContext, ToolRegistry};
 
+/// Drives the agentic conversation loop for a single session.
+///
+/// Holds shared references to the session manager, LLM provider registry,
+/// tool registry, permission checker, and event bus.
 pub struct SessionProcessor {
     pub session_manager: Arc<SessionManager>,
     pub provider_registry: Arc<ProviderRegistry>,
     pub tool_registry: Arc<ToolRegistry>,
-    pub permission_checker: Arc<std::sync::Mutex<PermissionChecker>>,
+    pub permission_checker: Arc<tokio::sync::RwLock<PermissionChecker>>,
     pub event_bus: Arc<EventBus>,
 }
 
 impl SessionProcessor {
+    /// Processes a user message within an agent session.
+    ///
+    /// Persists the user message, then enters an agentic loop that streams
+    /// LLM responses, executes tool calls, and feeds results back to the model
+    /// until completion or the agent's max-step limit is reached.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured model or provider is missing, if the
+    /// API key cannot be resolved, or if an LLM call fails.
     pub async fn process_message(
         &self,
         session_id: &str,
@@ -35,12 +54,7 @@ impl SessionProcessor {
     ) -> Result<Message> {
         // 1. Store user message
         let user_msg = Message::user_text(session_id, user_text);
-        self.session_manager
-            .get_messages(session_id)
-            .ok(); // ensure session exists
-        if let Some(storage) = self.get_storage() {
-            storage.create_message(&user_msg)?;
-        }
+        self.session_manager.get_messages(session_id).ok(); // ensure session exists
 
         self.event_bus.publish(Event::MessageStart {
             session_id: session_id.to_string(),
@@ -56,9 +70,7 @@ impl SessionProcessor {
         let provider = self
             .provider_registry
             .get(&model_ref.provider_id)
-            .ok_or_else(|| {
-                anyhow::anyhow!("Provider '{}' not found", model_ref.provider_id)
-            })?;
+            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", model_ref.provider_id))?;
 
         // Try to get API key from environment or storage
         let api_key = self.resolve_api_key(&model_ref.provider_id)?;
@@ -113,7 +125,7 @@ impl SessionProcessor {
             let mut stream = match client.chat(request).await {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("LLM call failed: {}", e);
+                    error!("LLM call failed: {}", redact_secrets(&e.to_string()));
                     self.event_bus.publish(Event::AgentError {
                         session_id: session_id.to_string(),
                         error: e.to_string(),
@@ -177,7 +189,7 @@ impl SessionProcessor {
                         });
                     }
                     StreamEvent::Error { message } => {
-                        error!("Stream error: {}", message);
+                        error!("Stream error: {}", redact_secrets(&message));
                         self.event_bus.publish(Event::AgentError {
                             session_id: session_id.to_string(),
                             error: message,
@@ -217,8 +229,10 @@ impl SessionProcessor {
             // Execute tool calls
             let mut tool_result_parts: Vec<ContentPart> = Vec::new();
             for tc in &tool_calls {
-                let input: Value =
-                    serde_json::from_str(&tc.args_json).unwrap_or(json!({}));
+                let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
+                    warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
+                    json!({})
+                });
 
                 assistant_content_parts.push(ContentPart::ToolUse {
                     id: tc.id.clone(),
@@ -233,17 +247,16 @@ impl SessionProcessor {
                     event_bus: self.event_bus.clone(),
                 };
 
-                let result = match self.tool_registry.get(&tc.name) {
-                    Some(tool) => tool.execute(input.clone(), &tool_ctx).await,
-                    None => Err(anyhow::anyhow!("Unknown tool: {}", tc.name)),
+                let result = self.tool_registry.get(&tc.name)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc.name));
+                let result = match result {
+                    Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
+                    Err(e) => Err(e),
                 };
                 let duration_ms = start.elapsed().as_millis() as u64;
 
                 let (output_value, error) = match &result {
-                    Ok(output) => (
-                        Some(json!(output.content)),
-                        None,
-                    ),
+                    Ok(output) => (Some(json!(output.content)), None),
                     Err(e) => (None, Some(e.to_string())),
                 };
 
@@ -266,9 +279,9 @@ impl SessionProcessor {
                     call_id: tc.id.clone(),
                     state: ToolCallState {
                         status,
-                        input: input.clone(),
-                        output: output_value.clone(),
-                        error: error.clone(),
+                        input,
+                        output: output_value,
+                        error,
                         duration_ms: Some(duration_ms),
                     },
                 });
@@ -299,9 +312,6 @@ impl SessionProcessor {
 
         // 6. Store assistant message
         let assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
-        if let Some(storage) = self.get_storage() {
-            storage.create_message(&assistant_msg)?;
-        }
 
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
@@ -332,12 +342,6 @@ impl SessionProcessor {
             "No API key found for provider '{}'. Set the appropriate environment variable.",
             provider_id
         )
-    }
-
-    fn get_storage(&self) -> Option<Arc<crate::storage::Storage>> {
-        // Access storage through session manager's storage
-        // The session manager holds storage, we use it via the manager's methods
-        None // Storage is accessed through session_manager
     }
 }
 
@@ -439,11 +443,7 @@ fn build_tree_recursive(
 
         if path.is_dir() {
             lines.push(format!("{}{}{}/", prefix, connector, name_str));
-            let new_prefix = format!(
-                "{}{}",
-                prefix,
-                if is_last { "    " } else { "│   " }
-            );
+            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
             build_tree_recursive(&path, &new_prefix, depth + 1, max_depth, lines);
         } else {
             lines.push(format!("{}{}{}", prefix, connector, name_str));

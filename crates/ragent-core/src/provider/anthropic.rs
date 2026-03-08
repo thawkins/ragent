@@ -1,16 +1,20 @@
-use anyhow::{bail, Context, Result};
+//! Anthropic (Claude) provider implementation.
+//!
+//! Implements the [`Provider`] trait for the Anthropic Messages API, supporting
+//! streaming chat completions, tool use, and extended thinking.
+
+use anyhow::{Context, Result, bail};
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
 use crate::config::{Capabilities, Cost};
 use crate::event::FinishReason;
-use crate::llm::{
-    ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent,
-};
+use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::{ModelInfo, Provider};
 
+/// Provider implementation for the Anthropic Claude API.
 pub struct AnthropicProvider;
 
 impl AnthropicProvider {
@@ -19,14 +23,17 @@ impl AnthropicProvider {
 
 #[async_trait::async_trait]
 impl Provider for AnthropicProvider {
+    /// Returns `"anthropic"`.
     fn id(&self) -> &str {
         "anthropic"
     }
 
+    /// Returns `"Anthropic"`.
     fn name(&self) -> &str {
         "Anthropic"
     }
 
+    /// Returns default Claude models (Sonnet 4, 3.5 Haiku).
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![
             ModelInfo {
@@ -66,6 +73,11 @@ impl Provider for AnthropicProvider {
         ]
     }
 
+    /// Creates an [`AnthropicClient`] configured with the given API key and optional base URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be constructed.
     async fn create_client(
         &self,
         api_key: &str,
@@ -84,6 +96,7 @@ impl Provider for AnthropicProvider {
     }
 }
 
+/// HTTP client for the Anthropic Messages API with streaming SSE support.
 pub struct AnthropicClient {
     api_key: String,
     base_url: String,
@@ -186,7 +199,10 @@ impl LlmClient for AnthropicClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body = response.text().await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to read response body");
+                String::new()
+            });
             bail!("Anthropic API error ({}): {}", status, body);
         }
 

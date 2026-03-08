@@ -1,3 +1,10 @@
+//! ragent CLI binary.
+//!
+//! Entry point for the ragent terminal AI coding agent. Parses CLI arguments,
+//! loads configuration, initialises storage and the event bus, and dispatches
+//! to the requested sub-command (TUI, headless run, HTTP server, session
+//! management, auth, or config display).
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,6 +24,7 @@ use ragent_core::{
     tool,
 };
 
+/// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
 #[command(name = "ragent", about = "An Rust AI coding agent for the terminal")]
 struct Cli {
@@ -48,6 +56,7 @@ struct Cli {
     config: Option<String>,
 }
 
+/// Available top-level sub-commands.
 #[derive(Subcommand)]
 enum Commands {
     /// Execute agent with prompt
@@ -79,6 +88,7 @@ enum Commands {
     Config,
 }
 
+/// Sub-commands for the `session` namespace.
 #[derive(Subcommand)]
 enum SessionCommands {
     /// List all sessions
@@ -100,12 +110,18 @@ enum SessionCommands {
     },
 }
 
+/// Return the platform data directory for ragent (e.g. `~/.local/share/ragent`).
 fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("ragent")
 }
 
+/// Parse CLI args, set up infrastructure, and dispatch to the selected command.
+///
+/// # Errors
+///
+/// Returns an error on configuration, storage, network, or I/O failures.
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -135,7 +151,7 @@ async fn main() -> Result<()> {
     // Create registries
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(std::sync::Mutex::new(PermissionChecker::new(
+    let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(
         config.permission.clone(),
     )));
 
@@ -160,7 +176,8 @@ async fn main() -> Result<()> {
             // Default: run TUI
             if cli.no_tui {
                 tracing::info!("Starting ragent interactive mode (plain)");
-                let session = session_manager.create_session(PathBuf::from("."))?;
+                let dir = std::fs::canonicalize(".")?;
+                let session = session_manager.create_session(dir)?;
                 let reader = tokio::io::BufReader::new(tokio::io::stdin());
                 use tokio::io::AsyncBufReadExt;
                 let mut lines = reader.lines();
@@ -182,7 +199,8 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Run { prompt }) => {
-            let session = session_manager.create_session(PathBuf::from("."))?;
+            let dir = std::fs::canonicalize(".")?;
+            let session = session_manager.create_session(dir)?;
             match session_processor
                 .process_message(&session.id, &prompt, &resolved_agent)
                 .await
@@ -197,11 +215,14 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Serve { addr }) => {
+            let auth_token = uuid::Uuid::new_v4().to_string();
             let state = ragent_server::routes::AppState {
                 event_bus,
                 config,
                 storage,
                 session_processor,
+                auth_token,
+                rate_limiter: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             };
             ragent_server::start_server(&addr, state).await?;
         }
@@ -235,8 +256,7 @@ async fn main() -> Result<()> {
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
-                let _messages: Vec<ragent_core::message::Message> =
-                    serde_json::from_str(&content)?;
+                let _messages: Vec<ragent_core::message::Message> = serde_json::from_str(&content)?;
                 tracing::info!(file = %file, "Imported session");
                 // TODO: store imported messages
             }
