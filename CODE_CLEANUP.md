@@ -10,7 +10,7 @@ This document lists tasks to bring the ragent codebase up to recommended Rust pr
 
 The project currently has **20 clippy warnings** across 4 categories. All should be resolved.
 
-### 1.1 🟡 Add workspace-wide lint configuration
+### 1.1 ✅ ~~Add workspace-wide lint configuration~~
 
 **Files**: `Cargo.toml` (workspace root), each `crates/*/Cargo.toml`
 
@@ -528,7 +528,7 @@ pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self { ..
 
 The project has `SPEC.md` but no `README.md` with quickstart instructions, build commands, and usage examples.
 
-### 11.2 🟡 Add a `.gitignore`
+### 11.2 ✅ ~~Add a `.gitignore`~~
 
 Ensure `target/`, `*.db`, and secret files are excluded from version control.
 
@@ -562,7 +562,7 @@ newline_style = "Unix"
 use_field_init_shorthand = true
 ```
 
-### 11.6 🟡 Add `.gitignore` with AGENTS.md requirements
+### 11.6 ✅ ~~Add `.gitignore` with AGENTS.md requirements~~
 
 AGENTS.md requires `target/temp` to be gitignored. No `.gitignore` exists at all.
 
@@ -680,7 +680,7 @@ crates/ragent-core/tests/
 
 **Fix**: Replace with explicit imports. This will also be resolved by task 12.1 (migrating tests out of source files).
 
-### 12.5 🟠 Set version to `0.1.0-alpha` during development
+### 12.5 ✅ ~~Set version to `0.1.0-alpha` during development~~
 
 **AGENTS.md rule**: *"During development the release number will have `-alpha` appended to the end."*
 
@@ -760,7 +760,7 @@ group_imports = "StdExternalCrate"
 
 And manually audit files where imports mix `std::`, external crates, and `crate::` imports in the same block.
 
-### 12.11 🟡 Enable `warn(missing_docs)` and cognitive complexity lint
+### 12.11 ✅ ~~Enable `warn(missing_docs)` and cognitive complexity lint~~
 
 **AGENTS.md rule**: *"warn on missing docs"* and *"cognitive complexity ≤30"*
 
@@ -821,21 +821,21 @@ This reference covers project structure and clean code practices. A review again
 
 ## Summary
 
-| Category | 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low | Total |
-|----------|-------------|---------|-----------|--------|-------|
-| Clippy Compliance | 0 | 0 | 3 | 1 | 4 |
-| Error Handling | 2 | 2 | 0 | 0 | 4 |
-| Type Safety | 1 | 1 | 2 | 0 | 4 |
-| Documentation | 0 | 2 | 1 | 1 | 4 |
-| Testing | 1 | 1 | 2 | 0 | 4 |
-| Security | 2 | 3 | 1 | 0 | 6 |
-| Concurrency | 0 | 1 | 2 | 0 | 3 |
-| API Design | 0 | 2 | 2 | 1 | 5 |
-| Performance | 0 | 1 | 2 | 1 | 4 |
-| Rust Idioms | 0 | 0 | 3 | 1 | 4 |
-| Project Config | 0 | 1 | 3 | 1 | 5 |
-| AGENTS.md Compliance | 4 | 6 | 4 | 1 | 15 |
-| **Total** | **10** | **20** | **25** | **7** | **62** |
+| Category | 🔴 Critical | 🟠 High | 🟡 Medium | 🟢 Low | ✅ Done | Total |
+|----------|-------------|---------|-----------|--------|--------|-------|
+| Clippy Compliance | 0 | 0 | 2 | 1 | **1** | 4 |
+| Error Handling | 2 | 2 | 0 | 0 | 0 | 4 |
+| Type Safety | 1 | 1 | 2 | 0 | 0 | 4 |
+| Documentation | 0 | 2 | 1 | 1 | 0 | 4 |
+| Testing | 1 | 1 | 2 | 0 | 0 | 4 |
+| Security | 2 | 3 | 1 | 0 | 0 | 6 |
+| Concurrency | 0 | 1 | 2 | 0 | 0 | 3 |
+| API Design | 0 | 2 | 2 | 1 | 0 | 5 |
+| Performance | 0 | 1 | 2 | 1 | 0 | 4 |
+| Rust Idioms | 0 | 0 | 3 | 1 | 0 | 4 |
+| Project Config | 0 | 1 | 1 | 1 | **2** | 5 |
+| AGENTS.md Compliance | 4 | 5 | 3 | 1 | **2** | 15 |
+| **Total** | **10** | **19** | **21** | **7** | **5** | **62** |
 
 ### Recommended Priority Order
 
