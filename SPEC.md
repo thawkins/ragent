@@ -216,19 +216,19 @@ The provider system abstracts LLM API differences behind a unified streaming int
 
 #### Supported Providers
 
-| Provider ID | SDK / Protocol | Auth |
-|-------------|---------------|------|
-| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` |
-| `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` |
-| `google` | Google Generative AI API | `GOOGLE_API_KEY` |
-| `azure` | Azure OpenAI (OpenAI-compatible) | `AZURE_OPENAI_API_KEY` + endpoint |
-| `bedrock` | AWS Bedrock (SigV4) | AWS credentials chain |
-| `openrouter` | OpenAI-compatible | `OPENROUTER_API_KEY` |
-| `xai` | OpenAI-compatible | `XAI_API_KEY` |
-| `mistral` | OpenAI-compatible | `MISTRAL_API_KEY` |
-| `groq` | OpenAI-compatible | `GROQ_API_KEY` |
-| `ollama` | OpenAI-compatible (local) | None |
-| `custom` | Any OpenAI-compatible endpoint | User-defined |
+| Provider ID | SDK / Protocol | Auth | Status |
+|-------------|---------------|------|--------|
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` | ✅ Implemented |
+| `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` | ✅ Implemented |
+| `ollama` | OpenAI-compatible (local/remote) | None (optional `OLLAMA_API_KEY`) | ✅ Implemented |
+| `google` | Google Generative AI API | `GOOGLE_API_KEY` | Planned |
+| `azure` | Azure OpenAI (OpenAI-compatible) | `AZURE_OPENAI_API_KEY` + endpoint | Planned |
+| `bedrock` | AWS Bedrock (SigV4) | AWS credentials chain | Planned |
+| `openrouter` | OpenAI-compatible | `OPENROUTER_API_KEY` | Planned |
+| `xai` | OpenAI-compatible | `XAI_API_KEY` | Planned |
+| `mistral` | OpenAI-compatible | `MISTRAL_API_KEY` | Planned |
+| `groq` | OpenAI-compatible | `GROQ_API_KEY` | Planned |
+| `custom` | Any OpenAI-compatible endpoint | User-defined | Planned |
 
 #### Model Descriptor
 
@@ -278,6 +278,80 @@ pub enum FinishReason {
 ```
 
 Each provider implements `LlmStream`. Internally, the Anthropic adapter uses the native Messages API; all OpenAI-compatible providers share a single `OpenAiCompatibleStream` implementation parameterized by base URL and auth.
+
+#### Ollama Provider
+
+The Ollama provider connects to a local or remote [Ollama](https://ollama.com) server. It uses Ollama's OpenAI-compatible `/v1/chat/completions` endpoint for streaming chat completions and the `/api/tags` endpoint for dynamic model discovery.
+
+**Key characteristics:**
+
+| Feature | Detail |
+|---------|--------|
+| API endpoint | `{base_url}/v1/chat/completions` (OpenAI-compatible) |
+| Model discovery | `{base_url}/api/tags` — queries available models at runtime |
+| Authentication | None required for local servers; optional Bearer token via `OLLAMA_API_KEY` for remote |
+| Default base URL | `http://localhost:11434` |
+| Base URL override | `OLLAMA_HOST` environment variable or `provider.ollama.api.base_url` in config |
+| Cost | Free (all models run locally) |
+| Streaming | SSE via `data:` lines, identical to OpenAI format |
+| Tool calls | Supported (model-dependent — works with llama3.x, qwen2.5, etc.) |
+
+**Environment variables:**
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OLLAMA_HOST` | Ollama server URL | `http://localhost:11434` |
+| `OLLAMA_API_KEY` | Optional Bearer token for authenticated remote servers | (empty — no auth) |
+
+**Model discovery:**
+
+The `list_ollama_models()` function queries `/api/tags` and returns `ModelInfo` for each installed model, including:
+- Model ID (e.g. `llama3.2:latest`, `qwen2.5-coder:32b`)
+- Human-readable display name with parameter count
+- Estimated context window based on parameter size (8K–131K)
+
+```bash
+# Discover models from a running Ollama server
+ragent models --provider ollama
+
+# Discover from a remote server
+ragent models --ollama-url http://remote-server:11434
+```
+
+**Configuration example:**
+
+```jsonc
+{
+  "provider": {
+    "ollama": {
+      "api": { "base_url": "http://localhost:11434" },
+      "models": {
+        "llama3.2": { "name": "Llama 3.2" },
+        "qwen2.5-coder:32b": { "name": "Qwen 2.5 Coder 32B" }
+      }
+    }
+  },
+  "agent": {
+    "local": {
+      "model": "ollama/llama3.2",
+      "prompt": "You are a helpful coding assistant."
+    }
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# Use a specific Ollama model
+ragent run --model ollama/llama3.2 "Explain this code"
+
+# Use a custom agent backed by Ollama
+ragent run --agent local "Write a unit test"
+
+# Point at a remote Ollama server
+OLLAMA_HOST=http://gpu-server:11434 ragent run --model ollama/deepseek-r1:70b "Refactor this"
+```
 
 ---
 
