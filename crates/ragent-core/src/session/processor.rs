@@ -323,6 +323,13 @@ impl SessionProcessor {
     }
 
     fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
+        // Ollama does not require an API key for local servers
+        if provider_id == "ollama" {
+            return Ok(
+                std::env::var("OLLAMA_API_KEY").unwrap_or_default()
+            );
+        }
+
         // Check common environment variable names
         let env_vars = match provider_id {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],

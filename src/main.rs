@@ -83,7 +83,14 @@ enum Commands {
         key: String,
     },
     /// List available models
-    Models,
+    Models {
+        /// Filter by provider (e.g. "ollama", "openai", "anthropic")
+        #[arg(short, long)]
+        provider: Option<String>,
+        /// Discover models from a remote Ollama server URL
+        #[arg(long)]
+        ollama_url: Option<String>,
+    },
     /// Show resolved configuration
     Config,
 }
@@ -265,15 +272,63 @@ async fn main() -> Result<()> {
             storage.set_provider_auth(&provider, &key)?;
             tracing::info!(provider = %provider, "Stored API key");
         }
-        Some(Commands::Models) => {
-            let providers = provider_registry.list();
-            if providers.is_empty() {
-                tracing::info!("No providers configured");
+        Some(Commands::Models {
+            provider: filter,
+            ollama_url,
+        }) => {
+            let mut stdout = std::io::stdout().lock();
+
+            // If Ollama discovery is requested (or provider filter is "ollama"),
+            // query the running Ollama server for available models.
+            if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
+                match ragent_core::provider::ollama::list_ollama_models(
+                    ollama_url.as_deref(),
+                )
+                .await
+                {
+                    Ok(models) if models.is_empty() => {
+                        writeln!(stdout, "No models found on Ollama server. Pull models with: ollama pull <model>")?;
+                    }
+                    Ok(models) => {
+                        writeln!(stdout, "ollama models:")?;
+                        for m in &models {
+                            writeln!(stdout, "  ollama/{:<28} {}", m.id, m.name)?;
+                        }
+                    }
+                    Err(e) => {
+                        writeln!(stdout, "Could not connect to Ollama: {e}")?;
+                        writeln!(stdout, "Is Ollama running? Start with: ollama serve")?;
+                    }
+                }
+                if filter.as_deref() == Some("ollama") {
+                    // Only showing Ollama, skip other providers
+                } else {
+                    // Also show other providers below
+                    let providers = provider_registry.list();
+                    for p in &providers {
+                        if p.id == "ollama" {
+                            continue;
+                        }
+                        for m in &p.models {
+                            writeln!(stdout, "{}/{}", p.id, m.id)?;
+                        }
+                    }
+                }
             } else {
-                let mut stdout = std::io::stdout().lock();
-                for p in &providers {
-                    for m in &p.models {
-                        writeln!(stdout, "{}/{}", p.id, m.id)?;
+                let providers = provider_registry.list();
+                let providers: Vec<_> = if let Some(ref f) = filter {
+                    providers.into_iter().filter(|p| p.id == *f).collect()
+                } else {
+                    providers
+                };
+
+                if providers.is_empty() {
+                    writeln!(stdout, "No providers found matching filter")?;
+                } else {
+                    for p in &providers {
+                        for m in &p.models {
+                            writeln!(stdout, "{}/{}", p.id, m.id)?;
+                        }
                     }
                 }
             }
