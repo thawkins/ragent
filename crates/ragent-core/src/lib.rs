@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod config;
+pub mod error;
 pub mod event;
 pub mod llm;
 pub mod mcp;

@@ -15,3 +15,12 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Temporary build artifacts
+target/temp/
+
+# Database files
+*.db
+
+# Key files
+*.key

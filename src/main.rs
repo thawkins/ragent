@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -158,12 +159,12 @@ async fn main() -> Result<()> {
         None => {
             // Default: run TUI
             if cli.no_tui {
-                println!("ragent interactive mode (plain). Type your message and press Enter.");
-                println!("Use Ctrl+C to exit.\n");
+                tracing::info!("Starting ragent interactive mode (plain)");
                 let session = session_manager.create_session(PathBuf::from("."))?;
                 let reader = tokio::io::BufReader::new(tokio::io::stdin());
                 use tokio::io::AsyncBufReadExt;
                 let mut lines = reader.lines();
+                let mut stdout = std::io::stdout().lock();
                 while let Some(line) = lines.next_line().await? {
                     if line.is_empty() {
                         continue;
@@ -172,8 +173,8 @@ async fn main() -> Result<()> {
                         .process_message(&session.id, &line, &resolved_agent)
                         .await
                     {
-                        Ok(msg) => println!("{}", msg.text_content()),
-                        Err(e) => eprintln!("Error: {}", e),
+                        Ok(msg) => writeln!(stdout, "{}", msg.text_content())?,
+                        Err(e) => tracing::error!(error = %e, "Failed to process message"),
                     }
                 }
             } else {
@@ -186,9 +187,11 @@ async fn main() -> Result<()> {
                 .process_message(&session.id, &prompt, &resolved_agent)
                 .await
             {
-                Ok(msg) => println!("{}", msg.text_content()),
+                Ok(msg) => {
+                    writeln!(std::io::stdout(), "{}", msg.text_content())?;
+                }
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    tracing::error!(error = %e, "Run failed");
                     std::process::exit(1);
                 }
             }
@@ -206,48 +209,51 @@ async fn main() -> Result<()> {
             SessionCommands::List => {
                 let sessions = storage.list_sessions()?;
                 if sessions.is_empty() {
-                    println!("No sessions found.");
+                    tracing::info!("No sessions found");
                 } else {
+                    let mut stdout = std::io::stdout().lock();
                     for s in sessions {
-                        println!(
+                        writeln!(
+                            stdout,
                             "{} | {} | {} | {}",
                             &s.id[..8.min(s.id.len())],
                             s.title,
                             s.directory,
                             s.updated_at
-                        );
+                        )?;
                     }
                 }
             }
             SessionCommands::Resume { id } => {
-                println!("Resuming session {}...", id);
+                tracing::info!(session_id = %id, "Resuming session");
                 // TODO: implement resume with TUI
             }
             SessionCommands::Export { id } => {
                 let messages = storage.get_messages(&id)?;
                 let json = serde_json::to_string_pretty(&messages)?;
-                println!("{}", json);
+                writeln!(std::io::stdout(), "{json}")?;
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
                 let _messages: Vec<ragent_core::message::Message> =
                     serde_json::from_str(&content)?;
-                println!("Imported session from {}", file);
+                tracing::info!(file = %file, "Imported session");
                 // TODO: store imported messages
             }
         },
         Some(Commands::Auth { provider, key }) => {
             storage.set_provider_auth(&provider, &key)?;
-            println!("Stored API key for provider '{}'", provider);
+            tracing::info!(provider = %provider, "Stored API key");
         }
         Some(Commands::Models) => {
             let providers = provider_registry.list();
             if providers.is_empty() {
-                println!("No providers configured.");
+                tracing::info!("No providers configured");
             } else {
+                let mut stdout = std::io::stdout().lock();
                 for p in &providers {
                     for m in &p.models {
-                        println!("{}/{}", p.id, m.id);
+                        writeln!(stdout, "{}/{}", p.id, m.id)?;
                     }
                 }
             }
@@ -255,7 +261,7 @@ async fn main() -> Result<()> {
         Some(Commands::Config) => {
             let config = config.read().await;
             let json = serde_json::to_string_pretty(&*config)?;
-            println!("{}", json);
+            writeln!(std::io::stdout(), "{json}")?;
         }
     }
 

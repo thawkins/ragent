@@ -6,8 +6,16 @@ use std::sync::Mutex;
 
 use crate::message::{Message, MessagePart, Role};
 
+/// SQLite-backed storage for sessions, messages, and provider credentials.
 pub struct Storage {
     conn: Mutex<Connection>,
+}
+
+/// Acquires the database connection lock, mapping a poisoned mutex to an anyhow error.
+macro_rules! lock_conn {
+    ($self:expr) => {
+        $self.conn.lock().map_err(|e| anyhow::anyhow!("database lock poisoned: {e}"))
+    };
 }
 
 impl Storage {
@@ -34,7 +42,7 @@ impl Storage {
     }
 
     fn migrate(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS sessions (
@@ -92,7 +100,7 @@ impl Storage {
     // ── Session CRUD ──────────────────────────────────────────────
 
     pub fn create_session(&self, id: &str, directory: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO sessions (id, directory, created_at, updated_at) VALUES (?1, ?2, ?3, ?4)",
@@ -105,7 +113,7 @@ impl Storage {
         &self,
         id: &str,
     ) -> Result<Option<SessionRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
             "SELECT id, title, project_id, directory, parent_id, version, \
              created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1",
@@ -130,7 +138,7 @@ impl Storage {
     }
 
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
             "SELECT id, title, project_id, directory, parent_id, version, \
              created_at, updated_at, archived_at, summary \
@@ -156,7 +164,7 @@ impl Storage {
     }
 
     pub fn update_session(&self, id: &str, title: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE sessions SET title = ?1, updated_at = ?2 WHERE id = ?3",
@@ -166,7 +174,7 @@ impl Storage {
     }
 
     pub fn archive_session(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE sessions SET archived_at = ?1, updated_at = ?1 WHERE id = ?2",
@@ -178,7 +186,7 @@ impl Storage {
     // ── Message CRUD ──────────────────────────────────────────────
 
     pub fn create_message(&self, msg: &Message) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
         let role_str = msg.role.to_string();
         let created = msg.created_at.to_rfc3339();
@@ -198,7 +206,7 @@ impl Storage {
     }
 
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, role, parts, created_at, updated_at \
              FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
@@ -242,7 +250,7 @@ impl Storage {
     }
 
     pub fn update_message(&self, msg: &Message) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
         let updated = Utc::now().to_rfc3339();
         conn.execute(
@@ -255,7 +263,7 @@ impl Storage {
     // ── Provider Auth ─────────────────────────────────────────────
 
     pub fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT OR REPLACE INTO provider_auth (provider_id, api_key, updated_at) \
@@ -266,7 +274,7 @@ impl Storage {
     }
 
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
             "SELECT api_key FROM provider_auth WHERE provider_id = ?1",
         )?;
