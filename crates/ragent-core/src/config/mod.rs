@@ -146,19 +146,12 @@ pub enum McpTransport {
     Http,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ExperimentalFlags {
     #[serde(default)]
     pub open_telemetry: bool,
 }
 
-impl Default for ExperimentalFlags {
-    fn default() -> Self {
-        Self {
-            open_telemetry: false,
-        }
-    }
-}
 
 impl Config {
     /// Load configuration with precedence:

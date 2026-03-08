@@ -63,7 +63,7 @@ Functions accepting `&PathBuf` should accept `&Path` — a `PathBuf` auto-derefs
 | `crates/ragent-core/src/tool/read.rs` | 97 |
 | `crates/ragent-core/src/tool/write.rs` | 79 |
 
-### 1.4 🟢 Derive `Default` instead of manual impl
+### 1.4 ✅ ~~Derive `Default` instead of manual impl~~
 
 **File**: `crates/ragent-core/src/config/mod.rs:155`
 
