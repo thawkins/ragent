@@ -6,7 +6,8 @@ resolver = "2"
 version = "0.1.0-alpha.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/user/ragent"
+repository = "https://github.com/thawkins/ragent"
+authors = ["Tim Hawkins <tim.thawkins@gmail.com>"]
 
 [package]
 name = "ragent"
