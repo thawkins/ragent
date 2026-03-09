@@ -450,6 +450,47 @@ impl App {
         self.configured_provider = Self::detect_provider(&self.storage);
     }
 
+    /// Load an existing session from storage and restore its state.
+    ///
+    /// Sets the session ID, loads all persisted messages, switches to the
+    /// chat screen, and updates the status bar. Returns an error if the
+    /// session is not found or the storage query fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`anyhow::Error`] if the session ID is not found in storage
+    /// or if a database query fails.
+    pub fn load_session(&mut self, session_id: &str) -> anyhow::Result<()> {
+        let session = self
+            .storage
+            .get_session(session_id)?
+            .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
+
+        let messages = self.storage.get_messages(session_id)?;
+        let msg_count = messages.len();
+
+        self.session_id = Some(session_id.to_string());
+        self.messages = messages;
+        self.current_screen = ScreenMode::Chat;
+        self.status = format!("resumed ({} messages)", msg_count);
+
+        // Update cwd to match the session's working directory
+        if !session.directory.is_empty() {
+            self.cwd = session.directory.clone();
+        }
+
+        self.push_log(
+            LogLevel::Info,
+            format!(
+                "Resumed session {} ({} messages)",
+                &session_id[..8.min(session_id.len())],
+                msg_count
+            ),
+        );
+
+        Ok(())
+    }
+
     /// Detect the current git branch, if the cwd is inside a git repository.
     fn detect_git_branch() -> Option<String> {
         let output = std::process::Command::new("git")

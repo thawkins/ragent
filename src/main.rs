@@ -213,6 +213,7 @@ async fn main() -> Result<()> {
                     session_processor,
                     resolved_agent.clone(),
                     cli.log,
+                    None,
                 )
                 .await?;
             }
@@ -265,8 +266,21 @@ async fn main() -> Result<()> {
                 }
             }
             SessionCommands::Resume { id } => {
+                // Verify session exists before launching TUI
+                if storage.get_session(&id)?.is_none() {
+                    anyhow::bail!("Session not found: {}", id);
+                }
                 tracing::info!(session_id = %id, "Resuming session");
-                // TODO: implement resume with TUI
+                ragent_tui::run_tui(
+                    event_bus,
+                    storage,
+                    provider_registry,
+                    session_processor,
+                    resolved_agent.clone(),
+                    cli.log,
+                    Some(id),
+                )
+                .await?;
             }
             SessionCommands::Export { id } => {
                 let messages = storage.get_messages(&id)?;

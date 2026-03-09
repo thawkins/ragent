@@ -36,6 +36,9 @@ use ragent_core::storage::Storage;
 /// Enters the alternate screen, creates an [`App`], and runs the main event
 /// loop until the user quits. The terminal is restored on exit.
 ///
+/// If `resume_session_id` is provided, the TUI loads the existing session
+/// and its message history before entering the event loop.
+///
 /// # Errors
 ///
 /// Returns an error if terminal setup, drawing, or event reading fails.
@@ -46,6 +49,7 @@ pub async fn run_tui(
     session_processor: Arc<SessionProcessor>,
     agent: AgentInfo,
     show_log: bool,
+    resume_session_id: Option<String>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -62,6 +66,13 @@ pub async fn run_tui(
         show_log,
     );
     app.check_provider_health();
+
+    if let Some(ref sid) = resume_session_id {
+        if let Err(e) = app.load_session(sid) {
+            tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
+        }
+    }
+
     let mut bus_stream = BroadcastStream::new(event_bus.subscribe());
 
     while app.is_running {
