@@ -103,7 +103,7 @@ This document is a comprehensive list of all agent implementations that have mis
 - **File**: `crates/ragent-tui/src/app.rs` — line ~70
 - **Crate**: ragent-tui
 - **Match Arm**: `InputAction::SlashCommand(_cmd)`
-- **Current State**: Empty block with comment `// Handle slash commands — placeholder`
+- **Current State**: Existing parser decodes a limitit number of /functions.
 - **Required Behavior**:
   - Parse user input starting with `/` as slash commands
   - Support commands:

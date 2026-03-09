@@ -159,6 +159,18 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Switch the active agent",
     },
     SlashCommandDef {
+        trigger: "clear",
+        description: "Clear message history for the current session",
+    },
+    SlashCommandDef {
+        trigger: "compact",
+        description: "Summarise and compact the conversation history",
+    },
+    SlashCommandDef {
+        trigger: "help",
+        description: "Show available slash commands",
+    },
+    SlashCommandDef {
         trigger: "log",
         description: "Toggle the log panel on/off",
     },
@@ -173,6 +185,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "provider_reset",
         description: "Reset the current provider and remove stored credentials",
+    },
+    SlashCommandDef {
+        trigger: "quit",
+        description: "Exit ragent",
+    },
+    SlashCommandDef {
+        trigger: "system",
+        description: "Override the agent system prompt (/system <prompt>)",
     },
 ];
 
@@ -612,19 +632,142 @@ impl App {
 
     /// Execute a slash command by trigger name (e.g. `"/model"` or `"model"`).
     pub fn execute_slash_command(&mut self, raw: &str) {
-        let trigger = raw.strip_prefix('/').unwrap_or(raw).trim();
+        let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
         self.slash_menu = None;
 
-        match trigger {
+        // Split into command and optional argument text.
+        let (cmd, args) = stripped
+            .split_once(char::is_whitespace)
+            .map_or((stripped, ""), |(c, a)| (c, a.trim()));
+
+        match cmd {
             "agent" => {
-                let agents: Vec<(String, String)> = self
-                    .cycleable_agents
-                    .iter()
-                    .map(|a| (a.name.clone(), a.description.clone()))
-                    .collect();
-                let selected = self.current_agent_index;
-                self.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected });
+                if args.is_empty() {
+                    // Open the agent picker dialog
+                    let agents: Vec<(String, String)> = self
+                        .cycleable_agents
+                        .iter()
+                        .map(|a| (a.name.clone(), a.description.clone()))
+                        .collect();
+                    let selected = self.current_agent_index;
+                    self.provider_setup =
+                        Some(ProviderSetupStep::SelectAgent { agents, selected });
+                } else {
+                    // Direct switch: /agent <name>
+                    if let Some(idx) = self
+                        .cycleable_agents
+                        .iter()
+                        .position(|a| a.name == args)
+                    {
+                        let prev = self.agent_name.clone();
+                        self.current_agent_index = idx;
+                        self.agent_info = self.cycleable_agents[idx].clone();
+                        self.agent_name = self.agent_info.name.clone();
+                        self.status = format!("agent: {}", self.agent_name);
+                        self.push_log(
+                            LogLevel::Info,
+                            format!(
+                                "Switched to: {} ({})",
+                                self.agent_name, self.agent_info.description
+                            ),
+                        );
+                        if let Some(ref sid) = self.session_id {
+                            self.event_bus.publish(Event::AgentSwitched {
+                                session_id: sid.clone(),
+                                from: prev,
+                                to: self.agent_name.clone(),
+                            });
+                        }
+                    } else {
+                        let available: Vec<&str> =
+                            self.cycleable_agents.iter().map(|a| a.name.as_str()).collect();
+                        self.status =
+                            format!("Unknown agent '{}'. Available: {}", args, available.join(", "));
+                        self.push_log(LogLevel::Warn, format!("Unknown agent: {}", args));
+                    }
+                }
+            }
+            "clear" => {
+                self.messages.clear();
+                self.scroll_offset = 0;
+                self.status = "messages cleared".to_string();
+                self.push_log(LogLevel::Info, "Message history cleared".to_string());
+            }
+            "compact" => {
+                if self.session_id.is_none() {
+                    self.status = "⚠ No active session to compact".to_string();
+                    return;
+                }
+                if self.messages.is_empty() {
+                    self.status = "⚠ No messages to compact".to_string();
+                    return;
+                }
+
+                let sid = self.session_id.clone().unwrap();
+                let compaction_agent =
+                    ragent_core::agent::resolve_agent("compaction", &Default::default())
+                        .unwrap_or_else(|_| self.agent_info.clone());
+
+                // Override model to match current selection
+                let mut agent = compaction_agent;
+                if let Some(ref model_str) = self.selected_model {
+                    if let Some((provider, model)) = model_str.split_once('/') {
+                        agent.model = Some(ModelRef {
+                            provider_id: provider.to_string(),
+                            model_id: model.to_string(),
+                        });
+                    }
+                }
+
+                // Build a summary prompt from the current messages
+                let summary_prompt =
+                    "Summarise the conversation so far into a concise representation that \
+                     preserves all important context, decisions, code changes, file paths, \
+                     and outstanding tasks. Output only the summary."
+                        .to_string();
+
+                self.status = "compacting…".to_string();
+                self.push_log(LogLevel::Info, "Compaction started".to_string());
+
+                let processor = self.session_processor.clone();
+                let event_bus = self.event_bus.clone();
+                tokio::spawn(async move {
+                    match processor
+                        .process_message(&sid, &summary_prompt, &agent)
+                        .await
+                    {
+                        Ok(_) => {
+                            tracing::info!(session_id = %sid, "Compaction completed");
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "Compaction failed");
+                            event_bus.publish(Event::AgentError {
+                                session_id: sid,
+                                error: format!("Compaction failed: {e}"),
+                            });
+                        }
+                    }
+                });
+            }
+            "help" => {
+                let mut help_lines = String::from("Available commands:\n");
+                for cmd_def in SLASH_COMMANDS {
+                    help_lines.push_str(&format!("  /{:<18} {}\n", cmd_def.trigger, cmd_def.description));
+                }
+                self.append_assistant_text(&help_lines);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "help".to_string();
+            }
+            "log" => {
+                self.show_log = !self.show_log;
+                self.status = if self.show_log {
+                    "log panel visible".to_string()
+                } else {
+                    "log panel hidden".to_string()
+                };
             }
             "model" => {
                 if let Some(ref prov) = self.configured_provider {
@@ -641,22 +784,41 @@ impl App {
                     self.status = "⚠ No provider configured — use /provider first".to_string();
                 }
             }
-            "log" => {
-                self.show_log = !self.show_log;
-                self.status = if self.show_log {
-                    "log panel visible".to_string()
-                } else {
-                    "log panel hidden".to_string()
-                };
-            }
             "provider" => {
                 self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
             }
             "provider_reset" => {
                 self.provider_setup = Some(ProviderSetupStep::ResetProvider { selected: 0 });
             }
+            "quit" => {
+                self.is_running = false;
+            }
+            "system" => {
+                if args.is_empty() {
+                    // Show current system prompt
+                    if let Some(ref prompt) = self.agent_info.prompt {
+                        self.append_assistant_text(&format!("Current system prompt:\n{prompt}"));
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    } else {
+                        self.status = "No system prompt set".to_string();
+                    }
+                } else {
+                    self.agent_info.prompt = Some(args.to_string());
+                    self.status = "system prompt updated".to_string();
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "System prompt set ({} chars)",
+                            args.len()
+                        ),
+                    );
+                }
+            }
             _ => {
-                self.status = format!("Unknown command: /{}", trigger);
+                self.status = format!("Unknown command: /{}", cmd);
+                self.push_log(LogLevel::Warn, format!("Unknown command: /{}", cmd));
             }
         }
     }
