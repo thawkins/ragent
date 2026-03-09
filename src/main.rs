@@ -289,9 +289,33 @@ async fn main() -> Result<()> {
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
-                let _messages: Vec<ragent_core::message::Message> = serde_json::from_str(&content)?;
-                tracing::info!(file = %file, "Imported session");
-                // TODO: store imported messages
+                let messages: Vec<ragent_core::message::Message> =
+                    serde_json::from_str(&content)?;
+
+                let dir = std::fs::canonicalize(".")?;
+                let session = session_manager.create_session(dir)?;
+
+                let mut imported = 0u64;
+                for msg in &messages {
+                    // Re-parent each message into the new session with a fresh ID
+                    let imported_msg = ragent_core::message::Message {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        session_id: session.id.clone(),
+                        role: msg.role.clone(),
+                        parts: msg.parts.clone(),
+                        created_at: msg.created_at,
+                        updated_at: msg.updated_at,
+                    };
+                    storage.create_message(&imported_msg)?;
+                    imported += 1;
+                }
+
+                writeln!(
+                    std::io::stdout(),
+                    "Imported {} messages into session {}",
+                    imported,
+                    &session.id[..8.min(session.id.len())]
+                )?;
             }
         },
         Some(Commands::Auth { provider, key }) => {
