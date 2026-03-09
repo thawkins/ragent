@@ -181,6 +181,16 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "api_base": api_base,
             }),
         ),
+        Event::SessionAborted {
+            session_id,
+            reason,
+        } => (
+            "session_aborted",
+            serde_json::json!({
+                "session_id": session_id,
+                "reason": reason,
+            }),
+        ),
     };
 
     SseEvent::default().event(event_type).data(data.to_string())

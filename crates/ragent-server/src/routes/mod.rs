@@ -353,8 +353,58 @@ async fn send_message(
         .into_response()
 }
 
-async fn abort_session(Path(_id): Path<String>) -> impl IntoResponse {
-    Json(serde_json::json!({ "ok": true }))
+/// Abort a session, archiving it and publishing an abort event.
+///
+/// Verifies the session exists, marks it as archived in storage, and
+/// publishes a [`Event::SessionAborted`] event on the event bus.
+///
+/// # Path Parameters
+///
+/// * `id` — the session ID to abort
+///
+/// # Responses
+///
+/// * `200` — session successfully aborted
+/// * `404` — session not found
+/// * `500` — internal error during archive or lookup
+async fn abort_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.storage.get_session(&id) {
+        Ok(Some(_)) => {
+            if let Err(e) = state.storage.archive_session(&id) {
+                tracing::error!(
+                    session_id = %id,
+                    error = %e,
+                    "Failed to archive session during abort"
+                );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": format!("Failed to archive session: {e}") })),
+                )
+                    .into_response();
+            }
+
+            state.event_bus.publish(Event::SessionAborted {
+                session_id: id.clone(),
+                reason: "user_requested".to_string(),
+            });
+
+            tracing::info!(session_id = %id, "Session aborted");
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Session not found" })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Failed to look up session: {e}") })),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -445,6 +495,9 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
             session_id: sid, ..
         }
         | Event::ToolResult {
+            session_id: sid, ..
+        }
+        | Event::SessionAborted {
             session_id: sid, ..
         } => sid == session_id,
         Event::McpStatusChanged { .. } => false,

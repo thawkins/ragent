@@ -190,6 +190,13 @@ pub enum Event {
         /// The plan-specific API base URL discovered during setup.
         api_base: String,
     },
+    /// A session was aborted by the user or the server.
+    SessionAborted {
+        /// Identifier of the aborted session.
+        session_id: String,
+        /// Human-readable reason for the abort (e.g. `"user_requested"`).
+        reason: String,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.

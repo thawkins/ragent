@@ -116,6 +116,10 @@ fn test_event_serialization_roundtrip_all_variants() {
             token: "ghu_test123".into(),
             api_base: "https://api.individual.githubcopilot.com".into(),
         },
+        Event::SessionAborted {
+            session_id: "s1".into(),
+            reason: "user_requested".into(),
+        },
     ];
 
     for event in &events {
