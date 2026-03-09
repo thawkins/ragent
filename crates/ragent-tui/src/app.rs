@@ -217,6 +217,43 @@ pub enum ScrollbarDragPane {
     Log,
 }
 
+/// Identifies which pane a text selection lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionPane {
+    /// Selection in the messages pane.
+    Messages,
+    /// Selection in the log pane.
+    Log,
+    /// Selection in the chat-screen input widget.
+    Input,
+    /// Selection in the home-screen input widget.
+    HomeInput,
+}
+
+/// A mouse-driven text selection within a pane.
+#[derive(Debug, Clone)]
+pub struct TextSelection {
+    /// Which pane the selection is in.
+    pub pane: SelectionPane,
+    /// Anchor point (where the mouse was first pressed), screen coordinates.
+    pub anchor: (u16, u16),
+    /// Current endpoint (where the mouse is now), screen coordinates.
+    pub endpoint: (u16, u16),
+}
+
+impl TextSelection {
+    /// Return `(start, end)` with start ≤ end in row-major order.
+    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+        if self.anchor.1 < self.endpoint.1
+            || (self.anchor.1 == self.endpoint.1 && self.anchor.0 <= self.endpoint.0)
+        {
+            (self.anchor, self.endpoint)
+        } else {
+            (self.endpoint, self.anchor)
+        }
+    }
+}
+
 /// Core TUI application state.
 ///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
@@ -295,6 +332,16 @@ pub struct App {
     pub log_max_scroll: u16,
     /// Active scrollbar drag, if any.
     pub scrollbar_drag: Option<ScrollbarDragPane>,
+    /// Active text selection, if any.
+    pub text_selection: Option<TextSelection>,
+    /// Plain-text lines from the last message pane render (for copy).
+    pub message_content_lines: Vec<String>,
+    /// Plain-text lines from the last log pane render (for copy).
+    pub log_content_lines: Vec<String>,
+    /// Cached area of the chat-screen input widget (set during render).
+    pub input_area: Rect,
+    /// Cached area of the home-screen input widget (set during render).
+    pub home_input_area: Rect,
 }
 
 impl App {
@@ -374,6 +421,11 @@ impl App {
             message_max_scroll: 0,
             log_max_scroll: 0,
             scrollbar_drag: None,
+            text_selection: None,
+            message_content_lines: Vec::new(),
+            log_content_lines: Vec::new(),
+            input_area: Rect::default(),
+            home_input_area: Rect::default(),
         }
     }
 
@@ -889,7 +941,7 @@ impl App {
         }
     }
 
-    /// Process a terminal mouse event (scroll wheel, scrollbar drag).
+    /// Process a terminal mouse event (scroll wheel, scrollbar drag, text selection).
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         match event.kind {
             MouseEventKind::ScrollUp => {
@@ -907,34 +959,196 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                // Start drag if click is on the scrollbar column (rightmost column of pane)
+                let pos = (event.column, event.row);
+                // Scrollbar drag takes priority (rightmost column of pane)
                 if self.message_area.height > 0
                     && event.column == self.message_area.right().saturating_sub(1)
-                    && self.message_area.contains((event.column, event.row).into())
+                    && self.message_area.contains(pos.into())
                     && self.message_max_scroll > 0
                 {
                     self.scrollbar_drag = Some(ScrollbarDragPane::Messages);
+                    self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Messages);
                 } else if self.show_log
                     && self.log_area.height > 0
                     && event.column == self.log_area.right().saturating_sub(1)
-                    && self.log_area.contains((event.column, event.row).into())
+                    && self.log_area.contains(pos.into())
                     && self.log_max_scroll > 0
                 {
                     self.scrollbar_drag = Some(ScrollbarDragPane::Log);
+                    self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Log);
+                } else {
+                    // Start text selection in whichever pane the click is in
+                    let pane = self.pane_at(event.column, event.row);
+                    if let Some(pane) = pane {
+                        self.text_selection = Some(TextSelection {
+                            pane,
+                            anchor: pos,
+                            endpoint: pos,
+                        });
+                    } else {
+                        self.text_selection = None;
+                    }
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 if let Some(pane) = self.scrollbar_drag {
                     self.apply_scrollbar_drag(event.row, pane);
+                } else if let Some(ref mut sel) = self.text_selection {
+                    sel.endpoint = (event.column, event.row);
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.scrollbar_drag = None;
+                // Keep text_selection alive so it stays highlighted until right-click or next click
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                self.copy_selection();
             }
             _ => {}
         }
+    }
+
+    /// Determine which selection pane a screen position falls in.
+    fn pane_at(&self, col: u16, row: u16) -> Option<SelectionPane> {
+        let pos = (col, row).into();
+        if self.message_area.area() > 0 && self.message_area.contains(pos) {
+            Some(SelectionPane::Messages)
+        } else if self.show_log && self.log_area.area() > 0 && self.log_area.contains(pos) {
+            Some(SelectionPane::Log)
+        } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
+            Some(SelectionPane::Input)
+        } else if self.home_input_area.area() > 0 && self.home_input_area.contains(pos) {
+            Some(SelectionPane::HomeInput)
+        } else {
+            None
+        }
+    }
+
+    /// Copy the currently selected text to the system clipboard.
+    fn copy_selection(&mut self) {
+        let sel = match self.text_selection.take() {
+            Some(s) => s,
+            None => return,
+        };
+        let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
+
+        let lines: &[String] = match sel.pane {
+            SelectionPane::Messages => &self.message_content_lines,
+            SelectionPane::Log => &self.log_content_lines,
+            SelectionPane::Input | SelectionPane::HomeInput => {
+                // For input widgets, build a single-line content from app.input
+                let input_text = format!("> {}", self.input);
+                let area = if sel.pane == SelectionPane::Input {
+                    self.input_area
+                } else {
+                    self.home_input_area
+                };
+                let inner_x = area.x + 1; // inside border
+                let inner_y = area.y + 1;
+                let inner_w = area.width.saturating_sub(2).max(1) as usize;
+                // Wrap the input text into display lines
+                let wrapped: Vec<String> = input_text
+                    .as_bytes()
+                    .chunks(inner_w)
+                    .map(|c| String::from_utf8_lossy(c).into_owned())
+                    .collect();
+                let text = Self::extract_text_from_lines(
+                    &wrapped,
+                    inner_x,
+                    inner_y,
+                    start_col,
+                    start_row,
+                    end_col,
+                    end_row,
+                );
+                if !text.is_empty() {
+                    Self::set_clipboard(&text);
+                    self.push_log(LogLevel::Info, format!("Copied {} chars", text.len()));
+                }
+                return;
+            }
+        };
+
+        let area = match sel.pane {
+            SelectionPane::Messages => self.message_area,
+            SelectionPane::Log => self.log_area,
+            _ => unreachable!(),
+        };
+
+        // Inner area (accounting for borders)
+        let inner_x = if sel.pane == SelectionPane::Messages {
+            area.x + 1 // LEFT border only
+        } else {
+            area.x + 1 // ALL borders
+        };
+        let inner_y = if sel.pane == SelectionPane::Messages {
+            area.y // no top border on messages (LEFT|RIGHT only)
+        } else {
+            area.y + 1 // ALL borders on log panel
+        };
+
+        let text = Self::extract_text_from_lines(
+            lines, inner_x, inner_y, start_col, start_row, end_col, end_row,
+        );
+
+        if !text.is_empty() {
+            Self::set_clipboard(&text);
+            self.push_log(LogLevel::Info, format!("Copied {} chars", text.len()));
+        }
+    }
+
+    /// Extract text from cached content lines given screen coordinates.
+    pub fn extract_text_from_lines(
+        lines: &[String],
+        inner_x: u16,
+        inner_y: u16,
+        start_col: u16,
+        start_row: u16,
+        end_col: u16,
+        end_row: u16,
+    ) -> String {
+        let mut result = String::new();
+        for screen_row in start_row..=end_row {
+            let line_idx = screen_row.saturating_sub(inner_y) as usize;
+            let line = lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
+            let line_start = if screen_row == start_row {
+                start_col.saturating_sub(inner_x) as usize
+            } else {
+                0
+            };
+            let line_end = if screen_row == end_row {
+                (end_col.saturating_sub(inner_x) as usize + 1).min(line.len())
+            } else {
+                line.len()
+            };
+            if line_start < line.len() {
+                result.push_str(&line[line_start..line_end.min(line.len())]);
+            }
+            if screen_row < end_row {
+                result.push('\n');
+            }
+        }
+        result
+    }
+
+    /// Copy text to the system clipboard (spawns thread to avoid blocking).
+    fn set_clipboard(text: &str) {
+        let text = text.to_owned();
+        std::thread::spawn(move || {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                #[cfg(target_os = "linux")]
+                {
+                    use arboard::SetExtLinux;
+                    let _ = clipboard.set().wait().text(&text);
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = clipboard.set_text(&text);
+                }
+            }
+        });
     }
 
     /// Map a mouse Y position to a scroll offset for the given pane.

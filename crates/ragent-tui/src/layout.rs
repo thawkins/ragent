@@ -6,7 +6,7 @@
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
@@ -14,7 +14,7 @@ use ratatui::{
 
 use ragent_core::message::{MessagePart, Role};
 
-use crate::app::{App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode};
+use crate::app::{App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode, SelectionPane};
 use crate::logo;
 
 /// The version string shown on the home screen.
@@ -28,11 +28,38 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
+/// Apply a visual highlight to cells within the active text selection.
+fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, area: Rect) {
+    let sel = match &app.text_selection {
+        Some(s) if s.pane == pane => s,
+        _ => return,
+    };
+    let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
+    let highlight = Style::default().bg(Color::LightBlue).fg(Color::Black);
+    let buf = frame.buffer_mut();
+    for row in start_row..=end_row {
+        if row < area.y || row >= area.bottom() {
+            continue;
+        }
+        let col_start = if row == start_row { start_col.max(area.x) } else { area.x };
+        let col_end = if row == end_row {
+            (end_col + 1).min(area.right())
+        } else {
+            area.right()
+        };
+        for col in col_start..col_end {
+            if let Some(cell) = buf.cell_mut(Position::new(col, row)) {
+                cell.set_style(highlight);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Home screen
 // ---------------------------------------------------------------------------
 
-fn render_home(frame: &mut Frame, app: &App) {
+fn render_home(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     // Compute input height based on wrapped text length
@@ -62,11 +89,13 @@ fn render_home(frame: &mut Frame, app: &App) {
     render_logo(frame, chunks[1]);
 
     // Prompt — centered input
+    let home_input_area = centered_horizontal(max_width, chunks[3]);
+    app.home_input_area = home_input_area;
     render_home_input(frame, app, chunks[3]);
+    apply_selection_highlight(frame, app, SelectionPane::HomeInput, home_input_area);
 
     // Slash menu dropdown (above the input, if active)
     if app.slash_menu.is_some() {
-        let max_width = 70u16.min(area.width.saturating_sub(4));
         let input_area = centered_horizontal(max_width, chunks[3]);
         render_slash_menu(frame, app, input_area);
     }
@@ -722,14 +751,19 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.message_area = h_chunks[0];
         app.log_area = h_chunks[1];
         render_messages(frame, app, h_chunks[0]);
+        apply_selection_highlight(frame, app, SelectionPane::Messages, h_chunks[0]);
         render_log_panel(frame, app, h_chunks[1]);
+        apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
     } else {
         app.message_area = chunks[1];
         app.log_area = Rect::default();
         render_messages(frame, app, chunks[1]);
+        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[1]);
     }
 
+    app.input_area = chunks[2];
     render_input(frame, app, chunks[2]);
+    apply_selection_highlight(frame, app, SelectionPane::Input, chunks[2]);
 
     // Slash menu dropdown (above the chat input, if active)
     if app.slash_menu.is_some() {
@@ -793,6 +827,12 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Span::raw(&entry.message),
             ])
         })
+        .collect();
+
+    // Cache plain-text content for text selection copy
+    app.log_content_lines = lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
         .collect();
 
     let total_lines = lines.len() as u16;
@@ -974,6 +1014,12 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
         lines.push(Line::from(""));
     }
+
+    // Cache plain-text content for text selection copy
+    app.message_content_lines = lines
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .collect();
 
     // Apply scroll offset
     let total = lines.len() as u16;
