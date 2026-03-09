@@ -226,16 +226,138 @@ impl McpClient {
         Ok((service, tools))
     }
 
-    /// List tools from all connected servers.
+    /// List tools from all connected servers (cached).
     ///
     /// Returns an aggregated list of tool definitions from every server
-    /// that has status [`McpStatus::Connected`].
+    /// that has status [`McpStatus::Connected`]. Uses the tool list
+    /// discovered at connection time. Call [`Self::refresh_tools`] to
+    /// re-query servers for updated tool manifests.
     pub fn list_tools(&self) -> Vec<McpToolDef> {
         self.servers
             .iter()
             .filter(|s| s.status == McpStatus::Connected)
             .flat_map(|s| s.tools.iter().cloned())
             .collect()
+    }
+
+    /// List tools for a specific server by ID (cached).
+    ///
+    /// Returns the cached tool definitions for the given server, or an
+    /// empty list if the server is not found or not connected.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_id` — the ID of the server to query
+    pub fn list_tools_for_server(&self, server_id: &str) -> Vec<McpToolDef> {
+        self.servers
+            .iter()
+            .find(|s| s.id == server_id && s.status == McpStatus::Connected)
+            .map(|s| s.tools.clone())
+            .unwrap_or_default()
+    }
+
+    /// Re-query all connected servers for their current tool manifests.
+    ///
+    /// Sends `tools/list` to each connected server and updates the cached
+    /// tool definitions. Servers that fail to respond keep their existing
+    /// tool list and log a warning.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Ok(())` even if individual servers fail to respond; errors
+    /// are logged per-server. Only returns `Err` if the connection lock
+    /// cannot be acquired.
+    pub async fn refresh_tools(&mut self) -> anyhow::Result<()> {
+        let conns = self.connections.read().await;
+
+        for server in &mut self.servers {
+            if server.status != McpStatus::Connected {
+                continue;
+            }
+
+            if let Some(conn) = conns.get(&server.id) {
+                match conn.service.peer().list_all_tools().await {
+                    Ok(tools) => {
+                        let tool_defs: Vec<McpToolDef> = tools
+                            .iter()
+                            .map(|t| McpToolDef {
+                                name: t.name.to_string(),
+                                description: t
+                                    .description
+                                    .as_deref()
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                parameters: serde_json::to_value(&*t.input_schema)
+                                    .unwrap_or(Value::Object(serde_json::Map::new())),
+                            })
+                            .collect();
+
+                        tracing::info!(
+                            server_id = %server.id,
+                            tool_count = tool_defs.len(),
+                            "Refreshed tools from MCP server"
+                        );
+                        server.tools = tool_defs;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            server_id = %server.id,
+                            error = %e,
+                            "Failed to refresh tools from MCP server"
+                        );
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Re-query a specific server for its current tool manifest.
+    ///
+    /// Sends `tools/list` to the specified server and updates its cached
+    /// tool definitions.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_id` — the ID of the server to refresh
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server is not connected or the query fails.
+    pub async fn refresh_tools_for_server(
+        &mut self,
+        server_id: &str,
+    ) -> anyhow::Result<Vec<McpToolDef>> {
+        let conns = self.connections.read().await;
+        let conn = conns
+            .get(server_id)
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' is not connected", server_id))?;
+
+        let tools = conn.service.peer().list_all_tools().await?;
+        let tool_defs: Vec<McpToolDef> = tools
+            .iter()
+            .map(|t| McpToolDef {
+                name: t.name.to_string(),
+                description: t.description.as_deref().unwrap_or_default().to_string(),
+                parameters: serde_json::to_value(&*t.input_schema)
+                    .unwrap_or(Value::Object(serde_json::Map::new())),
+            })
+            .collect();
+
+        drop(conns);
+
+        if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
+            server.tools = tool_defs.clone();
+        }
+
+        tracing::info!(
+            server_id,
+            tool_count = tool_defs.len(),
+            "Refreshed tools from MCP server"
+        );
+
+        Ok(tool_defs)
     }
 
     /// Call a tool on a specific MCP server.

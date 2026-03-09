@@ -186,6 +186,76 @@ async fn test_mcp_client_disconnect_all_empty() {
     assert!(result.is_ok());
 }
 
+// ── list_tools_for_server returns empty for unknown server ──────
+
+#[test]
+fn test_mcp_client_list_tools_for_server_unknown() {
+    let client = McpClient::new();
+    let tools = client.list_tools_for_server("nonexistent");
+    assert!(tools.is_empty());
+}
+
+// ── list_tools_for_server returns empty for disabled server ─────
+
+#[tokio::test]
+async fn test_mcp_client_list_tools_for_server_disabled() {
+    let mut client = McpClient::new();
+    client
+        .connect(
+            "disabled-srv",
+            McpServerConfig {
+                disabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let tools = client.list_tools_for_server("disabled-srv");
+    assert!(tools.is_empty());
+}
+
+// ── refresh_tools on empty client is a no-op ────────────────────
+
+#[tokio::test]
+async fn test_mcp_client_refresh_tools_empty() {
+    let mut client = McpClient::new();
+    let result = client.refresh_tools().await;
+    assert!(result.is_ok());
+}
+
+// ── refresh_tools skips disabled servers ─────────────────────────
+
+#[tokio::test]
+async fn test_mcp_client_refresh_tools_skips_disabled() {
+    let mut client = McpClient::new();
+    client
+        .connect(
+            "disabled",
+            McpServerConfig {
+                disabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let result = client.refresh_tools().await;
+    assert!(result.is_ok());
+    assert!(client.list_tools().is_empty());
+}
+
+// ── refresh_tools_for_server errors on unconnected server ───────
+
+#[tokio::test]
+async fn test_mcp_client_refresh_tools_for_server_not_connected() {
+    let mut client = McpClient::new();
+    let result = client.refresh_tools_for_server("nonexistent").await;
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("not connected"));
+}
+
 // ── McpStatus serde ──────────────────────────────────────────────
 
 #[test]
