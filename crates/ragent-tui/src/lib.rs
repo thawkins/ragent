@@ -96,13 +96,15 @@ pub async fn run_tui(
         }
     }
 
-    // Restore terminal
+    // Restore terminal — disable mouse capture first to stop generating
+    // escape sequences, then drain any buffered events so they don't leak
+    // into the shell after we leave raw mode.
+    execute!(terminal.backend_mut(), DisableMouseCapture)?;
+    while ct_event::poll(std::time::Duration::ZERO)? {
+        let _ = ct_event::read();
+    }
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
     Ok(())
