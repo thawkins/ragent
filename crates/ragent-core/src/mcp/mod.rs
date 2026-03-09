@@ -77,6 +77,9 @@ pub struct McpClient {
 }
 
 impl McpClient {
+    /// Default timeout for tool calls in seconds.
+    const TOOL_CALL_TIMEOUT_SECS: u64 = 120;
+
     /// Creates a new `McpClient` with no registered servers.
     pub fn new() -> Self {
         Self {
@@ -375,7 +378,7 @@ impl McpClient {
     /// # Errors
     ///
     /// Returns an error if the server is not connected, the tool call
-    /// fails, or the response cannot be serialized.
+    /// fails, times out, or the response cannot be serialized.
     pub async fn call_tool(
         &self,
         server_id: &str,
@@ -404,8 +407,54 @@ impl McpClient {
             task: None,
         };
 
-        let result = conn.service.peer().call_tool(params).await?;
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(Self::TOOL_CALL_TIMEOUT_SECS),
+            conn.service.peer().call_tool(params),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "MCP tool call '{}' on server '{}' timed out after {}s",
+                tool_name,
+                server_id,
+                Self::TOOL_CALL_TIMEOUT_SECS,
+            )
+        })??;
 
+        Self::format_call_result(&result)
+    }
+
+    /// Call a tool by name, automatically resolving which server owns it.
+    ///
+    /// Searches all connected servers for a tool matching `tool_name` and
+    /// dispatches the call to the first server that advertises it.
+    ///
+    /// # Arguments
+    ///
+    /// * `tool_name` — the name of the tool to invoke
+    /// * `input` — JSON arguments matching the tool's input schema
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no connected server advertises the named tool,
+    /// or if the tool call itself fails.
+    pub async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value> {
+        let server_id = self
+            .servers
+            .iter()
+            .find(|s| {
+                s.status == McpStatus::Connected && s.tools.iter().any(|t| t.name == tool_name)
+            })
+            .map(|s| s.id.clone())
+            .ok_or_else(|| {
+                anyhow::anyhow!("No connected MCP server provides tool '{}'", tool_name)
+            })?;
+
+        self.call_tool(&server_id, tool_name, input).await
+    }
+
+    /// Format a [`CallToolResult`] into a JSON [`Value`].
+    fn format_call_result(result: &rmcp::model::CallToolResult) -> anyhow::Result<Value> {
         let content_values: Vec<Value> = result
             .content
             .iter()

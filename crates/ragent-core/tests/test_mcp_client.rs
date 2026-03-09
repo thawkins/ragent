@@ -99,6 +99,48 @@ async fn test_mcp_client_call_tool_not_connected() {
     );
 }
 
+// ── call_tool_by_name errors when no server has the tool ────────
+
+#[tokio::test]
+async fn test_mcp_client_call_tool_by_name_not_found() {
+    let client = McpClient::new();
+    let result = client
+        .call_tool_by_name("nonexistent_tool", serde_json::json!({}))
+        .await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("No connected MCP server"),
+        "Expected 'No connected MCP server' error, got: {err_msg}"
+    );
+}
+
+// ── call_tool_by_name skips disabled servers ─────────────────────
+
+#[tokio::test]
+async fn test_mcp_client_call_tool_by_name_skips_disabled() {
+    let mut client = McpClient::new();
+    client
+        .connect(
+            "disabled-srv",
+            McpServerConfig {
+                disabled: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let result = client
+        .call_tool_by_name("any_tool", serde_json::json!({}))
+        .await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("No connected MCP server"));
+}
+
 // ── Connect with invalid command records failure ────────────────
 
 #[tokio::test]
