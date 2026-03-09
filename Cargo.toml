@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -60,6 +60,7 @@ pin-project-lite = "0.2"
 bytes = "1"
 regex = "1"
 base64 = "0.22"
+rand = "0.8"
 
 [[bin]]
 name = "ragent"

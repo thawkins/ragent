@@ -154,6 +154,12 @@ impl Storage {
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             ",
         )?;
         Ok(())
@@ -396,6 +402,37 @@ impl Storage {
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
         Ok(key.map(|k| deobfuscate_key(&k)))
+    }
+
+    // ── Settings (key-value) ──────────────────────────────────────
+
+    /// Stores or replaces a setting value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the upsert fails.
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+            params![key, value, now],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves a setting value, or `None` if not set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let val = stmt
+            .query_row(params![key], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(val)
     }
 }
 

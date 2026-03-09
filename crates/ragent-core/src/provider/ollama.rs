@@ -341,6 +341,13 @@ impl OllamaClient {
             body["tools"] = json!(tool_defs);
         }
 
+        // Reasoning / thinking control via agent options
+        if let Some(thinking_val) = request.options.get("thinking") {
+            if thinking_val.as_str() == Some("disabled") {
+                body["think"] = json!(false);
+            }
+        }
+
         body
     }
 }

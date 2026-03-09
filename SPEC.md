@@ -218,9 +218,9 @@ The provider system abstracts LLM API differences behind a unified streaming int
 
 | Provider ID | SDK / Protocol | Auth | Status |
 |-------------|---------------|------|--------|
-| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` | ✅ Implemented |
-| `copilot` | OpenAI-compatible (GitHub Copilot) | Copilot OAuth token (auto-discovered) | ✅ Implemented |
-| `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` | ✅ Implemented |
+| `anthropic` | Anthropic Messages API | `ANTHROPIC_API_KEY` or `ragent auth` | ✅ Implemented |
+| `copilot` | OpenAI-compatible (GitHub Copilot) | Copilot OAuth token (auto-discovered) or `ragent auth` | ✅ Implemented |
+| `openai` | OpenAI Chat Completions API | `OPENAI_API_KEY` or `ragent auth` | ✅ Implemented |
 | `ollama` | OpenAI-compatible (local/remote) | None (optional `OLLAMA_API_KEY`) | ✅ Implemented |
 | `google` | Google Generative AI API | `GOOGLE_API_KEY` | Planned |
 | `azure` | Azure OpenAI (OpenAI-compatible) | `AZURE_OPENAI_API_KEY` + endpoint | Planned |
@@ -455,13 +455,16 @@ pub struct AgentInfo {
 
 | Name | Mode | Description | Key Permission Traits |
 |------|------|-------------|----------------------|
-| `build` | Primary | Default development agent; full read/write/execute access | Allows all tools; denies editing `.env*` files |
-| `plan` | Primary | Read-only analysis & planning agent | Denies all edit/write tools; asks before bash |
-| `general` | Subagent | Multi-step sub-task executor (invoked via `@general`) | Full access minus TODO operations |
+| `ask` | Primary | Quick Q&A — answers questions without tools | Read-only; max 1 step |
+| `general` | Primary | General-purpose coding agent; full read/write/execute access (default) | Allows all tools; denies editing `.env*` files |
+| `build` | Subagent | Build/test agent; compile, run tests, fix errors | Full access; max 30 steps |
+| `plan` | Subagent | Read-only analysis & planning agent | Denies all edit/write tools; asks before bash |
 | `explore` | Subagent | Fast codebase search (invoked via `@explore`) | Read-only: grep, glob, list, read, bash, web |
 | `title` | Internal | Generates session titles | Hidden, no tools |
 | `summary` | Internal | Generates session summaries | Hidden, no tools |
 | `compaction` | Internal | Compresses long conversation history | Hidden, no tools |
+
+Agents can be switched at runtime using the `/agent` slash command or by cycling with `Tab`/`Shift+Tab`.
 
 #### Agent Resolution
 
@@ -767,14 +770,91 @@ data: {"message":"Rate limit exceeded","code":"rate_limit"}
 | Aspect | Detail |
 |--------|--------|
 | Crate | `ratatui` + `crossterm` |
-| Layout | Single full-screen view with panels |
+| Layout | Home screen on launch, transitions to chat on first message |
 
-#### Layout
+#### Home Screen
+
+On startup ragent displays a centered landing page:
 
 ```
-┌─────────────────────────────────────────────────┐
-│ ● ragent  session: abc123  agent: build  ▸ plan │  ← Status bar
-├─────────────────────────────────────────────────┤
+                                               
+     ██████╗  █████╗  ██████╗ ███████╗███╗   ██╗████████╗
+     ██╔══██╗██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+     ██████╔╝███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   
+     ██╔══██╗██╔══██║██║   ██║██╔══╝  ██║╚═██║   ██║   
+     ██║  ██║██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   
+     ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   
+
+        ┌─ Ask anything… ─────────────────────┐
+        │ >                                    │
+        └──────────────────────────────────────┘
+
+        ● Anthropic (Claude) (env)  model: claude-sonnet-4  — press p to change
+        ● Tip  Use /help to see available commands
+        
+ /home/user/project                        v0.1.0
+```
+
+If no provider is configured, the status line reads:
+
+```
+        ⚠ No provider configured — press p to set up a provider
+```
+
+#### Provider Setup Dialog
+
+Pressing `p` on the home screen opens a modal dialog:
+
+1. **Select Provider** — arrow keys to navigate, Enter to select:
+   - Anthropic (Claude)
+   - OpenAI (GPT)
+   - GitHub Copilot
+   - Ollama (Local)
+
+2. **Enter API Key** — paste or type the API key (shown partially masked).
+   Copilot auto-discovers from IDE config if possible.
+   Ollama requires no key.
+
+3. **Select Model** — arrow keys to browse the provider's available models,
+   Enter to confirm. The list is populated from the provider's default model
+   catalogue (e.g. Claude Sonnet 4 and Claude 3.5 Haiku for Anthropic).
+
+4. **Confirmation** — success message showing the selected provider and model;
+   press any key to return.
+
+Keys are stored persistently in `~/.local/share/ragent/ragent.db` (provider_auth table)
+and are used as a fallback when environment variables are not set.
+
+#### Provider Health Indicator
+
+Both the home screen and the chat status bar display a health indicator before the
+provider/model label:
+
+| Symbol | Colour | Meaning |
+|--------|--------|---------|
+| `●` | Green | Provider is reachable and responding |
+| `✗` | Red | Provider is unreachable (e.g. Ollama server not running, network error) |
+| `●` | Yellow | Health check in progress |
+
+A background health check runs on startup and again after each provider setup.
+For Ollama, the check queries `/api/tags`; for Copilot it verifies the token
+against the models API; for API-key providers (Anthropic, OpenAI) the key
+presence is treated as sufficient.
+
+#### API Key Resolution Order
+
+When the agent needs a provider API key, it checks in order:
+
+1. Environment variable (e.g. `ANTHROPIC_API_KEY`)
+2. Provider-specific auto-discovery (Copilot IDE config)
+3. Database (`provider_auth` table, stored via `ragent auth` or the TUI dialog)
+
+#### Chat Layout
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│ ● ragent  session: abc123  agent: general  [ready]  ● Ollama (Local) / qwen3:latest │
+├───────────────────────────────────────────────────────────────┤
 │                                                 │
 │  User: Build me a REST API for managing tasks   │  ← Message
 │                                                 │     history
@@ -802,24 +882,31 @@ data: {"message":"Rate limit exceeded","code":"rate_limit"}
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message (Shift+Enter for newline) |
-| `Tab` | Switch between primary agents (build ↔ plan) |
+| `Tab` / `Shift+Tab` | Cycle between agents (general → build → plan → explore) |
 | `Ctrl+C` | Abort current agent run / exit |
 | `Ctrl+L` | Clear screen |
 | `Esc` | Cancel current input / close dialog |
 | `Up/Down` | Scroll message history |
+| `p` | Open provider setup dialog (home screen) |
 | `@` | Invoke sub-agent (e.g. `@general`, `@explore`) |
-| `/` | Slash commands (e.g. `/clear`, `/compact`, `/session`) |
+| `/` | Slash commands — shows autocomplete dropdown |
 | `y/a/n` | Permission dialog responses |
 
 #### Slash Commands
 
+Typing `/` in the input area on either the home screen or the chat screen
+opens an autocomplete dropdown above the input. The list filters as you type,
+and you can navigate with `↑`/`↓` arrow keys and select with `Enter`.
+Press `Esc` to dismiss the menu.
+
 | Command | Description |
 |---------|-------------|
+| `/agent` | Switch the active agent (opens selection dialog) |
+| `/model` | Switch the active model on the current provider |
+| `/provider` | Change the LLM provider (re-enters full setup flow) |
 | `/clear` | Clear the current session and start fresh |
 | `/compact` | Compact the conversation history |
 | `/session [list\|new\|resume]` | Session management |
-| `/model <provider/model>` | Switch model mid-conversation |
-| `/agent <name>` | Switch agent |
 | `/config` | Show current configuration |
 | `/help` | Show available commands |
 | `/quit` | Exit ragent |

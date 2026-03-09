@@ -19,3 +19,4 @@ crossterm = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
 chrono = { workspace = true }
+rand = { workspace = true }

@@ -27,18 +27,42 @@ cp target/release/ragent ~/.local/bin/
 
 ## 1. Configure a Provider
 
-Ragent needs at least one LLM provider. Choose one:
+Ragent needs at least one LLM provider. The easiest way is via the **interactive TUI**:
+
+```bash
+ragent        # launch ragent
+              # press 'p' on the home screen to open the provider setup dialog
+```
+
+The dialog walks you through:
+1. **Selecting a provider** (Anthropic, OpenAI, GitHub Copilot, or Ollama)
+2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none)
+3. **Choosing a model** from the provider's available models
+
+The key is stored persistently in `~/.local/share/ragent/ragent.db` so you only need to
+configure once.
+
+A **health indicator** appears next to the provider on both the home and chat screens:
+- **●** (green) — provider is reachable
+- **✗** (red) — provider is unreachable (e.g. Ollama server not running)
+- **●** (yellow) — health check in progress
+
+You can also configure providers via **environment variables** or the **CLI**:
 
 ### Option A: Anthropic (Claude)
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
+# or store persistently:
+ragent auth anthropic sk-ant-your-key-here
 ```
 
 ### Option B: OpenAI (GPT-4o)
 
 ```bash
 export OPENAI_API_KEY="sk-..."
+# or store persistently:
+ragent auth openai sk-your-key-here
 ```
 
 ### Option C: GitHub Copilot (No Extra API Key)
@@ -67,21 +91,14 @@ ollama pull llama3.2  # Pull a model
 export OLLAMA_HOST="http://your-server:11434"
 ```
 
-You can also store API keys persistently:
-
-```bash
-ragent auth anthropic sk-ant-your-key-here
-ragent auth openai sk-your-key-here
-```
-
-Keys are stored in `~/.local/share/ragent/ragent.db` (obfuscated).
+**API key resolution order:** environment variable → provider auto-discovery (Copilot) → database.
 
 ---
 
 ## 2. First Run
 
 ```bash
-# Start an interactive session with the default agent ("build")
+# Start an interactive session with the default agent ("general")
 ragent run "Explain the structure of this project"
 
 # Use a specific model
@@ -149,7 +166,7 @@ Ragent loads configuration from multiple sources (last wins):
 ```jsonc
 {
   // Default agent to use when --agent is not specified
-  "default_agent": "build",
+  "default_agent": "general",
 
   // Provider configuration
   "provider": {
@@ -210,18 +227,22 @@ ragent config
 
 ## 5. Built-in Agents
 
-| Agent        | Purpose                             | Mode      |
-|--------------|-------------------------------------|-----------|
-| `general`    | General-purpose assistant           | primary   |
-| `build`      | Code generation and editing         | primary   |
-| `plan`       | Planning and architecture           | primary   |
-| `explore`    | Codebase exploration and analysis   | primary   |
-| `title`      | Auto-generate session titles        | subagent  |
-| `summary`    | Summarize conversations             | subagent  |
-| `compaction` | Compact long conversation history   | subagent  |
+| Agent        | Purpose                                    | Mode      |
+|--------------|--------------------------------------------|-----------|
+| `ask`        | Quick Q&A — answers without tools           | primary   |
+| `general`    | General-purpose coding assistant (default) | primary   |
+| `build`      | Build, test, and debug                     | subagent  |
+| `plan`       | Read-only planning and architecture        | subagent  |
+| `explore`    | Fast codebase exploration and search       | subagent  |
+| `title`      | Auto-generate session titles               | internal  |
+| `summary`    | Summarize conversations                    | internal  |
+| `compaction` | Compact long conversation history          | internal  |
+
+Switch agents interactively with the `/agent` slash command or cycle with `Tab`/`Shift+Tab`.
 
 ```bash
-# Use a specific agent
+# Use a specific agent from the CLI
+ragent run --agent ask "What is the capital of France?"
 ragent run --agent plan "Design a REST API for user management"
 ragent run --agent explore "How does authentication work in this codebase?"
 ```
@@ -374,7 +395,7 @@ ragent run --model ollama/qwen2.5-coder:32b "Implement a binary search function"
 # Create a project-specific config
 cat > ragent.json << 'EOF'
 {
-  "default_agent": "build",
+  "default_agent": "general",
   "agent": {
     "build": {
       "model": "anthropic/claude-sonnet-4-20250514",

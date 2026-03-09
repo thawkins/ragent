@@ -173,6 +173,24 @@ impl AnthropicClient {
                 .collect();
             body["tools"] = json!(tools);
         }
+
+        // Extended thinking control via agent options
+        if let Some(thinking_val) = request.options.get("thinking") {
+            match thinking_val.as_str() {
+                Some("disabled") => {
+                    body["thinking"] = json!({"type": "disabled"});
+                }
+                Some("enabled") => {
+                    let budget = request
+                        .options
+                        .get("thinking_budget_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(10_000);
+                    body["thinking"] = json!({"type": "enabled", "budget_tokens": budget});
+                }
+                _ => {}
+            }
+        }
         body
     }
 }

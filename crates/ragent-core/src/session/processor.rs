@@ -54,29 +54,67 @@ impl SessionProcessor {
     ) -> Result<Message> {
         // 1. Store user message
         let user_msg = Message::user_text(session_id, user_text);
-        self.session_manager.get_messages(session_id).ok(); // ensure session exists
+        self.session_manager
+            .storage()
+            .create_message(&user_msg)?;
 
         self.event_bus.publish(Event::MessageStart {
             session_id: session_id.to_string(),
             message_id: user_msg.id.clone(),
         });
 
-        // 2. Resolve model and create LLM client
-        let model_ref = agent
-            .model
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Agent '{}' has no model configured", agent.name))?;
+        // Helper: publish error + message-end so the TUI always resets.
+        let publish_error = |bus: &EventBus, sid: &str, msg_id: &str, err: &str| {
+            bus.publish(Event::AgentError {
+                session_id: sid.to_string(),
+                error: err.to_string(),
+            });
+            bus.publish(Event::MessageEnd {
+                session_id: sid.to_string(),
+                message_id: msg_id.to_string(),
+                reason: FinishReason::Stop,
+            });
+        };
 
-        let provider = self
-            .provider_registry
-            .get(&model_ref.provider_id)
-            .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", model_ref.provider_id))?;
+        // 2. Resolve model and create LLM client
+        let model_ref = match agent.model.as_ref() {
+            Some(m) => m,
+            None => {
+                let err = format!("Agent '{}' has no model configured", agent.name);
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                bail!("{}", err);
+            }
+        };
+
+        let provider = match self.provider_registry.get(&model_ref.provider_id) {
+            Some(p) => p,
+            None => {
+                let err = format!("Provider '{}' not found", model_ref.provider_id);
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                bail!("{}", err);
+            }
+        };
 
         // Try to get API key from environment or storage
-        let api_key = self.resolve_api_key(&model_ref.provider_id)?;
-        let client = provider
+        let api_key = match self.resolve_api_key(&model_ref.provider_id) {
+            Ok(k) => k,
+            Err(e) => {
+                let err = e.to_string();
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                return Err(e);
+            }
+        };
+        let client = match provider
             .create_client(&api_key, None, &HashMap::new())
-            .await?;
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                let err = e.to_string();
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                return Err(e);
+            }
+        };
 
         // 3. Build system prompt
         let working_dir = self
@@ -94,7 +132,13 @@ impl SessionProcessor {
 
         // 5. Agent loop
         let max_steps = agent.max_steps.unwrap_or(50) as usize;
-        let tool_definitions = self.tool_registry.definitions();
+        // Single-step agents (e.g. "chat") don't use tools — omit definitions
+        // so providers aren't confused by unused tool schemas.
+        let tool_definitions = if max_steps <= 1 {
+            Vec::new()
+        } else {
+            self.tool_registry.definitions()
+        };
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut step = 0;
 
@@ -119,6 +163,7 @@ impl SessionProcessor {
                 top_p: agent.top_p,
                 max_tokens: None,
                 system: Some(system_prompt.clone()),
+                options: agent.options.clone(),
             };
 
             // Call LLM
@@ -312,6 +357,9 @@ impl SessionProcessor {
 
         // 6. Store assistant message
         let assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
+        self.session_manager
+            .storage()
+            .create_message(&assistant_msg)?;
 
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
@@ -340,10 +388,7 @@ impl SessionProcessor {
             if let Some(token) = crate::provider::copilot::find_copilot_token() {
                 return Ok(token);
             }
-            bail!(
-                "No Copilot token found. Set GITHUB_COPILOT_TOKEN or ensure GitHub Copilot \
-                 is configured in your IDE (~/.config/github-copilot/apps.json)."
-            );
+            // Fall through to database check below
         }
 
         // Check common environment variable names
@@ -353,7 +398,7 @@ impl SessionProcessor {
             _ => vec![],
         };
 
-        for var in env_vars {
+        for var in &env_vars {
             if let Ok(key) = std::env::var(var)
                 && !key.is_empty()
             {
@@ -361,8 +406,17 @@ impl SessionProcessor {
             }
         }
 
+        // Check the database for a stored API key
+        if let Ok(Some(key)) = self.session_manager.storage().get_provider_auth(provider_id) {
+            if !key.is_empty() {
+                return Ok(key);
+            }
+        }
+
         bail!(
-            "No API key found for provider '{}'. Set the appropriate environment variable.",
+            "No API key found for provider '{}'. Set the appropriate environment variable \
+             or run `ragent auth {} <key>` to store one.",
+            provider_id,
             provider_id
         )
     }

@@ -237,6 +237,14 @@ impl OpenAiClient {
                 .collect();
             body["tools"] = json!(tools);
         }
+
+        // Reasoning / thinking control via agent options
+        if let Some(thinking_val) = request.options.get("thinking") {
+            if thinking_val.as_str() == Some("disabled") {
+                body["reasoning_effort"] = json!("none");
+            }
+        }
+
         body
     }
 }

@@ -6,7 +6,7 @@
 //! [`resolve_agent`] for merging built-in definitions with user config.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -99,10 +99,31 @@ impl Default for AgentInfo {
 
 /// Returns the full set of built-in agents shipped with ragent.
 ///
-/// Includes `general`, `build`, `plan`, `explore`, `title`, `summary`,
+/// Includes `chat`, `general`, `build`, `plan`, `explore`, `title`, `summary`,
 /// and `compaction` agents.
 pub fn create_builtin_agents() -> Vec<AgentInfo> {
     vec![
+        AgentInfo {
+            name: "ask".to_string(),
+            description: "Quick Q&A — answers questions without tools".to_string(),
+            mode: AgentMode::Primary,
+            hidden: false,
+            temperature: None,
+            top_p: None,
+            model: Some(ModelRef {
+                provider_id: "anthropic".to_string(),
+                model_id: "claude-sonnet-4-20250514".to_string(),
+            }),
+            prompt: Some(
+                "You are a helpful AI assistant. Answer the user's questions clearly and \
+                 concisely. You do not have access to any tools — just respond with your \
+                 best knowledge."
+                    .to_string(),
+            ),
+            permission: read_only_permissions(),
+            max_steps: Some(1),
+            options: HashMap::from([("thinking".to_string(), json!("disabled"))]),
+        },
         AgentInfo {
             name: "general".to_string(),
             description: "General-purpose coding agent".to_string(),
@@ -351,6 +372,13 @@ pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &st
     if let Some(ref agent_prompt) = agent.prompt {
         prompt.push_str(agent_prompt);
         prompt.push_str("\n\n");
+    }
+
+    // Single-step agents (e.g. "ask") are tool-free; skip project context
+    // so the model focuses on answering the user's question directly.
+    let has_tools = agent.max_steps.map_or(true, |s| s > 1);
+    if !has_tools {
+        return prompt;
     }
 
     // Working directory context

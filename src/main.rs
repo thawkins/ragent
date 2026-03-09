@@ -36,7 +36,7 @@ struct Cli {
     model: Option<String>,
 
     /// Override agent
-    #[arg(long, global = true, default_value = "build")]
+    #[arg(long, global = true, default_value = "general")]
     agent: String,
 
     /// Log level
@@ -202,7 +202,14 @@ async fn main() -> Result<()> {
                     }
                 }
             } else {
-                ragent_tui::run_tui(event_bus).await?;
+                ragent_tui::run_tui(
+                    event_bus,
+                    storage,
+                    provider_registry,
+                    session_processor,
+                    resolved_agent.clone(),
+                )
+                .await?;
             }
         }
         Some(Commands::Run { prompt }) => {

@@ -54,6 +54,11 @@ impl SessionManager {
         Self { storage, event_bus }
     }
 
+    /// Returns a reference to the underlying storage backend.
+    pub fn storage(&self) -> &Arc<Storage> {
+        &self.storage
+    }
+
     /// Creates a new session rooted at `directory`, persists it, and emits a
     /// `SessionCreated` event.
     ///

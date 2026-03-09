@@ -11,12 +11,12 @@ It is reimplemented in Rust as a learninh exercise for the author.
 
 ## Features
 
-- **Multi-provider LLM support** — Anthropic and OpenAI out of the box, with an
-  extensible provider trait for adding more
+- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, and Ollama
+  out of the box, with an extensible provider trait for adding more
 - **8 built-in tools** — file read/write/edit, bash execution, grep, glob, directory
   listing, and interactive questions
-- **Terminal UI** — full-screen ratatui interface with message history, streaming
-  output, and a permission approval dialog
+- **Terminal UI** — full-screen ratatui interface with home screen, provider setup
+  dialog, slash-command autocomplete, agent cycling, and streaming chat
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
 - **Session management** — persistent conversation history stored in SQLite
 - **Permission system** — configurable rules that gate file writes, shell commands,
@@ -140,10 +140,10 @@ User Input
 
 ## Project Status
 
-**v0.1.0-alpha.0** — Early development. Core architecture is in place and the binary
-compiles, but many features are stubs or incomplete. See [TODO.md](TODO.md) for
-unimplemented functions and [CODE_CLEANUP.md](CODE_CLEANUP.md) for the quality
-roadmap.
+**v0.1.0-alpha.1** — Early development. Core architecture is in place and the
+binary compiles. The TUI now features a home screen with provider setup dialog,
+agent cycling, slash-command autocomplete, and provider health checks. See
+[TODO.md](TODO.md) for unimplemented functions.
 
 ## License
 

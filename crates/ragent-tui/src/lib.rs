@@ -7,6 +7,8 @@
 pub mod app;
 pub mod input;
 pub mod layout;
+pub mod logo;
+pub mod tips;
 pub mod widgets;
 
 pub use app::App;
@@ -23,7 +25,11 @@ use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio_stream::wrappers::BroadcastStream;
 
+use ragent_core::agent::AgentInfo;
 use ragent_core::event::EventBus;
+use ragent_core::provider::ProviderRegistry;
+use ragent_core::session::processor::SessionProcessor;
+use ragent_core::storage::Storage;
 
 /// Run the TUI application.
 ///
@@ -33,14 +39,27 @@ use ragent_core::event::EventBus;
 /// # Errors
 ///
 /// Returns an error if terminal setup, drawing, or event reading fails.
-pub async fn run_tui(event_bus: Arc<EventBus>) -> Result<()> {
+pub async fn run_tui(
+    event_bus: Arc<EventBus>,
+    storage: Arc<Storage>,
+    provider_registry: Arc<ProviderRegistry>,
+    session_processor: Arc<SessionProcessor>,
+    agent: AgentInfo,
+) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(event_bus.clone());
+    let mut app = App::new(
+        event_bus.clone(),
+        storage,
+        provider_registry,
+        session_processor,
+        agent,
+    );
+    app.check_provider_health();
     let mut bus_stream = BroadcastStream::new(event_bus.subscribe());
 
     while app.is_running {

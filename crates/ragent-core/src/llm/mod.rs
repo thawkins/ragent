@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use crate::event::FinishReason;
@@ -64,6 +65,9 @@ pub struct ChatRequest {
     pub top_p: Option<f32>,
     pub max_tokens: Option<u32>,
     pub system: Option<String>,
+    /// Arbitrary key-value options forwarded to the provider (e.g. thinking control).
+    #[serde(default)]
+    pub options: HashMap<String, Value>,
 }
 
 /// A single message in a chat conversation.
