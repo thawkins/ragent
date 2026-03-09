@@ -599,7 +599,10 @@ mod tests {
             parameter_size: "70B".to_string(),
             family: "llama".to_string(),
         };
-        assert_eq!(format_model_name("llama3.3:latest", &details), "Llama3.3 (70B)");
+        assert_eq!(
+            format_model_name("llama3.3:latest", &details),
+            "Llama3.3 (70B)"
+        );
     }
 
     #[test]

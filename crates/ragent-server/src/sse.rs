@@ -130,20 +130,14 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "output_tokens": output_tokens,
             }),
         ),
-        Event::ToolsSent {
-            session_id,
-            tools,
-        } => (
+        Event::ToolsSent { session_id, tools } => (
             "tools_sent",
             serde_json::json!({
                 "session_id": session_id,
                 "tools": tools,
             }),
         ),
-        Event::ModelResponse {
-            session_id,
-            text,
-        } => (
+        Event::ModelResponse { session_id, text } => (
             "model_response",
             serde_json::json!({
                 "session_id": session_id,

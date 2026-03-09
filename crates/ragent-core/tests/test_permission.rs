@@ -3,7 +3,10 @@ use ragent_core::permission::*;
 #[test]
 fn test_permission_default_action_is_ask() {
     let checker = PermissionChecker::new(vec![]);
-    assert_eq!(checker.check("file:read", "/some/path"), PermissionAction::Ask);
+    assert_eq!(
+        checker.check("file:read", "/some/path"),
+        PermissionAction::Ask
+    );
 }
 
 #[test]

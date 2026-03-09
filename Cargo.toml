@@ -62,6 +62,7 @@ regex = "1"
 base64 = "0.22"
 rand = "0.8"
 arboard = "3"
+rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 
 [[bin]]
 name = "ragent"

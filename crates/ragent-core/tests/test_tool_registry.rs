@@ -10,7 +10,9 @@ fn test_default_registry_has_all_tools() {
     let registry = create_default_registry();
     let tools = registry.list();
 
-    let expected = ["bash", "edit", "glob", "grep", "list", "question", "read", "write"];
+    let expected = [
+        "bash", "edit", "glob", "grep", "list", "question", "read", "write",
+    ];
     assert_eq!(tools.len(), expected.len());
     for name in &expected {
         assert!(tools.contains(name), "Missing tool: {}", name);
@@ -31,9 +33,15 @@ fn test_registry_list_alphabetically_sorted() {
 fn test_registry_get_existing_tool() {
     let registry = create_default_registry();
 
-    for name in &["read", "write", "edit", "bash", "grep", "glob", "list", "question"] {
+    for name in &[
+        "read", "write", "edit", "bash", "grep", "glob", "list", "question",
+    ] {
         let tool = registry.get(name);
-        assert!(tool.is_some(), "Tool '{}' should be found in registry", name);
+        assert!(
+            tool.is_some(),
+            "Tool '{}' should be found in registry",
+            name
+        );
         assert_eq!(tool.unwrap().name(), *name);
     }
 }
@@ -54,7 +62,10 @@ fn test_tool_definitions_have_required_fields() {
     assert_eq!(defs.len(), 8);
 
     for def in &defs {
-        assert!(!def.name.is_empty(), "Tool definition name should not be empty");
+        assert!(
+            !def.name.is_empty(),
+            "Tool definition name should not be empty"
+        );
         assert!(
             !def.description.is_empty(),
             "Tool '{}' definition should have a description",
@@ -192,14 +203,20 @@ async fn test_read_tool_line_range() {
     };
 
     let result = tool
-        .execute(json!({"path": "test_range.txt", "start_line": 2, "end_line": 4}), &ctx)
+        .execute(
+            json!({"path": "test_range.txt", "start_line": 2, "end_line": 4}),
+            &ctx,
+        )
         .await
         .unwrap();
 
     assert!(result.content.contains("b"));
     assert!(result.content.contains("c"));
     assert!(result.content.contains("d"));
-    assert!(!result.content.contains("   1  a"), "Should not include line 1");
+    assert!(
+        !result.content.contains("   1  a"),
+        "Should not include line 1"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -275,10 +292,7 @@ async fn test_list_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
     };
 
-    let result = tool
-        .execute(json!({"path": "."}), &ctx)
-        .await
-        .unwrap();
+    let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
 
     assert!(result.content.contains("file1.txt"));
     assert!(result.content.contains("file2.rs"));

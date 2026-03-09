@@ -84,7 +84,8 @@ fn test_redact_at_boundaries() {
 
 #[test]
 fn test_redact_preserves_context() {
-    let input = "Error: authentication failed with token sk-abcdefghijklmnopqrstuvwxyz. Please retry.";
+    let input =
+        "Error: authentication failed with token sk-abcdefghijklmnopqrstuvwxyz. Please retry.";
     let result = redact_secrets(input);
     assert!(result.contains("Error: authentication failed with token"));
     assert!(result.contains(". Please retry."));

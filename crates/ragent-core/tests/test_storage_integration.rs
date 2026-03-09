@@ -1,5 +1,5 @@
 use ragent_core::message::Message;
-use ragent_core::storage::{Storage, obfuscate_key, deobfuscate_key};
+use ragent_core::storage::{Storage, deobfuscate_key, obfuscate_key};
 use std::sync::Arc;
 
 // ── Session lifecycle ─────────────────────────────────────────────
@@ -134,7 +134,12 @@ fn test_message_touches_session_updated_at() {
     let storage = Storage::open_in_memory().unwrap();
     storage.create_session("s1", "/tmp").unwrap();
 
-    let before = storage.get_session("s1").unwrap().unwrap().updated_at.clone();
+    let before = storage
+        .get_session("s1")
+        .unwrap()
+        .unwrap()
+        .updated_at
+        .clone();
 
     std::thread::sleep(std::time::Duration::from_millis(10));
     storage
@@ -142,7 +147,10 @@ fn test_message_touches_session_updated_at() {
         .unwrap();
 
     let after = storage.get_session("s1").unwrap().unwrap().updated_at;
-    assert!(after > before, "Session updated_at should advance after adding a message");
+    assert!(
+        after > before,
+        "Session updated_at should advance after adding a message"
+    );
 }
 
 // ── Provider Auth CRUD ───────────────────────────────────────────
@@ -155,14 +163,18 @@ fn test_provider_auth_full_lifecycle() {
     assert_eq!(storage.get_provider_auth("anthropic").unwrap(), None);
 
     // Set and get
-    storage.set_provider_auth("anthropic", "sk-test-key-1").unwrap();
+    storage
+        .set_provider_auth("anthropic", "sk-test-key-1")
+        .unwrap();
     assert_eq!(
         storage.get_provider_auth("anthropic").unwrap(),
         Some("sk-test-key-1".to_string())
     );
 
     // Update (upsert)
-    storage.set_provider_auth("anthropic", "sk-test-key-2").unwrap();
+    storage
+        .set_provider_auth("anthropic", "sk-test-key-2")
+        .unwrap();
     assert_eq!(
         storage.get_provider_auth("anthropic").unwrap(),
         Some("sk-test-key-2".to_string())
@@ -181,15 +193,30 @@ fn test_provider_auth_multiple_providers() {
     storage.set_provider_auth("openai", "sk-oai").unwrap();
     storage.set_provider_auth("copilot", "ghu_abc").unwrap();
 
-    assert_eq!(storage.get_provider_auth("anthropic").unwrap(), Some("sk-ant".to_string()));
-    assert_eq!(storage.get_provider_auth("openai").unwrap(), Some("sk-oai".to_string()));
-    assert_eq!(storage.get_provider_auth("copilot").unwrap(), Some("ghu_abc".to_string()));
+    assert_eq!(
+        storage.get_provider_auth("anthropic").unwrap(),
+        Some("sk-ant".to_string())
+    );
+    assert_eq!(
+        storage.get_provider_auth("openai").unwrap(),
+        Some("sk-oai".to_string())
+    );
+    assert_eq!(
+        storage.get_provider_auth("copilot").unwrap(),
+        Some("ghu_abc".to_string())
+    );
 
     // Deleting one doesn't affect others
     storage.delete_provider_auth("openai").unwrap();
-    assert_eq!(storage.get_provider_auth("anthropic").unwrap(), Some("sk-ant".to_string()));
+    assert_eq!(
+        storage.get_provider_auth("anthropic").unwrap(),
+        Some("sk-ant".to_string())
+    );
     assert_eq!(storage.get_provider_auth("openai").unwrap(), None);
-    assert_eq!(storage.get_provider_auth("copilot").unwrap(), Some("ghu_abc".to_string()));
+    assert_eq!(
+        storage.get_provider_auth("copilot").unwrap(),
+        Some("ghu_abc".to_string())
+    );
 }
 
 // ── Settings CRUD ────────────────────────────────────────────────
@@ -201,10 +228,16 @@ fn test_settings_full_lifecycle() {
     assert_eq!(storage.get_setting("theme").unwrap(), None);
 
     storage.set_setting("theme", "dark").unwrap();
-    assert_eq!(storage.get_setting("theme").unwrap(), Some("dark".to_string()));
+    assert_eq!(
+        storage.get_setting("theme").unwrap(),
+        Some("dark".to_string())
+    );
 
     storage.set_setting("theme", "light").unwrap();
-    assert_eq!(storage.get_setting("theme").unwrap(), Some("light".to_string()));
+    assert_eq!(
+        storage.get_setting("theme").unwrap(),
+        Some("light".to_string())
+    );
 
     storage.delete_setting("theme").unwrap();
     assert_eq!(storage.get_setting("theme").unwrap(), None);
@@ -218,9 +251,18 @@ fn test_settings_multiple_keys() {
     storage.set_setting("key2", "val2").unwrap();
     storage.set_setting("key3", "val3").unwrap();
 
-    assert_eq!(storage.get_setting("key1").unwrap(), Some("val1".to_string()));
-    assert_eq!(storage.get_setting("key2").unwrap(), Some("val2".to_string()));
-    assert_eq!(storage.get_setting("key3").unwrap(), Some("val3".to_string()));
+    assert_eq!(
+        storage.get_setting("key1").unwrap(),
+        Some("val1".to_string())
+    );
+    assert_eq!(
+        storage.get_setting("key2").unwrap(),
+        Some("val2".to_string())
+    );
+    assert_eq!(
+        storage.get_setting("key3").unwrap(),
+        Some("val3".to_string())
+    );
 }
 
 // ── Obfuscation roundtrip ────────────────────────────────────────
@@ -237,7 +279,11 @@ fn test_obfuscation_roundtrip() {
     for key in &keys {
         let obfuscated = obfuscate_key(key);
         let recovered = deobfuscate_key(&obfuscated);
-        assert_eq!(&recovered, key, "Obfuscation roundtrip failed for key: {:?}", key);
+        assert_eq!(
+            &recovered, key,
+            "Obfuscation roundtrip failed for key: {:?}",
+            key
+        );
     }
 }
 
@@ -245,7 +291,10 @@ fn test_obfuscation_roundtrip() {
 fn test_obfuscation_produces_different_output() {
     let key = "sk-test-key";
     let obfuscated = obfuscate_key(key);
-    assert_ne!(obfuscated, key, "Obfuscated key should differ from original");
+    assert_ne!(
+        obfuscated, key,
+        "Obfuscated key should differ from original"
+    );
 }
 
 #[test]

@@ -43,7 +43,7 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 
 ## GitHub Access
 - Use "gh" to access all GitHub repositories.
-- When asked to "push to remote", update the SPEC.md, README.md, STATS.md, and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
+- When asked to "push to remote", update the SPEC.md, README.md, STATS.md, RELEASE.md, QUICKSTART.md and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
 - When asked to "push release to remote", update the release number, and then follow the "push to remote" process. **Commit Message Rule**: Do not use "chore: bump version to ...", instead use "Version: <version_number>".
 - When initializing a new repo, add BUG, FEATURE, TASK and CHANGE issue templates only do this once. 
 - **CRITICAL**: Do not push changes to remote unless specifically told to. This is a strict rule.
@@ -59,7 +59,7 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 ## Documentation Standards
 - For all functions create DOCBLOCK documentation comments above each function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (*.md) **MUST** be located in the `docs/` folder, except for `STATS.md`,  `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md` and `CHANGELOG.md` which remain in the project root. This includes: implementation guides, architecture documentation, feature specifications, task breakdowns, user guides, API references, and any other markdown documentation. Any future documentation should be created in the docs/ folder following this convention.
+- **Documentation Files**: All documentation markdown files (*.md) **MUST** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`,  `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md` and `CHANGELOG.md` which remain in the project root. This includes: implementation guides, architecture documentation, feature specifications, task breakdowns, user guides, API references, and any other markdown documentation. Any future documentation should be created in the docs/ folder following this convention.
 - Do not create explainer documents or other .md files unless specifically asked to.
 
 ## Code Style Guidelines

@@ -211,8 +211,14 @@ fn test_build_system_prompt_single_step_skips_context() {
     );
 
     assert!(prompt.contains("Answer questions."));
-    assert!(!prompt.contains("/project"), "Single-step agent should skip working dir");
-    assert!(!prompt.contains("big file tree"), "Single-step agent should skip file tree");
+    assert!(
+        !prompt.contains("/project"),
+        "Single-step agent should skip working dir"
+    );
+    assert!(
+        !prompt.contains("big file tree"),
+        "Single-step agent should skip file tree"
+    );
 }
 
 #[test]
@@ -228,7 +234,10 @@ fn test_build_system_prompt_empty_file_tree() {
 
     assert!(prompt.contains("Hello."));
     assert!(prompt.contains("/proj"));
-    assert!(!prompt.contains("Project Structure"), "Empty tree should be skipped");
+    assert!(
+        !prompt.contains("Project Structure"),
+        "Empty tree should be skipped"
+    );
 }
 
 #[test]

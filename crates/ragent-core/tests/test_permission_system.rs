@@ -248,7 +248,11 @@ fn test_permission_action_display() {
 
 #[test]
 fn test_permission_action_serde() {
-    for action in &[PermissionAction::Allow, PermissionAction::Deny, PermissionAction::Ask] {
+    for action in &[
+        PermissionAction::Allow,
+        PermissionAction::Deny,
+        PermissionAction::Ask,
+    ] {
         let json = serde_json::to_string(action).unwrap();
         let deserialized: PermissionAction = serde_json::from_str(&json).unwrap();
         assert_eq!(&deserialized, action);
@@ -259,7 +263,11 @@ fn test_permission_action_serde() {
 
 #[test]
 fn test_permission_decision_serde() {
-    for decision in &[PermissionDecision::Once, PermissionDecision::Always, PermissionDecision::Deny] {
+    for decision in &[
+        PermissionDecision::Once,
+        PermissionDecision::Always,
+        PermissionDecision::Deny,
+    ] {
         let json = serde_json::to_string(decision).unwrap();
         let deserialized: PermissionDecision = serde_json::from_str(&json).unwrap();
         assert_eq!(&deserialized, decision);

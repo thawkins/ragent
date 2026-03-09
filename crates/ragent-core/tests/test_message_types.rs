@@ -30,7 +30,10 @@ fn test_message_multipart_text_and_tool_call() {
 
     assert_eq!(msg.role, Role::Assistant);
     assert_eq!(msg.parts.len(), 3);
-    assert_eq!(msg.text_content(), "I'll read the file and here are the results");
+    assert_eq!(
+        msg.text_content(),
+        "I'll read the file and here are the results"
+    );
 }
 
 #[test]
@@ -213,7 +216,11 @@ fn test_message_serde_all_part_types() {
         _ => panic!("Expected Reasoning"),
     }
     match &deserialized.parts[2] {
-        MessagePart::ToolCall { tool, call_id, state } => {
+        MessagePart::ToolCall {
+            tool,
+            call_id,
+            state,
+        } => {
             assert_eq!(tool, "read");
             assert_eq!(call_id, "c1");
             assert_eq!(state.status, ToolCallStatus::Completed);

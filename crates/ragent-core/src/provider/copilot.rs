@@ -414,8 +414,8 @@ impl LlmClient for CopilotClient {
             let error_body = response.text().await.unwrap_or_default();
             tracing::error!(status = %status, body = %error_body, "copilot chat error");
             // Extract a clean message from the JSON error response if possible
-            let clean_msg = parse_api_error_message(&error_body)
-                .unwrap_or_else(|| format!("HTTP {status}"));
+            let clean_msg =
+                parse_api_error_message(&error_body).unwrap_or_else(|| format!("HTTP {status}"));
             bail!("{clean_msg}");
         }
 
@@ -1096,10 +1096,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
         .context("Failed to fetch Copilot models")?;
 
     if !resp.status().is_success() {
-        bail!(
-            "Copilot models endpoint returned HTTP {}",
-            resp.status()
-        );
+        bail!("Copilot models endpoint returned HTTP {}", resp.status());
     }
 
     let listing: CopilotModelsResponse = resp
@@ -1137,10 +1134,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 .and_then(|s| s.reasoning_effort.as_ref())
                 .map_or(false, |efforts| !efforts.is_empty());
 
-            let display_name = entry
-                .name
-                .clone()
-                .unwrap_or_else(|| entry.id.clone());
+            let display_name = entry.name.clone().unwrap_or_else(|| entry.id.clone());
 
             let vendor_suffix = entry
                 .vendor

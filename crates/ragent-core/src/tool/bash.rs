@@ -18,13 +18,7 @@ pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
-const DENIED_PATTERNS: &[&str] = &[
-    "rm -rf /",
-    "mkfs",
-    "dd if=",
-    ":(){ :|:&};:",
-    "> /dev/sd",
-];
+const DENIED_PATTERNS: &[&str] = &["rm -rf /", "mkfs", "dd if=", ":(){ :|:&};:", "> /dev/sd"];
 
 #[async_trait::async_trait]
 impl Tool for BashTool {

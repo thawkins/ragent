@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, ProviderSetupStep, PROVIDER_LIST, SLASH_COMMANDS};
+use crate::app::{App, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS};
 
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
@@ -211,7 +211,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 if pid == "ollama" {
                     // Ollama doesn't require a key — store empty and mark configured
                     let _ = app.storage.set_provider_auth(pid, "");
-                    let _ = app.storage.delete_setting(&format!("provider_{pid}_disabled"));
+                    let _ = app
+                        .storage
+                        .delete_setting(&format!("provider_{pid}_disabled"));
                     app.refresh_provider();
                     let models = app.models_for_provider(pid);
                     app.provider_setup = Some(ProviderSetupStep::SelectModel {
@@ -230,10 +232,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             .flatten()
                             .filter(|k| !k.is_empty())
                     };
-                    let token =
-                        ragent_core::provider::copilot::resolve_copilot_github_token(Some(
-                            &db_lookup,
-                        ));
+                    let token = ragent_core::provider::copilot::resolve_copilot_github_token(Some(
+                        &db_lookup,
+                    ));
                     if let Some(ref tk) = token {
                         // Try token exchange to check if we have a working token
                         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -247,12 +248,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                             });
                             if let Ok(auth) = exchange_ok {
                                 if !auth.base_url.contains("models.inference.ai.azure.com") {
-                                    let _ = app
-                                        .storage
-                                        .set_setting("copilot_api_base", &auth.base_url);
-                                    let _ = app
-                                        .storage
-                                        .delete_setting("provider_copilot_disabled");
+                                    let _ =
+                                        app.storage.set_setting("copilot_api_base", &auth.base_url);
+                                    let _ = app.storage.delete_setting("provider_copilot_disabled");
                                     app.refresh_provider();
                                     let models = app.models_for_provider(pid);
                                     app.provider_setup = Some(ProviderSetupStep::SelectModel {
@@ -461,7 +459,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 } else {
                     selected - 1
                 };
-                app.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected: new });
+                app.provider_setup = Some(ProviderSetupStep::SelectAgent {
+                    agents,
+                    selected: new,
+                });
             }
             KeyCode::Down => {
                 let new = if agents.is_empty() {
@@ -469,15 +470,14 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 } else {
                     (selected + 1) % agents.len()
                 };
-                app.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected: new });
+                app.provider_setup = Some(ProviderSetupStep::SelectAgent {
+                    agents,
+                    selected: new,
+                });
             }
             KeyCode::Enter => {
                 if let Some((name, _desc)) = agents.get(selected) {
-                    if let Some(idx) = app
-                        .cycleable_agents
-                        .iter()
-                        .position(|a| a.name == *name)
-                    {
+                    if let Some(idx) = app.cycleable_agents.iter().position(|a| a.name == *name) {
                         app.current_agent_index = idx;
                         app.agent_info = app.cycleable_agents[idx].clone();
                         app.agent_name = app.agent_info.name.clone();

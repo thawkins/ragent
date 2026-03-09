@@ -20,7 +20,9 @@ fn test_storage_roundtrip() {
 #[test]
 fn test_storage_provider_auth_crud() {
     let storage = Storage::open_in_memory().unwrap();
-    storage.set_provider_auth("anthropic", "sk-test-123").unwrap();
+    storage
+        .set_provider_auth("anthropic", "sk-test-123")
+        .unwrap();
     let key = storage.get_provider_auth("anthropic").unwrap();
     assert_eq!(key, Some("sk-test-123".to_string()));
 }
@@ -28,7 +30,9 @@ fn test_storage_provider_auth_crud() {
 #[test]
 fn test_storage_delete_provider_auth() {
     let storage = Storage::open_in_memory().unwrap();
-    storage.set_provider_auth("anthropic", "sk-test-456").unwrap();
+    storage
+        .set_provider_auth("anthropic", "sk-test-456")
+        .unwrap();
     assert!(storage.get_provider_auth("anthropic").unwrap().is_some());
 
     storage.delete_provider_auth("anthropic").unwrap();
@@ -46,7 +50,10 @@ fn test_storage_delete_provider_auth_nonexistent() {
 fn test_storage_delete_setting() {
     let storage = Storage::open_in_memory().unwrap();
     storage.set_setting("my_key", "my_value").unwrap();
-    assert_eq!(storage.get_setting("my_key").unwrap(), Some("my_value".to_string()));
+    assert_eq!(
+        storage.get_setting("my_key").unwrap(),
+        Some("my_value".to_string())
+    );
 
     storage.delete_setting("my_key").unwrap();
     assert_eq!(storage.get_setting("my_key").unwrap(), None);

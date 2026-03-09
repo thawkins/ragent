@@ -1,22 +1,38 @@
 //! Model Context Protocol (MCP) client and types.
 //!
-//! Defines [`McpClient`] for managing MCP server connections, along with
-//! supporting types such as [`McpServer`], [`McpToolDef`], and [`McpStatus`].
-//! The current implementation is a stub that registers servers without
-//! establishing real connections.
+//! Provides [`McpClient`] for managing MCP server connections using the
+//! official `rmcp` SDK. Supports stdio (child process) and HTTP transports.
+//! After connecting, tools advertised by each server are discoverable via
+//! [`McpClient::list_tools`] and invocable via [`McpClient::call_tool`].
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use rmcp::ServiceExt;
+use rmcp::model::{CallToolRequestParams, Tool as RmcpTool};
+use rmcp::service::{RoleClient, RunningService};
+use rmcp::transport::ConfigureCommandExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::process::Command;
+use tokio::sync::RwLock;
 
-use crate::config::McpServerConfig;
+use crate::config::{McpServerConfig, McpTransport};
 
 /// Connection status of an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum McpStatus {
+    /// The server is connected and operational.
     Connected,
+    /// The server is registered but not connected.
     Disabled,
-    Failed { error: String },
+    /// The server failed to connect.
+    Failed {
+        /// Error message describing the failure.
+        error: String,
+    },
+    /// The server requires authentication before connecting.
     NeedsAuth,
 }
 
@@ -24,24 +40,40 @@ pub enum McpStatus {
 /// advertised tools.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServer {
+    /// Unique identifier for this server.
     pub id: String,
+    /// Configuration used to connect.
     pub config: McpServerConfig,
+    /// Current connection status.
     pub status: McpStatus,
+    /// Tools advertised by this server after connection.
     pub tools: Vec<McpToolDef>,
 }
 
 /// Definition of a tool exposed by an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolDef {
+    /// The tool name as registered with the MCP server.
     pub name: String,
+    /// A human-readable description of the tool.
     pub description: String,
-    // TODO: Replace `Value` with a typed JSON Schema struct.
+    /// JSON Schema defining the tool's expected input parameters.
     pub parameters: Value,
 }
 
-/// Stub MCP client for future implementation.
+/// An active connection to a single MCP server, wrapping the rmcp
+/// [`RunningService`].
+struct McpConnection {
+    service: RunningService<RoleClient, ()>,
+}
+
+/// MCP client managing connections to one or more MCP servers.
+///
+/// Uses the official `rmcp` SDK for transport, handshake, tool discovery,
+/// and tool invocation.
 pub struct McpClient {
     servers: Vec<McpServer>,
+    connections: Arc<RwLock<HashMap<String, McpConnection>>>,
 }
 
 impl McpClient {
@@ -49,44 +81,278 @@ impl McpClient {
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
+            connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Connect to an MCP server (stub — returns Ok immediately).
+    /// Connect to an MCP server using the configured transport.
+    ///
+    /// For stdio servers, spawns a child process and communicates over
+    /// stdin/stdout. For HTTP/SSE servers, connects to the configured URL.
+    /// After the MCP `initialize` handshake completes, discovers available
+    /// tools and populates the server's tool list.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` — unique identifier for this server connection
+    /// * `config` — transport and connection configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transport cannot be established, the
+    /// initialize handshake fails, or tool discovery fails.
     pub async fn connect(&mut self, id: &str, config: McpServerConfig) -> anyhow::Result<()> {
-        let server = McpServer {
-            id: id.to_string(),
-            config,
-            status: McpStatus::Disabled,
-            tools: Vec::new(),
-        };
-        self.servers.push(server);
-        tracing::info!("MCP server '{}' registered (stub)", id);
-        Ok(())
+        if config.disabled {
+            let server = McpServer {
+                id: id.to_string(),
+                config,
+                status: McpStatus::Disabled,
+                tools: Vec::new(),
+            };
+            self.servers.push(server);
+            tracing::info!(server_id = id, "MCP server registered as disabled");
+            return Ok(());
+        }
+
+        match self.connect_inner(id, &config).await {
+            Ok((service, tools)) => {
+                let tool_defs: Vec<McpToolDef> = tools
+                    .iter()
+                    .map(|t| McpToolDef {
+                        name: t.name.to_string(),
+                        description: t.description.as_deref().unwrap_or_default().to_string(),
+                        parameters: serde_json::to_value(&*t.input_schema)
+                            .unwrap_or(Value::Object(serde_json::Map::new())),
+                    })
+                    .collect();
+
+                let tool_count = tool_defs.len();
+                let server = McpServer {
+                    id: id.to_string(),
+                    config,
+                    status: McpStatus::Connected,
+                    tools: tool_defs,
+                };
+                self.servers.push(server);
+
+                let mut conns = self.connections.write().await;
+                conns.insert(id.to_string(), McpConnection { service });
+
+                tracing::info!(
+                    server_id = id,
+                    tool_count,
+                    "MCP server connected and tools discovered"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("{e:#}");
+                let server = McpServer {
+                    id: id.to_string(),
+                    config,
+                    status: McpStatus::Failed {
+                        error: error_msg.clone(),
+                    },
+                    tools: Vec::new(),
+                };
+                self.servers.push(server);
+                tracing::error!(
+                    server_id = id,
+                    error = %error_msg,
+                    "MCP server connection failed"
+                );
+                Err(e)
+            }
+        }
     }
 
-    /// List tools from all connected servers (stub — returns empty).
+    /// Internal connection logic, separated for clean error handling.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` — server identifier for logging
+    /// * `config` — transport configuration
+    ///
+    /// # Returns
+    ///
+    /// The running service and discovered tools on success.
+    async fn connect_inner(
+        &self,
+        id: &str,
+        config: &McpServerConfig,
+    ) -> anyhow::Result<(RunningService<RoleClient, ()>, Vec<RmcpTool>)> {
+        let service =
+            match config.type_ {
+                McpTransport::Stdio => {
+                    let command_str = config.command.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("stdio transport requires a 'command' field")
+                    })?;
+
+                    let args = config.args.clone();
+                    let env = config.env.clone();
+
+                    let transport = rmcp::transport::TokioChildProcess::new(
+                        Command::new(command_str).configure(|cmd| {
+                            for arg in &args {
+                                cmd.arg(arg);
+                            }
+                            for (k, v) in &env {
+                                cmd.env(k, v);
+                            }
+                        }),
+                    )?;
+
+                    tracing::info!(
+                        server_id = id,
+                        command = command_str,
+                        "Spawning stdio MCP server"
+                    );
+                    ().serve(transport).await?
+                }
+                McpTransport::Http | McpTransport::Sse => {
+                    let url = config.url.as_deref().ok_or_else(|| {
+                        anyhow::anyhow!("HTTP/SSE transport requires a 'url' field")
+                    })?;
+
+                    let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url);
+
+                    tracing::info!(server_id = id, url, "Connecting to HTTP MCP server");
+                    ().serve(transport).await?
+                }
+            };
+
+        let tools = service.peer().list_all_tools().await?;
+
+        Ok((service, tools))
+    }
+
+    /// List tools from all connected servers.
+    ///
+    /// Returns an aggregated list of tool definitions from every server
+    /// that has status [`McpStatus::Connected`].
     pub fn list_tools(&self) -> Vec<McpToolDef> {
         self.servers
             .iter()
+            .filter(|s| s.status == McpStatus::Connected)
             .flat_map(|s| s.tools.iter().cloned())
             .collect()
     }
 
-    /// Call a tool on an MCP server (stub — returns empty result).
+    /// Call a tool on a specific MCP server.
+    ///
+    /// Routes the invocation to the server identified by `server_id`,
+    /// serializes the `input` as tool arguments, and returns the server's
+    /// response as a JSON value.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_id` — the ID of the target server
+    /// * `tool_name` — the name of the tool to invoke
+    /// * `input` — JSON arguments matching the tool's input schema
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server is not connected, the tool call
+    /// fails, or the response cannot be serialized.
     pub async fn call_tool(
         &self,
-        _server_id: &str,
-        _tool_name: &str,
-        _input: Value,
+        server_id: &str,
+        tool_name: &str,
+        input: Value,
     ) -> anyhow::Result<Value> {
-        tracing::warn!("MCP call_tool is a stub, returning empty object");
-        Ok(serde_json::json!({}))
+        let conns = self.connections.read().await;
+        let conn = conns
+            .get(server_id)
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' is not connected", server_id))?;
+
+        let arguments = match input {
+            Value::Object(map) => Some(map),
+            Value::Null => None,
+            other => {
+                let mut map = serde_json::Map::new();
+                map.insert("value".to_string(), other);
+                Some(map)
+            }
+        };
+
+        let params = CallToolRequestParams {
+            meta: None,
+            name: tool_name.to_string().into(),
+            arguments,
+            task: None,
+        };
+
+        let result = conn.service.peer().call_tool(params).await?;
+
+        let content_values: Vec<Value> = result
+            .content
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or(Value::Null))
+            .collect();
+
+        let response = serde_json::json!({
+            "content": content_values,
+            "is_error": result.is_error.unwrap_or(false),
+        });
+
+        Ok(response)
     }
 
     /// Get all registered servers and their statuses.
     pub fn servers(&self) -> &[McpServer] {
         &self.servers
+    }
+
+    /// Disconnect a specific server by ID.
+    ///
+    /// Cancels the running service and removes the connection.
+    ///
+    /// # Arguments
+    ///
+    /// * `server_id` — the ID of the server to disconnect
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the service cancellation fails.
+    pub async fn disconnect(&mut self, server_id: &str) -> anyhow::Result<()> {
+        let conn = {
+            let mut conns = self.connections.write().await;
+            conns.remove(server_id)
+        };
+
+        if let Some(conn) = conn {
+            conn.service
+                .cancel()
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to cancel MCP service: {e}"))?;
+
+            if let Some(server) = self.servers.iter_mut().find(|s| s.id == server_id) {
+                server.status = McpStatus::Disabled;
+                server.tools.clear();
+            }
+
+            tracing::info!(server_id, "MCP server disconnected");
+        }
+
+        Ok(())
+    }
+
+    /// Disconnect all connected servers and clean up.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any service cancellation fails.
+    pub async fn disconnect_all(&mut self) -> anyhow::Result<()> {
+        let server_ids: Vec<String> = {
+            let conns = self.connections.read().await;
+            conns.keys().cloned().collect()
+        };
+
+        for id in server_ids {
+            self.disconnect(&id).await?;
+        }
+
+        Ok(())
     }
 }
 

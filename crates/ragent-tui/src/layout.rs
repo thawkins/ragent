@@ -14,7 +14,7 @@ use ratatui::{
 
 use ragent_core::message::{MessagePart, Role};
 
-use crate::app::{App, LogLevel, ProviderSetupStep, ScreenMode, PROVIDER_LIST, SLASH_COMMANDS};
+use crate::app::{App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode};
 use crate::logo;
 
 /// The version string shown on the home screen.
@@ -167,10 +167,7 @@ fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
         ];
 
         if let Some(label) = app.provider_model_label() {
-            let model_id = label
-                .split(" / ")
-                .nth(1)
-                .unwrap_or(&label);
+            let model_id = label.split(" / ").nth(1).unwrap_or(&label);
             spans.push(Span::styled(
                 format!("  model: {}", model_id),
                 Style::default().fg(Color::Cyan),
@@ -187,9 +184,7 @@ fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 "⚠ No provider configured",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 "  — use /provider to set up",
@@ -418,7 +413,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-        ProviderSetupStep::Done { provider_name, model_name } => {
+        ProviderSetupStep::Done {
+            provider_name,
+            model_name,
+        } => {
             let mut lines = vec![
                 Line::from(""),
                 Line::from(Span::styled(
@@ -502,10 +500,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::ResetProvider { selected } => {
-            let active_id = app
-                .configured_provider
-                .as_ref()
-                .map(|p| p.id.as_str());
+            let active_id = app.configured_provider.as_ref().map(|p| p.id.as_str());
             let mut lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
                     "Reset Provider Credentials",
@@ -532,10 +527,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
-                    Span::styled(
-                        active_marker,
-                        Style::default().fg(Color::Green),
-                    ),
+                    Span::styled(active_marker, Style::default().fg(Color::Green)),
                 ]));
             }
 
@@ -660,7 +652,9 @@ fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
     let right_len = right_span.content.len();
-    let gap = area.width.saturating_sub(left_len as u16 + right_len as u16);
+    let gap = area
+        .width
+        .saturating_sub(left_len as u16 + right_len as u16);
     let gap_span = Span::raw(" ".repeat(gap as usize));
 
     let mut spans = left_spans;
@@ -764,10 +758,7 @@ fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
                 LogLevel::Error => ("ERR", Color::Red),
             };
             Line::from(vec![
-                Span::styled(
-                    format!("{ts} "),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!("{level_str} "),
                     Style::default()
@@ -838,16 +829,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     if app.show_log {
         right_parts.push(Span::styled(
             "▪ log:on  ",
-            Style::default()
-                .fg(Color::Yellow)
-                .bg(Color::DarkGray),
+            Style::default().fg(Color::Yellow).bg(Color::DarkGray),
         ));
     } else {
         right_parts.push(Span::styled(
             "▪ log:off  ",
-            Style::default()
-                .fg(Color::DarkGray)
-                .bg(Color::DarkGray),
+            Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         ));
     }
 
@@ -868,14 +855,13 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         right_parts.push(Span::styled(label, bar_style));
     }
 
-    right_parts.push(Span::styled(
-        "  ",
-        Style::default().bg(Color::DarkGray),
-    ));
+    right_parts.push(Span::styled("  ", Style::default().bg(Color::DarkGray)));
 
     let left_len: usize = left_spans.iter().map(|s| s.content.len()).sum();
     let right_len: usize = right_parts.iter().map(|s| s.content.len()).sum();
-    let gap = area.width.saturating_sub(left_len as u16 + right_len as u16);
+    let gap = area
+        .width
+        .saturating_sub(left_len as u16 + right_len as u16);
     let gap_str = " ".repeat(gap as usize);
 
     let mut spans = left_spans;

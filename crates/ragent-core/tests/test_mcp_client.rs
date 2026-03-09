@@ -1,5 +1,5 @@
-use ragent_core::mcp::*;
 use ragent_core::config::{McpServerConfig, McpTransport};
+use ragent_core::mcp::*;
 
 // ── New client ───────────────────────────────────────────────────
 
@@ -10,10 +10,10 @@ fn test_mcp_client_new() {
     assert!(client.list_tools().is_empty());
 }
 
-// ── Connect registers server ────────────────────────────────────
+// ── Connect disabled server registers without connecting ────────
 
 #[tokio::test]
-async fn test_mcp_client_connect() {
+async fn test_mcp_client_connect_disabled() {
     let mut client = McpClient::new();
 
     client
@@ -23,6 +23,7 @@ async fn test_mcp_client_connect() {
                 type_: McpTransport::Stdio,
                 command: Some("gh-mcp".to_string()),
                 args: vec!["--mode".to_string(), "stdio".to_string()],
+                disabled: true,
                 ..Default::default()
             },
         )
@@ -35,24 +36,24 @@ async fn test_mcp_client_connect() {
     assert!(client.servers()[0].tools.is_empty());
 }
 
-// ── Multiple servers ─────────────────────────────────────────────
+// ── Multiple disabled servers ───────────────────────────────────
 
 #[tokio::test]
-async fn test_mcp_client_multiple_servers() {
+async fn test_mcp_client_multiple_disabled_servers() {
     let mut client = McpClient::new();
 
-    client
-        .connect("server1", McpServerConfig::default())
-        .await
-        .unwrap();
-    client
-        .connect("server2", McpServerConfig::default())
-        .await
-        .unwrap();
-    client
-        .connect("server3", McpServerConfig::default())
-        .await
-        .unwrap();
+    for name in &["server1", "server2", "server3"] {
+        client
+            .connect(
+                name,
+                McpServerConfig {
+                    disabled: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
 
     assert_eq!(client.servers().len(), 3);
     let ids: Vec<&str> = client.servers().iter().map(|s| s.id.as_str()).collect();
@@ -61,13 +62,19 @@ async fn test_mcp_client_multiple_servers() {
     assert!(ids.contains(&"server3"));
 }
 
-// ── List tools (empty stub) ──────────────────────────────────────
+// ── List tools empty for disabled servers ───────────────────────
 
 #[tokio::test]
-async fn test_mcp_client_list_tools_empty() {
+async fn test_mcp_client_list_tools_empty_disabled() {
     let mut client = McpClient::new();
     client
-        .connect("test", McpServerConfig::default())
+        .connect(
+            "test",
+            McpServerConfig {
+                disabled: true,
+                ..Default::default()
+            },
+        )
         .await
         .unwrap();
 
@@ -75,17 +82,108 @@ async fn test_mcp_client_list_tools_empty() {
     assert!(tools.is_empty());
 }
 
-// ── Call tool (stub) ─────────────────────────────────────────────
+// ── Call tool on non-existent server returns error ───────────────
 
 #[tokio::test]
-async fn test_mcp_client_call_tool_stub() {
+async fn test_mcp_client_call_tool_not_connected() {
     let client = McpClient::new();
     let result = client
-        .call_tool("any", "any_tool", serde_json::json!({}))
-        .await
-        .unwrap();
+        .call_tool("missing", "any_tool", serde_json::json!({}))
+        .await;
 
-    assert!(result.is_object());
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("not connected"),
+        "Expected 'not connected' error, got: {err_msg}"
+    );
+}
+
+// ── Connect with invalid command records failure ────────────────
+
+#[tokio::test]
+async fn test_mcp_client_connect_invalid_command() {
+    let mut client = McpClient::new();
+
+    let result = client
+        .connect(
+            "bad-server",
+            McpServerConfig {
+                type_: McpTransport::Stdio,
+                command: Some("nonexistent-binary-xyz-999".to_string()),
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert_eq!(client.servers().len(), 1);
+    assert!(matches!(
+        client.servers()[0].status,
+        McpStatus::Failed { .. }
+    ));
+}
+
+// ── Connect without command for stdio returns error ─────────────
+
+#[tokio::test]
+async fn test_mcp_client_connect_stdio_no_command() {
+    let mut client = McpClient::new();
+
+    let result = client
+        .connect(
+            "no-cmd",
+            McpServerConfig {
+                type_: McpTransport::Stdio,
+                command: None,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("command"));
+}
+
+// ── Connect without url for HTTP returns error ──────────────────
+
+#[tokio::test]
+async fn test_mcp_client_connect_http_no_url() {
+    let mut client = McpClient::new();
+
+    let result = client
+        .connect(
+            "no-url",
+            McpServerConfig {
+                type_: McpTransport::Http,
+                url: None,
+                ..Default::default()
+            },
+        )
+        .await;
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("url"));
+}
+
+// ── Disconnect non-existent is a no-op ──────────────────────────
+
+#[tokio::test]
+async fn test_mcp_client_disconnect_nonexistent() {
+    let mut client = McpClient::new();
+    let result = client.disconnect("nonexistent").await;
+    assert!(result.is_ok());
+}
+
+// ── Disconnect all on empty client ──────────────────────────────
+
+#[tokio::test]
+async fn test_mcp_client_disconnect_all_empty() {
+    let mut client = McpClient::new();
+    let result = client.disconnect_all().await;
+    assert!(result.is_ok());
 }
 
 // ── McpStatus serde ──────────────────────────────────────────────

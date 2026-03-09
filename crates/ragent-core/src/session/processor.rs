@@ -54,9 +54,7 @@ impl SessionProcessor {
     ) -> Result<Message> {
         // 1. Store user message
         let user_msg = Message::user_text(session_id, user_text);
-        self.session_manager
-            .storage()
-            .create_message(&user_msg)?;
+        self.session_manager.storage().create_message(&user_msg)?;
 
         self.event_bus.publish(Event::MessageStart {
             session_id: session_id.to_string(),
@@ -187,7 +185,8 @@ impl SessionProcessor {
 
             // Log which tools are being sent with this request
             if !tool_definitions.is_empty() {
-                let tool_names: Vec<String> = tool_definitions.iter().map(|t| t.name.clone()).collect();
+                let tool_names: Vec<String> =
+                    tool_definitions.iter().map(|t| t.name.clone()).collect();
                 self.event_bus.publish(Event::ToolsSent {
                     session_id: session_id.to_string(),
                     tools: tool_names,
@@ -345,7 +344,9 @@ impl SessionProcessor {
                     event_bus: self.event_bus.clone(),
                 };
 
-                let result = self.tool_registry.get(&tc.name)
+                let result = self
+                    .tool_registry
+                    .get(&tc.name)
                     .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc.name));
                 let result = match result {
                     Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
@@ -441,9 +442,7 @@ impl SessionProcessor {
     fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
         // Ollama does not require an API key for local servers
         if provider_id == "ollama" {
-            return Ok(
-                std::env::var("OLLAMA_API_KEY").unwrap_or_default()
-            );
+            return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
         }
 
         // Copilot: prefer DB-stored device flow token (works for token
@@ -483,7 +482,11 @@ impl SessionProcessor {
         }
 
         // Check the database for a stored API key
-        if let Ok(Some(key)) = self.session_manager.storage().get_provider_auth(provider_id) {
+        if let Ok(Some(key)) = self
+            .session_manager
+            .storage()
+            .get_provider_auth(provider_id)
+        {
             if !key.is_empty() {
                 return Ok(key);
             }

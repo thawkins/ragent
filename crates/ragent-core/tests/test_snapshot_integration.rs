@@ -23,7 +23,8 @@ fn test_snapshot_multiple_files() {
     std::fs::write(&file2, "content B").unwrap();
     std::fs::write(&file3, "content C").unwrap();
 
-    let snapshot = take_snapshot("s1", "m1", &[file1.clone(), file2.clone(), file3.clone()]).unwrap();
+    let snapshot =
+        take_snapshot("s1", "m1", &[file1.clone(), file2.clone(), file3.clone()]).unwrap();
     assert_eq!(snapshot.files.len(), 3);
     assert_eq!(snapshot.files.get(&file1).unwrap(), b"content A");
     assert_eq!(snapshot.files.get(&file2).unwrap(), b"content B");
@@ -90,7 +91,10 @@ fn test_restore_creates_parent_dirs() {
     // Restore should recreate the directories
     restore_snapshot(&snapshot).unwrap();
 
-    assert_eq!(std::fs::read_to_string(&nested_path).unwrap(), "deep content");
+    assert_eq!(
+        std::fs::read_to_string(&nested_path).unwrap(),
+        "deep content"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

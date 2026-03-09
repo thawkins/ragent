@@ -122,7 +122,9 @@ fn test_session_manager_multiple_sessions() {
 #[test]
 fn test_session_fields_populated() {
     let (manager, _) = create_test_manager();
-    let session = manager.create_session(PathBuf::from("/my/project")).unwrap();
+    let session = manager
+        .create_session(PathBuf::from("/my/project"))
+        .unwrap();
 
     assert!(!session.id.is_empty());
     assert_eq!(session.directory, PathBuf::from("/my/project"));

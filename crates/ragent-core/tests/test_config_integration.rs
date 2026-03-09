@@ -8,15 +8,11 @@ use std::collections::HashMap;
 fn test_config_merge_multiple_overlays() {
     let base: Config = serde_json::from_str("{}").unwrap();
 
-    let overlay1: Config = serde_json::from_str(
-        r#"{"username": "alice", "instructions": ["be helpful"]}"#,
-    )
-    .unwrap();
+    let overlay1: Config =
+        serde_json::from_str(r#"{"username": "alice", "instructions": ["be helpful"]}"#).unwrap();
 
-    let overlay2: Config = serde_json::from_str(
-        r#"{"username": "bob", "instructions": ["be concise"]}"#,
-    )
-    .unwrap();
+    let overlay2: Config =
+        serde_json::from_str(r#"{"username": "bob", "instructions": ["be concise"]}"#).unwrap();
 
     let merged = Config::merge(Config::merge(base, overlay1), overlay2);
 
@@ -28,15 +24,12 @@ fn test_config_merge_multiple_overlays() {
 
 #[test]
 fn test_config_merge_provider_configs() {
-    let base: Config = serde_json::from_str(
-        r#"{"provider": {"anthropic": {"env": ["ANTHROPIC_API_KEY"]}}}"#,
-    )
-    .unwrap();
+    let base: Config =
+        serde_json::from_str(r#"{"provider": {"anthropic": {"env": ["ANTHROPIC_API_KEY"]}}}"#)
+            .unwrap();
 
-    let overlay: Config = serde_json::from_str(
-        r#"{"provider": {"openai": {"env": ["OPENAI_API_KEY"]}}}"#,
-    )
-    .unwrap();
+    let overlay: Config =
+        serde_json::from_str(r#"{"provider": {"openai": {"env": ["OPENAI_API_KEY"]}}}"#).unwrap();
 
     let merged = Config::merge(base, overlay);
     assert!(merged.provider.contains_key("anthropic"));
@@ -45,15 +38,11 @@ fn test_config_merge_provider_configs() {
 
 #[test]
 fn test_config_merge_provider_overlay_wins() {
-    let base: Config = serde_json::from_str(
-        r#"{"provider": {"anthropic": {"env": ["OLD_KEY"]}}}"#,
-    )
-    .unwrap();
+    let base: Config =
+        serde_json::from_str(r#"{"provider": {"anthropic": {"env": ["OLD_KEY"]}}}"#).unwrap();
 
-    let overlay: Config = serde_json::from_str(
-        r#"{"provider": {"anthropic": {"env": ["NEW_KEY"]}}}"#,
-    )
-    .unwrap();
+    let overlay: Config =
+        serde_json::from_str(r#"{"provider": {"anthropic": {"env": ["NEW_KEY"]}}}"#).unwrap();
 
     let merged = Config::merge(base, overlay);
     assert_eq!(merged.provider["anthropic"].env, vec!["NEW_KEY"]);
@@ -81,15 +70,9 @@ fn test_config_merge_permissions_append() {
 
 #[test]
 fn test_config_merge_instructions_append() {
-    let base: Config = serde_json::from_str(
-        r#"{"instructions": ["first"]}"#,
-    )
-    .unwrap();
+    let base: Config = serde_json::from_str(r#"{"instructions": ["first"]}"#).unwrap();
 
-    let overlay: Config = serde_json::from_str(
-        r#"{"instructions": ["second", "third"]}"#,
-    )
-    .unwrap();
+    let overlay: Config = serde_json::from_str(r#"{"instructions": ["second", "third"]}"#).unwrap();
 
     let merged = Config::merge(base, overlay);
     assert_eq!(merged.instructions, vec!["first", "second", "third"]);
@@ -102,10 +85,8 @@ fn test_config_merge_experimental_flags() {
     let base: Config = serde_json::from_str(r#"{}"#).unwrap();
     assert!(!base.experimental.open_telemetry);
 
-    let overlay: Config = serde_json::from_str(
-        r#"{"experimental": {"open_telemetry": true}}"#,
-    )
-    .unwrap();
+    let overlay: Config =
+        serde_json::from_str(r#"{"experimental": {"open_telemetry": true}}"#).unwrap();
 
     let merged = Config::merge(base, overlay);
     assert!(merged.experimental.open_telemetry);
@@ -113,10 +94,8 @@ fn test_config_merge_experimental_flags() {
 
 #[test]
 fn test_config_experimental_flag_sticky() {
-    let base: Config = serde_json::from_str(
-        r#"{"experimental": {"open_telemetry": true}}"#,
-    )
-    .unwrap();
+    let base: Config =
+        serde_json::from_str(r#"{"experimental": {"open_telemetry": true}}"#).unwrap();
 
     let overlay: Config = serde_json::from_str(r#"{}"#).unwrap();
     let merged = Config::merge(base, overlay);
@@ -128,10 +107,9 @@ fn test_config_experimental_flag_sticky() {
 
 #[test]
 fn test_config_merge_mcp_servers() {
-    let base: Config = serde_json::from_str(
-        r#"{"mcp": {"github": {"type": "stdio", "command": "gh-mcp"}}}"#,
-    )
-    .unwrap();
+    let base: Config =
+        serde_json::from_str(r#"{"mcp": {"github": {"type": "stdio", "command": "gh-mcp"}}}"#)
+            .unwrap();
 
     let overlay: Config = serde_json::from_str(
         r#"{"mcp": {"jira": {"type": "sse", "url": "http://localhost:3000"}}}"#,
@@ -229,7 +207,10 @@ fn test_config_full_deserialization() {
     assert!(anthropic.api.is_some());
     let api = anthropic.api.as_ref().unwrap();
     assert_eq!(api.base_url.as_deref(), Some("https://api.anthropic.com"));
-    assert_eq!(api.headers.get("x-custom").map(|s| s.as_str()), Some("value"));
+    assert_eq!(
+        api.headers.get("x-custom").map(|s| s.as_str()),
+        Some("value")
+    );
 
     // Check model config
     let claude3 = &anthropic.models["claude-3"];
@@ -276,10 +257,8 @@ fn test_config_default_agent_name() {
 
 #[test]
 fn test_config_merge_agent_configs() {
-    let base: Config = serde_json::from_str(
-        r#"{"agent": {"general": {"temperature": 0.5}}}"#,
-    )
-    .unwrap();
+    let base: Config =
+        serde_json::from_str(r#"{"agent": {"general": {"temperature": 0.5}}}"#).unwrap();
 
     let overlay: Config = serde_json::from_str(
         r#"{"agent": {"general": {"temperature": 0.8}, "build": {"max_steps": 20}}}"#,

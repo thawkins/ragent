@@ -293,13 +293,13 @@ async fn main() -> Result<()> {
             // If Ollama discovery is requested (or provider filter is "ollama"),
             // query the running Ollama server for available models.
             if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
-                match ragent_core::provider::ollama::list_ollama_models(
-                    ollama_url.as_deref(),
-                )
-                .await
+                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
                 {
                     Ok(models) if models.is_empty() => {
-                        writeln!(stdout, "No models found on Ollama server. Pull models with: ollama pull <model>")?;
+                        writeln!(
+                            stdout,
+                            "No models found on Ollama server. Pull models with: ollama pull <model>"
+                        )?;
                     }
                     Ok(models) => {
                         writeln!(stdout, "ollama models:")?;

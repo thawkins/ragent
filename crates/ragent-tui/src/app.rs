@@ -295,10 +295,7 @@ impl App {
             .unwrap_or(0);
 
         // Load persisted model selection
-        let selected_model = storage
-            .get_setting("selected_model")
-            .ok()
-            .flatten();
+        let selected_model = storage.get_setting("selected_model").ok().flatten();
 
         Self {
             messages: Vec::new(),
@@ -442,7 +439,11 @@ impl App {
             .ok()?;
         if output.status.success() {
             let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if branch.is_empty() { None } else { Some(branch) }
+            if branch.is_empty() {
+                None
+            } else {
+                Some(branch)
+            }
         } else {
             None
         }
@@ -547,11 +548,9 @@ impl App {
 
         tokio::spawn(async move {
             let available = match provider.id.as_str() {
-                "ollama" => {
-                    ragent_core::provider::ollama::list_ollama_models(None)
-                        .await
-                        .is_ok()
-                }
+                "ollama" => ragent_core::provider::ollama::list_ollama_models(None)
+                    .await
+                    .is_ok(),
                 "copilot" => {
                     if let Some(token) = copilot_token {
                         ragent_core::provider::copilot::check_copilot_health(&token).await
@@ -594,11 +593,7 @@ impl App {
                 .map(|(i, _)| i)
                 .collect();
 
-            let prev_selected = self
-                .slash_menu
-                .as_ref()
-                .map(|m| m.selected)
-                .unwrap_or(0);
+            let prev_selected = self.slash_menu.as_ref().map(|m| m.selected).unwrap_or(0);
             let selected = if matches.is_empty() {
                 0
             } else {
@@ -643,8 +638,7 @@ impl App {
                         selected: 0,
                     });
                 } else {
-                    self.status =
-                        "⚠ No provider configured — use /provider first".to_string();
+                    self.status = "⚠ No provider configured — use /provider first".to_string();
                 }
             }
             "log" => {
@@ -656,12 +650,10 @@ impl App {
                 };
             }
             "provider" => {
-                self.provider_setup =
-                    Some(ProviderSetupStep::SelectProvider { selected: 0 });
+                self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
             }
             "provider_reset" => {
-                self.provider_setup =
-                    Some(ProviderSetupStep::ResetProvider { selected: 0 });
+                self.provider_setup = Some(ProviderSetupStep::ResetProvider { selected: 0 });
             }
             _ => {
                 self.status = format!("Unknown command: /{}", trigger);
@@ -681,8 +673,7 @@ impl App {
                         return;
                     }
                     if self.selected_model.is_none() {
-                        self.status =
-                            "⚠ No model selected — use /model to choose".to_string();
+                        self.status = "⚠ No model selected — use /model to choose".to_string();
                         return;
                     }
                     // Transition from Home to Chat on first message
@@ -692,11 +683,7 @@ impl App {
                     // Create session if needed
                     if self.session_id.is_none() {
                         let dir = std::env::current_dir().unwrap_or_default();
-                        match self
-                            .session_processor
-                            .session_manager
-                            .create_session(dir)
-                        {
+                        match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
                                 self.session_id = Some(session.id);
                             }
@@ -738,10 +725,7 @@ impl App {
                     // Spawn async task to process the message
                     let processor = self.session_processor.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = processor
-                            .process_message(&sid, &text, &agent)
-                            .await
-                        {
+                        if let Err(e) = processor.process_message(&sid, &text, &agent).await {
                             // Error is already surfaced via Event::AgentError;
                             // only trace at debug level to avoid duplicating
                             // output below the TUI.
@@ -777,27 +761,24 @@ impl App {
                         _ => {}
                     }
                 }
-                InputAction::HistoryDown => {
-                    match self.history_index {
-                        Some(idx) if idx + 1 < self.input_history.len() => {
-                            let idx = idx + 1;
-                            self.history_index = Some(idx);
-                            self.input = self.input_history[idx].clone();
-                        }
-                        Some(_) => {
-                            self.history_index = None;
-                            self.input = self.history_draft.clone();
-                            self.history_draft.clear();
-                        }
-                        None => {}
+                InputAction::HistoryDown => match self.history_index {
+                    Some(idx) if idx + 1 < self.input_history.len() => {
+                        let idx = idx + 1;
+                        self.history_index = Some(idx);
+                        self.input = self.input_history[idx].clone();
                     }
-                }
+                    Some(_) => {
+                        self.history_index = None;
+                        self.input = self.history_draft.clone();
+                        self.history_draft.clear();
+                    }
+                    None => {}
+                },
                 InputAction::SwitchAgent => {
                     if !self.cycleable_agents.is_empty() {
                         self.current_agent_index =
                             (self.current_agent_index + 1) % self.cycleable_agents.len();
-                        self.agent_info =
-                            self.cycleable_agents[self.current_agent_index].clone();
+                        self.agent_info = self.cycleable_agents[self.current_agent_index].clone();
                         self.agent_name = self.agent_info.name.clone();
                     }
                 }
@@ -814,7 +795,13 @@ impl App {
             Event::SessionCreated { ref session_id } => {
                 if self.session_id.is_none() {
                     self.session_id = Some(session_id.clone());
-                    self.push_log(LogLevel::Info, format!("session created: {}", &session_id[..8.min(session_id.len())]));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "session created: {}",
+                            &session_id[..8.min(session_id.len())]
+                        ),
+                    );
                 }
             }
             Event::TextDelta {
@@ -841,7 +828,10 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
-                    self.push_log(LogLevel::Tool, format!("tool call: {} ({})", tool, &call_id[..8.min(call_id.len())]));
+                    self.push_log(
+                        LogLevel::Tool,
+                        format!("tool call: {} ({})", tool, &call_id[..8.min(call_id.len())]),
+                    );
                 }
             }
             Event::ToolCallEnd {
@@ -854,19 +844,38 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_status(call_id, error.is_none());
                     if let Some(err) = error {
-                        self.push_log(LogLevel::Error, format!("tool {} failed: {} ({}ms)", tool, err, duration_ms));
+                        self.push_log(
+                            LogLevel::Error,
+                            format!("tool {} failed: {} ({}ms)", tool, err, duration_ms),
+                        );
                     } else {
-                        self.push_log(LogLevel::Tool, format!("tool {} completed ({}ms)", tool, duration_ms));
+                        self.push_log(
+                            LogLevel::Tool,
+                            format!("tool {} completed ({}ms)", tool, duration_ms),
+                        );
                     }
                 }
             }
-            Event::MessageStart { ref session_id, ref message_id } => {
+            Event::MessageStart {
+                ref session_id,
+                ref message_id,
+            } => {
                 if self.is_current_session(session_id) {
                     self.status = "processing...".to_string();
-                    self.push_log(LogLevel::Info, format!("response started ({})", &message_id[..8.min(message_id.len())]));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "response started ({})",
+                            &message_id[..8.min(message_id.len())]
+                        ),
+                    );
                 }
             }
-            Event::MessageEnd { ref session_id, ref reason, .. } => {
+            Event::MessageEnd {
+                ref session_id,
+                ref reason,
+                ..
+            } => {
                 if self.is_current_session(session_id) {
                     self.status = "ready".to_string();
                     self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
@@ -888,14 +897,24 @@ impl App {
                         tool_call_id: None,
                     });
                     self.status = "awaiting permission".to_string();
-                    self.push_log(LogLevel::Warn, format!("permission requested: {} — {}", permission, description));
+                    self.push_log(
+                        LogLevel::Warn,
+                        format!("permission requested: {} — {}", permission, description),
+                    );
                 }
             }
-            Event::PermissionReplied { ref session_id, allowed, .. } => {
+            Event::PermissionReplied {
+                ref session_id,
+                allowed,
+                ..
+            } => {
                 if self.is_current_session(session_id) {
                     self.permission_pending = None;
                     self.status = "processing...".to_string();
-                    self.push_log(LogLevel::Info, format!("permission {}", if allowed { "granted" } else { "denied" }));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("permission {}", if allowed { "granted" } else { "denied" }),
+                    );
                 }
             }
             Event::AgentSwitched {
@@ -929,7 +948,13 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.token_usage.0 += input_tokens;
                     self.token_usage.1 += output_tokens;
-                    self.push_log(LogLevel::Info, format!("tokens: +{}in +{}out (total {}in {}out)", input_tokens, output_tokens, self.token_usage.0, self.token_usage.1));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "tokens: +{}in +{}out (total {}in {}out)",
+                            input_tokens, output_tokens, self.token_usage.0, self.token_usage.1
+                        ),
+                    );
                 }
             }
             Event::ToolsSent {
@@ -937,7 +962,10 @@ impl App {
                 ref tools,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(LogLevel::Info, format!("tools sent: [{}]", tools.join(", ")));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("tools sent: [{}]", tools.join(", ")),
+                    );
                 }
             }
             Event::ModelResponse {
@@ -982,12 +1010,8 @@ impl App {
         {
             let _ = self.storage.set_provider_auth("copilot", token);
 
-            let _ = self
-                .storage
-                .set_setting("copilot_api_base", api_base);
-            let _ = self
-                .storage
-                .delete_setting("provider_copilot_disabled");
+            let _ = self.storage.set_setting("copilot_api_base", api_base);
+            let _ = self.storage.delete_setting("provider_copilot_disabled");
             self.push_log(
                 LogLevel::Info,
                 format!("Copilot authorised (api: {api_base})"),
@@ -1143,10 +1167,7 @@ impl App {
 fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
-    let cleaned = raw
-        .trim()
-        .strip_prefix("LLM call failed: ")
-        .unwrap_or(raw);
+    let cleaned = raw.trim().strip_prefix("LLM call failed: ").unwrap_or(raw);
 
     // Truncate to a reasonable length for the status bar
     if cleaned.len() > 120 {

@@ -157,7 +157,11 @@ async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
                 Ok(val) => (StatusCode::OK, Json(val)).into_response(),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to serialize session list");
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "serialization failed" }))).into_response()
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "serialization failed" })),
+                    )
+                        .into_response()
                 }
             }
         }
@@ -225,7 +229,11 @@ async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> i
                 Ok(val) => (StatusCode::OK, Json(val)).into_response(),
                 Err(e) => {
                     tracing::warn!(error = %e, "Failed to serialize session");
-                    (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "serialization failed" }))).into_response()
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "serialization failed" })),
+                    )
+                        .into_response()
                 }
             }
         }
@@ -262,7 +270,11 @@ async fn get_messages(State(state): State<AppState>, Path(id): Path<String>) -> 
             Ok(val) => (StatusCode::OK, Json(val)).into_response(),
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to serialize messages");
-                (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "serialization failed" }))).into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({ "error": "serialization failed" })),
+                )
+                    .into_response()
             }
         },
         Err(e) => (
@@ -284,10 +296,7 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Response {
     {
-        let mut limiter = state
-            .rate_limiter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut limiter = state.rate_limiter.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         let entry = limiter.entry(id.clone()).or_insert((0, now));
         if now.duration_since(entry.1).as_secs() >= 60 {

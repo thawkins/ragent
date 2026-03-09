@@ -113,9 +113,7 @@ impl Message {
         Self::new(
             session_id,
             Role::User,
-            vec![MessagePart::Text {
-                text: text.into(),
-            }],
+            vec![MessagePart::Text { text: text.into() }],
         )
     }
 
