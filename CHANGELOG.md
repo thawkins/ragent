@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.2] - 2025-07-25
+
+### Added
+- `/provider_reset` slash command with interactive provider selection UI
+- Persistent provider disable flag — reset providers stay disabled across restarts
+- Clipboard copy support on Copilot device code screen (`c` key, Linux-aware via `arboard`)
+- Storage methods: `delete_provider_auth()`, `delete_setting()` with full test coverage
+- `discover_api_base_multi_source()` for robust Copilot API base resolution
+- VS Code-compatible headers for Copilot chat API (fixes 400 errors on plan-specific endpoints)
+
+### Fixed
+- Copilot "Unknown model" error — DB-stored device flow token now prioritised over `gh` CLI token
+- Copilot API base URL resolution uses plan-specific endpoint (`api.individual.githubcopilot.com`)
+- Provider reset now properly persists by storing a disabled flag in settings
+
+### Changed
+- `CopilotDeviceFlowComplete` event now carries `api_base` field
+- Token exchange returns `TokenExchangeResult` with optional endpoints
+- `resolve_api_key` for Copilot checks DB-stored token first, then falls back to other sources
+
 ## [0.1.0-alpha.1] - 2026-03-09
 
 ### Added

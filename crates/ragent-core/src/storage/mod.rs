@@ -390,6 +390,20 @@ impl Storage {
         Ok(())
     }
 
+    /// Removes the stored API key for the given provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_provider_auth(&self, provider_id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "DELETE FROM provider_auth WHERE provider_id = ?1",
+            params![provider_id],
+        )?;
+        Ok(())
+    }
+
     /// Retrieves the stored API key for a provider, or `None` if not set.
     ///
     /// # Errors
@@ -418,6 +432,17 @@ impl Storage {
             "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
             params![key, value, now],
         )?;
+        Ok(())
+    }
+
+    /// Removes a setting value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
         Ok(())
     }
 

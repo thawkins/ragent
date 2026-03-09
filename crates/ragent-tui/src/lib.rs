@@ -45,6 +45,7 @@ pub async fn run_tui(
     provider_registry: Arc<ProviderRegistry>,
     session_processor: Arc<SessionProcessor>,
     agent: AgentInfo,
+    show_log: bool,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -58,6 +59,7 @@ pub async fn run_tui(
         provider_registry,
         session_processor,
         agent,
+        show_log,
     );
     app.check_provider_health();
     let mut bus_stream = BroadcastStream::new(event_bus.subscribe());

@@ -14,7 +14,7 @@ use ratatui::{
 
 use ragent_core::message::{MessagePart, Role};
 
-use crate::app::{App, ProviderSetupStep, ScreenMode, PROVIDER_LIST, SLASH_COMMANDS};
+use crate::app::{App, LogLevel, ProviderSetupStep, ScreenMode, PROVIDER_LIST, SLASH_COMMANDS};
 use crate::logo;
 
 /// The version string shown on the home screen.
@@ -178,7 +178,7 @@ fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
         }
 
         spans.push(Span::styled(
-            "  — press p to change",
+            "  — use /provider to change",
             Style::default().fg(Color::DarkGray),
         ));
 
@@ -192,7 +192,7 @@ fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "  — press p to set up a provider",
+                "  — use /provider to set up",
                 Style::default().fg(Color::Yellow),
             ),
         ]));
@@ -303,6 +303,58 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(" Enter API Key ")
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+        ProviderSetupStep::DeviceFlowPending {
+            user_code,
+            verification_uri,
+        } => {
+            let lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    "GitHub Copilot Authorisation",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("Visit the URL below and enter the code:"),
+                Line::from(""),
+                Line::from(Span::styled(
+                    verification_uri.as_str(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::UNDERLINED),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::raw("Code: "),
+                    Span::styled(
+                        user_code.as_str(),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Waiting for authorisation…",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "c copy code  Esc cancel",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ];
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Copilot Sign In ")
                 .border_style(Style::default().fg(Color::Cyan));
 
             let paragraph = Paragraph::new(lines)
@@ -449,6 +501,60 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Left);
             frame.render_widget(paragraph, area);
         }
+        ProviderSetupStep::ResetProvider { selected } => {
+            let active_id = app
+                .configured_provider
+                .as_ref()
+                .map(|p| p.id.as_str());
+            let mut lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    "Reset Provider Credentials",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+
+            for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
+                let is_active = active_id == Some(*pid);
+                let (indicator, style) = if i == *selected {
+                    (
+                        "▸ ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("  ", Style::default().fg(Color::White))
+                };
+                let active_marker = if is_active { " ●" } else { "" };
+                lines.push(Line::from(vec![
+                    Span::styled(indicator, style),
+                    Span::styled(*pname, style),
+                    Span::styled(
+                        active_marker,
+                        Style::default().fg(Color::Green),
+                    ),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "↑/↓ navigate  Enter reset  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Provider Reset ")
+                .border_style(Style::default().fg(Color::Yellow));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
     }
 }
 
@@ -535,6 +641,18 @@ fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    if app.show_log {
+        left_spans.push(Span::styled(
+            "  ▪ log:on",
+            Style::default().fg(Color::Yellow),
+        ));
+    } else {
+        left_spans.push(Span::styled(
+            "  ▪ log:off",
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
     let right_span = Span::styled(
         format!("{}  ", version),
         Style::default().fg(Color::DarkGray),
@@ -570,13 +688,29 @@ fn render_chat(frame: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // status bar
-            Constraint::Min(3),    // messages
+            Constraint::Min(3),    // messages + optional log
             Constraint::Length(3), // input
         ])
         .split(frame.area());
 
     render_status_bar(frame, app, chunks[0]);
-    render_messages(frame, app, chunks[1]);
+
+    // Split the middle area horizontally when the log panel is visible.
+    if app.show_log {
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(70), // messages
+                Constraint::Percentage(30), // log
+            ])
+            .split(chunks[1]);
+
+        render_messages(frame, app, h_chunks[0]);
+        render_log_panel(frame, app, h_chunks[1]);
+    } else {
+        render_messages(frame, app, chunks[1]);
+    }
+
     render_input(frame, app, chunks[2]);
 
     // Slash menu dropdown (above the chat input, if active)
@@ -592,6 +726,69 @@ fn render_chat(frame: &mut Frame, app: &App) {
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
     }
+}
+
+fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Log ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if app.log_entries.is_empty() {
+        let empty = Paragraph::new(Line::from(Span::styled(
+            "No log entries yet",
+            Style::default().fg(Color::DarkGray),
+        )));
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    // Build lines from log entries
+    let lines: Vec<Line> = app
+        .log_entries
+        .iter()
+        .map(|entry| {
+            let ts = entry.timestamp.format("%H:%M:%S");
+            let (level_str, level_color) = match entry.level {
+                LogLevel::Info => ("INF", Color::Blue),
+                LogLevel::Tool => ("TUL", Color::Cyan),
+                LogLevel::Warn => ("WRN", Color::Yellow),
+                LogLevel::Error => ("ERR", Color::Red),
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!("{ts} "),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled(
+                    format!("{level_str} "),
+                    Style::default()
+                        .fg(level_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(&entry.message),
+            ])
+        })
+        .collect();
+
+    let total_lines = lines.len() as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll = app.log_scroll_offset.min(max_scroll);
+
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((max_scroll.saturating_sub(scroll), 0));
+
+    frame.render_widget(paragraph, inner);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -635,8 +832,24 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // Right side: provider/model with health indicator
+    // Right side: log indicator + provider/model with health indicator
     let mut right_parts: Vec<Span<'_>> = Vec::new();
+
+    if app.show_log {
+        right_parts.push(Span::styled(
+            "▪ log:on  ",
+            Style::default()
+                .fg(Color::Yellow)
+                .bg(Color::DarkGray),
+        ));
+    } else {
+        right_parts.push(Span::styled(
+            "▪ log:off  ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .bg(Color::DarkGray),
+        ));
+    }
 
     if let Some(label) = app.provider_model_label() {
         let (icon, health_color) = match app.provider_health_status() {

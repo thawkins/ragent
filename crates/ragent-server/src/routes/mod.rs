@@ -425,7 +425,20 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         }
         | Event::TokenUsage {
             session_id: sid, ..
+        }
+        | Event::ToolsSent {
+            session_id: sid, ..
+        }
+        | Event::ModelResponse {
+            session_id: sid, ..
+        }
+        | Event::ToolCallArgs {
+            session_id: sid, ..
+        }
+        | Event::ToolResult {
+            session_id: sid, ..
         } => sid == session_id,
         Event::McpStatusChanged { .. } => false,
+        Event::CopilotDeviceFlowComplete { .. } => false,
     }
 }

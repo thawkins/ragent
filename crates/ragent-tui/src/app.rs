@@ -22,6 +22,30 @@ use ragent_core::{
 use crate::input::{self, InputAction};
 use crate::tips;
 
+/// Severity level for a log entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    /// Informational message (prompts sent, session created, etc.).
+    Info,
+    /// Tool-related activity (call start, call end).
+    Tool,
+    /// Warning or recoverable issue.
+    Warn,
+    /// Unrecoverable error.
+    Error,
+}
+
+/// A single entry in the log panel.
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    /// Wall-clock timestamp (UTC).
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Severity / category.
+    pub level: LogLevel,
+    /// Human-readable log message.
+    pub message: String,
+}
+
 /// Which screen the TUI is currently showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenMode {
@@ -58,6 +82,13 @@ pub enum ProviderSetupStep {
         /// Optional error message from a previous attempt.
         error: Option<String>,
     },
+    /// Waiting for the user to complete Copilot device flow authorisation.
+    DeviceFlowPending {
+        /// Short code the user enters at the verification URL.
+        user_code: String,
+        /// URL the user must visit (e.g. `https://github.com/login/device`).
+        verification_uri: String,
+    },
     /// Choosing which model to use from the selected provider.
     SelectModel {
         /// The provider id (e.g. `"anthropic"`).
@@ -81,6 +112,11 @@ pub enum ProviderSetupStep {
         /// Available agent names and descriptions.
         agents: Vec<(String, String)>,
         /// Index of the highlighted agent.
+        selected: usize,
+    },
+    /// Choosing which provider to reset and remove credentials for.
+    ResetProvider {
+        /// Index of the highlighted provider in [`PROVIDER_LIST`].
         selected: usize,
     },
 }
@@ -123,12 +159,20 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Switch the active agent",
     },
     SlashCommandDef {
+        trigger: "log",
+        description: "Toggle the log panel on/off",
+    },
+    SlashCommandDef {
         trigger: "model",
         description: "Switch the active model on the current provider",
     },
     SlashCommandDef {
         trigger: "provider",
         description: "Change the LLM provider (re-enters setup flow)",
+    },
+    SlashCommandDef {
+        trigger: "provider_reset",
+        description: "Reset the current provider and remove stored credentials",
     },
 ];
 
@@ -205,6 +249,12 @@ pub struct App {
     pub history_index: Option<usize>,
     /// Saved in-progress input while browsing history.
     pub history_draft: String,
+    /// Whether the log panel is visible.
+    pub show_log: bool,
+    /// Log entries displayed in the log panel.
+    pub log_entries: Vec<LogEntry>,
+    /// Scroll offset for the log panel (lines from bottom).
+    pub log_scroll_offset: u16,
 }
 
 impl App {
@@ -215,6 +265,7 @@ impl App {
         provider_registry: Arc<ProviderRegistry>,
         session_processor: Arc<SessionProcessor>,
         agent_info: AgentInfo,
+        show_log: bool,
     ) -> Self {
         let cwd = std::env::current_dir()
             .map(|p| {
@@ -278,62 +329,93 @@ impl App {
             input_history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
+            show_log,
+            log_entries: Vec::new(),
+            log_scroll_offset: 0,
         }
     }
 
     /// Detect the first configured provider by checking env vars and the database.
     pub fn detect_provider(storage: &Storage) -> Option<ConfiguredProvider> {
+        // Helper: returns true when the user has explicitly reset this provider.
+        let is_disabled = |pid: &str| -> bool {
+            storage
+                .get_setting(&format!("provider_{pid}_disabled"))
+                .ok()
+                .flatten()
+                .is_some()
+        };
+
         // Check Anthropic
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if !key.is_empty() {
-                return Some(ConfiguredProvider {
-                    id: "anthropic".into(),
-                    name: "Anthropic (Claude)".into(),
-                    source: ProviderSource::EnvVar,
-                });
+        if !is_disabled("anthropic") {
+            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                if !key.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "anthropic".into(),
+                        name: "Anthropic (Claude)".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
             }
         }
         // Check OpenAI
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-            if !key.is_empty() {
-                return Some(ConfiguredProvider {
-                    id: "openai".into(),
-                    name: "OpenAI (GPT)".into(),
-                    source: ProviderSource::EnvVar,
-                });
+        if !is_disabled("openai") {
+            if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                if !key.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "openai".into(),
+                        name: "OpenAI (GPT)".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
             }
         }
         // Check Copilot env var
-        if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
-            if !key.is_empty() {
+        if !is_disabled("copilot") {
+            if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
+                if !key.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "copilot".into(),
+                        name: "GitHub Copilot".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
+            }
+            // Check Copilot auto-discover (IDE config)
+            if ragent_core::provider::copilot::find_copilot_token().is_some() {
                 return Some(ConfiguredProvider {
                     id: "copilot".into(),
                     name: "GitHub Copilot".into(),
-                    source: ProviderSource::EnvVar,
+                    source: ProviderSource::AutoDiscovered,
+                });
+            }
+            // Check Copilot via gh CLI
+            if ragent_core::provider::copilot::find_gh_cli_token().is_some() {
+                return Some(ConfiguredProvider {
+                    id: "copilot".into(),
+                    name: "GitHub Copilot".into(),
+                    source: ProviderSource::AutoDiscovered,
                 });
             }
         }
-        // Check Copilot auto-discover
-        if ragent_core::provider::copilot::find_copilot_token().is_some() {
-            return Some(ConfiguredProvider {
-                id: "copilot".into(),
-                name: "GitHub Copilot".into(),
-                source: ProviderSource::AutoDiscovered,
-            });
-        }
         // Check Ollama (always available locally)
-        if let Ok(host) = std::env::var("OLLAMA_HOST") {
-            if !host.is_empty() {
-                return Some(ConfiguredProvider {
-                    id: "ollama".into(),
-                    name: "Ollama (Local)".into(),
-                    source: ProviderSource::EnvVar,
-                });
+        if !is_disabled("ollama") {
+            if let Ok(host) = std::env::var("OLLAMA_HOST") {
+                if !host.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "ollama".into(),
+                        name: "Ollama (Local)".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
             }
         }
 
         // Check database for any stored provider auth
         for (pid, pname) in PROVIDER_LIST {
+            if is_disabled(pid) {
+                continue;
+            }
             if let Ok(Some(_key)) = storage.get_provider_auth(pid) {
                 return Some(ConfiguredProvider {
                     id: pid.to_string(),
@@ -383,6 +465,33 @@ impl App {
                 }
             }
         }
+        if provider_id == "copilot" {
+            // Prefer DB-stored device flow token (works for token exchange),
+            // then fall back to other token sources for model discovery.
+            let token = self
+                .storage
+                .get_provider_auth("copilot")
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty())
+                .or_else(|| {
+                    let storage = self.storage.clone();
+                    let db_lookup = move || -> Option<String> { None }; // already checked
+                    ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
+                });
+            if let Some(token) = token {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle.block_on(ragent_core::provider::copilot::list_copilot_models(&token))
+                    });
+                    if let Ok(models) = result {
+                        if !models.is_empty() {
+                            return models.into_iter().map(|m| (m.id, m.name)).collect();
+                        }
+                    }
+                }
+            }
+        }
         self.provider_registry
             .get(provider_id)
             .map(|p| {
@@ -420,6 +529,22 @@ impl App {
         self.provider_health.store(0, Ordering::Relaxed);
         let health = self.provider_health.clone();
 
+        // Pre-resolve the copilot token using the centralized resolver:
+        // env var → IDE auto-discover → gh CLI → database.
+        let copilot_token = if provider.id == "copilot" {
+            let storage = self.storage.clone();
+            let db_lookup = move || {
+                storage
+                    .get_provider_auth("copilot")
+                    .ok()
+                    .flatten()
+                    .filter(|k| !k.is_empty())
+            };
+            ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
+        } else {
+            None
+        };
+
         tokio::spawn(async move {
             let available = match provider.id.as_str() {
                 "ollama" => {
@@ -428,10 +553,8 @@ impl App {
                         .is_ok()
                 }
                 "copilot" => {
-                    if let Some(token) = ragent_core::provider::copilot::find_copilot_token() {
-                        ragent_core::provider::copilot::list_copilot_models(&token, None)
-                            .await
-                            .is_ok()
+                    if let Some(token) = copilot_token {
+                        ragent_core::provider::copilot::check_copilot_health(&token).await
                     } else {
                         false
                     }
@@ -524,9 +647,21 @@ impl App {
                         "⚠ No provider configured — use /provider first".to_string();
                 }
             }
+            "log" => {
+                self.show_log = !self.show_log;
+                self.status = if self.show_log {
+                    "log panel visible".to_string()
+                } else {
+                    "log panel hidden".to_string()
+                };
+            }
             "provider" => {
                 self.provider_setup =
                     Some(ProviderSetupStep::SelectProvider { selected: 0 });
+            }
+            "provider_reset" => {
+                self.provider_setup =
+                    Some(ProviderSetupStep::ResetProvider { selected: 0 });
             }
             _ => {
                 self.status = format!("Unknown command: /{}", trigger);
@@ -542,12 +677,12 @@ impl App {
                     // Block sending if no provider/model is configured
                     if self.configured_provider.is_none() {
                         self.status =
-                            "⚠ No provider configured — press p to set up".to_string();
+                            "⚠ No provider configured — use /provider to set up".to_string();
                         return;
                     }
                     if self.selected_model.is_none() {
                         self.status =
-                            "⚠ No model selected — press p to choose a model".to_string();
+                            "⚠ No model selected — use /model to choose".to_string();
                         return;
                     }
                     // Transition from Home to Chat on first message
@@ -581,6 +716,14 @@ impl App {
                     self.input.clear();
                     self.status = "processing...".to_string();
 
+                    // Log the prompt
+                    let truncated = if text.len() > 120 {
+                        format!("{}…", &text[..120])
+                    } else {
+                        text.clone()
+                    };
+                    self.push_log(LogLevel::Info, format!("prompt sent: {}", truncated));
+
                     // Build agent with the selected model override
                     let mut agent = self.agent_info.clone();
                     if let Some(ref model_str) = self.selected_model {
@@ -599,7 +742,10 @@ impl App {
                             .process_message(&sid, &text, &agent)
                             .await
                         {
-                            tracing::error!(error = %e, "Failed to process message");
+                            // Error is already surfaced via Event::AgentError;
+                            // only trace at debug level to avoid duplicating
+                            // output below the TUI.
+                            tracing::debug!(error = %e, "Failed to process message");
                         }
                     });
                 }
@@ -668,6 +814,7 @@ impl App {
             Event::SessionCreated { ref session_id } => {
                 if self.session_id.is_none() {
                     self.session_id = Some(session_id.clone());
+                    self.push_log(LogLevel::Info, format!("session created: {}", &session_id[..8.min(session_id.len())]));
                 }
             }
             Event::TextDelta {
@@ -694,26 +841,35 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
+                    self.push_log(LogLevel::Tool, format!("tool call: {} ({})", tool, &call_id[..8.min(call_id.len())]));
                 }
             }
             Event::ToolCallEnd {
                 ref session_id,
                 ref call_id,
+                ref tool,
                 ref error,
-                ..
+                duration_ms,
             } => {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_status(call_id, error.is_none());
+                    if let Some(err) = error {
+                        self.push_log(LogLevel::Error, format!("tool {} failed: {} ({}ms)", tool, err, duration_ms));
+                    } else {
+                        self.push_log(LogLevel::Tool, format!("tool {} completed ({}ms)", tool, duration_ms));
+                    }
                 }
             }
-            Event::MessageStart { ref session_id, .. } => {
+            Event::MessageStart { ref session_id, ref message_id } => {
                 if self.is_current_session(session_id) {
                     self.status = "processing...".to_string();
+                    self.push_log(LogLevel::Info, format!("response started ({})", &message_id[..8.min(message_id.len())]));
                 }
             }
-            Event::MessageEnd { ref session_id, .. } => {
+            Event::MessageEnd { ref session_id, ref reason, .. } => {
                 if self.is_current_session(session_id) {
                     self.status = "ready".to_string();
+                    self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
                 }
             }
             Event::PermissionRequested {
@@ -732,21 +888,24 @@ impl App {
                         tool_call_id: None,
                     });
                     self.status = "awaiting permission".to_string();
+                    self.push_log(LogLevel::Warn, format!("permission requested: {} — {}", permission, description));
                 }
             }
-            Event::PermissionReplied { ref session_id, .. } => {
+            Event::PermissionReplied { ref session_id, allowed, .. } => {
                 if self.is_current_session(session_id) {
                     self.permission_pending = None;
                     self.status = "processing...".to_string();
+                    self.push_log(LogLevel::Info, format!("permission {}", if allowed { "granted" } else { "denied" }));
                 }
             }
             Event::AgentSwitched {
                 ref session_id,
+                ref from,
                 ref to,
-                ..
             } => {
                 if self.is_current_session(session_id) {
                     self.agent_name = to.clone();
+                    self.push_log(LogLevel::Info, format!("agent switched: {} → {}", from, to));
                 }
             }
             Event::AgentError {
@@ -754,7 +913,12 @@ impl App {
                 ref error,
             } => {
                 if self.is_current_session(session_id) {
-                    self.status = format!("error: {}", error);
+                    // Full details go to the log panel only
+                    self.push_log(LogLevel::Error, format!("agent error: {}", error));
+                    // Clean summary for the status bar and chat panel
+                    let summary = summarise_error(error);
+                    self.status = format!("error: {}", summary);
+                    self.append_assistant_text(&format!("⚠ {}", summary));
                 }
             }
             Event::TokenUsage {
@@ -765,10 +929,87 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.token_usage.0 += input_tokens;
                     self.token_usage.1 += output_tokens;
+                    self.push_log(LogLevel::Info, format!("tokens: +{}in +{}out (total {}in {}out)", input_tokens, output_tokens, self.token_usage.0, self.token_usage.1));
+                }
+            }
+            Event::ToolsSent {
+                ref session_id,
+                ref tools,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(LogLevel::Info, format!("tools sent: [{}]", tools.join(", ")));
+                }
+            }
+            Event::ModelResponse {
+                ref session_id,
+                ref text,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(LogLevel::Info, format!("model response: {}", text));
+                }
+            }
+            Event::ToolCallArgs {
+                ref session_id,
+                ref tool,
+                ref args,
+                ..
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(LogLevel::Tool, format!("→ {}({})", tool, args));
+                }
+            }
+            Event::ToolResult {
+                ref session_id,
+                ref tool,
+                ref content,
+                success,
+                ..
+            } => {
+                if self.is_current_session(session_id) {
+                    let icon = if success { "✓" } else { "✗" };
+                    self.push_log(LogLevel::Tool, format!("← {} {} {}", tool, icon, content));
                 }
             }
             _ => {}
         }
+
+        // Handle device flow completion outside the match to avoid
+        // borrow issues (we need &mut self for storage + UI updates).
+        if let Event::CopilotDeviceFlowComplete {
+            ref token,
+            ref api_base,
+        } = event
+        {
+            let _ = self.storage.set_provider_auth("copilot", token);
+
+            let _ = self
+                .storage
+                .set_setting("copilot_api_base", api_base);
+            let _ = self
+                .storage
+                .delete_setting("provider_copilot_disabled");
+            self.push_log(
+                LogLevel::Info,
+                format!("Copilot authorised (api: {api_base})"),
+            );
+            self.refresh_provider();
+            let models = self.models_for_provider("copilot");
+            self.provider_setup = Some(ProviderSetupStep::SelectModel {
+                provider_id: "copilot".to_string(),
+                provider_name: "GitHub Copilot".to_string(),
+                models,
+                selected: 0,
+            });
+        }
+    }
+
+    /// Append a log entry to the log buffer.
+    pub fn push_log(&mut self, level: LogLevel, message: String) {
+        self.log_entries.push(LogEntry {
+            timestamp: chrono::Utc::now(),
+            level,
+            message,
+        });
     }
 
     fn is_current_session(&self, session_id: &str) -> bool {
@@ -892,5 +1133,25 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// Produces a short, user-facing summary from a raw error string.
+///
+/// Strips JSON payloads, HTTP status codes, and verbose context so the
+/// chat panel only shows the essential message.
+fn summarise_error(raw: &str) -> String {
+    // Try to extract just the human-readable message from common patterns
+    // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
+    let cleaned = raw
+        .trim()
+        .strip_prefix("LLM call failed: ")
+        .unwrap_or(raw);
+
+    // Truncate to a reasonable length for the status bar
+    if cleaned.len() > 120 {
+        format!("{}…", &cleaned[..120])
+    } else {
+        cleaned.to_string()
     }
 }

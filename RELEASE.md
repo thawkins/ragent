@@ -1,14 +1,15 @@
 # Release
 
-## Current Version: 0.1.0-alpha.0
+## Current Version: 0.1.0-alpha.2
 
-### Added
-- Initial project scaffolding with Cargo workspace (3 crates)
-- Core library (ragent-core): agent, config, event, llm, mcp, message, permission, provider, session, snapshot, storage, tool modules
-- Provider adapters for Anthropic and OpenAI with SSE streaming
-- 8 built-in tools: read, write, edit, bash, grep, glob, list, question
-- Permission system with glob-based rule matching
-- SQLite storage for sessions, messages, and provider auth
-- HTTP server (ragent-server) with REST + SSE endpoints via axum
-- Terminal UI (ragent-tui) with ratatui
-- CLI entry point with clap (run, serve, session, auth, models, config commands)
+### Added (since 0.1.0-alpha.1)
+- `/provider_reset` slash command with interactive provider selection and persistent disable flag
+- Clipboard copy support on Copilot device code screen (Linux-aware via `arboard`)
+- Storage methods: `delete_provider_auth()`, `delete_setting()`
+- Robust Copilot API base resolution with multi-source token discovery
+- VS Code-compatible headers for Copilot chat API
+
+### Fixed (since 0.1.0-alpha.1)
+- Copilot "Unknown model" error — device flow token now prioritised over `gh` CLI token
+- Copilot API uses plan-specific endpoint (`api.individual.githubcopilot.com`)
+- Provider reset persistence across app restarts

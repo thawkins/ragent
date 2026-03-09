@@ -51,6 +51,10 @@ struct Cli {
     #[arg(long, global = true)]
     yes: bool,
 
+    /// Show the log panel in the TUI
+    #[arg(long, global = true)]
+    log: bool,
+
     /// Path to config file
     #[arg(long, global = true)]
     config: Option<String>,
@@ -208,6 +212,7 @@ async fn main() -> Result<()> {
                     provider_registry,
                     session_processor,
                     resolved_agent.clone(),
+                    cli.log,
                 )
                 .await?;
             }

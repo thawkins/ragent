@@ -130,6 +130,63 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "output_tokens": output_tokens,
             }),
         ),
+        Event::ToolsSent {
+            session_id,
+            tools,
+        } => (
+            "tools_sent",
+            serde_json::json!({
+                "session_id": session_id,
+                "tools": tools,
+            }),
+        ),
+        Event::ModelResponse {
+            session_id,
+            text,
+        } => (
+            "model_response",
+            serde_json::json!({
+                "session_id": session_id,
+                "text": text,
+            }),
+        ),
+        Event::ToolCallArgs {
+            session_id,
+            call_id,
+            tool,
+            args,
+        } => (
+            "tool_call_args",
+            serde_json::json!({
+                "session_id": session_id,
+                "call_id": call_id,
+                "tool": tool,
+                "args": args,
+            }),
+        ),
+        Event::ToolResult {
+            session_id,
+            call_id,
+            tool,
+            content,
+            success,
+        } => (
+            "tool_result",
+            serde_json::json!({
+                "session_id": session_id,
+                "call_id": call_id,
+                "tool": tool,
+                "content": content,
+                "success": success,
+            }),
+        ),
+        Event::CopilotDeviceFlowComplete { token, api_base } => (
+            "copilot_device_flow_complete",
+            serde_json::json!({
+                "token_present": !token.is_empty(),
+                "api_base": api_base,
+            }),
+        ),
     };
 
     SseEvent::default().event(event_type).data(data.to_string())

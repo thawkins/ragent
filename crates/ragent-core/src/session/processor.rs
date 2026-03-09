@@ -11,7 +11,7 @@ use std::time::Instant;
 use anyhow::{Result, bail};
 use futures::StreamExt;
 use serde_json::{Value, json};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
@@ -104,8 +104,27 @@ impl SessionProcessor {
                 return Err(e);
             }
         };
+
+        // For Copilot, pass the stored plan-specific API base URL
+        let base_url = if model_ref.provider_id == "copilot" {
+            self.session_manager
+                .storage()
+                .get_setting("copilot_api_base")
+                .ok()
+                .flatten()
+        } else {
+            None
+        };
+
+        tracing::info!(
+            provider = %model_ref.provider_id,
+            model = %model_ref.model_id,
+            api_base = ?base_url,
+            "creating LLM client"
+        );
+
         let client = match provider
-            .create_client(&api_key, None, &HashMap::new())
+            .create_client(&api_key, base_url.as_deref(), &HashMap::new())
             .await
         {
             Ok(c) => c,
@@ -166,11 +185,22 @@ impl SessionProcessor {
                 options: agent.options.clone(),
             };
 
+            // Log which tools are being sent with this request
+            if !tool_definitions.is_empty() {
+                let tool_names: Vec<String> = tool_definitions.iter().map(|t| t.name.clone()).collect();
+                self.event_bus.publish(Event::ToolsSent {
+                    session_id: session_id.to_string(),
+                    tools: tool_names,
+                });
+            }
+
             // Call LLM
             let mut stream = match client.chat(request).await {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("LLM call failed: {}", redact_secrets(&e.to_string()));
+                    // Full details logged at debug level; the AgentError event
+                    // carries the message to the TUI log panel.
+                    debug!("LLM call failed: {}", redact_secrets(&e.to_string()));
                     self.event_bus.publish(Event::AgentError {
                         session_id: session_id.to_string(),
                         error: e.to_string(),
@@ -234,7 +264,7 @@ impl SessionProcessor {
                         });
                     }
                     StreamEvent::Error { message } => {
-                        error!("Stream error: {}", redact_secrets(&message));
+                        debug!("Stream error: {}", redact_secrets(&message));
                         self.event_bus.publish(Event::AgentError {
                             session_id: session_id.to_string(),
                             error: message,
@@ -253,6 +283,16 @@ impl SessionProcessor {
                 });
             }
             if !text_buffer.is_empty() {
+                // Log the model response text
+                let response_preview = if text_buffer.len() > 200 {
+                    format!("{}…", &text_buffer[..200])
+                } else {
+                    text_buffer.clone()
+                };
+                self.event_bus.publish(Event::ModelResponse {
+                    session_id: session_id.to_string(),
+                    text: response_preview,
+                });
                 assistant_parts.push(MessagePart::Text {
                     text: text_buffer.clone(),
                 });
@@ -277,6 +317,19 @@ impl SessionProcessor {
                 let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
                     warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
                     json!({})
+                });
+
+                // Log tool call with arguments
+                let args_preview = if tc.args_json.len() > 200 {
+                    format!("{}…", &tc.args_json[..200])
+                } else {
+                    tc.args_json.clone()
+                };
+                self.event_bus.publish(Event::ToolCallArgs {
+                    session_id: session_id.to_string(),
+                    call_id: tc.id.clone(),
+                    tool: tc.name.clone(),
+                    args: args_preview,
                 });
 
                 assistant_content_parts.push(ContentPart::ToolUse {
@@ -310,6 +363,7 @@ impl SessionProcessor {
                 } else {
                     ToolCallStatus::Error
                 };
+                let success = status == ToolCallStatus::Completed;
 
                 self.event_bus.publish(Event::ToolCallEnd {
                     session_id: session_id.to_string(),
@@ -335,6 +389,20 @@ impl SessionProcessor {
                     Ok(output) => output.content,
                     Err(e) => format!("Error: {}", e),
                 };
+
+                // Log the tool result
+                let result_preview = if result_content.len() > 200 {
+                    format!("{}…", &result_content[..200])
+                } else {
+                    result_content.clone()
+                };
+                self.event_bus.publish(Event::ToolResult {
+                    session_id: session_id.to_string(),
+                    call_id: tc.id.clone(),
+                    tool: tc.name.clone(),
+                    content: result_preview,
+                    success,
+                });
 
                 tool_result_parts.push(ContentPart::ToolResult {
                     tool_use_id: tc.id.clone(),
@@ -378,17 +446,25 @@ impl SessionProcessor {
             );
         }
 
-        // Copilot: check env var, then try to discover from IDE config
+        // Copilot: prefer DB-stored device flow token (works for token
+        // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
-            if let Ok(token) = std::env::var("GITHUB_COPILOT_TOKEN") {
-                if !token.is_empty() {
-                    return Ok(token);
+            // DB first — device flow tokens stored here work for copilot_internal/v2/token
+            if let Ok(Some(key)) = self.session_manager.storage().get_provider_auth("copilot") {
+                if !key.is_empty() {
+                    return Ok(key);
                 }
             }
-            if let Some(token) = crate::provider::copilot::find_copilot_token() {
+            let db_lookup = || -> Option<String> { None }; // already checked above
+            if let Some(token) =
+                crate::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
+            {
                 return Ok(token);
             }
-            // Fall through to database check below
+            bail!(
+                "No GitHub token found for Copilot. Use /provider to configure, \
+                 or authenticate with `gh auth login` then `gh auth refresh -s copilot`."
+            );
         }
 
         // Check common environment variable names

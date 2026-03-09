@@ -356,26 +356,32 @@ OLLAMA_HOST=http://gpu-server:11434 ragent run --model ollama/deepseek-r1:70b "R
 
 #### GitHub Copilot Provider
 
-The Copilot provider connects to the [GitHub Copilot](https://github.com/features/copilot) API at `https://api.githubcopilot.com`. It uses the same OpenAI-compatible chat completions format and includes automatic token discovery from your IDE's Copilot configuration.
+The Copilot provider connects to the [GitHub Copilot](https://github.com/features/copilot) API using plan-specific endpoints (e.g. `https://api.individual.githubcopilot.com` for Individual/Pro plans). It uses the same OpenAI-compatible chat completions format and includes automatic token discovery via device flow, `gh` CLI, or IDE configuration.
 
 **Key characteristics:**
 
 | Feature | Detail |
 |---------|--------|
-| API endpoint | `https://api.githubcopilot.com/v1/chat/completions` (OpenAI-compatible) |
-| Model discovery | `https://api.githubcopilot.com/models` — queries available models at runtime |
-| Authentication | Copilot OAuth token (`ghu_*` / `gho_*`), auto-discovered from IDE config |
+| API endpoint | Plan-specific (e.g. `https://api.individual.githubcopilot.com/chat/completions`) |
+| Model discovery | Queries available models at runtime from the plan-specific endpoint |
+| Authentication | Copilot OAuth token via device flow (`ghu_*`), `gh` CLI (`gho_*`), or env var |
 | Cost | Included with GitHub Copilot subscription |
 | Streaming | SSE via `data:` lines, identical to OpenAI format |
 | Tool calls | Supported |
 
-**Authentication flow:**
+**Authentication flow (priority order):**
 
 1. `GITHUB_COPILOT_TOKEN` environment variable (highest priority)
-2. Auto-discovery from `~/.config/github-copilot/apps.json` (Linux/macOS)
-3. Auto-discovery from `%LOCALAPPDATA%/github-copilot/apps.json` (Windows)
+2. DB-stored device flow token (from interactive setup)
+3. `gh auth token` CLI fallback
+4. Auto-discovery from `~/.config/github-copilot/apps.json` (Linux/macOS)
+5. Auto-discovery from `%LOCALAPPDATA%/github-copilot/apps.json` (Windows)
 
-The token is automatically read from your IDE's GitHub Copilot extension configuration — no manual setup required if you already have Copilot active in VS Code or JetBrains.
+When authenticating interactively, ragent uses the GitHub device flow: a one-time code is displayed that the user enters at `https://github.com/login/device`. Press `c` on the device code screen to copy the code to the clipboard.
+
+**API base resolution:**
+
+The Copilot token exchange (`copilot_internal/v2/token`) may return plan-specific `endpoints`. If not, ragent discovers the correct API base via `copilot_internal/user`, trying both the device flow token and the `gh` CLI token for broader scope coverage.
 
 **Default models:**
 
@@ -789,7 +795,7 @@ On startup ragent displays a centered landing page:
         │ >                                    │
         └──────────────────────────────────────┘
 
-        ● Anthropic (Claude) (env)  model: claude-sonnet-4  — press p to change
+        ● Anthropic (Claude) (env)  model: claude-sonnet-4  — use /provider to change
         ● Tip  Use /help to see available commands
         
  /home/user/project                        v0.1.0
@@ -798,12 +804,12 @@ On startup ragent displays a centered landing page:
 If no provider is configured, the status line reads:
 
 ```
-        ⚠ No provider configured — press p to set up a provider
+        ⚠ No provider configured — use /provider to set up
 ```
 
 #### Provider Setup Dialog
 
-Pressing `p` on the home screen opens a modal dialog:
+The `/provider` slash command opens a modal dialog:
 
 1. **Select Provider** — arrow keys to navigate, Enter to select:
    - Anthropic (Claude)
@@ -877,6 +883,30 @@ When the agent needs a provider API key, it checks in order:
 └─────────────────────────────────────────────────┘
 ```
 
+#### Log Panel
+
+When enabled (via `--log` CLI flag or the `/log` slash command), a scrollable
+log panel appears on the right side of the chat area (30% width). It captures:
+
+- **Prompts sent** — user messages submitted to the LLM
+- **Tool calls** — tool invocations with call IDs, and their results with timing
+- **Session events** — session creation, message start/end, agent switches
+- **Token usage** — per-request and cumulative input/output token counts
+- **Permissions** — requested and granted/denied permission events
+- **Errors** — agent and tool errors
+
+Each entry includes a UTC timestamp and a colour-coded level:
+
+| Level | Label | Colour | Description |
+|-------|-------|--------|-------------|
+| Info  | `INF` | Blue   | General events (prompts, sessions, tokens) |
+| Tool  | `TUL` | Cyan   | Tool call start and end |
+| Warn  | `WRN` | Yellow | Permission requests |
+| Error | `ERR` | Red    | Agent and tool errors |
+
+The panel auto-scrolls to show the most recent entries. Toggle visibility
+at runtime with `/log`.
+
 #### Key Bindings
 
 | Key | Action |
@@ -887,7 +917,6 @@ When the agent needs a provider API key, it checks in order:
 | `Ctrl+L` | Clear screen |
 | `Esc` | Cancel current input / close dialog |
 | `Up/Down` | Scroll message history |
-| `p` | Open provider setup dialog (home screen) |
 | `@` | Invoke sub-agent (e.g. `@general`, `@explore`) |
 | `/` | Slash commands — shows autocomplete dropdown |
 | `y/a/n` | Permission dialog responses |
@@ -902,8 +931,10 @@ Press `Esc` to dismiss the menu.
 | Command | Description |
 |---------|-------------|
 | `/agent` | Switch the active agent (opens selection dialog) |
+| `/log` | Toggle the log panel on/off |
 | `/model` | Switch the active model on the current provider |
 | `/provider` | Change the LLM provider (re-enters full setup flow) |
+| `/provider_reset` | Reset a provider — prompts for selection, clears stored credentials and disables auto-detection |
 | `/clear` | Clear the current session and start fresh |
 | `/compact` | Compact the conversation history |
 | `/session [list\|new\|resume]` | Session management |

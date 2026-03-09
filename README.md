@@ -140,9 +140,11 @@ User Input
 
 ## Project Status
 
-**v0.1.0-alpha.1** — Early development. Core architecture is in place and the
-binary compiles. The TUI now features a home screen with provider setup dialog,
-agent cycling, slash-command autocomplete, and provider health checks. See
+**v0.1.0-alpha.2** — Early development. Core architecture is in place and the
+binary compiles. The TUI features a home screen with provider setup dialog,
+agent cycling, slash-command autocomplete, provider health checks, and
+`/provider_reset` for credential management. GitHub Copilot integration now uses
+plan-specific API endpoints with robust device flow authentication. See
 [TODO.md](TODO.md) for unimplemented functions.
 
 ## License

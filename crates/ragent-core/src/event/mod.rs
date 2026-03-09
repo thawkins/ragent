@@ -145,6 +145,51 @@ pub enum Event {
         /// Number of output (completion) tokens consumed.
         output_tokens: u64,
     },
+    /// The set of tool definitions sent with an LLM request.
+    ToolsSent {
+        /// Session this request belongs to.
+        session_id: String,
+        /// Names of the tools included in the request.
+        tools: Vec<String>,
+    },
+    /// The model returned text content (complete, not a delta).
+    ModelResponse {
+        /// Session this response belongs to.
+        session_id: String,
+        /// The full or truncated text returned by the model.
+        text: String,
+    },
+    /// A tool call has been fully assembled with its arguments.
+    ToolCallArgs {
+        /// Session this tool call belongs to.
+        session_id: String,
+        /// Provider-assigned call identifier.
+        call_id: String,
+        /// Name of the tool being invoked.
+        tool: String,
+        /// JSON-encoded arguments.
+        args: String,
+    },
+    /// The result of executing a tool.
+    ToolResult {
+        /// Session this tool result belongs to.
+        session_id: String,
+        /// Provider-assigned call identifier.
+        call_id: String,
+        /// Name of the tool that was invoked.
+        tool: String,
+        /// The result content (or error text).
+        content: String,
+        /// Whether the tool succeeded.
+        success: bool,
+    },
+    /// The Copilot device flow completed successfully.
+    CopilotDeviceFlowComplete {
+        /// The GitHub OAuth token obtained from the device flow.
+        token: String,
+        /// The plan-specific API base URL discovered during setup.
+        api_base: String,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.
