@@ -192,13 +192,179 @@ fn test_area_fields_default_to_zero() {
 fn test_mouse_click_no_effect() {
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
     let click = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: 10,
+        column: 10, // not the scrollbar column (79)
         row: 10,
         modifiers: crossterm::event::KeyModifiers::empty(),
     };
     app.handle_mouse_event(click);
     assert_eq!(app.scroll_offset, 0);
     assert_eq!(app.log_scroll_offset, 0);
+    assert!(app.scrollbar_drag.is_none());
+}
+
+// ---------- Scrollbar drag tests ----------
+
+use ragent_tui::app::ScrollbarDragPane;
+
+fn mouse_down(col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }
+}
+
+fn mouse_drag(col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }
+}
+
+fn mouse_up(col: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind: MouseEventKind::Up(MouseButton::Left),
+        column: col,
+        row,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }
+}
+
+#[test]
+fn test_drag_starts_on_message_scrollbar_column() {
+    let mut app = make_app();
+    // message area: x=0, y=1, width=80, height=20 → scrollbar at column 79
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
+
+    app.handle_mouse_event(mouse_down(79, 10));
+    assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Messages));
+}
+
+#[test]
+fn test_drag_does_not_start_without_scrollable_content() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 0; // nothing to scroll
+
+    app.handle_mouse_event(mouse_down(79, 10));
+    assert!(app.scrollbar_drag.is_none());
+}
+
+#[test]
+fn test_drag_starts_on_log_scrollbar_column() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.log_area = Rect::new(80, 1, 30, 20);
+    app.log_max_scroll = 50;
+
+    // log scrollbar at column 109 (80 + 30 - 1)
+    app.handle_mouse_event(mouse_down(109, 10));
+    assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Log));
+}
+
+#[test]
+fn test_drag_to_top_scrolls_to_top_of_content() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
+
+    // Click scrollbar, drag to top of pane (row 1)
+    app.handle_mouse_event(mouse_down(79, 10));
+    app.handle_mouse_event(mouse_drag(79, 1));
+    // Top of content → scroll_offset = max_scroll
+    assert_eq!(app.scroll_offset, 100);
+}
+
+#[test]
+fn test_drag_to_bottom_scrolls_to_bottom_of_content() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
+    app.scroll_offset = 50;
+
+    // Click scrollbar, drag to bottom of pane (row 20 = y + height - 1)
+    app.handle_mouse_event(mouse_down(79, 10));
+    app.handle_mouse_event(mouse_drag(79, 20));
+    // Bottom of content → scroll_offset = 0
+    assert_eq!(app.scroll_offset, 0);
+}
+
+#[test]
+fn test_drag_to_middle_scrolls_to_midpoint() {
+    let mut app = make_app();
+    // area: y=0, height=21 → rows 0..20 inclusive, track_height=20
+    app.message_area = Rect::new(0, 0, 80, 21);
+    app.message_max_scroll = 100;
+
+    app.handle_mouse_event(mouse_down(79, 10));
+    app.handle_mouse_event(mouse_drag(79, 10));
+    // fraction = 10/20 = 0.5, offset = (1-0.5)*100 = 50
+    assert_eq!(app.scroll_offset, 50);
+}
+
+#[test]
+fn test_drag_release_clears_state() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
+
+    app.handle_mouse_event(mouse_down(79, 10));
+    assert!(app.scrollbar_drag.is_some());
+
+    app.handle_mouse_event(mouse_up(79, 10));
+    assert!(app.scrollbar_drag.is_none());
+}
+
+#[test]
+fn test_drag_outside_pane_clamped() {
+    let mut app = make_app();
+    // area: y=5, height=10 → rows 5..14
+    app.message_area = Rect::new(0, 5, 80, 10);
+    app.message_max_scroll = 100;
+
+    app.handle_mouse_event(mouse_down(79, 10));
+    // Drag above the pane (row 0) — should clamp to top
+    app.handle_mouse_event(mouse_drag(79, 0));
+    assert_eq!(app.scroll_offset, 100); // top of content
+
+    // Drag below the pane (row 30) — should clamp to bottom
+    app.handle_mouse_event(mouse_drag(79, 30));
+    assert_eq!(app.scroll_offset, 0); // bottom of content
+}
+
+#[test]
+fn test_drag_log_scrollbar() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.log_area = Rect::new(80, 0, 30, 21);
+    app.log_max_scroll = 60;
+
+    // Click log scrollbar (column 109), drag to top
+    app.handle_mouse_event(mouse_down(109, 10));
+    assert_eq!(app.scrollbar_drag, Some(ScrollbarDragPane::Log));
+
+    app.handle_mouse_event(mouse_drag(109, 0));
+    assert_eq!(app.log_scroll_offset, 60);
+
+    // Drag to bottom
+    app.handle_mouse_event(mouse_drag(109, 20));
+    assert_eq!(app.log_scroll_offset, 0);
+}
+
+#[test]
+fn test_drag_ignored_when_no_active_drag() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_max_scroll = 100;
+
+    // Drag without prior mouse down — no scrollbar_drag active
+    app.handle_mouse_event(mouse_drag(79, 5));
+    assert_eq!(app.scroll_offset, 0);
 }

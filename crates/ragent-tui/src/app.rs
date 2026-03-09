@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use ragent_core::{
@@ -208,6 +208,15 @@ pub struct SlashMenuState {
     pub filter: String,
 }
 
+/// Identifies which pane a scrollbar drag is acting on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollbarDragPane {
+    /// Dragging the messages pane scrollbar.
+    Messages,
+    /// Dragging the log pane scrollbar.
+    Log,
+}
+
 /// Core TUI application state.
 ///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
@@ -280,6 +289,12 @@ pub struct App {
     pub message_area: Rect,
     /// Cached area of the log panel (set during render for mouse hit-testing).
     pub log_area: Rect,
+    /// Maximum scroll value for the messages pane (set during render).
+    pub message_max_scroll: u16,
+    /// Maximum scroll value for the log pane (set during render).
+    pub log_max_scroll: u16,
+    /// Active scrollbar drag, if any.
+    pub scrollbar_drag: Option<ScrollbarDragPane>,
 }
 
 impl App {
@@ -356,6 +371,9 @@ impl App {
             log_scroll_offset: 0,
             message_area: Rect::default(),
             log_area: Rect::default(),
+            message_max_scroll: 0,
+            log_max_scroll: 0,
+            scrollbar_drag: None,
         }
     }
 
@@ -871,7 +889,7 @@ impl App {
         }
     }
 
-    /// Process a terminal mouse event (scroll wheel, etc.).
+    /// Process a terminal mouse event (scroll wheel, scrollbar drag).
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         match event.kind {
             MouseEventKind::ScrollUp => {
@@ -888,7 +906,61 @@ impl App {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                 }
             }
+            MouseEventKind::Down(MouseButton::Left) => {
+                // Start drag if click is on the scrollbar column (rightmost column of pane)
+                if self.message_area.height > 0
+                    && event.column == self.message_area.right().saturating_sub(1)
+                    && self.message_area.contains((event.column, event.row).into())
+                    && self.message_max_scroll > 0
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Messages);
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Messages);
+                } else if self.show_log
+                    && self.log_area.height > 0
+                    && event.column == self.log_area.right().saturating_sub(1)
+                    && self.log_area.contains((event.column, event.row).into())
+                    && self.log_max_scroll > 0
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Log);
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Log);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(pane) = self.scrollbar_drag {
+                    self.apply_scrollbar_drag(event.row, pane);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.scrollbar_drag = None;
+            }
             _ => {}
+        }
+    }
+
+    /// Map a mouse Y position to a scroll offset for the given pane.
+    fn apply_scrollbar_drag(&mut self, mouse_y: u16, pane: ScrollbarDragPane) {
+        let (area, max_scroll) = match pane {
+            ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll),
+            ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll),
+        };
+
+        if area.height <= 1 || max_scroll == 0 {
+            return;
+        }
+
+        // Clamp mouse_y to the pane area
+        let y = mouse_y.clamp(area.y, area.bottom().saturating_sub(1));
+        let relative = y.saturating_sub(area.y) as f32;
+        let track_height = (area.height.saturating_sub(1)) as f32;
+        let fraction = (relative / track_height).clamp(0.0, 1.0);
+
+        // fraction 0.0 = top of content, 1.0 = bottom of content
+        // scroll_offset is "lines from bottom": top → max_scroll, bottom → 0
+        let offset = ((1.0 - fraction) * max_scroll as f32).round() as u16;
+
+        match pane {
+            ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Log => self.log_scroll_offset = offset.min(max_scroll),
         }
     }
 

@@ -726,7 +726,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
+fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
@@ -741,6 +741,7 @@ fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     if app.log_entries.is_empty() {
+        app.log_max_scroll = 0;
         let empty = Paragraph::new(Line::from(Span::styled(
             "No log entries yet",
             Style::default().fg(Color::DarkGray),
@@ -777,6 +778,7 @@ fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
     let total_lines = lines.len() as u16;
     let visible_height = inner.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
+    app.log_max_scroll = max_scroll;
     let scroll = app.log_scroll_offset.min(max_scroll);
 
     let paragraph = Paragraph::new(lines)
@@ -887,7 +889,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
+fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     for msg in &app.messages {
@@ -957,6 +959,7 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
     let total = lines.len() as u16;
     let visible = area.height.saturating_sub(2);
     let max_scroll = total.saturating_sub(visible);
+    app.message_max_scroll = max_scroll;
     let scroll = max_scroll.saturating_sub(app.scroll_offset);
 
     let messages_block = Block::default()
