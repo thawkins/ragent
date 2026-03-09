@@ -35,18 +35,25 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 fn render_home(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
+    // Compute input height based on wrapped text length
+    let max_width = 70u16.min(area.width.saturating_sub(4));
+    let inner_width = max_width.saturating_sub(2).max(1) as usize; // inside borders
+    let input_text_len = app.input.len() + 2; // "> " prefix
+    let num_lines = ((input_text_len as f32) / (inner_width as f32)).ceil().max(1.0) as u16;
+    let input_height = num_lines + 2; // +2 for top and bottom borders
+
     // Vertical layout: flex-grow top | logo | gap | prompt | provider | tip | flex-grow bottom | status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),    // top spacer
-            Constraint::Length(4), // logo (4 lines)
-            Constraint::Length(1), // gap
-            Constraint::Length(3), // prompt input
-            Constraint::Length(2), // provider status
-            Constraint::Length(2), // tip
-            Constraint::Min(1),    // bottom spacer
-            Constraint::Length(1), // status bar
+            Constraint::Min(1),              // top spacer
+            Constraint::Length(4),            // logo (4 lines)
+            Constraint::Length(1),            // gap
+            Constraint::Length(input_height), // prompt input (dynamic)
+            Constraint::Length(2),            // provider status
+            Constraint::Length(2),            // tip
+            Constraint::Min(1),              // bottom spacer
+            Constraint::Length(1),            // status bar
         ])
         .flex(Flex::Center)
         .split(area);
@@ -113,12 +120,18 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
         .title(" Ask anything… ")
         .title_style(Style::default().fg(Color::DarkGray));
 
-    let paragraph = Paragraph::new(input_text).block(block);
+    let paragraph = Paragraph::new(input_text)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, centered);
 
-    // Position cursor inside the bordered box
-    let cursor_x = centered.x + 3 + app.input.len() as u16;
-    let cursor_y = centered.y + 1;
+    // Position cursor accounting for wrapped lines
+    let inner_width = centered.width.saturating_sub(2).max(1) as usize;
+    let cursor_pos = app.input.len() + 2; // "> " prefix
+    let cursor_line = cursor_pos / inner_width;
+    let cursor_col = cursor_pos % inner_width;
+    let cursor_x = centered.x + 1 + cursor_col as u16;
+    let cursor_y = centered.y + 1 + cursor_line as u16;
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
@@ -678,14 +691,21 @@ fn centered_horizontal(width: u16, area: Rect) -> Rect {
 // ---------------------------------------------------------------------------
 
 fn render_chat(frame: &mut Frame, app: &mut App) {
+    // Compute chat input height based on wrapped text
+    let chat_area = frame.area();
+    let input_inner_width = chat_area.width.saturating_sub(2).max(1) as usize;
+    let input_text_len = app.input.len() + 2; // "> " prefix
+    let input_lines = ((input_text_len as f32) / (input_inner_width as f32)).ceil().max(1.0) as u16;
+    let input_height = input_lines + 2; // +2 for borders
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // status bar
-            Constraint::Min(3),    // messages + optional log
-            Constraint::Length(3), // input
+            Constraint::Length(1),            // status bar
+            Constraint::Min(3),              // messages + optional log
+            Constraint::Length(input_height), // input (dynamic)
         ])
-        .split(frame.area());
+        .split(chat_area);
 
     render_status_bar(frame, app, chunks[0]);
 
@@ -987,12 +1007,18 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let input_text = format!("> {}", app.input);
     let block = Block::default().borders(Borders::ALL).title(" Input ");
-    let paragraph = Paragraph::new(input_text).block(block);
+    let paragraph = Paragraph::new(input_text)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
 
-    // Position cursor
-    let cursor_x = area.x + 3 + app.input.len() as u16;
-    let cursor_y = area.y + 1;
+    // Position cursor accounting for wrapped lines
+    let inner_width = area.width.saturating_sub(2).max(1) as usize;
+    let cursor_pos = app.input.len() + 2; // "> " prefix
+    let cursor_line = cursor_pos / inner_width;
+    let cursor_col = cursor_pos % inner_width;
+    let cursor_x = area.x + 1 + cursor_col as u16;
+    let cursor_y = area.y + 1 + cursor_line as u16;
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
