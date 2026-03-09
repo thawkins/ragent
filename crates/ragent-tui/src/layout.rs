@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use ragent_core::message::{MessagePart, Role};
@@ -21,7 +21,7 @@ use crate::logo;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Render the full TUI, dispatching to the Home or Chat screen.
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     match app.current_screen {
         ScreenMode::Home => render_home(frame, app),
         ScreenMode::Chat => render_chat(frame, app),
@@ -677,7 +677,7 @@ fn centered_horizontal(width: u16, area: Rect) -> Rect {
 // Chat screen (existing three-panel layout)
 // ---------------------------------------------------------------------------
 
-fn render_chat(frame: &mut Frame, app: &App) {
+fn render_chat(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -699,9 +699,13 @@ fn render_chat(frame: &mut Frame, app: &App) {
             ])
             .split(chunks[1]);
 
+        app.message_area = h_chunks[0];
+        app.log_area = h_chunks[1];
         render_messages(frame, app, h_chunks[0]);
         render_log_panel(frame, app, h_chunks[1]);
     } else {
+        app.message_area = chunks[1];
+        app.log_area = Rect::default();
         render_messages(frame, app, chunks[1]);
     }
 
@@ -780,6 +784,16 @@ fn render_log_panel(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((max_scroll.saturating_sub(scroll), 0));
 
     frame.render_widget(paragraph, inner);
+
+    // Render scrollbar when content overflows
+    if total_lines > visible_height {
+        let scroll_position = max_scroll.saturating_sub(scroll) as usize;
+        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+            .position(scroll_position);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -955,6 +969,16 @@ fn render_messages(frame: &mut Frame, app: &App, area: Rect) {
         .scroll((scroll, 0));
 
     frame.render_widget(paragraph, area);
+
+    // Render scrollbar when content overflows
+    if total > visible {
+        let scroll_position = scroll as usize;
+        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
+            .position(scroll_position);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    }
 }
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {

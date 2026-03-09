@@ -7,7 +7,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 use ragent_core::{
     agent::{AgentInfo, ModelRef},
@@ -275,6 +276,10 @@ pub struct App {
     pub log_entries: Vec<LogEntry>,
     /// Scroll offset for the log panel (lines from bottom).
     pub log_scroll_offset: u16,
+    /// Cached area of the messages pane (set during render for mouse hit-testing).
+    pub message_area: Rect,
+    /// Cached area of the log panel (set during render for mouse hit-testing).
+    pub log_area: Rect,
 }
 
 impl App {
@@ -349,6 +354,8 @@ impl App {
             show_log,
             log_entries: Vec::new(),
             log_scroll_offset: 0,
+            message_area: Rect::default(),
+            log_area: Rect::default(),
         }
     }
 
@@ -864,6 +871,27 @@ impl App {
         }
     }
 
+    /// Process a terminal mouse event (scroll wheel, etc.).
+    pub fn handle_mouse_event(&mut self, event: MouseEvent) {
+        match event.kind {
+            MouseEventKind::ScrollUp => {
+                if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                    self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                } else if self.message_area.contains((event.column, event.row).into()) {
+                    self.scroll_offset = self.scroll_offset.saturating_add(3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                } else if self.message_area.contains((event.column, event.row).into()) {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Process a terminal key event and execute the resulting [`InputAction`], if any.
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         if let Some(action) = input::handle_key(self, key) {
@@ -944,6 +972,12 @@ impl App {
                 }
                 InputAction::ScrollDown => {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                }
+                InputAction::LogScrollUp => {
+                    self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                }
+                InputAction::LogScrollDown => {
+                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                 }
                 InputAction::HistoryUp => {
                     if self.input_history.is_empty() {

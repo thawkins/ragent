@@ -18,6 +18,10 @@ pub enum InputAction {
     ScrollUp,
     /// Scroll the message view downward.
     ScrollDown,
+    /// Scroll the log panel upward.
+    LogScrollUp,
+    /// Scroll the log panel downward.
+    LogScrollDown,
     /// Recall the previous entry from input history.
     HistoryUp,
     /// Recall the next entry from input history.
@@ -175,6 +179,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Up => Some(InputAction::HistoryUp),
         KeyCode::Down => Some(InputAction::HistoryDown),
+        KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::LogScrollUp)
+        }
+        KeyCode::PageDown if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::LogScrollDown)
+        }
         KeyCode::PageUp => Some(InputAction::ScrollUp),
         KeyCode::PageDown => Some(InputAction::ScrollDown),
         KeyCode::Tab | KeyCode::BackTab => Some(InputAction::SwitchAgent),

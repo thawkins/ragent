@@ -76,14 +76,16 @@ pub async fn run_tui(
     let mut bus_stream = BroadcastStream::new(event_bus.subscribe());
 
     while app.is_running {
-        terminal.draw(|frame| layout::render(frame, &app))?;
+        terminal.draw(|frame| layout::render(frame, &mut app))?;
 
         tokio::select! {
             // Terminal key/mouse events (polled at 50ms intervals)
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 while ct_event::poll(std::time::Duration::ZERO)? {
-                    if let CtEvent::Key(key) = ct_event::read()? {
-                        app.handle_key_event(key);
+                    match ct_event::read()? {
+                        CtEvent::Key(key) => app.handle_key_event(key),
+                        CtEvent::Mouse(mouse) => app.handle_mouse_event(mouse),
+                        _ => {}
                     }
                 }
             }
