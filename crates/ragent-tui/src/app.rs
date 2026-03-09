@@ -775,11 +775,25 @@ impl App {
                     None => {}
                 },
                 InputAction::SwitchAgent => {
-                    if !self.cycleable_agents.is_empty() {
+                    if self.cycleable_agents.len() > 1 {
+                        let prev = self.agent_name.clone();
                         self.current_agent_index =
                             (self.current_agent_index + 1) % self.cycleable_agents.len();
                         self.agent_info = self.cycleable_agents[self.current_agent_index].clone();
                         self.agent_name = self.agent_info.name.clone();
+                        self.status = format!("agent: {}", self.agent_name);
+                        self.push_log(
+                            LogLevel::Info,
+                            format!("Switched to: {} ({})", self.agent_name, self.agent_info.description),
+                        );
+
+                        if let Some(ref sid) = self.session_id {
+                            self.event_bus.publish(Event::AgentSwitched {
+                                session_id: sid.clone(),
+                                from: prev,
+                                to: self.agent_name.clone(),
+                            });
+                        }
                     }
                 }
                 InputAction::SlashCommand(cmd) => {
