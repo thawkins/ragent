@@ -28,6 +28,17 @@ pub struct Snapshot {
 /// # Errors
 ///
 /// Returns an error if a file exists but cannot be read.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::path::PathBuf;
+/// use ragent_core::snapshot::take_snapshot;
+///
+/// let files = vec![PathBuf::from("/tmp/example.txt")];
+/// let snap = take_snapshot("session-1", "msg-1", &files).unwrap();
+/// assert_eq!(snap.session_id, "session-1");
+/// ```
 pub fn take_snapshot(session_id: &str, message_id: &str, files: &[PathBuf]) -> Result<Snapshot> {
     let mut file_contents = HashMap::new();
 
@@ -54,6 +65,18 @@ pub fn take_snapshot(session_id: &str, message_id: &str, files: &[PathBuf]) -> R
 /// # Errors
 ///
 /// Returns an error if a directory cannot be created or a file cannot be written.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use std::path::PathBuf;
+/// use ragent_core::snapshot::{take_snapshot, restore_snapshot};
+///
+/// let files = vec![PathBuf::from("/tmp/example.txt")];
+/// let snap = take_snapshot("session-1", "msg-1", &files).unwrap();
+/// // … later, restore the captured file contents
+/// restore_snapshot(&snap).unwrap();
+/// ```
 pub fn restore_snapshot(snapshot: &Snapshot) -> Result<()> {
     for (path, content) in &snapshot.files {
         if let Some(parent) = path.parent() {

@@ -14,8 +14,8 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
-use ragent_tui::app::{LogLevel, ScreenMode};
 use ragent_tui::App;
+use ragent_tui::app::{LogLevel, ScreenMode};
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -51,8 +51,10 @@ fn make_app() -> App {
 fn test_slash_clear_empties_messages() {
     let mut app = make_app();
     // Add some dummy messages
-    app.messages.push(ragent_core::message::Message::user_text("s1", "hello"));
-    app.messages.push(ragent_core::message::Message::user_text("s1", "world"));
+    app.messages
+        .push(ragent_core::message::Message::user_text("s1", "hello"));
+    app.messages
+        .push(ragent_core::message::Message::user_text("s1", "world"));
     assert_eq!(app.messages.len(), 2);
 
     app.execute_slash_command("/clear");
@@ -300,7 +302,10 @@ fn test_slash_command_clears_input() {
     app.input = "/help".to_string();
 
     app.execute_slash_command(&app.input.clone());
-    assert!(app.input.is_empty(), "input should be cleared after command");
+    assert!(
+        app.input.is_empty(),
+        "input should be cleared after command"
+    );
     assert!(app.slash_menu.is_none(), "slash menu should be closed");
 }
 
@@ -325,4 +330,82 @@ fn test_slash_system_preserves_argument_whitespace() {
         Some("You are   a   helpful   bot"),
         "leading/trailing whitespace trimmed, internal preserved"
     );
+}
+
+// ── /tools ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_tools_lists_builtin_tools() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/tools");
+
+    assert_eq!(app.status, "tools");
+    assert!(!app.messages.is_empty());
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Built-in Tools:"), "should have built-in heading");
+    assert!(text.contains("read"), "should list 'read' tool");
+    assert!(text.contains("bash"), "should list 'bash' tool");
+    assert!(text.contains("edit"), "should list 'edit' tool");
+    assert!(text.contains("grep"), "should list 'grep' tool");
+}
+
+#[test]
+fn test_slash_tools_shows_no_mcp_when_empty() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/tools");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("MCP Tools:"), "should have MCP heading");
+    assert!(
+        text.contains("no MCP servers connected"),
+        "should indicate no MCP servers"
+    );
+}
+
+#[test]
+fn test_slash_tools_shows_mcp_tools() {
+    use ragent_core::mcp::{McpServer, McpStatus, McpToolDef};
+
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.mcp_servers = vec![McpServer {
+        id: "github".to_string(),
+        config: Default::default(),
+        status: McpStatus::Connected,
+        tools: vec![McpToolDef {
+            name: "search_repos".to_string(),
+            description: "Search GitHub repositories".to_string(),
+            parameters: serde_json::json!({}),
+        }],
+    }];
+
+    app.execute_slash_command("/tools");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("search_repos"), "should list MCP tool name");
+    assert!(text.contains("[github]"), "should show MCP server name");
+    assert!(
+        text.contains("Search GitHub repositories"),
+        "should show MCP tool description"
+    );
+    assert!(
+        !text.contains("no MCP servers connected"),
+        "should not show empty message"
+    );
+}
+
+#[test]
+fn test_slash_tools_creates_session_if_none() {
+    let mut app = make_app();
+    assert!(app.session_id.is_none());
+
+    app.execute_slash_command("/tools");
+
+    assert!(app.session_id.is_some(), "should create session");
+    assert_eq!(app.status, "tools");
+    assert!(!app.messages.is_empty());
 }

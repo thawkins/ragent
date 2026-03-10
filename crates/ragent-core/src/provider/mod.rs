@@ -78,6 +78,15 @@ pub struct ProviderRegistry {
 
 impl ProviderRegistry {
     /// Creates an empty provider registry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::ProviderRegistry;
+    ///
+    /// let registry = ProviderRegistry::new();
+    /// assert!(registry.list().is_empty());
+    /// ```
     pub fn new() -> Self {
         Self {
             providers: HashMap::new(),
@@ -85,16 +94,46 @@ impl ProviderRegistry {
     }
 
     /// Registers a provider, keyed by its [`Provider::id`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::{ProviderRegistry, openai::OpenAiProvider};
+    ///
+    /// let mut registry = ProviderRegistry::new();
+    /// registry.register(Box::new(OpenAiProvider));
+    /// assert_eq!(registry.list().len(), 1);
+    /// ```
     pub fn register(&mut self, provider: Box<dyn Provider>) {
         self.providers.insert(provider.id().to_string(), provider);
     }
 
     /// Returns a reference to the provider with the given `id`, if registered.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// assert!(registry.get("anthropic").is_some());
+    /// assert!(registry.get("nonexistent").is_none());
+    /// ```
     pub fn get(&self, id: &str) -> Option<&dyn Provider> {
         self.providers.get(id).map(|p| p.as_ref())
     }
 
     /// Returns [`ProviderInfo`] for every registered provider.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// let providers = registry.list();
+    /// assert!(!providers.is_empty());
+    /// ```
     pub fn list(&self) -> Vec<ProviderInfo> {
         self.providers
             .values()
@@ -109,6 +148,16 @@ impl ProviderRegistry {
     /// Looks up a specific model by provider and model ID.
     ///
     /// Returns `None` if the provider or model is not found.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::ProviderRegistry;
+    ///
+    /// let registry = ProviderRegistry::new();
+    /// // No providers registered, so resolution returns `None`.
+    /// assert!(registry.resolve_model("openai", "gpt-4o").is_none());
+    /// ```
     pub fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo> {
         self.providers
             .get(provider_id)
@@ -123,6 +172,16 @@ impl Default for ProviderRegistry {
 }
 
 /// Creates a [`ProviderRegistry`] pre-populated with the built-in Anthropic and OpenAI providers.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::provider::create_default_registry;
+///
+/// let registry = create_default_registry();
+/// assert!(registry.get("anthropic").is_some());
+/// assert!(registry.get("openai").is_some());
+/// ```
 pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));

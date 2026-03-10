@@ -36,7 +36,9 @@ fn test_import_round_trip_preserves_content() {
 
     // Import: deserialise and re-parent into a new session
     let imported_msgs: Vec<Message> = serde_json::from_str(&json).unwrap();
-    storage.create_session("sess-import", "/tmp/project").unwrap();
+    storage
+        .create_session("sess-import", "/tmp/project")
+        .unwrap();
 
     for msg in &imported_msgs {
         let new_msg = Message {
@@ -193,5 +195,7 @@ fn test_import_preserves_tool_call_parts() {
     let loaded = storage.get_messages("sess-tc2").unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].parts.len(), 2);
-    assert!(matches!(&loaded[0].parts[1], MessagePart::ToolCall { tool, .. } if tool == "read_file"));
+    assert!(
+        matches!(&loaded[0].parts[1], MessagePart::ToolCall { tool, .. } if tool == "read_file")
+    );
 }

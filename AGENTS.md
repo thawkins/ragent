@@ -55,6 +55,7 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 - **Update Timing**: Update CHANGELOG.md before each push to remote with the latest changes, features, fixes, and improvements.
 - **Version**: Use semantic versioning (major.minor.patch-prerelease)
 - **RELEASE.md**: write the version number and the most recent CHANGELOG.md entry to the RELEASE.md file for use as a Description in the Github Releases page. 
+- Whenever a new feature or function is added ensure that SPEC.md and QUICKSTART.md is updated if relevant. 
 
 ## Documentation Standards
 - For all functions create DOCBLOCK documentation comments above each function that describes the purpose of the function, and documents any arguments and return values.

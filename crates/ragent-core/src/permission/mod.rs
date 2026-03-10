@@ -28,6 +28,23 @@ impl fmt::Display for PermissionAction {
     }
 }
 
+/// Represents the type of permission required for a tool operation.
+///
+/// Standard variants cover common operations (file reads, edits, shell
+/// commands, etc.). [`Custom`](Permission::Custom) allows extending the
+/// permission system with arbitrary names.
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_core::permission::Permission;
+///
+/// let read = Permission::from("read");
+/// assert_eq!(read, Permission::Read);
+///
+/// let custom = Permission::from("deploy");
+/// assert_eq!(custom, Permission::Custom("deploy".to_string()));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Permission {
     Read,
@@ -136,6 +153,19 @@ pub struct PermissionChecker {
 
 impl PermissionChecker {
     /// Creates a new checker with the given static ruleset.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::permission::{PermissionChecker, PermissionRule, PermissionAction, Permission};
+    ///
+    /// let rules = vec![PermissionRule {
+    ///     permission: Permission::Read,
+    ///     pattern: "src/**".to_string(),
+    ///     action: PermissionAction::Allow,
+    /// }];
+    /// let checker = PermissionChecker::new(rules);
+    /// ```
     pub fn new(ruleset: PermissionRuleset) -> Self {
         Self {
             ruleset,
@@ -149,6 +179,20 @@ impl PermissionChecker {
     /// Permanent grants (from [`record_always`](Self::record_always)) are
     /// checked first; then the static ruleset is evaluated last-match-wins.
     /// Returns [`PermissionAction::Ask`] if no rule matches.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::permission::{PermissionChecker, PermissionRule, PermissionAction, Permission};
+    ///
+    /// let checker = PermissionChecker::new(vec![PermissionRule {
+    ///     permission: Permission::Read,
+    ///     pattern: "src/**".to_string(),
+    ///     action: PermissionAction::Allow,
+    /// }]);
+    /// assert_eq!(checker.check("read", "src/main.rs"), PermissionAction::Allow);
+    /// assert_eq!(checker.check("read", "secrets.env"), PermissionAction::Ask);
+    /// ```
     pub fn check(&self, permission: &str, path: &str) -> PermissionAction {
         let target = Permission::from(permission);
         let wildcard = Permission::Custom("*".to_string());
@@ -179,6 +223,16 @@ impl PermissionChecker {
 
     /// Records a permanent "always allow" grant for the given permission and
     /// glob pattern, effective for the lifetime of this checker.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::permission::{PermissionChecker, PermissionAction};
+    ///
+    /// let mut checker = PermissionChecker::new(vec![]);
+    /// checker.record_always("edit", "src/**");
+    /// assert_eq!(checker.check("edit", "src/lib.rs"), PermissionAction::Allow);
+    /// ```
     pub fn record_always(&mut self, permission: &str, pattern: &str) {
         if let Ok(glob) = globset::Glob::new(pattern) {
             let matcher = glob.compile_matcher();

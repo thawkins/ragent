@@ -49,6 +49,25 @@ impl fmt::Display for ToolCallStatus {
     }
 }
 
+/// Tracks the execution state of a single tool call, including its input
+/// arguments, output result, error information, and timing.
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_core::message::{ToolCallState, ToolCallStatus};
+/// use serde_json::json;
+///
+/// let state = ToolCallState {
+///     status: ToolCallStatus::Completed,
+///     input: json!({"path": "/tmp/file.txt"}),
+///     output: Some(json!({"ok": true})),
+///     error: None,
+///     duration_ms: Some(42),
+/// };
+/// assert_eq!(state.status, ToolCallStatus::Completed);
+/// assert!(state.error.is_none());
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallState {
     pub status: ToolCallStatus,
@@ -96,6 +115,20 @@ pub struct Message {
 
 impl Message {
     /// Creates a new message with a generated UUID and the current timestamp.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::message::{Message, MessagePart, Role};
+    ///
+    /// let msg = Message::new(
+    ///     "session-1",
+    ///     Role::Assistant,
+    ///     vec![MessagePart::Text { text: "Hello!".into() }],
+    /// );
+    /// assert_eq!(msg.role, Role::Assistant);
+    /// assert_eq!(msg.session_id, "session-1");
+    /// ```
     pub fn new(session_id: impl Into<String>, role: Role, parts: Vec<MessagePart>) -> Self {
         let now = Utc::now();
         Self {
@@ -109,6 +142,16 @@ impl Message {
     }
 
     /// Convenience constructor for a simple user text message.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::message::{Message, Role};
+    ///
+    /// let msg = Message::user_text("session-1", "Fix the bug");
+    /// assert_eq!(msg.role, Role::User);
+    /// assert_eq!(msg.text_content(), "Fix the bug");
+    /// ```
     pub fn user_text(session_id: impl Into<String>, text: impl Into<String>) -> Self {
         Self::new(
             session_id,
@@ -118,6 +161,22 @@ impl Message {
     }
 
     /// Concatenates all [`MessagePart::Text`] parts into a single string.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_core::message::{Message, MessagePart, Role};
+    ///
+    /// let msg = Message::new(
+    ///     "s1",
+    ///     Role::User,
+    ///     vec![
+    ///         MessagePart::Text { text: "Hello ".into() },
+    ///         MessagePart::Text { text: "world".into() },
+    ///     ],
+    /// );
+    /// assert_eq!(msg.text_content(), "Hello world");
+    /// ```
     pub fn text_content(&self) -> String {
         self.parts
             .iter()
@@ -134,7 +193,11 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = self.text_content();
         let preview = if text.len() > 80 {
-            format!("{}…", &text[..80])
+            let mut end = 80;
+            while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}…", &text[..end])
         } else {
             text
         };

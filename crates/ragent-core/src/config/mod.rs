@@ -226,6 +226,15 @@ impl Config {
     /// # Errors
     ///
     /// Returns an error if a config file cannot be read or contains invalid JSON.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::config::Config;
+    ///
+    /// let config = Config::load().expect("failed to load config");
+    /// println!("default agent: {}", config.default_agent);
+    /// ```
     pub fn load() -> anyhow::Result<Self> {
         let mut config = Config::default();
 
@@ -270,6 +279,19 @@ impl Config {
     }
 
     /// Deep merge two configs, with overlay taking precedence for set fields.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::config::Config;
+    ///
+    /// let base = Config::default();
+    /// let mut overlay = Config::default();
+    /// overlay.username = Some("alice".to_string());
+    ///
+    /// let merged = Config::merge(base, overlay);
+    /// assert_eq!(merged.username.as_deref(), Some("alice"));
+    /// ```
     pub fn merge(mut base: Config, overlay: Config) -> Config {
         if overlay.username.is_some() {
             base.username = overlay.username;

@@ -178,8 +178,10 @@ pub enum Event {
         call_id: String,
         /// Name of the tool that was invoked.
         tool: String,
-        /// The result content (or error text).
+        /// The result content (or error text), possibly truncated for display.
         content: String,
+        /// Total number of lines in the full (untruncated) result content.
+        content_line_count: usize,
         /// Whether the tool succeeded.
         success: bool,
     },
@@ -207,12 +209,30 @@ pub struct EventBus {
 
 impl EventBus {
     /// Creates a new event bus with the given channel capacity.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::event::EventBus;
+    ///
+    /// let bus = EventBus::new(128);
+    /// ```
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
         Self { sender }
     }
 
     /// Returns a new receiver that will observe all future events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::event::EventBus;
+    ///
+    /// let bus = EventBus::new(64);
+    /// let mut rx = bus.subscribe();
+    /// // rx.recv().await will yield future events published to the bus.
+    /// ```
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.sender.subscribe()
     }
@@ -225,6 +245,19 @@ impl EventBus {
     /// The underlying broadcast channel has a fixed-size buffer (256 by default).
     /// When the buffer is full, the oldest events are dropped and slow subscribers
     /// will receive a `Lagged` error on their next `recv()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::event::{Event, EventBus};
+    ///
+    /// let bus = EventBus::new(64);
+    /// let mut rx = bus.subscribe();
+    ///
+    /// bus.publish(Event::SessionCreated {
+    ///     session_id: "sess-001".to_string(),
+    /// });
+    /// ```
     pub fn publish(&self, event: Event) {
         if self.sender.send(event).is_err() {
             tracing::warn!("Event dropped: no active subscribers");

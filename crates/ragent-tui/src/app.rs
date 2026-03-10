@@ -13,6 +13,7 @@ use ratatui::layout::Rect;
 use ragent_core::{
     agent::{AgentInfo, ModelRef},
     event::{Event, EventBus},
+    mcp::McpServer,
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
     provider::ProviderRegistry,
@@ -156,6 +157,10 @@ pub struct SlashCommandDef {
 /// All available slash commands.
 pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
+        trigger: "about",
+        description: "Show application info, version, and authors",
+    },
+    SlashCommandDef {
         trigger: "agent",
         description: "Switch the active agent",
     },
@@ -194,6 +199,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "system",
         description: "Override the agent system prompt (/system <prompt>)",
+    },
+    SlashCommandDef {
+        trigger: "tools",
+        description: "List all available tools (built-in and MCP)",
     },
 ];
 
@@ -243,6 +252,21 @@ pub struct TextSelection {
 
 impl TextSelection {
     /// Return `(start, end)` with start ≤ end in row-major order.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_tui::app::{TextSelection, SelectionPane};
+    ///
+    /// let sel = TextSelection {
+    ///     pane: SelectionPane::Messages,
+    ///     anchor: (10, 5),
+    ///     endpoint: (3, 2),
+    /// };
+    /// let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
+    /// assert_eq!((start_col, start_row), (3, 2));
+    /// assert_eq!((end_col, end_row), (10, 5));
+    /// ```
     pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
         if self.anchor.1 < self.endpoint.1
             || (self.anchor.1 == self.endpoint.1 && self.anchor.0 <= self.endpoint.0)
@@ -342,10 +366,38 @@ pub struct App {
     pub input_area: Rect,
     /// Cached area of the home-screen input widget (set during render).
     pub home_input_area: Rect,
+    /// Snapshot of MCP servers and their tools (populated when MCP is connected).
+    pub mcp_servers: Vec<McpServer>,
+    /// When true, the next assistant text delta starts a new message instead
+    /// of appending to the current one. Set by `MessageEnd` events to
+    /// separate init-exchange output from the main response.
+    pub force_new_message: bool,
 }
 
 impl App {
     /// Create a new [`App`] with default state and the given event bus.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use std::sync::Arc;
+    /// # use ragent_core::event::EventBus;
+    /// # use ragent_core::provider::ProviderRegistry;
+    /// # use ragent_core::session::processor::SessionProcessor;
+    /// # use ragent_core::storage::Storage;
+    /// # use ragent_core::agent::AgentInfo;
+    /// # fn example(
+    /// #     event_bus: Arc<EventBus>,
+    /// #     storage: Arc<Storage>,
+    /// #     registry: Arc<ProviderRegistry>,
+    /// #     processor: Arc<SessionProcessor>,
+    /// # ) {
+    /// let agent = AgentInfo::new("general", "General-purpose agent");
+    /// let app = ragent_tui::App::new(
+    ///     event_bus, storage, registry, processor, agent, false,
+    /// );
+    /// # }
+    /// ```
     pub fn new(
         event_bus: Arc<EventBus>,
         storage: Arc<Storage>,
@@ -426,10 +478,25 @@ impl App {
             log_content_lines: Vec::new(),
             input_area: Rect::default(),
             home_input_area: Rect::default(),
+            mcp_servers: Vec::new(),
+            force_new_message: false,
         }
     }
 
     /// Detect the first configured provider by checking env vars and the database.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use std::sync::Arc;
+    /// # use ragent_core::storage::Storage;
+    /// # use ragent_tui::App;
+    /// # fn example(storage: &Storage) {
+    /// if let Some(provider) = App::detect_provider(storage) {
+    ///     println!("Found provider: {}", provider.name);
+    /// }
+    /// # }
+    /// ```
     pub fn detect_provider(storage: &Storage) -> Option<ConfiguredProvider> {
         // Helper: returns true when the user has explicitly reset this provider.
         let is_disabled = |pid: &str| -> bool {
@@ -523,6 +590,15 @@ impl App {
     }
 
     /// Refresh the configured-provider detection (e.g. after storing a new key).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// app.refresh_provider();
+    /// # }
+    /// ```
     pub fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
     }
@@ -537,6 +613,17 @@ impl App {
     ///
     /// Returns [`anyhow::Error`] if the session ID is not found in storage
     /// or if a database query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// if let Err(e) = app.load_session("session-abc-123") {
+    ///     eprintln!("Failed to load session: {e}");
+    /// }
+    /// # }
+    /// ```
     pub fn load_session(&mut self, session_id: &str) -> anyhow::Result<()> {
         let session = self
             .storage
@@ -591,6 +678,18 @@ impl App {
     ///
     /// For Ollama, queries the running server to discover actual models.
     /// Falls back to the provider's static defaults if discovery fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &App) {
+    /// let models = app.models_for_provider("anthropic");
+    /// for (id, name) in &models {
+    ///     println!("{id}: {name}");
+    /// }
+    /// # }
+    /// ```
     pub fn models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
         if provider_id == "ollama" {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -643,6 +742,17 @@ impl App {
     }
 
     /// Returns a human-readable `"provider / model"` label, or `None` if no model is selected.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &App) {
+    /// if let Some(label) = app.provider_model_label() {
+    ///     println!("Using: {label}");
+    /// }
+    /// # }
+    /// ```
     pub fn provider_model_label(&self) -> Option<String> {
         let provider_name = self.configured_provider.as_ref()?.name.clone();
         let model_str = self.selected_model.as_ref()?;
@@ -657,6 +767,21 @@ impl App {
     ///
     /// Sets `provider_health` to `0` (checking) immediately, then spawns
     /// a background task that updates it to `1` (available) or `2` (unavailable).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// app.check_provider_health();
+    /// // Later, query the result:
+    /// match app.provider_health_status() {
+    ///     Some(true)  => println!("Provider is available"),
+    ///     Some(false) => println!("Provider is unavailable"),
+    ///     None        => println!("Still checking..."),
+    /// }
+    /// # }
+    /// ```
     pub fn check_provider_health(&mut self) {
         let provider = match &self.configured_provider {
             Some(p) => p.clone(),
@@ -705,6 +830,19 @@ impl App {
     }
 
     /// Returns the provider health status: `None` = checking, `Some(true)` = up, `Some(false)` = down.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &App) {
+    /// match app.provider_health_status() {
+    ///     Some(true)  => println!("healthy"),
+    ///     Some(false) => println!("unhealthy"),
+    ///     None        => println!("checking"),
+    /// }
+    /// # }
+    /// ```
     pub fn provider_health_status(&self) -> Option<bool> {
         match self.provider_health.load(Ordering::Relaxed) {
             1 => Some(true),
@@ -717,6 +855,17 @@ impl App {
     ///
     /// Shows the menu when input starts with `/`, filtering commands by the text
     /// after the slash. Closes the menu when input no longer starts with `/`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// app.input = "/mod".to_string();
+    /// app.update_slash_menu();
+    /// // The slash menu now shows commands matching "mod"
+    /// # }
+    /// ```
     pub fn update_slash_menu(&mut self) {
         if let Some(filter) = self.input.strip_prefix('/') {
             let needle = filter.to_lowercase();
@@ -749,6 +898,15 @@ impl App {
     }
 
     /// Execute a slash command by trigger name (e.g. `"/model"` or `"model"`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// app.execute_slash_command("/help");
+    /// # }
+    /// ```
     pub fn execute_slash_command(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
@@ -760,6 +918,42 @@ impl App {
             .map_or((stripped, ""), |(c, a)| (c, a.trim()));
 
         match cmd {
+            "about" => {
+                // Ensure a session exists so the about text can be displayed
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
+                let about = format!(
+                    "  ragent — AI Coding Agent\n\
+                     \n\
+                     \x20 An interactive TUI-based AI coding agent\n\
+                     \x20 supporting multiple LLM providers.\n\
+                     \n\
+                     \x20 Version:     {}\n\
+                     \x20 Built:       {}\n\
+                     \x20 Repository:  https://github.com/thawkins/ragent\n\
+                     \x20 License:     MIT\n\
+                     \n\
+                     \x20 Authors:\n\
+                     \x20   Tim Hawkins <tim.thawkins@gmail.com>\n",
+                    env!("CARGO_PKG_VERSION"),
+                    option_env!("RAGENT_BUILD_DATE").unwrap_or("dev"),
+                );
+                self.append_assistant_text(&about);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "about".to_string();
+            }
             "agent" => {
                 if args.is_empty() {
                     // Open the agent picker dialog
@@ -769,15 +963,10 @@ impl App {
                         .map(|a| (a.name.clone(), a.description.clone()))
                         .collect();
                     let selected = self.current_agent_index;
-                    self.provider_setup =
-                        Some(ProviderSetupStep::SelectAgent { agents, selected });
+                    self.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected });
                 } else {
                     // Direct switch: /agent <name>
-                    if let Some(idx) = self
-                        .cycleable_agents
-                        .iter()
-                        .position(|a| a.name == args)
-                    {
+                    if let Some(idx) = self.cycleable_agents.iter().position(|a| a.name == args) {
                         let prev = self.agent_name.clone();
                         self.current_agent_index = idx;
                         self.agent_info = self.cycleable_agents[idx].clone();
@@ -798,10 +987,16 @@ impl App {
                             });
                         }
                     } else {
-                        let available: Vec<&str> =
-                            self.cycleable_agents.iter().map(|a| a.name.as_str()).collect();
-                        self.status =
-                            format!("Unknown agent '{}'. Available: {}", args, available.join(", "));
+                        let available: Vec<&str> = self
+                            .cycleable_agents
+                            .iter()
+                            .map(|a| a.name.as_str())
+                            .collect();
+                        self.status = format!(
+                            "Unknown agent '{}'. Available: {}",
+                            args,
+                            available.join(", ")
+                        );
                         self.push_log(LogLevel::Warn, format!("Unknown agent: {}", args));
                     }
                 }
@@ -869,9 +1064,25 @@ impl App {
                 });
             }
             "help" => {
+                // Ensure a session exists so the help text can be appended
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
                 let mut help_lines = String::from("Available commands:\n");
                 for cmd_def in SLASH_COMMANDS {
-                    help_lines.push_str(&format!("  /{:<18} {}\n", cmd_def.trigger, cmd_def.description));
+                    help_lines.push_str(&format!(
+                        "  /{:<18} {}\n",
+                        cmd_def.trigger, cmd_def.description
+                    ));
                 }
                 self.append_assistant_text(&help_lines);
                 if self.current_screen == ScreenMode::Home {
@@ -927,12 +1138,58 @@ impl App {
                     self.status = "system prompt updated".to_string();
                     self.push_log(
                         LogLevel::Info,
-                        format!(
-                            "System prompt set ({} chars)",
-                            args.len()
-                        ),
+                        format!("System prompt set ({} chars)", args.len()),
                     );
                 }
+            }
+            "tools" => {
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
+
+                let tool_defs = self.session_processor.tool_registry.definitions();
+                let mut output = String::from("Built-in Tools:\n\n");
+                for def in &tool_defs {
+                    output.push_str(&format!("  {:<16} {}\n", def.name, def.description));
+                }
+
+                let connected_servers: Vec<&McpServer> = self
+                    .mcp_servers
+                    .iter()
+                    .filter(|s| s.status == ragent_core::mcp::McpStatus::Connected)
+                    .collect();
+
+                if connected_servers.is_empty() {
+                    output.push_str("\nMCP Tools:\n\n  (no MCP servers connected)\n");
+                } else {
+                    output.push_str("\nMCP Tools:\n\n");
+                    for server in &connected_servers {
+                        for tool in &server.tools {
+                            output.push_str(&format!(
+                                "  {:<16} [{}] {}\n",
+                                tool.name, server.id, tool.description
+                            ));
+                        }
+                    }
+                    if connected_servers.iter().all(|s| s.tools.is_empty()) {
+                        output.push_str("  (no tools advertised)\n");
+                    }
+                }
+
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "tools".to_string();
             }
             _ => {
                 self.status = format!("Unknown command: /{}", cmd);
@@ -942,6 +1199,22 @@ impl App {
     }
 
     /// Process a terminal mouse event (scroll wheel, scrollbar drag, text selection).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use crossterm::event::{MouseEvent, MouseEventKind, MouseButton};
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// let event = MouseEvent {
+    ///     kind: MouseEventKind::ScrollUp,
+    ///     column: 10,
+    ///     row: 5,
+    ///     modifiers: crossterm::event::KeyModifiers::NONE,
+    /// };
+    /// app.handle_mouse_event(event);
+    /// # }
+    /// ```
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
         match event.kind {
             MouseEventKind::ScrollUp => {
@@ -1055,13 +1328,7 @@ impl App {
                     .map(|c| String::from_utf8_lossy(c).into_owned())
                     .collect();
                 let text = Self::extract_text_from_lines(
-                    &wrapped,
-                    inner_x,
-                    inner_y,
-                    start_col,
-                    start_row,
-                    end_col,
-                    end_row,
+                    &wrapped, inner_x, inner_y, start_col, start_row, end_col, end_row,
                 );
                 if !text.is_empty() {
                     Self::set_clipboard(&text);
@@ -1100,6 +1367,19 @@ impl App {
     }
 
     /// Extract text from cached content lines given screen coordinates.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ragent_tui::App;
+    ///
+    /// let lines = vec![
+    ///     "Hello, world!".to_string(),
+    ///     "Second line".to_string(),
+    /// ];
+    /// let text = App::extract_text_from_lines(&lines, 0, 0, 0, 0, 4, 0);
+    /// assert_eq!(text, "Hello");
+    /// ```
     pub fn extract_text_from_lines(
         lines: &[String],
         inner_x: u16,
@@ -1179,6 +1459,17 @@ impl App {
     }
 
     /// Process a terminal key event and execute the resulting [`InputAction`], if any.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+    /// app.handle_key_event(key);
+    /// # }
+    /// ```
     pub fn handle_key_event(&mut self, key: KeyEvent) {
         if let Some(action) = input::handle_key(self, key) {
             match action {
@@ -1222,7 +1513,11 @@ impl App {
 
                     // Log the prompt
                     let truncated = if text.len() > 120 {
-                        format!("{}…", &text[..120])
+                        let mut end = 120;
+                        while end > 0 && !text.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}…", &text[..end])
                     } else {
                         text.clone()
                     };
@@ -1307,7 +1602,10 @@ impl App {
                         self.status = format!("agent: {}", self.agent_name);
                         self.push_log(
                             LogLevel::Info,
-                            format!("Switched to: {} ({})", self.agent_name, self.agent_info.description),
+                            format!(
+                                "Switched to: {} ({})",
+                                self.agent_name, self.agent_info.description
+                            ),
                         );
 
                         if let Some(ref sid) = self.session_id {
@@ -1327,6 +1625,19 @@ impl App {
     }
 
     /// Handle an [`Event`] from the agent event bus and update application state.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_core::event::Event;
+    /// # use ragent_tui::App;
+    /// # fn example(app: &mut App) {
+    /// let event = Event::SessionCreated {
+    ///     session_id: "sess-001".to_string(),
+    /// };
+    /// app.handle_event(event);
+    /// # }
+    /// ```
     pub fn handle_event(&mut self, event: Event) {
         match event {
             Event::SessionCreated { ref session_id } => {
@@ -1415,6 +1726,7 @@ impl App {
             } => {
                 if self.is_current_session(session_id) {
                     self.status = "ready".to_string();
+                    self.force_new_message = true;
                     self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
                 }
             }
@@ -1515,22 +1827,32 @@ impl App {
             }
             Event::ToolCallArgs {
                 ref session_id,
+                ref call_id,
                 ref tool,
                 ref args,
-                ..
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(LogLevel::Tool, format!("→ {}({})", tool, args));
+                    self.update_tool_call_input(call_id, args);
+                    // Truncate args for log display only
+                    let log_args = if args.len() > 200 {
+                        format!("{}…", &args[..args.floor_char_boundary(200)])
+                    } else {
+                        args.clone()
+                    };
+                    self.push_log(LogLevel::Tool, format!("→ {}({})", tool, log_args));
                 }
             }
             Event::ToolResult {
                 ref session_id,
+                ref call_id,
                 ref tool,
                 ref content,
+                content_line_count,
                 success,
                 ..
             } => {
                 if self.is_current_session(session_id) {
+                    self.update_tool_call_output(call_id, content_line_count);
                     let icon = if success { "✓" } else { "✗" };
                     self.push_log(LogLevel::Tool, format!("← {} {} {}", tool, icon, content));
                 }
@@ -1565,6 +1887,16 @@ impl App {
     }
 
     /// Append a log entry to the log buffer.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # use ragent_tui::app::LogLevel;
+    /// # fn example(app: &mut App) {
+    /// app.push_log(LogLevel::Info, "Session started".to_string());
+    /// # }
+    /// ```
     pub fn push_log(&mut self, level: LogLevel, message: String) {
         self.log_entries.push(LogEntry {
             timestamp: chrono::Utc::now(),
@@ -1578,22 +1910,24 @@ impl App {
     }
 
     fn append_assistant_text(&mut self, text: &str) {
-        if let Some(last) = self.messages.last_mut()
-            && last.role == Role::Assistant
-        {
-            // Append to the last text part if it exists
-            for part in last.parts.iter_mut().rev() {
-                if let MessagePart::Text { text: t } = part {
+        if !self.force_new_message {
+            if let Some(last) = self.messages.last_mut()
+                && last.role == Role::Assistant
+            {
+                // Only append to the last part if it is a Text part;
+                // otherwise start a new Text part so text after tool calls
+                // appears in the correct position.
+                if let Some(MessagePart::Text { text: t }) = last.parts.last_mut() {
                     t.push_str(text);
-                    return;
+                } else {
+                    last.parts.push(MessagePart::Text {
+                        text: text.to_string(),
+                    });
                 }
+                return;
             }
-            // No text part yet, add one
-            last.parts.push(MessagePart::Text {
-                text: text.to_string(),
-            });
-            return;
         }
+        self.force_new_message = false;
         // Create new assistant message
         if let Some(ref sid) = self.session_id {
             let msg = Message::new(
@@ -1611,15 +1945,13 @@ impl App {
         if let Some(last) = self.messages.last_mut()
             && last.role == Role::Assistant
         {
-            for part in last.parts.iter_mut().rev() {
-                if let MessagePart::Reasoning { text: t } = part {
-                    t.push_str(text);
-                    return;
-                }
+            if let Some(MessagePart::Reasoning { text: t }) = last.parts.last_mut() {
+                t.push_str(text);
+            } else {
+                last.parts.push(MessagePart::Reasoning {
+                    text: text.to_string(),
+                });
             }
-            last.parts.push(MessagePart::Reasoning {
-                text: text.to_string(),
-            });
             return;
         }
         if let Some(ref sid) = self.session_id {
@@ -1695,6 +2027,43 @@ impl App {
             }
         }
     }
+
+    fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) {
+        if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
+            for msg in self.messages.iter_mut().rev() {
+                for part in msg.parts.iter_mut() {
+                    if let MessagePart::ToolCall {
+                        call_id: cid,
+                        state,
+                        ..
+                    } = part
+                        && cid == call_id
+                    {
+                        state.input = input;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    fn update_tool_call_output(&mut self, call_id: &str, content_line_count: usize) {
+        let value = serde_json::json!({ "line_count": content_line_count });
+        for msg in self.messages.iter_mut().rev() {
+            for part in msg.parts.iter_mut() {
+                if let MessagePart::ToolCall {
+                    call_id: cid,
+                    state,
+                    ..
+                } = part
+                    && cid == call_id
+                {
+                    state.output = Some(value);
+                    return;
+                }
+            }
+        }
+    }
 }
 
 /// Produces a short, user-facing summary from a raw error string.
@@ -1708,7 +2077,11 @@ fn summarise_error(raw: &str) -> String {
 
     // Truncate to a reasonable length for the status bar
     if cleaned.len() > 120 {
-        format!("{}…", &cleaned[..120])
+        let mut end = 120;
+        while end > 0 && !cleaned.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &cleaned[..end])
     } else {
         cleaned.to_string()
     }

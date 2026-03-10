@@ -30,3 +30,11 @@ bytes = { workspace = true }
 regex = { workspace = true }
 base64 = { workspace = true }
 rmcp = { workspace = true }
+docx-rust = { workspace = true }
+calamine = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+ooxmlsdk = { workspace = true }
+zip = { workspace = true }
+printpdf = { workspace = true }
+pdf-extract = { workspace = true }
+lopdf = { workspace = true }

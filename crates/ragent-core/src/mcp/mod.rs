@@ -81,6 +81,15 @@ impl McpClient {
     const TOOL_CALL_TIMEOUT_SECS: u64 = 120;
 
     /// Creates a new `McpClient` with no registered servers.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::mcp::McpClient;
+    ///
+    /// let client = McpClient::new();
+    /// assert!(client.servers().is_empty());
+    /// ```
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
@@ -104,6 +113,19 @@ impl McpClient {
     ///
     /// Returns an error if the transport cannot be established, the
     /// initialize handshake fails, or tool discovery fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # use ragent_core::config::McpServerConfig;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let mut client = McpClient::new();
+    /// let config = McpServerConfig::default();
+    /// client.connect("my-server", config).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn connect(&mut self, id: &str, config: McpServerConfig) -> anyhow::Result<()> {
         if config.disabled {
             let server = McpServer {
@@ -235,6 +257,16 @@ impl McpClient {
     /// that has status [`McpStatus::Connected`]. Uses the tool list
     /// discovered at connection time. Call [`Self::refresh_tools`] to
     /// re-query servers for updated tool manifests.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::mcp::McpClient;
+    ///
+    /// let client = McpClient::new();
+    /// let tools = client.list_tools();
+    /// assert!(tools.is_empty());
+    /// ```
     pub fn list_tools(&self) -> Vec<McpToolDef> {
         self.servers
             .iter()
@@ -251,6 +283,16 @@ impl McpClient {
     /// # Arguments
     ///
     /// * `server_id` — the ID of the server to query
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::mcp::McpClient;
+    ///
+    /// let client = McpClient::new();
+    /// let tools = client.list_tools_for_server("my-server");
+    /// assert!(tools.is_empty());
+    /// ```
     pub fn list_tools_for_server(&self, server_id: &str) -> Vec<McpToolDef> {
         self.servers
             .iter()
@@ -270,6 +312,17 @@ impl McpClient {
     /// Returns `Ok(())` even if individual servers fail to respond; errors
     /// are logged per-server. Only returns `Err` if the connection lock
     /// cannot be acquired.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let mut client = McpClient::new();
+    /// client.refresh_tools().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn refresh_tools(&mut self) -> anyhow::Result<()> {
         let conns = self.connections.read().await;
 
@@ -328,6 +381,17 @@ impl McpClient {
     /// # Errors
     ///
     /// Returns an error if the server is not connected or the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let mut client = McpClient::new();
+    /// let tools = client.refresh_tools_for_server("my-server").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn refresh_tools_for_server(
         &mut self,
         server_id: &str,
@@ -379,6 +443,18 @@ impl McpClient {
     ///
     /// Returns an error if the server is not connected, the tool call
     /// fails, times out, or the response cannot be serialized.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let client = McpClient::new();
+    /// let input = serde_json::json!({"query": "test"});
+    /// let result = client.call_tool("my-server", "search", input).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn call_tool(
         &self,
         server_id: &str,
@@ -438,6 +514,18 @@ impl McpClient {
     ///
     /// Returns an error if no connected server advertises the named tool,
     /// or if the tool call itself fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let client = McpClient::new();
+    /// let input = serde_json::json!({"query": "test"});
+    /// let result = client.call_tool_by_name("search", input).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn call_tool_by_name(&self, tool_name: &str, input: Value) -> anyhow::Result<Value> {
         let server_id = self
             .servers
@@ -470,6 +558,15 @@ impl McpClient {
     }
 
     /// Get all registered servers and their statuses.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::mcp::McpClient;
+    ///
+    /// let client = McpClient::new();
+    /// assert!(client.servers().is_empty());
+    /// ```
     pub fn servers(&self) -> &[McpServer] {
         &self.servers
     }
@@ -485,6 +582,17 @@ impl McpClient {
     /// # Errors
     ///
     /// Returns an error if the service cancellation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let mut client = McpClient::new();
+    /// client.disconnect("my-server").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn disconnect(&mut self, server_id: &str) -> anyhow::Result<()> {
         let conn = {
             let mut conns = self.connections.write().await;
@@ -513,6 +621,17 @@ impl McpClient {
     /// # Errors
     ///
     /// Returns an error if any service cancellation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let mut client = McpClient::new();
+    /// client.disconnect_all().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn disconnect_all(&mut self) -> anyhow::Result<()> {
         let server_ids: Vec<String> = {
             let conns = self.connections.read().await;

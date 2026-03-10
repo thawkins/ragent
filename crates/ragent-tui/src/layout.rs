@@ -9,18 +9,33 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Flex, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    },
 };
 
-use ragent_core::message::{MessagePart, Role};
+use ragent_core::message::{MessagePart, Role, ToolCallStatus};
 
-use crate::app::{App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode, SelectionPane};
+use crate::app::{
+    App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode, SelectionPane,
+};
 use crate::logo;
 
 /// The version string shown on the home screen.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Render the full TUI, dispatching to the Home or Chat screen.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use ratatui::Frame;
+/// # use ragent_tui::App;
+/// # use ragent_tui::layout::render;
+/// # fn example(frame: &mut Frame, app: &mut App) {
+/// render(frame, app);
+/// # }
+/// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
     match app.current_screen {
         ScreenMode::Home => render_home(frame, app),
@@ -41,7 +56,11 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
         if row < area.y || row >= area.bottom() {
             continue;
         }
-        let col_start = if row == start_row { start_col.max(area.x) } else { area.x };
+        let col_start = if row == start_row {
+            start_col.max(area.x)
+        } else {
+            area.x
+        };
         let col_end = if row == end_row {
             (end_col + 1).min(area.right())
         } else {
@@ -63,23 +82,25 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
     // Compute input height based on wrapped text length
-    let max_width = 70u16.min(area.width.saturating_sub(4));
+    let max_width = 88u16.min(area.width.saturating_sub(4));
     let inner_width = max_width.saturating_sub(2).max(1) as usize; // inside borders
     let input_text_len = app.input.len() + 2; // "> " prefix
-    let num_lines = ((input_text_len as f32) / (inner_width as f32)).ceil().max(1.0) as u16;
+    let num_lines = ((input_text_len as f32) / (inner_width as f32))
+        .ceil()
+        .max(1.0) as u16;
     let input_height = num_lines + 2; // +2 for top and bottom borders
 
     // Vertical layout: flex-grow top | logo | gap | prompt | provider | tip | flex-grow bottom | status bar
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),              // top spacer
+            Constraint::Min(1),               // top spacer
             Constraint::Length(4),            // logo (4 lines)
             Constraint::Length(1),            // gap
             Constraint::Length(input_height), // prompt input (dynamic)
             Constraint::Length(2),            // provider status
             Constraint::Length(2),            // tip
-            Constraint::Min(1),              // bottom spacer
+            Constraint::Min(1),               // bottom spacer
             Constraint::Length(1),            // status bar
         ])
         .flex(Flex::Center)
@@ -138,10 +159,14 @@ fn render_logo(frame: &mut Frame, area: Rect) {
 }
 
 fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 70u16.min(area.width.saturating_sub(4));
+    let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
 
     let input_text = format!("> {}", app.input);
+    let inner_width = centered.width.saturating_sub(2).max(1) as usize;
+
+    // Character-wrap the text so cursor math (pos / width) stays correct
+    let wrapped_lines = char_wrap(&input_text, inner_width);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -149,13 +174,10 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
         .title(" Ask anything… ")
         .title_style(Style::default().fg(Color::DarkGray));
 
-    let paragraph = Paragraph::new(input_text)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(wrapped_lines).block(block);
     frame.render_widget(paragraph, centered);
 
     // Position cursor accounting for wrapped lines
-    let inner_width = centered.width.saturating_sub(2).max(1) as usize;
     let cursor_pos = app.input.len() + 2; // "> " prefix
     let cursor_line = cursor_pos / inner_width;
     let cursor_col = cursor_pos % inner_width;
@@ -165,7 +187,7 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 70u16.min(area.width.saturating_sub(4));
+    let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
 
     let tip_line = Line::from(vec![
@@ -183,7 +205,7 @@ fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 70u16.min(area.width.saturating_sub(4));
+    let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
@@ -311,11 +333,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             let masked = if key_input.is_empty() {
                 "".to_string()
             } else {
-                let len = key_input.len();
-                if len <= 8 {
-                    "*".repeat(len)
+                let char_count = key_input.chars().count();
+                if char_count <= 8 {
+                    "*".repeat(char_count)
                 } else {
-                    format!("{}…{}", &key_input[..4], &key_input[len - 4..])
+                    let first4: String = key_input.chars().take(4).collect();
+                    let last4: String = key_input.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+                    format!("{}…{}", first4, last4)
                 }
             };
             lines.push(Line::from(vec![
@@ -715,6 +739,27 @@ fn centered_horizontal(width: u16, area: Rect) -> Rect {
     Rect::new(x, area.y, w, area.height)
 }
 
+/// Split `text` into fixed-width character-wrapped lines.
+///
+/// Unlike word wrapping, this breaks at exact character boundaries so that
+/// cursor positioning via `pos / width` and `pos % width` is always correct.
+fn char_wrap<'a>(text: &'a str, width: usize) -> Vec<Line<'a>> {
+    if width == 0 {
+        return vec![Line::from(text)];
+    }
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while start < text.len() {
+        let end = (start + width).min(text.len());
+        lines.push(Line::from(&text[start..end]));
+        start = end;
+    }
+    if lines.is_empty() {
+        lines.push(Line::from(""));
+    }
+    lines
+}
+
 // ---------------------------------------------------------------------------
 // Chat screen (existing three-panel layout)
 // ---------------------------------------------------------------------------
@@ -724,14 +769,16 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     let chat_area = frame.area();
     let input_inner_width = chat_area.width.saturating_sub(2).max(1) as usize;
     let input_text_len = app.input.len() + 2; // "> " prefix
-    let input_lines = ((input_text_len as f32) / (input_inner_width as f32)).ceil().max(1.0) as u16;
+    let input_lines = ((input_text_len as f32) / (input_inner_width as f32))
+        .ceil()
+        .max(1.0) as u16;
     let input_height = input_lines + 2; // +2 for borders
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),            // status bar
-            Constraint::Min(3),              // messages + optional log
+            Constraint::Min(3),               // messages + optional log
             Constraint::Length(input_height), // input (dynamic)
         ])
         .split(chat_area);
@@ -832,7 +879,12 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Cache plain-text content for text selection copy
     app.log_content_lines = lines
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect();
 
     let total_lines = lines.len() as u16;
@@ -850,8 +902,8 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render scrollbar when content overflows
     if total_lines > visible_height {
         let scroll_position = max_scroll.saturating_sub(scroll) as usize;
-        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-            .position(scroll_position);
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
@@ -949,55 +1001,228 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
+/// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
+fn capitalize_tool_name(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+    }
+}
+
+/// Strip the working directory prefix from a path to produce a project-relative path.
+fn make_relative_path(path: &str, cwd: &str) -> String {
+    // Expand ~ in cwd to the home directory for comparison
+    let expanded_cwd = if cwd.starts_with('~') {
+        if let Some(home) = std::env::var_os("HOME") {
+            format!("{}{}", home.to_string_lossy(), &cwd[1..])
+        } else {
+            cwd.to_string()
+        }
+    } else {
+        cwd.to_string()
+    };
+
+    let cwd_prefix = if expanded_cwd.ends_with('/') {
+        expanded_cwd
+    } else {
+        format!("{}/", expanded_cwd)
+    };
+    if path.starts_with(&cwd_prefix) {
+        path[cwd_prefix.len()..].to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+/// Extract a brief summary from tool input for display next to the tool name.
+fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
+    match tool {
+        "bash" => input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.lines().next())
+            .map(|s| format!("$ {}", s))
+            .unwrap_or_default(),
+        "read" | "write" | "edit" | "list" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
+        "glob" => input
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "grep" => {
+            let pattern = input
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let path = input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|p| make_relative_path(p, cwd));
+            match path {
+                Some(p) if !p.is_empty() => format!("\"{}\" in {}", pattern, p),
+                _ => format!("\"{}\"", pattern),
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+/// Generate a result summary line for a completed tool call.
+fn tool_result_summary(
+    tool: &str,
+    output: &Option<serde_json::Value>,
+    input: &serde_json::Value,
+    cwd: &str,
+) -> Option<String> {
+    let out = output.as_ref()?;
+    let line_count = out.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    match tool {
+        "read" => Some(format!(
+            "{} line{} read",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "write" => {
+            let path = input["path"]
+                .as_str()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} line{} written to {}",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                path
+            ))
+        }
+        "edit" => Some(format!(
+            "{} line{} changed",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "bash" => Some(format!(
+            "{} line{}...",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "grep" => Some(format!(
+            "{} line{} matched",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "glob" => Some(format!(
+            "{} file{} found",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "list" => Some(format!(
+            "{} entr{}",
+            line_count,
+            if line_count == 1 { "y" } else { "ies" }
+        )),
+        _ => None,
+    }
+}
+
 fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     for msg in &app.messages {
-        let role_style = match msg.role {
-            Role::User => Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            Role::Assistant => Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        };
-
-        let prefix = match msg.role {
-            Role::User => "You: ",
-            Role::Assistant => "Assistant: ",
-        };
-
         for part in &msg.parts {
             match part {
                 MessagePart::Text { text } => {
+                    let (dot, dot_style, indent) = match msg.role {
+                        Role::User => (
+                            "You: ",
+                            Style::default()
+                                .fg(Color::Cyan)
+                                .add_modifier(Modifier::BOLD),
+                            5,
+                        ),
+                        Role::Assistant => (
+                            "● ",
+                            Style::default()
+                                .fg(Color::Magenta)
+                                .add_modifier(Modifier::BOLD),
+                            2,
+                        ),
+                    };
                     for (i, line) in text.lines().enumerate() {
                         if i == 0 {
                             lines.push(Line::from(vec![
-                                Span::styled(prefix, role_style),
+                                Span::styled(dot, dot_style),
                                 Span::raw(line),
                             ]));
                         } else {
                             lines.push(Line::from(Span::raw(format!(
                                 "{}{}",
-                                " ".repeat(prefix.len()),
+                                " ".repeat(indent),
                                 line
                             ))));
                         }
                     }
                 }
                 MessagePart::ToolCall { tool, state, .. } => {
-                    let status_str = format!("{:?}", state.status);
-                    lines.push(Line::from(vec![
-                        Span::styled("  ┌─ ", Style::default().fg(Color::Yellow)),
-                        Span::styled(
-                            format!("tool: {} [{}]", tool, status_str.to_lowercase()),
-                            Style::default().fg(Color::Yellow),
+                    let (indicator, ind_style, name_style) = match state.status {
+                        ToolCallStatus::Completed => (
+                            "● ",
+                            Style::default().fg(Color::Green),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
                         ),
-                    ]));
-                    lines.push(Line::from(Span::styled(
-                        "  └────",
-                        Style::default().fg(Color::Yellow),
-                    )));
+                        ToolCallStatus::Error => (
+                            "✗ ",
+                            Style::default().fg(Color::Red),
+                            Style::default()
+                                .fg(Color::Red)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        ToolCallStatus::Running | ToolCallStatus::Pending => (
+                            "● ",
+                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    };
+
+                    let display_name = capitalize_tool_name(tool);
+                    let summary = tool_input_summary(tool, &state.input, &app.cwd);
+                    if summary.is_empty() {
+                        lines.push(Line::from(vec![
+                            Span::styled(indicator, ind_style),
+                            Span::styled(display_name, name_style),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![
+                            Span::styled(indicator, ind_style),
+                            Span::styled(format!("{} ", display_name), name_style),
+                            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+                        ]));
+                    }
+
+                    if state.status == ToolCallStatus::Completed {
+                        if let Some(result) =
+                            tool_result_summary(tool, &state.output, &state.input, &app.cwd)
+                        {
+                            lines.push(Line::from(Span::styled(
+                                format!("  └ {}", result),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
+                    }
+
+                    if state.status == ToolCallStatus::Error {
+                        if let Some(ref err) = state.error {
+                            lines.push(Line::from(Span::styled(
+                                format!("  └ {}", err),
+                                Style::default().fg(Color::Red),
+                            )));
+                        }
+                    }
                 }
                 MessagePart::Reasoning { text } => {
                     for line in text.lines() {
@@ -1010,15 +1235,20 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     }
                 }
             }
-        }
 
-        lines.push(Line::from(""));
+            lines.push(Line::from(""));
+        }
     }
 
     // Cache plain-text content for text selection copy
     app.message_content_lines = lines
         .iter()
-        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+        .map(|l| {
+            l.spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>()
+        })
         .collect();
 
     // Apply scroll offset
@@ -1042,8 +1272,8 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
     // Render scrollbar when content overflows
     if total > visible {
         let scroll_position = scroll as usize;
-        let mut scrollbar_state = ScrollbarState::new(max_scroll as usize)
-            .position(scroll_position);
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
@@ -1052,14 +1282,16 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let input_text = format!("> {}", app.input);
+    let inner_width = area.width.saturating_sub(2).max(1) as usize;
+
+    // Character-wrap the text so cursor math (pos / width) stays correct
+    let wrapped_lines = char_wrap(&input_text, inner_width);
+
     let block = Block::default().borders(Borders::ALL).title(" Input ");
-    let paragraph = Paragraph::new(input_text)
-        .block(block)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(wrapped_lines).block(block);
     frame.render_widget(paragraph, area);
 
     // Position cursor accounting for wrapped lines
-    let inner_width = area.width.saturating_sub(2).max(1) as usize;
     let cursor_pos = app.input.len() + 2; // "> " prefix
     let cursor_line = cursor_pos / inner_width;
     let cursor_col = cursor_pos % inner_width;

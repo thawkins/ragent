@@ -15,8 +15,8 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
-use ragent_tui::app::{LogLevel, ScreenMode};
 use ragent_tui::App;
+use ragent_tui::app::{LogLevel, ScreenMode};
 
 /// Build an [`App`] and its shared [`SessionManager`] backed by in-memory storage.
 fn make_app_with_manager() -> (App, Arc<SessionManager>) {

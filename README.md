@@ -23,6 +23,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
   and external access before they execute
 - **Agent presets** — coder, task, architect, ask, debug, code-review, and custom
   agents with tailored system prompts
+- **Project guidelines** — auto-loads `AGENTS.md` from the project root into the
+  system prompt so agents follow project-specific conventions
 - **MCP client** — Model Context Protocol support for extending tool capabilities
   via external servers (stub, in progress)
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back

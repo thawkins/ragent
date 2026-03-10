@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -63,6 +63,14 @@ base64 = "0.22"
 rand = "0.8"
 arboard = "3"
 rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+docx-rust = "0.1"
+calamine = "0.34"
+rust_xlsxwriter = "0.94"
+ooxmlsdk = "0.3"
+zip = { version = "7", default-features = false, features = ["deflate"] }
+printpdf = { version = "0.9", default-features = false, features = ["text_layout", "png", "jpeg"] }
+pdf-extract = "0.10"
+lopdf = "0.39"
 
 [[bin]]
 name = "ragent"

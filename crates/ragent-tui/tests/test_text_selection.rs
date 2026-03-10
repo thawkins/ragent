@@ -34,9 +34,16 @@ fn make_app() -> App {
         permission_checker,
         event_bus: event_bus.clone(),
     });
-    let agent_info = agent::resolve_agent("general", &Default::default())
-        .expect("resolve general agent");
-    App::new(event_bus, storage, provider_registry, session_processor, agent_info, true)
+    let agent_info =
+        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
+    App::new(
+        event_bus,
+        storage,
+        provider_registry,
+        session_processor,
+        agent_info,
+        true,
+    )
 }
 
 fn mouse_down(col: u16, row: u16) -> MouseEvent {

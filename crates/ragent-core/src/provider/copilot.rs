@@ -94,6 +94,14 @@ pub struct CopilotProvider {
 
 impl CopilotProvider {
     /// Creates a new Copilot provider with the default API endpoint.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::provider::copilot::CopilotProvider;
+    ///
+    /// let provider = CopilotProvider::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             base_url: DEFAULT_COPILOT_API_BASE.to_string(),
@@ -101,6 +109,14 @@ impl CopilotProvider {
     }
 
     /// Creates a provider pointing at a custom Copilot-compatible endpoint.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::provider::copilot::CopilotProvider;
+    ///
+    /// let provider = CopilotProvider::with_url("https://my-proxy.example.com/copilot");
+    /// ```
     pub fn with_url(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -555,6 +571,16 @@ impl LlmClient for CopilotClient {
 /// 2. `%LOCALAPPDATA%/github-copilot/apps.json` (Windows)
 ///
 /// Returns `None` if no token is found.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::find_copilot_token;
+///
+/// if let Some(token) = find_copilot_token() {
+///     println!("Found Copilot token: {}", &token[..8]);
+/// }
+/// ```
 pub fn find_copilot_token() -> Option<String> {
     let config_dirs = if cfg!(windows) {
         vec![dirs::data_local_dir().map(|d| d.join("github-copilot"))]
@@ -588,6 +614,16 @@ pub fn find_copilot_token() -> Option<String> {
 /// Runs `gh auth token` and returns the token if available. Only returns
 /// OAuth tokens (`gho_` / `ghu_`); fine-grained PATs are filtered out
 /// since they cannot be used with the Copilot internal API.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::find_gh_cli_token;
+///
+/// if let Some(token) = find_gh_cli_token() {
+///     println!("Got token from gh CLI: {}", &token[..8]);
+/// }
+/// ```
 pub fn find_gh_cli_token() -> Option<String> {
     let output = std::process::Command::new("gh")
         .args(["auth", "token"])
@@ -610,6 +646,16 @@ pub fn find_gh_cli_token() -> Option<String> {
 
 /// Returns `true` if the token looks like a fine-grained or classic PAT
 /// (which cannot be used with the Copilot internal API).
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::is_pat_token;
+///
+/// assert!(is_pat_token("github_pat_abc123"));
+/// assert!(is_pat_token("ghp_xxxx"));
+/// assert!(!is_pat_token("ghu_xxxx"));
+/// ```
 pub fn is_pat_token(token: &str) -> bool {
     token.starts_with("github_pat_") || token.starts_with("ghp_")
 }
@@ -618,6 +664,19 @@ pub fn is_pat_token(token: &str) -> bool {
 ///
 /// Priority: env var → IDE auto-discover → `gh` CLI → database.
 /// Returns `None` if no valid token is found.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::resolve_copilot_github_token;
+///
+/// // Resolve without a database lookup fallback.
+/// let token = resolve_copilot_github_token(None);
+///
+/// // Resolve with a database lookup fallback.
+/// let db_lookup = || Some("ghu_my_stored_token".to_string());
+/// let token = resolve_copilot_github_token(Some(&db_lookup));
+/// ```
 pub fn resolve_copilot_github_token(
     db_lookup: Option<&dyn Fn() -> Option<String>>,
 ) -> Option<String> {
@@ -694,6 +753,18 @@ pub struct DeviceFlowStart {
 /// Returns the device code and user-facing instructions. The caller should
 /// display `user_code` and `verification_uri` to the user, then poll with
 /// [`poll_copilot_device_flow`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::start_copilot_device_flow;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let flow = start_copilot_device_flow().await?;
+/// println!("Go to {} and enter code: {}", flow.verification_uri, flow.user_code);
+/// # Ok(())
+/// # }
+/// ```
 pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
     let http = reqwest::Client::new();
     let resp = http
@@ -726,6 +797,21 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
 /// - `Ok(Some(token))` — user authorised, token is ready
 /// - `Ok(None)` — user hasn't authorised yet, keep polling
 /// - `Err(...)` — the code expired, was denied, or a network error occurred
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::poll_copilot_device_flow;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let device_code = "abc123";
+/// match poll_copilot_device_flow(device_code).await? {
+///     Some(token) => println!("Authorised! Token: {}", &token[..8]),
+///     None => println!("Still waiting for user authorisation..."),
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub async fn poll_copilot_device_flow(device_code: &str) -> Result<Option<String>> {
     let http = reqwest::Client::new();
     let resp = http
@@ -859,6 +945,18 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 /// 2. On failure (e.g. `gh` CLI tokens that lack the internal scope),
 ///    falls back to using the raw token directly with the GitHub Models
 ///    API at `models.inference.ai.azure.com`.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::resolve_copilot_auth;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let auth = resolve_copilot_auth("ghu_xxxxxxxxxxxx", None).await?;
+/// println!("Using API at {} with token {}", auth.base_url, &auth.token[..8]);
+/// # Ok(())
+/// # }
+/// ```
 pub async fn resolve_copilot_auth(
     github_token: &str,
     stored_api_base: Option<&str>,
@@ -945,6 +1043,17 @@ struct CopilotTokenEndpoints {
 /// Tries the plan-specific API endpoint first (via `copilot_internal/user`),
 /// then falls back to the GitHub Models API. Returns `true` if any models
 /// endpoint responds successfully.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::check_copilot_health;
+///
+/// # async fn example() {
+/// let healthy = check_copilot_health("ghu_xxxxxxxxxxxx").await;
+/// println!("Copilot API healthy: {healthy}");
+/// # }
+/// ```
 pub async fn check_copilot_health(github_token: &str) -> bool {
     let http = reqwest::Client::new();
 
@@ -1046,6 +1155,18 @@ struct CopilotEndpoints {
 /// Queries `api.github.com/copilot_internal/user` and returns the
 /// plan-specific API endpoint (e.g. `api.individual.githubcopilot.com`
 /// for Pro Plus subscribers).
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::discover_copilot_api_base;
+///
+/// # async fn example() {
+/// if let Some(base) = discover_copilot_api_base("ghu_xxxxxxxxxxxx").await {
+///     println!("Plan-specific API base: {base}");
+/// }
+/// # }
+/// ```
 pub async fn discover_copilot_api_base(github_token: &str) -> Option<String> {
     let http = reqwest::Client::new();
     let resp = http
@@ -1076,6 +1197,20 @@ pub async fn discover_copilot_api_base(github_token: &str) -> Option<String> {
 /// Discovers the user's plan-specific API endpoint, then queries `/models`
 /// to get the full catalogue. Only returns chat-capable models that are
 /// enabled in the model picker. Falls back to `default_models()` on failure.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::list_copilot_models;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// let models = list_copilot_models("ghu_xxxxxxxxxxxx").await?;
+/// for m in &models {
+///     println!("{}: {}", m.id, m.name);
+/// }
+/// # Ok(())
+/// # }
+/// ```
 pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
     // Discover the user-specific API base, fall back to default
     let api_base = discover_api_base_multi_source(github_token)

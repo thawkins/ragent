@@ -110,6 +110,7 @@ fn test_event_serialization_roundtrip_all_variants() {
             call_id: "c1".into(),
             tool: "read".into(),
             content: "file contents here".into(),
+            content_line_count: 1,
             success: true,
         },
         Event::CopilotDeviceFlowComplete {

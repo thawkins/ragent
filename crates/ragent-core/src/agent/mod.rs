@@ -74,6 +74,17 @@ pub struct AgentInfo {
 
 impl AgentInfo {
     /// Creates a new agent with the given name and description, using default values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::agent::AgentInfo;
+    ///
+    /// let agent = AgentInfo::new("my-agent", "A custom coding assistant");
+    /// assert_eq!(agent.name, "my-agent");
+    /// assert_eq!(agent.description, "A custom coding assistant");
+    /// assert!(agent.model.is_none());
+    /// ```
     pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -101,6 +112,19 @@ impl Default for AgentInfo {
 ///
 /// Includes `chat`, `general`, `build`, `plan`, `explore`, `title`, `summary`,
 /// and `compaction` agents.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::agent::create_builtin_agents;
+///
+/// let agents = create_builtin_agents();
+/// assert!(!agents.is_empty());
+///
+/// let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
+/// assert!(names.contains(&"general"));
+/// assert!(names.contains(&"explore"));
+/// ```
 pub fn create_builtin_agents() -> Vec<AgentInfo> {
     vec![
         AgentInfo {
@@ -322,6 +346,17 @@ fn read_only_permissions() -> PermissionRuleset {
 /// # Errors
 ///
 /// Returns an error if config overlay parsing fails (e.g. invalid model string format).
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::agent::resolve_agent;
+/// use ragent_core::config::Config;
+///
+/// let config = Config::default();
+/// let agent = resolve_agent("general", &config).unwrap();
+/// assert_eq!(agent.name, "general");
+/// ```
 pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Result<AgentInfo> {
     let builtins = create_builtin_agents();
     let mut agent = builtins
@@ -365,6 +400,21 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
 }
 
 /// Build the system prompt for an agent invocation.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use ragent_core::agent::{AgentInfo, build_system_prompt};
+///
+/// let mut agent = AgentInfo::new("helper", "A helpful agent");
+/// agent.prompt = Some("You are a helpful assistant.".to_string());
+/// agent.max_steps = Some(10);
+///
+/// let prompt = build_system_prompt(&agent, Path::new("/tmp/project"), "src/\n  main.rs");
+/// assert!(prompt.contains("You are a helpful assistant."));
+/// assert!(prompt.contains("/tmp/project"));
+/// ```
 pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &str) -> String {
     let mut prompt = String::new();
 
@@ -394,6 +444,16 @@ pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &st
         prompt.push_str("```\n");
         prompt.push_str(file_tree);
         prompt.push_str("\n```\n\n");
+    }
+
+    // Load AGENTS.md project guidelines if present
+    let agents_md = working_dir.join("AGENTS.md");
+    if agents_md.is_file() {
+        if let Ok(contents) = std::fs::read_to_string(&agents_md) {
+            prompt.push_str("## Project Guidelines (AGENTS.md)\n");
+            prompt.push_str(&contents);
+            prompt.push_str("\n\n");
+        }
     }
 
     // Tool usage guidelines

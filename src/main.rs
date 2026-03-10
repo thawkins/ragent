@@ -289,8 +289,7 @@ async fn main() -> Result<()> {
             }
             SessionCommands::Import { file } => {
                 let content = std::fs::read_to_string(&file)?;
-                let messages: Vec<ragent_core::message::Message> =
-                    serde_json::from_str(&content)?;
+                let messages: Vec<ragent_core::message::Message> = serde_json::from_str(&content)?;
 
                 let dir = std::fs::canonicalize(".")?;
                 let session = session_manager.create_session(dir)?;

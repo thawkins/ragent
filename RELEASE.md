@@ -1,15 +1,15 @@
 # Release
 
-## Current Version: 0.1.0-alpha.2
+## Current Version: 0.1.0-alpha.3
 
-### Added (since 0.1.0-alpha.1)
-- `/provider_reset` slash command with interactive provider selection and persistent disable flag
-- Clipboard copy support on Copilot device code screen (Linux-aware via `arboard`)
-- Storage methods: `delete_provider_auth()`, `delete_setting()`
-- Robust Copilot API base resolution with multi-source token discovery
-- VS Code-compatible headers for Copilot chat API
+### Added (since 0.1.0-alpha.2)
+- AGENTS.md auto-loading on session start for multi-step agents with visible init greeting
+- TUI tool call display: capitalized names, relative paths, result summaries with "└" prefix
+- INDEX.md document index for root-level markdown files
+- `/compact` history reconstruction with proper tool_result pairing
 
-### Fixed (since 0.1.0-alpha.1)
-- Copilot "Unknown model" error — device flow token now prioritised over `gh` CLI token
-- Copilot API uses plan-specific endpoint (`api.individual.githubcopilot.com`)
-- Provider reset persistence across app restarts
+### Fixed (since 0.1.0-alpha.2)
+- `/compact` slash command error (missing tool_result blocks in history)
+- Read/Write tool line counts now accurate (using full content or metadata)
+- Write tool filename display (full args JSON sent to TUI)
+- AGENTS.md init exchange isolated from main tool call processing

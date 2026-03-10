@@ -11,7 +11,19 @@ fn test_default_registry_has_all_tools() {
     let tools = registry.list();
 
     let expected = [
-        "bash", "edit", "glob", "grep", "list", "question", "read", "write",
+        "bash",
+        "edit",
+        "glob",
+        "grep",
+        "list",
+        "office_info",
+        "office_read",
+        "office_write",
+        "pdf_read",
+        "pdf_write",
+        "question",
+        "read",
+        "write",
     ];
     assert_eq!(tools.len(), expected.len());
     for name in &expected {
@@ -34,7 +46,17 @@ fn test_registry_get_existing_tool() {
     let registry = create_default_registry();
 
     for name in &[
-        "read", "write", "edit", "bash", "grep", "glob", "list", "question",
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "grep",
+        "glob",
+        "list",
+        "question",
+        "office_read",
+        "office_write",
+        "office_info",
     ] {
         let tool = registry.get(name);
         assert!(
@@ -59,7 +81,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 8);
+    assert_eq!(defs.len(), 13);
 
     for def in &defs {
         assert!(

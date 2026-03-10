@@ -42,6 +42,27 @@ use ragent_core::storage::Storage;
 /// # Errors
 ///
 /// Returns an error if terminal setup, drawing, or event reading fails.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use std::sync::Arc;
+/// # use ragent_core::event::EventBus;
+/// # use ragent_core::provider::ProviderRegistry;
+/// # use ragent_core::session::processor::SessionProcessor;
+/// # use ragent_core::storage::Storage;
+/// # use ragent_core::agent::AgentInfo;
+/// # async fn example(
+/// #     bus: Arc<EventBus>,
+/// #     storage: Arc<Storage>,
+/// #     registry: Arc<ProviderRegistry>,
+/// #     processor: Arc<SessionProcessor>,
+/// # ) -> anyhow::Result<()> {
+/// let agent = AgentInfo::new("general", "General-purpose agent");
+/// ragent_tui::run_tui(bus, storage, registry, processor, agent, false, None).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn run_tui(
     event_bus: Arc<EventBus>,
     storage: Arc<Storage>,

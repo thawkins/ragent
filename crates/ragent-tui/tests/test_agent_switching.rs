@@ -30,8 +30,8 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         permission_checker,
         event_bus: event_bus.clone(),
     });
-    let agent_info = agent::resolve_agent("general", &Default::default())
-        .expect("resolve general agent");
+    let agent_info =
+        agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
 
     App::new(
         event_bus,
@@ -194,7 +194,11 @@ fn test_agent_switch_full_cycle_names() {
     let mut app = make_app(bus);
 
     let count = app.cycleable_agents.len();
-    let expected_names: Vec<String> = app.cycleable_agents.iter().map(|a| a.name.clone()).collect();
+    let expected_names: Vec<String> = app
+        .cycleable_agents
+        .iter()
+        .map(|a| a.name.clone())
+        .collect();
 
     // Cycle through starting from current index
     let start = app.current_agent_index;

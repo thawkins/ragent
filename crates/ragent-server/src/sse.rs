@@ -7,6 +7,18 @@ use axum::response::sse::Event as SseEvent;
 use ragent_core::event::Event;
 
 /// Convert a ragent_core [`Event`] into an Axum [`SseEvent`].
+///
+/// # Examples
+///
+/// ```rust
+/// use ragent_core::event::Event;
+/// use ragent_server::sse::event_to_sse;
+///
+/// let event = Event::SessionCreated {
+///     session_id: "abc-123".to_string(),
+/// };
+/// let sse_event = event_to_sse(&event);
+/// ```
 pub fn event_to_sse(event: &Event) -> SseEvent {
     let (event_type, data) = match event {
         Event::SessionCreated { session_id } => (
@@ -163,6 +175,7 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
             call_id,
             tool,
             content,
+            content_line_count,
             success,
         } => (
             "tool_result",
@@ -171,6 +184,7 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "call_id": call_id,
                 "tool": tool,
                 "content": content,
+                "content_line_count": content_line_count,
                 "success": success,
             }),
         ),
@@ -181,10 +195,7 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "api_base": api_base,
             }),
         ),
-        Event::SessionAborted {
-            session_id,
-            reason,
-        } => (
+        Event::SessionAborted { session_id, reason } => (
             "session_aborted",
             serde_json::json!({
                 "session_id": session_id,

@@ -39,6 +39,20 @@ pub enum InputAction {
 /// keys are routed to the dialog. When the slash-command menu is active,
 /// arrow keys navigate and Enter selects. Otherwise normal editing and
 /// navigation keys are processed.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+/// # use ragent_tui::App;
+/// # use ragent_tui::input::handle_key;
+/// # fn example(app: &mut App) {
+/// let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+/// if let Some(action) = handle_key(app, key) {
+///     println!("Action: {action:?}");
+/// }
+/// # }
+/// ```
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     // If provider setup dialog is active, route all keys there
     if app.provider_setup.is_some() {

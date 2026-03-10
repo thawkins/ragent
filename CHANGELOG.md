@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.3] - 2026-03-10
+
+### Added
+- AGENTS.md auto-loading on session start — project guidelines are injected into the system prompt for all multi-step agents (general, build, plan, explore); excluded for ask and internal utility agents
+- AGENTS.md init exchange — model acknowledges project guidelines with a visible greeting in the message window on first message
+- TUI tool call display improvements:
+  - Tool names capitalized (Read, Write, Bash, Grep, etc.)
+  - File paths shown relative to project root instead of absolute
+  - Result summary lines with "└" prefix (e.g., "└ 72 lines read", "└ 45 lines written to INDEX.md")
+  - Per-message-part spacing for visual separation
+- INDEX.md document index with summaries of all root-level markdown files
+- `content_line_count` field on `ToolResult` event for accurate line counts
+- `force_new_message` flag in TUI to separate init exchange from main response
+- History reconstruction now generates `tool_result` messages for `/compact` compatibility
+
+### Fixed
+- `/compact` slash command "tool_use ids without tool_result" error — `history_to_chat_messages()` now injects synthetic user messages with `ToolResult` parts for each assistant tool call
+- Read tool line count showing truncated count (e.g., "5 lines" for a 1593-line file) — now uses full content line count before truncation
+- Write tool showing "1 line written" regardless of actual content — now uses metadata `lines` field from tool output
+- Write tool missing filename in display — `ToolCallArgs` event now sends full JSON args instead of truncated 200-char preview
+- AGENTS.md init exchange no longer interferes with tool call decoding — uses isolated message list without the user's actual message
+- Tool input parsing for write/edit tools with large content — full args JSON sent to TUI for proper field extraction
+
+### Changed
+- `ToolCallArgs` event now carries full args JSON (truncation moved to log display only)
+- `content_line_count` computation uses tool metadata `lines` field when available, falls back to result content line count
+- `build_system_prompt()` loads AGENTS.md from working directory for multi-step agents
+- `history_to_chat_messages()` rewritten from iterator `.map()` to imperative loop with tool result injection
+
 ## [0.1.0-alpha.2] - 2025-07-25
 
 ### Added

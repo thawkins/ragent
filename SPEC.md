@@ -481,6 +481,12 @@ Agents are merged from multiple sources (lowest → highest priority):
 4. `.ragent/agent-*.md` files (prompt overrides)
 5. CLI `--agent` flag
 
+#### AGENTS.md Auto-Loading
+
+On session start, `build_system_prompt()` checks for an `AGENTS.md` file in the project working directory. If found, its contents are injected into the system prompt under a "Project Guidelines" section. This applies to all multi-step agents (general, build, plan, explore) but is skipped for single-step agents (ask, title, summary, compaction).
+
+On the first message of a session, an init exchange prompts the model to acknowledge the guidelines. The acknowledgement streams to the TUI message window as a separate assistant message before the main response begins. This init exchange is display-only — it is not stored in the conversation history or fed into subsequent LLM calls.
+
 ---
 
 ### 3.5 Session Management
@@ -516,8 +522,9 @@ pub struct SessionSummary {
 3. **Continue** — user sends follow-up → messages appended, agent re-enters loop
 4. **Compact** — when context nears limit, compress old messages via `compaction` agent
 5. **Archive** — mark session as archived (soft delete)
-6. **Resume** — load session by ID, restore full message history
-7. **Export / Import** — serialize to/from JSON for portability
+6. **Resume** — `ragent session resume <id>` loads the session by ID, restores the full message history and working directory, and launches the TUI in the chat screen. The `App::load_session()` method verifies the session exists, loads all persisted messages, and updates the status bar
+7. **Export** — `ragent session export <id>` serializes messages to JSON on stdout
+8. **Import** — `ragent session import <file>` deserializes messages from a JSON file, creates a new session in storage, and re-parents each message with a fresh ULID into the new session. Prints the new session ID on success
 
 ---
 
@@ -732,7 +739,7 @@ The server exposes a REST + SSE API so any client can drive ragent.
 | `DELETE` | `/sessions/:id` | Archive session |
 | `GET` | `/sessions/:id/messages` | Get message history |
 | `POST` | `/sessions/:id/messages` | Send user message (SSE response) |
-| `POST` | `/sessions/:id/abort` | Abort running agent loop |
+| `POST` | `/sessions/:id/abort` | Abort running agent loop (archives session, publishes `SessionAborted` event) |
 | `POST` | `/sessions/:id/permission/:req_id` | Reply to permission request |
 | `GET` | `/mcp` | List MCP servers |
 | `POST` | `/mcp/:id/restart` | Restart MCP server |
@@ -758,6 +765,9 @@ data: {"call_id":"...","output":"...","duration_ms":42}
 
 event: permission.requested
 data: {"id":"...","permission":"edit","paths":["src/main.rs"]}
+
+event: session.aborted
+data: {"session_id":"...","reason":"user_requested"}
 
 event: usage
 data: {"input_tokens":1234,"output_tokens":567}
@@ -867,10 +877,11 @@ When the agent needs a provider API key, it checks in order:
 │  Assistant: I'll create a task management API.  │     (scrollable)
 │  Let me start by setting up the project...      │
 │                                                 │
-│  ┌─ bash ──────────────────────────────────┐    │  ← Tool call
-│  │ $ cargo init --name task-api            │    │     (collapsible)
-│  │ Created binary (application) package    │    │
-│  └─────────────────────────────────────────┘    │
+│  ● Bash $ cargo init --name task-api            │  ← Tool call
+│    └ 3 lines...                                 │     (with result)
+│                                                 │
+│  ● Write src/main.rs                            │  ← File write
+│    └ 45 lines written to src/main.rs            │     (with path)
 │                                                 │
 ├─────────────────────────────────────────────────┤
 │ ┌─ Permission ─────────────────────────────┐    │  ← Permission
@@ -882,6 +893,29 @@ When the agent needs a provider API key, it checks in order:
 │                                        tokens:$ │     (multi-line)
 └─────────────────────────────────────────────────┘
 ```
+
+#### Tool Call Display
+
+Tool calls in the message window use a compact, readable format:
+
+| Element | Format | Example |
+|---------|--------|---------|
+| Indicator | `●` (green=done, red=error, grey=running) | `●` |
+| Tool name | Capitalized | `Read`, `Write`, `Bash`, `Grep` |
+| Input summary | Tool-specific, paths relative to project root | `SPEC.md`, `$ cargo build` |
+| Result line | `└` prefix with count | `└ 1593 lines read` |
+
+Tool-specific input and result summaries:
+
+| Tool | Input Summary | Result Summary |
+|------|---------------|----------------|
+| `read` | relative file path | `N lines read` |
+| `write` | relative file path | `N lines written to <path>` |
+| `edit` | relative file path | `N lines changed` |
+| `bash` | `$ <first line of command>` | `N lines...` |
+| `grep` | `"pattern" in <path>` | `N lines matched` |
+| `glob` | glob pattern | `N files found` |
+| `list` | relative directory path | `N entries` |
 
 #### Log Panel
 
@@ -916,10 +950,33 @@ at runtime with `/log`.
 | `Ctrl+C` | Abort current agent run / exit |
 | `Ctrl+L` | Clear screen |
 | `Esc` | Cancel current input / close dialog |
-| `Up/Down` | Scroll message history |
+| `Up/Down` | Scroll input history |
+| `PageUp/PageDown` | Scroll message pane |
+| `Ctrl+PageUp/PageDown` | Scroll log panel |
 | `@` | Invoke sub-agent (e.g. `@general`, `@explore`) |
 | `/` | Slash commands — shows autocomplete dropdown |
 | `y/a/n` | Permission dialog responses |
+
+#### Mouse Support
+
+The TUI supports mouse interaction through `crossterm` mouse capture:
+
+| Interaction | Behaviour |
+|-------------|-----------|
+| **Scroll wheel** | Scrolls the message pane or log panel (whichever the cursor is over) |
+| **Scrollbar drag** | Click-and-drag the scrollbar track on either the messages or log pane to scrub through content |
+| **Text selection** | Click-and-drag to select text in any pane (messages, log, input, home input). Selected text is highlighted with a light-blue background |
+| **Right-click** | Copies the current text selection to the system clipboard |
+
+Mouse capture is disabled before leaving raw mode on exit to prevent escape sequences from leaking into the shell.
+
+#### Scrollbars
+
+When content overflows the visible area, vertical scrollbar widgets appear on the right edge of the messages pane and log panel. Scrollbars use `ratatui::widgets::Scrollbar` with `ScrollbarState` to reflect the current scroll position. Scrollbar tracks are draggable via mouse.
+
+#### Auto-expanding Input
+
+The input widget on both the home screen and the chat screen automatically expands vertically as the user types. Text wraps within the input borders, and the cursor position accounts for wrapped lines. The input height is computed dynamically based on the text length and the available inner width.
 
 #### Slash Commands
 
@@ -930,23 +987,23 @@ Press `Esc` to dismiss the menu.
 
 | Command | Description |
 |---------|-------------|
-| `/agent` | Switch the active agent (opens selection dialog) |
+| `/agent [name]` | Switch the active agent — opens selection dialog if no name given, or switches directly to the named agent |
+| `/clear` | Clear message history for the current session |
+| `/compact` | Summarise and compact the conversation history |
+| `/help` | Show available slash commands |
 | `/log` | Toggle the log panel on/off |
 | `/model` | Switch the active model on the current provider |
 | `/provider` | Change the LLM provider (re-enters full setup flow) |
 | `/provider_reset` | Reset a provider — prompts for selection, clears stored credentials and disables auto-detection |
-| `/clear` | Clear the current session and start fresh |
-| `/compact` | Compact the conversation history |
-| `/session [list\|new\|resume]` | Session management |
-| `/config` | Show current configuration |
-| `/help` | Show available commands |
 | `/quit` | Exit ragent |
+| `/system <prompt>` | Override the agent system prompt for the current session |
+| `/tools` | List all available tools (built-in and MCP) |
 
 ---
 
 ### 3.11 MCP Client
 
-ragent acts as an MCP (Model Context Protocol) **client**, connecting to external MCP servers that provide additional tools, resources, and prompts.
+ragent acts as an MCP (Model Context Protocol) **client**, connecting to external MCP servers that provide additional tools, resources, and prompts. The implementation uses the official [`rmcp`](https://crates.io/crates/rmcp) Rust SDK for transport, handshake, tool discovery, and tool invocation.
 
 #### MCP Server Configuration
 
@@ -991,12 +1048,14 @@ pub struct McpServer {
 }
 ```
 
-1. **Start** — spawn stdio process or connect to SSE/HTTP endpoint
-2. **Initialize** — exchange capabilities, negotiate protocol version
-3. **List Tools** — query available tools, convert to ragent `Tool` trait objects
-4. **Execute** — proxy tool calls from the agent to the MCP server
+1. **Start** — spawn stdio child process (via `tokio::process::Command` with `ConfigureCommandExt`) or connect to an SSE/HTTP endpoint
+2. **Initialize** — perform the MCP `initialize` handshake via `rmcp::ServiceExt`
+3. **List Tools** — discover tools advertised by the server; supports on-demand refresh via `list_tools(force_refresh: bool)`. Tool definitions include name, description, and JSON Schema parameters
+4. **Execute** — proxy tool calls from the agent to the correct MCP server via `call_tool`. Calls are auto-routed to the server that advertises the requested tool name. A configurable timeout (default 120 seconds) prevents runaway calls
 5. **Reconnect** — automatic retry on transient failures
 6. **Shutdown** — graceful disconnect on ragent exit
+
+MCP connections are stored in an `Arc<RwLock<HashMap<String, McpConnection>>>` keyed by server ID, allowing concurrent access from the agent loop and HTTP endpoints.
 
 MCP-provided tools are subject to the same permission rules as built-in tools.
 
@@ -1039,6 +1098,7 @@ pub enum Event {
     // Session events
     SessionCreated { session: Session },
     SessionUpdated { session: Session },
+    SessionAborted { session_id: String, reason: String },
 
     // Message events
     MessageStart { session_id: String, message_id: String },
@@ -1530,10 +1590,12 @@ cross build --release --target x86_64-pc-windows-msvc
 | Layer | Approach | Crates |
 |-------|----------|--------|
 | Unit | Test individual functions (config parsing, permission eval, prompt building) | Built-in `#[test]` |
-| Integration | Test tool execution, session lifecycle, provider streaming (with mock HTTP) | `tokio::test`, `wiremock` |
+| Integration | Test tool execution, session lifecycle, MCP client, provider streaming (with mock HTTP) | `tokio::test`, `wiremock` |
 | E2E | Full binary execution against mock LLM server | `assert_cmd`, `predicates` |
-| TUI | Snapshot testing of rendered frames | `ratatui::backend::TestBackend` |
+| TUI | Tests for agent switching, scrolling, session resume, slash commands, text selection | `#[test]` / `#[tokio::test]` |
 | Fuzzing | Fuzz config parsing, tool input deserialization | `cargo-fuzz` |
+
+Tests are located in `tests/` directories within each crate (not inline in source files). Current test count: **195+ tests** across `ragent-core` and `ragent-tui`.
 
 ### Mock LLM Server
 

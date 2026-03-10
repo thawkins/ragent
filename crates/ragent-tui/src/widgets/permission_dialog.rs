@@ -21,6 +21,17 @@ pub struct PermissionDialog<'a> {
 
 impl<'a> PermissionDialog<'a> {
     /// Create a new [`PermissionDialog`] for the given permission request.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use ragent_core::permission::PermissionRequest;
+    /// use ragent_tui::widgets::permission_dialog::PermissionDialog;
+    ///
+    /// # fn example(request: &PermissionRequest) {
+    /// let dialog = PermissionDialog::new(request);
+    /// # }
+    /// ```
     pub fn new(request: &'a PermissionRequest) -> Self {
         Self { request }
     }

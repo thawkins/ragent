@@ -50,6 +50,16 @@ pub struct AppState {
 /// # Errors
 ///
 /// Returns an error if the TCP listener cannot bind or the server fails.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use ragent_server::routes::{start_server, AppState};
+/// # async fn example(state: AppState) -> anyhow::Result<()> {
+/// start_server("127.0.0.1:3000", state).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn start_server(addr: &str, state: AppState) -> anyhow::Result<()> {
     tracing::info!("Server auth token: {}", state.auth_token);
     let app = router(state);
@@ -60,6 +70,16 @@ pub async fn start_server(addr: &str, state: AppState) -> anyhow::Result<()> {
 }
 
 /// Build the Axum [`Router`] with all ragent API routes and middleware.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// # use ragent_server::routes::{router, AppState};
+/// # fn example(state: AppState) {
+/// let app = router(state);
+/// // `app` is an axum::Router ready to be served
+/// # }
+/// ```
 pub fn router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/config", get(get_config))
@@ -367,10 +387,7 @@ async fn send_message(
 /// * `200` — session successfully aborted
 /// * `404` — session not found
 /// * `500` — internal error during archive or lookup
-async fn abort_session(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     match state.storage.get_session(&id) {
         Ok(Some(_)) => {
             if let Err(e) = state.storage.archive_session(&id) {

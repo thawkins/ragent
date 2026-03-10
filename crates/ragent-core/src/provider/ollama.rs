@@ -39,6 +39,14 @@ impl OllamaProvider {
     ///
     /// Checks `OLLAMA_HOST` environment variable first, then falls back to
     /// `http://localhost:11434`.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::provider::ollama::OllamaProvider;
+    ///
+    /// let provider = OllamaProvider::new();
+    /// ```
     pub fn new() -> Self {
         let base_url = std::env::var("OLLAMA_HOST")
             .unwrap_or_else(|_| DEFAULT_OLLAMA_HOST.to_string())
@@ -48,6 +56,14 @@ impl OllamaProvider {
     }
 
     /// Creates a provider pointing at a specific Ollama server URL.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::provider::ollama::OllamaProvider;
+    ///
+    /// let provider = OllamaProvider::with_url("http://gpu-server:11434");
+    /// ```
     pub fn with_url(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -524,6 +540,24 @@ impl LlmClient for OllamaClient {
 /// # Errors
 ///
 /// Returns an error if the server is unreachable or returns an invalid response.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::ollama::list_ollama_models;
+///
+/// # async fn example() -> anyhow::Result<()> {
+/// // Use the default Ollama host.
+/// let models = list_ollama_models(None).await?;
+/// for m in &models {
+///     println!("{}: {}", m.id, m.name);
+/// }
+///
+/// // Use a custom Ollama host.
+/// let models = list_ollama_models(Some("http://gpu-server:11434")).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>> {
     let provider = match base_url {
         Some(url) => OllamaProvider::with_url(url),

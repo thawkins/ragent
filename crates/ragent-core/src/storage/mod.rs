@@ -27,6 +27,16 @@ const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
 /// This is *not* encryption — it only prevents plaintext keys from
 /// appearing in the database. A keyring-based solution is recommended
 /// for production use.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::storage::obfuscate_key;
+///
+/// let obfuscated = obfuscate_key("sk-secret-key");
+/// assert!(!obfuscated.is_empty());
+/// assert_ne!(obfuscated, "sk-secret-key");
+/// ```
 pub fn obfuscate_key(key: &str) -> String {
     let xored: Vec<u8> = key
         .as_bytes()
@@ -40,6 +50,16 @@ pub fn obfuscate_key(key: &str) -> String {
 /// Reverses [`obfuscate_key`], recovering the original API key.
 ///
 /// Returns the original key, or an empty string if decoding fails.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::storage::{obfuscate_key, deobfuscate_key};
+///
+/// let obfuscated = obfuscate_key("my-api-key");
+/// let recovered = deobfuscate_key(&obfuscated);
+/// assert_eq!(recovered, "my-api-key");
+/// ```
 pub fn deobfuscate_key(encoded: &str) -> String {
     let Ok(xored) = STANDARD.decode(encoded) else {
         return String::new();
@@ -75,6 +95,15 @@ impl Storage {
     ///
     /// Returns an error if the parent directory cannot be created, the database
     /// file cannot be opened, or migrations fail.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use ragent_core::storage::Storage;
+    /// use std::path::Path;
+    ///
+    /// let storage = Storage::open(Path::new("/tmp/ragent-test.db")).unwrap();
+    /// ```
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -94,6 +123,14 @@ impl Storage {
     ///
     /// Returns an error if the in-memory database cannot be created or
     /// migrations fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// ```
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let storage = Self {
@@ -172,6 +209,15 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the insert fails (e.g., duplicate id).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/home/user/project").unwrap();
+    /// ```
     pub fn create_session(&self, id: &str, directory: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -187,6 +233,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/home/user/project").unwrap();
+    /// let session = storage.get_session("sess-1").unwrap();
+    /// assert!(session.is_some());
+    /// assert_eq!(session.unwrap().directory, "/home/user/project");
+    /// ```
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -217,6 +275,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project-a").unwrap();
+    /// storage.create_session("sess-2", "/tmp/project-b").unwrap();
+    /// let sessions = storage.list_sessions().unwrap();
+    /// assert_eq!(sessions.len(), 2);
+    /// ```
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -248,6 +318,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.update_session("sess-1", "My New Title").unwrap();
+    /// let session = storage.get_session("sess-1").unwrap().unwrap();
+    /// assert_eq!(session.title, "My New Title");
+    /// ```
     pub fn update_session(&self, id: &str, title: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -263,6 +345,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.archive_session("sess-1").unwrap();
+    /// let sessions = storage.list_sessions().unwrap();
+    /// assert!(sessions.is_empty(), "archived sessions are excluded from list");
+    /// ```
     pub fn archive_session(&self, id: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -280,6 +374,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if serialization or the insert fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// let msg = Message::user_text("sess-1", "Hello, agent!");
+    /// storage.create_message(&msg).unwrap();
+    /// ```
     pub fn create_message(&self, msg: &Message) -> Result<()> {
         let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
@@ -312,6 +418,20 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the query or deserialization fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "Hi")).unwrap();
+    /// let messages = storage.get_messages("sess-1").unwrap();
+    /// assert_eq!(messages.len(), 1);
+    /// assert_eq!(messages[0].text_content(), "Hi");
+    /// ```
     pub fn get_messages(&self, session_id: &str) -> Result<Vec<Message>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare(
@@ -360,6 +480,20 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if serialization or the update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::{Message, MessagePart};
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// let mut msg = Message::user_text("sess-1", "draft");
+    /// storage.create_message(&msg).unwrap();
+    /// msg.parts = vec![MessagePart::Text { text: "revised".into() }];
+    /// storage.update_message(&msg).unwrap();
+    /// ```
     pub fn update_message(&self, msg: &Message) -> Result<()> {
         let conn = lock_conn!(self)?;
         let parts_json = serde_json::to_string(&msg.parts)?;
@@ -378,6 +512,15 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the upsert fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_provider_auth("anthropic", "sk-ant-my-key").unwrap();
+    /// ```
     pub fn set_provider_auth(&self, provider_id: &str, api_key: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -395,6 +538,17 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the delete fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_provider_auth("anthropic", "sk-ant-my-key").unwrap();
+    /// storage.delete_provider_auth("anthropic").unwrap();
+    /// assert!(storage.get_provider_auth("anthropic").unwrap().is_none());
+    /// ```
     pub fn delete_provider_auth(&self, provider_id: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.execute(
@@ -409,6 +563,17 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_provider_auth("anthropic", "sk-ant-my-key").unwrap();
+    /// let key = storage.get_provider_auth("anthropic").unwrap();
+    /// assert_eq!(key.unwrap(), "sk-ant-my-key");
+    /// ```
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
@@ -425,6 +590,15 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the upsert fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_setting("theme", "dark").unwrap();
+    /// ```
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         let now = Utc::now().to_rfc3339();
@@ -440,6 +614,17 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the delete fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_setting("theme", "dark").unwrap();
+    /// storage.delete_setting("theme").unwrap();
+    /// assert!(storage.get_setting("theme").unwrap().is_none());
+    /// ```
     pub fn delete_setting(&self, key: &str) -> Result<()> {
         let conn = lock_conn!(self)?;
         conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
@@ -451,6 +636,17 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.set_setting("theme", "dark").unwrap();
+    /// let val = storage.get_setting("theme").unwrap();
+    /// assert_eq!(val.unwrap(), "dark");
+    /// ```
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;

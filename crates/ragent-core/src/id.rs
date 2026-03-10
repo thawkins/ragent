@@ -2,6 +2,26 @@
 //!
 //! Each wrapper ensures type safety — a [`SessionId`] cannot be accidentally
 //! used where a [`MessageId`] is expected, even though both are strings.
+//!
+//! # Examples
+//!
+//! Creating a new random identifier:
+//!
+//! ```
+//! use ragent_core::id::SessionId;
+//!
+//! let id = SessionId::new();
+//! assert!(!id.as_str().is_empty());
+//! ```
+//!
+//! Converting from a known string:
+//!
+//! ```
+//! use ragent_core::id::MessageId;
+//!
+//! let id = MessageId::from("msg-42");
+//! assert_eq!(id.as_str(), "msg-42");
+//! ```
 
 use serde::{Deserialize, Serialize};
 

@@ -238,13 +238,32 @@ ragent config
 | `summary`    | Summarize conversations                    | internal  |
 | `compaction` | Compact long conversation history          | internal  |
 
-Switch agents interactively with the `/agent` slash command or cycle with `Tab`/`Shift+Tab`.
+Switch agents interactively with the `/agent` slash command (opens a picker dialog),
+use `/agent <name>` for direct switching, or cycle with `Tab`/`Shift+Tab`.
 
 ```bash
 # Use a specific agent from the CLI
 ragent run --agent ask "What is the capital of France?"
 ragent run --agent plan "Design a REST API for user management"
 ragent run --agent explore "How does authentication work in this codebase?"
+```
+
+### Project Guidelines (AGENTS.md)
+
+Place an `AGENTS.md` file in your project root to define project-specific guidelines.
+On session start, ragent automatically loads this file into the system prompt for all
+multi-step agents (general, build, plan, explore). The `ask` agent and internal utility
+agents skip it.
+
+The model will acknowledge the guidelines with a brief greeting in the message window
+before processing your first message. Example `AGENTS.md` content:
+
+```markdown
+# Agent Guidelines
+- Language: Rust edition 2021
+- Use `cargo build` for builds (timeout 600s)
+- Tests go in `tests/` directories, not inline
+- Use `tracing` for logging, never `println!`
 ```
 
 ---
@@ -264,6 +283,10 @@ The AI agent can use these tools during a session:
 | `list`     | List directory contents (2 levels deep)         | `file:read`     |
 | `question` | Ask the user a clarifying question             | `question`      |
 
+MCP servers can provide additional tools that are automatically discovered and
+made available to the agent (see [SPEC.md §3.11](SPEC.md#311-mcp-client)). MCP
+tools use the official `rmcp` SDK and support both stdio and HTTP transports.
+
 ---
 
 ## 7. Sessions
@@ -274,13 +297,13 @@ Ragent persists conversations in sessions stored in SQLite.
 # List all sessions
 ragent session list
 
-# Resume a previous session
+# Resume a previous session (loads message history into the TUI)
 ragent session resume <session-id>
 
 # Export a session to JSON
-ragent session export <session-id> --output session.json
+ragent session export <session-id> > session.json
 
-# Import a session from JSON
+# Import a session from JSON (creates a new session with re-parented messages)
 ragent session import session.json
 ```
 
@@ -310,7 +333,7 @@ ragent serve --port 8080
 | GET    | `/sessions/{id}`                         | Get session details            |
 | POST   | `/sessions/{id}/messages`                | Send a message                 |
 | GET    | `/sessions/{id}/messages`                | Get session messages           |
-| POST   | `/sessions/{id}/abort`                   | Abort processing               |
+| POST   | `/sessions/{id}/abort`                   | Abort session (archives and publishes `SessionAborted` event) |
 | POST   | `/sessions/{id}/permission/{req_id}`     | Reply to a permission request  |
 | GET    | `/events`                                | SSE event stream               |
 
@@ -414,7 +437,48 @@ ragent run "Add input validation to the create_user endpoint"
 
 ---
 
-## 12. Data Storage
+## 12. TUI Interaction
+
+### Mouse Support
+
+The TUI supports mouse interaction:
+- **Scroll wheel** — scrolls the message pane or log panel
+- **Scrollbar drag** — click-and-drag the scrollbar track on either pane
+- **Text selection** — click-and-drag to select text in any pane
+- **Right-click** — copies the current text selection to the clipboard
+
+### Slash Commands
+
+Type `/` in the input to open an autocomplete menu:
+
+| Command | Description |
+|---------|-------------|
+| `/agent [name]` | Switch agent (dialog or direct) |
+| `/clear` | Clear message history |
+| `/compact` | Summarise and compact history |
+| `/help` | Show available commands |
+| `/log` | Toggle log panel |
+| `/model` | Switch model |
+| `/provider` | Change provider |
+| `/provider_reset` | Reset provider credentials |
+| `/quit` | Exit ragent |
+| `/system <prompt>` | Override system prompt |
+| `/tools` | List built-in and MCP tools |
+
+### Key Bindings
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Shift+Enter` | Newline in input |
+| `Tab` / `Shift+Tab` | Cycle agents |
+| `PageUp/PageDown` | Scroll messages |
+| `Ctrl+PageUp/Down` | Scroll log panel |
+| `Ctrl+C` | Abort / exit |
+
+---
+
+## 13. Data Storage
 
 | Item                | Location                                |
 |---------------------|-----------------------------------------|

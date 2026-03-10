@@ -12,6 +12,12 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod list;
+pub mod office_common;
+pub mod office_info;
+pub mod office_read;
+pub mod office_write;
+pub mod pdf_read;
+pub mod pdf_write;
 pub mod question;
 pub mod read;
 pub mod write;
@@ -47,6 +53,26 @@ impl Default for ToolOutput {
     }
 }
 
+/// Execution context passed to each tool invocation.
+///
+/// Carries the session identity, working directory, and event bus that
+/// tools use to resolve paths and publish events.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::tool::ToolContext;
+/// use ragent_core::event::EventBus;
+/// use std::sync::Arc;
+/// use std::path::PathBuf;
+///
+/// let ctx = ToolContext {
+///     session_id: "session-1".to_string(),
+///     working_dir: PathBuf::from("/tmp"),
+///     event_bus: Arc::new(EventBus::new(128)),
+/// };
+/// assert_eq!(ctx.session_id, "session-1");
+/// ```
 #[derive(Clone)]
 pub struct ToolContext {
     /// Unique identifier for the current agent session.
@@ -89,6 +115,15 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     /// Creates an empty tool registry.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::tool::ToolRegistry;
+    ///
+    /// let registry = ToolRegistry::new();
+    /// assert!(registry.list().is_empty());
+    /// ```
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
@@ -96,16 +131,48 @@ impl ToolRegistry {
     }
 
     /// Registers a tool, keyed by its [`Tool::name`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::tool::{ToolRegistry, read::ReadTool};
+    /// use std::sync::Arc;
+    ///
+    /// let mut registry = ToolRegistry::new();
+    /// registry.register(Arc::new(ReadTool));
+    /// assert_eq!(registry.list().len(), 1);
+    /// ```
     pub fn register(&mut self, tool: Arc<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
     /// Looks up a tool by name, returning a shared reference if found.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::tool::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// assert!(registry.get("read").is_some());
+    /// assert!(registry.get("nonexistent").is_none());
+    /// ```
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.get(name).cloned()
     }
 
     /// Returns an alphabetically sorted list of all registered tool names.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::tool::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// let names = registry.list();
+    /// assert!(names.contains(&"read"));
+    /// assert!(names.contains(&"bash"));
+    /// ```
     pub fn list(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.tools.keys().map(|s| s.as_str()).collect();
         names.sort();
@@ -113,6 +180,17 @@ impl ToolRegistry {
     }
 
     /// Returns [`ToolDefinition`] descriptors for all registered tools, sorted by name.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::tool::create_default_registry;
+    ///
+    /// let registry = create_default_registry();
+    /// let defs = registry.definitions();
+    /// assert!(!defs.is_empty());
+    /// assert!(defs.windows(2).all(|w| w[0].name <= w[1].name));
+    /// ```
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let mut defs: Vec<ToolDefinition> = self
             .tools
@@ -136,7 +214,18 @@ impl Default for ToolRegistry {
 
 /// Creates a [`ToolRegistry`] pre-populated with all built-in tools.
 ///
-/// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`, `question`.
+/// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`,
+/// `question`, `office_read`, `office_write`, `office_info`, `pdf_read`,
+/// `pdf_write`.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::tool::create_default_registry;
+///
+/// let registry = create_default_registry();
+/// assert_eq!(registry.list().len(), 13);
+/// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(read::ReadTool));
@@ -147,5 +236,10 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(list::ListTool));
     registry.register(Arc::new(question::QuestionTool));
+    registry.register(Arc::new(office_read::OfficeReadTool));
+    registry.register(Arc::new(office_write::OfficeWriteTool));
+    registry.register(Arc::new(office_info::OfficeInfoTool));
+    registry.register(Arc::new(pdf_read::PdfReadTool));
+    registry.register(Arc::new(pdf_write::PdfWriteTool));
     registry
 }

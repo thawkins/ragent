@@ -46,6 +46,23 @@ impl SessionProcessor {
     ///
     /// Returns an error if the configured model or provider is missing, if the
     /// API key cannot be resolved, or if an LLM call fails.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # async fn example() -> anyhow::Result<()> {
+    /// use std::sync::Arc;
+    /// use ragent_core::session::processor::SessionProcessor;
+    /// use ragent_core::agent::AgentInfo;
+    ///
+    /// // Assumes `processor` is a fully configured SessionProcessor.
+    /// # let processor: SessionProcessor = todo!();
+    /// let agent = AgentInfo::new("coder", "A coding assistant");
+    /// let reply = processor.process_message("session-1", "Hello!", &agent).await?;
+    /// println!("Assistant replied: {}", reply.text_content());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn process_message(
         &self,
         session_id: &str,
@@ -146,6 +163,73 @@ impl SessionProcessor {
         // 4. Build chat messages from history
         let history = self.session_manager.get_messages(session_id)?;
         let mut chat_messages = history_to_chat_messages(&history);
+
+        // 4b. AGENTS.md init exchange — on the first message of a session,
+        // prompt the model to acknowledge project guidelines so its output
+        // appears in the message window.
+        // Note: history already contains the user message we just stored,
+        // so we check for the absence of any assistant messages instead.
+        // The init exchange is display-only: it streams to the TUI but is
+        // NOT added to chat_messages so the actual LLM call isn't confused.
+        let has_tools = agent.max_steps.map_or(true, |s| s > 1);
+        let has_prior_exchange = history.iter().any(|m| m.role == Role::Assistant);
+        if !has_prior_exchange && has_tools {
+            let agents_md_path = working_dir.join("AGENTS.md");
+            if agents_md_path.is_file() {
+                let init_text = "AGENTS.md project guidelines have been loaded. \
+                                 Please acknowledge them briefly.";
+
+                // Only send the init prompt — exclude the user's real message
+                // so the model doesn't try to answer it without tools.
+                let init_messages = vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text(init_text.to_string()),
+                }];
+
+                let init_request = ChatRequest {
+                    model: model_ref.model_id.clone(),
+                    messages: init_messages,
+                    tools: Vec::new(),
+                    temperature: agent.temperature,
+                    top_p: agent.top_p,
+                    max_tokens: Some(200),
+                    system: Some(system_prompt.clone()),
+                    options: agent.options.clone(),
+                };
+
+                if let Ok(mut stream) = client.chat(init_request).await {
+                    while let Some(ev) = stream.next().await {
+                        match ev {
+                            StreamEvent::TextDelta { text } => {
+                                self.event_bus.publish(Event::TextDelta {
+                                    session_id: session_id.to_string(),
+                                    text: text.clone(),
+                                });
+                            }
+                            StreamEvent::Usage {
+                                input_tokens,
+                                output_tokens,
+                            } => {
+                                self.event_bus.publish(Event::TokenUsage {
+                                    session_id: session_id.to_string(),
+                                    input_tokens,
+                                    output_tokens,
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Signal end of init message so the TUI separates it from
+                // the actual response.
+                self.event_bus.publish(Event::MessageEnd {
+                    session_id: session_id.to_string(),
+                    message_id: "init".to_string(),
+                    reason: FinishReason::Stop,
+                });
+            }
+        }
 
         // 5. Agent loop
         let max_steps = agent.max_steps.unwrap_or(50) as usize;
@@ -284,7 +368,11 @@ impl SessionProcessor {
             if !text_buffer.is_empty() {
                 // Log the model response text
                 let response_preview = if text_buffer.len() > 200 {
-                    format!("{}…", &text_buffer[..200])
+                    let mut end = 200;
+                    while end > 0 && !text_buffer.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &text_buffer[..end])
                 } else {
                     text_buffer.clone()
                 };
@@ -318,17 +406,13 @@ impl SessionProcessor {
                     json!({})
                 });
 
-                // Log tool call with arguments
-                let args_preview = if tc.args_json.len() > 200 {
-                    format!("{}…", &tc.args_json[..200])
-                } else {
-                    tc.args_json.clone()
-                };
+                // Send full args to the TUI so it can parse input fields
+                // (path, command, etc.) even for tools with large content.
                 self.event_bus.publish(Event::ToolCallArgs {
                     session_id: session_id.to_string(),
                     call_id: tc.id.clone(),
                     tool: tc.name.clone(),
-                    args: args_preview,
+                    args: tc.args_json.clone(),
                 });
 
                 assistant_content_parts.push(ContentPart::ToolUse {
@@ -386,14 +470,32 @@ impl SessionProcessor {
                     },
                 });
 
-                let result_content = match result {
-                    Ok(output) => output.content,
+                let result_content = match &result {
+                    Ok(output) => output.content.clone(),
                     Err(e) => format!("Error: {}", e),
                 };
 
-                // Log the tool result
+                // Use metadata "lines" field when available (e.g. write/edit
+                // tools report the actual file line count there), otherwise
+                // fall back to counting lines in the result content.
+                let content_line_count = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|o| o.metadata.as_ref())
+                    .and_then(|m| m.get("lines"))
+                    .and_then(|v| v.as_u64())
+                    .map(|n| n as usize)
+                    .unwrap_or_else(|| result_content.lines().count());
+
+                // Log the tool result (truncate at a char boundary)
                 let result_preview = if result_content.len() > 200 {
-                    format!("{}…", &result_content[..200])
+                    let end = result_content
+                        .char_indices()
+                        .map(|(i, _)| i)
+                        .take_while(|&i| i <= 200)
+                        .last()
+                        .unwrap_or(0);
+                    format!("{}…", &result_content[..end])
                 } else {
                     result_content.clone()
                 };
@@ -402,6 +504,7 @@ impl SessionProcessor {
                     call_id: tc.id.clone(),
                     tool: tc.name.clone(),
                     content: result_preview,
+                    content_line_count,
                     success,
                 });
 
@@ -508,29 +611,64 @@ struct PendingToolCall {
 }
 
 fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
-    messages
-        .iter()
-        .map(|msg| {
-            let role = match msg.role {
-                Role::User => "user",
-                Role::Assistant => "assistant",
-            };
+    let mut chat_messages = Vec::new();
 
-            let content = if msg.parts.len() == 1 {
-                match &msg.parts[0] {
-                    MessagePart::Text { text } => ChatContent::Text(text.clone()),
-                    _ => parts_to_chat_content(&msg.parts),
-                }
-            } else {
-                parts_to_chat_content(&msg.parts)
-            };
+    for msg in messages {
+        let role = match msg.role {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        };
 
-            ChatMessage {
-                role: role.to_string(),
-                content,
+        let content = if msg.parts.len() == 1 {
+            match &msg.parts[0] {
+                MessagePart::Text { text } => ChatContent::Text(text.clone()),
+                _ => parts_to_chat_content(&msg.parts),
             }
-        })
-        .collect()
+        } else {
+            parts_to_chat_content(&msg.parts)
+        };
+
+        chat_messages.push(ChatMessage {
+            role: role.to_string(),
+            content,
+        });
+
+        // If this assistant message contains tool calls, emit a follow-up
+        // user message with the corresponding tool results so the LLM sees
+        // matching tool_use / tool_result pairs.
+        if msg.role == Role::Assistant {
+            let tool_results: Vec<ContentPart> = msg
+                .parts
+                .iter()
+                .filter_map(|part| match part {
+                    MessagePart::ToolCall {
+                        call_id, state, ..
+                    } => {
+                        let result_text = state
+                            .output
+                            .as_ref()
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            .or_else(|| state.error.clone())
+                            .unwrap_or_default();
+                        Some(ContentPart::ToolResult {
+                            tool_use_id: call_id.clone(),
+                            content: result_text,
+                        })
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            if !tool_results.is_empty() {
+                chat_messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Parts(tool_results),
+                });
+            }
+        }
+    }
+
+    chat_messages
 }
 
 fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {

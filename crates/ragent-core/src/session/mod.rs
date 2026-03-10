@@ -50,11 +50,38 @@ pub struct SessionManager {
 
 impl SessionManager {
     /// Creates a new `SessionManager` with the given storage backend and event bus.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// ```
     pub fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
         Self { storage, event_bus }
     }
 
     /// Returns a reference to the underlying storage backend.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// let _storage_ref = manager.storage();
+    /// ```
     pub fn storage(&self) -> &Arc<Storage> {
         &self.storage
     }
@@ -65,6 +92,22 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the session cannot be persisted to storage.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// let session = manager.create_session(PathBuf::from("/tmp/project")).unwrap();
+    /// assert!(!session.id.is_empty());
+    /// ```
     pub fn create_session(&self, directory: PathBuf) -> anyhow::Result<Session> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
@@ -96,6 +139,23 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the storage query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// let session = manager.create_session(PathBuf::from("/tmp/project")).unwrap();
+    /// let found = manager.get_session(&session.id).unwrap();
+    /// assert!(found.is_some());
+    /// ```
     pub fn get_session(&self, id: &str) -> anyhow::Result<Option<Session>> {
         let row = self.storage.get_session(id)?;
         Ok(row.map(Into::into))
@@ -106,6 +166,23 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the storage query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// manager.create_session(PathBuf::from("/tmp/project")).unwrap();
+    /// let sessions = manager.list_sessions().unwrap();
+    /// assert_eq!(sessions.len(), 1);
+    /// ```
     pub fn list_sessions(&self) -> anyhow::Result<Vec<Session>> {
         let rows = self.storage.list_sessions()?;
         Ok(rows.into_iter().map(Into::into).collect())
@@ -117,6 +194,24 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the storage update fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// let session = manager.create_session(PathBuf::from("/tmp/project")).unwrap();
+    /// manager.archive_session(&session.id).unwrap();
+    /// let sessions = manager.list_sessions().unwrap();
+    /// assert!(sessions.is_empty());
+    /// ```
     pub fn archive_session(&self, id: &str) -> anyhow::Result<()> {
         self.storage.archive_session(id)?;
         self.event_bus.publish(Event::SessionUpdated {
@@ -130,6 +225,24 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns an error if the storage query fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::path::PathBuf;
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::event::EventBus;
+    /// use ragent_core::message::Message;
+    /// use ragent_core::session::SessionManager;
+    ///
+    /// let storage = Arc::new(Storage::open_in_memory().unwrap());
+    /// let event_bus = Arc::new(EventBus::new(128));
+    /// let manager = SessionManager::new(storage, event_bus);
+    /// let session = manager.create_session(PathBuf::from("/tmp/project")).unwrap();
+    /// let messages = manager.get_messages(&session.id).unwrap();
+    /// assert!(messages.is_empty());
+    /// ```
     pub fn get_messages(&self, session_id: &str) -> anyhow::Result<Vec<Message>> {
         self.storage.get_messages(session_id)
     }
