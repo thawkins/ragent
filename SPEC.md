@@ -618,24 +618,36 @@ pub struct ToolContext {
 
 #### Built-in Tools
 
-| Tool | Permission | Description |
-|------|-----------|-------------|
-| `read` | `read` | Read file contents (with optional line range) |
-| `write` | `edit` | Create or overwrite a file |
-| `edit` | `edit` | Replace a specific string in a file |
-| `multiedit` | `edit` | Apply multiple edits to one or more files |
-| `patch` | `edit` | Apply a unified diff patch |
-| `grep` | `read` | Search file contents using ripgrep patterns |
-| `glob` | `read` | Find files matching glob patterns |
-| `list` | `read` | List directory contents (with depth control) |
-| `bash` | `bash` | Execute a shell command and capture output |
-| `webfetch` | `web` | Fetch a URL and return its content |
-| `websearch` | `web` | Perform a web search and return results |
-| `question` | `question` | Ask the user a question and wait for a response |
-| `plan_enter` | `plan_enter` | Switch the active agent to the plan agent |
-| `plan_exit` | `plan_exit` | Switch back from plan agent to the previous agent |
-| `todo_read` | `todo` | Read the current TODO list |
-| `todo_write` | `todo` | Update the TODO list |
+**Implemented:**
+
+| Tool | Permission | Description | Status |
+|------|-----------|-------------|--------|
+| `read` | `file:read` | Read file contents (with optional line range) | ✅ |
+| `write` | `file:write` | Create or overwrite a file | ✅ |
+| `edit` | `file:write` | Replace a specific string in a file | ✅ |
+| `bash` | `bash:execute` | Execute a shell command and capture output | ✅ |
+| `grep` | `file:read` | Search file contents using string matching | ✅ |
+| `glob` | `file:read` | Find files matching glob patterns | ✅ |
+| `list` | `file:read` | List directory contents (with depth control) | ✅ |
+| `question` | `question` | Ask the user a question and wait for a response | ✅ |
+| `office_read` | `file:read` | Read content from Word, Excel, or PowerPoint files | ✅ |
+| `office_write` | `file:write` | Write content to Word, Excel, or PowerPoint files | ✅ |
+| `office_info` | `file:read` | Get metadata about Office documents | ✅ |
+| `pdf_read` | `file:read` | Read text and metadata from PDF files | ✅ |
+| `pdf_write` | `file:write` | Create PDF files from structured content | ✅ |
+
+**Planned (not yet implemented):**
+
+| Tool | Permission | Description | Status |
+|------|-----------|-------------|--------|
+| `multiedit` | `file:write` | Apply multiple edits to one or more files | 🔲 |
+| `patch` | `file:write` | Apply a unified diff patch | 🔲 |
+| `webfetch` | `web` | Fetch a URL and return its content | 🔲 |
+| `websearch` | `web` | Perform a web search and return results | 🔲 |
+| `plan_enter` | `plan` | Switch the active agent to the plan agent | 🔲 |
+| `plan_exit` | `plan` | Switch back from plan agent to the previous agent | 🔲 |
+| `todo_read` | `todo` | Read the current TODO list | 🔲 |
+| `todo_write` | `todo` | Update the TODO list | 🔲 |
 
 #### Tool Execution Flow
 
