@@ -24,6 +24,7 @@ pub mod pdf_write;
 pub mod plan;
 pub mod question;
 pub mod read;
+pub mod rm;
 pub mod todo;
 pub mod webfetch;
 pub mod websearch;
@@ -234,7 +235,7 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 22);
+/// assert_eq!(registry.list().len(), 23);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -260,5 +261,6 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(office_info::OfficeInfoTool));
     registry.register(Arc::new(pdf_read::PdfReadTool));
     registry.register(Arc::new(pdf_write::PdfWriteTool));
+    registry.register(Arc::new(rm::RmTool));
     registry
 }

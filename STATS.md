@@ -2,8 +2,8 @@
 
 | Metric | Value |
 |---|---|
-| Total Rust lines | 27,703 |
-| Rust file count | 91 |
+| Total Rust lines | 27,812 |
+| Rust file count | 92 |
 | Tests passed | 538 |
 | Tests failed | 0 |
-| Tools | 22 |
+| Tools | 23 |

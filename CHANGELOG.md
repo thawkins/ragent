@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.7] - 2026-03-11
+
+### Added
+- `rm` tool — delete a single file (no wildcards), with path and success/failure display in TUI (23 tools total)
+- `/tools` command now shows indented parameter details (name + description) for each tool
+- SPEC.md: `orchestrator` and `debug` agents with tool group restrictions
+- SPEC.md: Task delegation via `new_task` tool for orchestrator-style workflows
+- SPEC.md: Codebase indexing & semantic search (§3.22) — embeddings + vector DB + Tree-sitter
+- SPEC.md: Post-edit diagnostics integration (§3.23) — write delay + LSP error detection
+- SPEC.md: Task todo list (§3.24) — interactive in-session task tracking
+- SPEC.md: Prompt enhancement (§3.25) — AI-powered prompt refinement before sending
+- SPEC.md: Hierarchical custom instructions (§3.26) — global/project/agent-specific rules
+- SPEC.md: File ignore patterns `.ragentignore` (§3.27) — agent file access control
+- SPEC.md: Suggested responses (§3.28) — context-aware follow-up suggestions
+- SPEC.md: Shadow git checkpoints in Snapshot & Undo (§3.16)
+- SPEC.md: `--allow-tool`, `--deny-tool`, `--allow-all-tools` CLI flags
+- SPEC.md: `-p`/`--prompt` programmatic mode flag
+- SPEC.md: `/context`, `/checkpoint`, `/todo` slash commands
+- SPEC.md: Auto-compaction at 95% context limit, message enqueueing, inline rejection feedback
+- SPEC.md: Hooks (§3.17), custom agents (§3.18), skills (§3.19), persistent memory (§3.20), trusted directories (§3.21)
+- SPEC.md: Future goals F11–F20 (ACP, marketplace, API profiles, concurrent ops, custom tools, etc.)
+- Planned tools: `new_task`, `switch_agent`, `codebase_search`, `generate_image`
+
+### Changed
+- Tool registry now contains 23 tools (up from 22)
+- SPEC.md expanded from ~1636 to ~2168 lines with Copilot CLI and Roo Code feature parity analysis
+
 ## [0.1.0-alpha.6] - 2026-03-11
 
 ### Added

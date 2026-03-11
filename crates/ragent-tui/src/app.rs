@@ -1173,6 +1173,17 @@ impl App {
                 let mut output = String::from("From: /tools\nBuilt-in Tools:\n\n");
                 for def in &tool_defs {
                     output.push_str(&format!("  {:<16} {}\n", def.name, def.description));
+                    // Show parameter actions indented under each tool
+                    if let Some(props) = def.parameters.get("properties").and_then(|v| v.as_object())
+                    {
+                        for (param, schema) in props {
+                            let desc = schema
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            output.push_str(&format!("    {:<14} {}\n", param, desc));
+                        }
+                    }
                 }
 
                 let connected_servers: Vec<&McpServer> = self

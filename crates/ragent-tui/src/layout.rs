@@ -1044,7 +1044,7 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "create" | "edit" | "patch" | "list" | "office_read" | "office_write"
+        "read" | "write" | "create" | "edit" | "patch" | "list" | "rm" | "office_read" | "office_write"
         | "office_info" | "pdf_read" | "pdf_write" => input
             .get("path")
             .and_then(|v| v.as_str())
@@ -1310,6 +1310,14 @@ fn tool_result_summary(
             line_count,
             if line_count == 1 { "" } else { "s" }
         )),
+        "rm" => {
+            let deleted = out.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+            if deleted {
+                Some("deleted".to_string())
+            } else {
+                Some("failed".to_string())
+            }
+        }
         _ => None,
     }
 }

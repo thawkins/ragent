@@ -27,6 +27,18 @@ ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/ope
    - 3.14 [Storage & Database](#314-storage--database)
    - 3.15 [Shell Execution](#315-shell-execution)
    - 3.16 [Snapshot & Undo](#316-snapshot--undo)
+   - 3.17 [Hooks](#317-hooks)
+   - 3.18 [Custom Agents](#318-custom-agents)
+   - 3.19 [Skills](#319-skills)
+   - 3.20 [Persistent Memory](#320-persistent-memory)
+   - 3.21 [Trusted Directories](#321-trusted-directories)
+   - 3.22 [Codebase Indexing & Semantic Search](#322-codebase-indexing--semantic-search)
+   - 3.23 [Post-Edit Diagnostics](#323-post-edit-diagnostics)
+   - 3.24 [Task Todo List](#324-task-todo-list)
+   - 3.25 [Prompt Enhancement](#325-prompt-enhancement)
+   - 3.26 [Hierarchical Custom Instructions](#326-hierarchical-custom-instructions)
+   - 3.27 [File Ignore Patterns](#327-file-ignore-patterns)
+   - 3.28 [Suggested Responses](#328-suggested-responses)
 4. [Data Flow](#4-data-flow)
 5. [Configuration File Format](#5-configuration-file-format)
 6. [Rust Crate Map](#6-rust-crate-map)
@@ -148,10 +160,14 @@ All async work runs on the **tokio** runtime. LLM responses are streamed via Ser
 | `--config <path>` | auto-detected | Path to config file |
 | `--model <provider/model>` | from config | Override model for this run |
 | `--agent <name>` | `build` | Override default agent |
+| `-p`, `--prompt <text>` | n/a | Execute a single prompt programmatically, print result, and exit |
 | `--log-level <level>` | `warn` | Logging verbosity (`trace`, `debug`, `info`, `warn`, `error`) |
 | `--print-logs` | `false` | Print logs to stderr |
 | `--no-tui` | `false` | Disable TUI, use plain stdout |
 | `--yes` | `false` | Auto-approve all permission prompts |
+| `--allow-all-tools` | `false` | Allow all tools without manual approval |
+| `--allow-tool <spec>` | n/a | Allow a specific tool without approval (repeatable). Spec: `'shell(cmd)'`, `'write'`, or `'McpServer(tool)'` |
+| `--deny-tool <spec>` | n/a | Deny a specific tool (repeatable, overrides `--allow-tool` and `--allow-all-tools`) |
 | `--server <addr>` | n/a | Connect to an existing ragent server |
 
 ---
@@ -450,6 +466,9 @@ pub struct AgentInfo {
     pub prompt: Option<String>,
     /// Permission ruleset specific to this agent.
     pub permission: PermissionRuleset,
+    /// Allowed tool groups (e.g. ["read", "edit", "command", "mcp"]).
+    /// If None, all groups are available.
+    pub tool_groups: Option<Vec<ToolGroup>>,
     /// Maximum tool-call iterations before stopping.
     pub max_steps: Option<u32>,
     /// Additional provider-specific options (e.g. extended_thinking).
@@ -469,8 +488,45 @@ pub struct AgentInfo {
 | `title` | Internal | Generates session titles | Hidden, no tools |
 | `summary` | Internal | Generates session summaries | Hidden, no tools |
 | `compaction` | Internal | Compresses long conversation history | Hidden, no tools |
+| `orchestrator` | Primary | Task orchestrator — decomposes complex work into subtasks and delegates to specialized agents | Read-only; delegates via `new_task` tool |
+| `debug` | Primary | Systematic debugger — methodical problem diagnosis and resolution | Full access; diagnostic-focused prompt |
 
 Agents can be switched at runtime using the `/agent` slash command or by cycling with `Tab`/`Shift+Tab`.
+
+#### Tool Groups
+
+Each agent can restrict its available tools by specifying allowed tool groups. This provides safety boundaries — e.g., the `ask` agent cannot modify files, and the `orchestrator` cannot directly execute commands.
+
+| Group | Tools Included | Purpose |
+|-------|---------------|---------|
+| `read` | `read`, `list`, `glob`, `grep`, `office_read`, `office_info`, `pdf_read` | File system reading and exploration |
+| `edit` | `write`, `create`, `edit`, `multiedit`, `patch`, `office_write`, `pdf_write` | File creation and modification |
+| `command` | `bash` | Terminal command execution |
+| `search` | `grep`, `glob`, `codebase_search` | Pattern and semantic searching |
+| `mcp` | MCP tools (dynamic) | External tool integration via MCP |
+| `web` | `webfetch`, `websearch` | Web access |
+| `workflow` | `question`, `new_task`, `switch_agent`, `todo_read`, `todo_write` | Task management and user interaction |
+
+If `tool_groups` is `None`, all groups are available. The `workflow` group tools (`question`, `new_task`, `switch_agent`) are always available regardless of group restrictions.
+
+#### Orchestrator Agent & Task Delegation
+
+The `orchestrator` agent breaks complex tasks into focused subtasks and delegates them to specialized agents. Each subtask runs in its own isolated context:
+
+1. User submits a complex request to the orchestrator
+2. Orchestrator analyzes the request and decomposes it into subtasks
+3. Each subtask is created via `new_task` tool, specifying:
+   - Target agent (e.g., `general` for coding, `plan` for analysis, `explore` for search)
+   - Task description with all necessary context passed explicitly
+   - Expected deliverable
+4. Subtask runs in its own conversation context (no shared history with parent)
+5. On completion, subtask returns a summary to the orchestrator
+6. Orchestrator continues with remaining subtasks or synthesizes final result
+
+This enables:
+- **Context isolation**: Subtasks don't pollute each other's context windows
+- **Specialized agents**: Each subtask uses the best agent for the job
+- **Parallel work**: Independent subtasks can run concurrently (future)
 
 #### Agent Resolution
 
@@ -649,6 +705,10 @@ pub struct ToolContext {
 | `plan_exit` | `plan` | Switch back from plan agent to the previous agent | ✅ |
 | `todo_read` | `todo` | Read the current TODO list | ✅ |
 | `todo_write` | `todo` | Update the TODO list | ✅ |
+| `new_task` | `workflow` | Create a subtask delegated to a specific agent with isolated context | 🔲 |
+| `switch_agent` | `workflow` | Switch the active agent for the current session | 🔲 |
+| `codebase_search` | `file:read` | Semantic search across indexed codebase using embeddings | 🔲 |
+| `generate_image` | `image` | Generate images from text prompts using AI image models | 🔲 |
 
 #### Tool Execution Flow
 
@@ -1001,8 +1061,10 @@ Press `Esc` to dismiss the menu.
 | Command | Description |
 |---------|-------------|
 | `/agent [name]` | Switch the active agent — opens selection dialog if no name given, or switches directly to the named agent |
+| `/checkpoint [diff|restore]` | View checkpoint diff or restore workspace to a previous checkpoint |
 | `/clear` | Clear message history for the current session |
 | `/compact` | Summarise and compact the conversation history |
+| `/context` | Show detailed token usage breakdown (input, output, cached, total, limit, percentage used) |
 | `/help` | Show available slash commands |
 | `/log` | Toggle the log panel on/off |
 | `/model` | Switch the active model on the current provider |
@@ -1010,7 +1072,28 @@ Press `Esc` to dismiss the menu.
 | `/provider_reset` | Reset a provider — prompts for selection, clears stored credentials and disables auto-detection |
 | `/quit` | Exit ragent |
 | `/system <prompt>` | Override the agent system prompt for the current session |
-| `/tools` | List all available tools (built-in and MCP) |
+| `/todo` | Display the current task todo list with status indicators |
+| `/tools` | List all available tools (built-in and MCP) with parameters |
+
+#### Automatic Context Compaction
+
+When the conversation approaches **95% of the model's context window**, ragent automatically compresses the conversation history in the background:
+
+1. Token usage is tracked per-request via provider token count responses
+2. When cumulative tokens exceed 95% of the model's context limit, auto-compaction triggers
+3. The conversation history is summarised by the LLM and replaced with the summary
+4. The user is notified in the status bar but their workflow is not interrupted
+5. Manual compaction is available via `/compact` at any time; press `Esc` to cancel
+
+This enables virtually infinite sessions without manual context management.
+
+#### Message Enqueueing
+
+Users can send follow-up messages while the agent is still processing a response. Queued messages are delivered after the current response completes, allowing natural steering of the conversation without waiting for each turn to finish.
+
+#### Inline Rejection Feedback
+
+When a user denies a permission prompt, they can provide inline feedback explaining why. The feedback is injected into the conversation so the agent can adapt its approach without stopping entirely.
 
 ---
 
@@ -1259,6 +1342,25 @@ Before executing edit/write/patch tools, ragent captures a snapshot of affected 
 5. If user requests undo → restore from snapshot
 6. Snapshots are associated with the message that triggered them
 
+#### Shadow Git Checkpoints
+
+In addition to per-file snapshots, ragent maintains a **shadow git repository** for full workspace versioning:
+
+1. On session start, initialise a hidden shadow repo (`.ragent/.shadow-git/`) separate from the project's own git
+2. Before any file modification, commit the current state as a checkpoint
+3. Checkpoints capture: file content changes, new files, deleted files, renames
+4. Users can compare the current workspace against any checkpoint (`/checkpoint diff`)
+5. Users can restore to any checkpoint:
+   - **Files only**: Revert workspace files but keep conversation history
+   - **Files & conversation**: Revert both workspace and conversation to the checkpoint's point in time
+
+Checkpoint exclusions:
+- Files matching `.gitignore` and `.ragentignore` patterns
+- Build artifacts, binary files, and dependencies (auto-detected)
+- Files larger than 1 MB
+
+The shadow repository is independent from the project's existing git — no GitHub account or git configuration is required.
+
 #### Undo Granularity
 
 | Level | Description |
@@ -1266,6 +1368,426 @@ Before executing edit/write/patch tools, ragent captures a snapshot of affected 
 | Per-tool-call | Revert a single tool call's changes |
 | Per-message | Revert all changes from one assistant message |
 | Per-session | Revert all changes from the entire session |
+| Per-checkpoint | Restore workspace to a specific checkpoint state |
+
+---
+
+### 3.17 Hooks
+
+Hooks allow users to execute custom shell commands at key points during agent execution, enabling validation, logging, security scanning, or workflow automation.
+
+#### Hook Types
+
+| Hook | Trigger Point | Use Cases |
+|------|---------------|-----------|
+| `pre-tool` | Before any tool executes | Validation, logging, security scanning |
+| `post-tool` | After a tool completes | Audit logging, cleanup, notification |
+| `pre-message` | Before sending a message to the LLM | Prompt injection detection, content filtering |
+| `post-message` | After receiving an LLM response | Response validation, metrics collection |
+| `session-start` | When a new session begins | Environment setup, dependency checks |
+| `session-end` | When a session completes | Cleanup, summary generation |
+
+#### Configuration
+
+Hooks are defined in `.ragent/hooks/` or in the project config:
+
+```jsonc
+{
+  "hooks": {
+    "pre-tool": {
+      "command": "./scripts/validate-tool.sh",
+      "timeout": 10,
+      "tools": ["bash", "write", "edit"]   // optional: only run for these tools
+    },
+    "post-tool": {
+      "command": "./scripts/audit-log.sh",
+      "timeout": 5
+    }
+  }
+}
+```
+
+Hook commands receive tool name, arguments, and context via environment variables. A non-zero exit code from a `pre-*` hook aborts the operation.
+
+---
+
+### 3.18 Custom Agents
+
+Users can define custom specialized agents beyond the built-in presets. Custom agents allow tailoring the agent's system prompt, available tools, and permissions for specific tasks or team roles.
+
+#### Configuration
+
+Custom agents are defined in `.ragent/agents/` as YAML or JSON files, or in the project config:
+
+```jsonc
+{
+  "agents": {
+    "frontend-expert": {
+      "description": "Frontend specialist following team guidelines",
+      "prompt": "You are an expert frontend engineer. Follow React best practices...",
+      "tools": ["read", "write", "edit", "bash", "grep", "glob", "list"],
+      "permissions": {
+        "file:write": { "glob": "src/components/**", "rule": "Allow" }
+      }
+    }
+  }
+}
+```
+
+Custom agents appear in the agent picker (`/agent`) and can be selected via `Tab`/`Shift+Tab` cycling. The CLI automatically delegates common tasks to specialized agents when appropriate.
+
+---
+
+### 3.19 Skills
+
+Skills enhance the agent's ability to perform specialized tasks by bundling instructions, scripts, and resources into reusable packages.
+
+#### Skill Structure
+
+```
+.ragent/skills/
+  deploy/
+    skill.json          # Skill metadata and instructions
+    scripts/            # Helper scripts the skill can invoke
+    resources/          # Reference materials, templates, examples
+```
+
+#### Skill Definition
+
+```jsonc
+{
+  "name": "deploy",
+  "description": "Deploy the application to production",
+  "instructions": "Follow the deployment checklist: run tests, build release, deploy to staging, verify, promote to production.",
+  "tools": ["bash"],
+  "scripts": {
+    "deploy": "./scripts/deploy.sh",
+    "rollback": "./scripts/rollback.sh"
+  }
+}
+```
+
+Skills are automatically loaded from `.ragent/skills/` and their instructions are injected into the system prompt when the agent invokes them.
+
+---
+
+### 3.20 Persistent Memory
+
+Persistent memory allows ragent to build a lasting understanding of the project across sessions. Memories are facts about coding conventions, patterns, preferences, and project structure that the agent learns over time.
+
+#### Memory Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| Convention | Coding style preferences | "Use 4-space indentation in Rust files" |
+| Pattern | Recurring code patterns | "Error handling uses `anyhow::Result` with `.context()`" |
+| Preference | User preferences | "Prefer `tokio::fs` over `std::fs` for async file operations" |
+| Structure | Project layout knowledge | "Tests live in `tests/` directory per crate, not inline" |
+
+#### Storage
+
+Memories are stored in the SQLite database (`memories` table) with:
+- `id` — unique identifier
+- `category` — convention, pattern, preference, structure
+- `content` — the memory text
+- `source` — file or conversation that produced it
+- `created_at` — when the memory was recorded
+
+#### Usage
+
+- Memories are loaded at session start and injected into the system prompt
+- The agent can create new memories when it discovers patterns via a `memory_write` tool
+- Users can review and manage memories via `/memory` slash command
+- Memories persist across sessions and reduce the need to repeat context
+
+---
+
+### 3.21 Trusted Directories
+
+Trusted directories control where ragent can read, modify, and execute files, providing a security boundary.
+
+#### Behaviour
+
+1. On first launch from a directory, ragent prompts the user to confirm trust
+2. Trusted directories are recorded in the settings database
+3. File operations outside trusted directories require explicit permission
+4. ragent should not be launched from the user's home directory (warning displayed)
+
+#### Configuration
+
+```jsonc
+{
+  "trusted_directories": [
+    "/home/user/projects",
+    "/home/user/work"
+  ]
+}
+```
+
+Trusted directory scoping is enforced by the permission system. File access outside trusted directories triggers the `external_directory` permission check.
+
+---
+
+### 3.22 Codebase Indexing & Semantic Search
+
+Codebase indexing enables natural-language semantic search across the entire project, complementing the existing `grep` (text matching) and `glob` (file patterns) tools.
+
+#### Architecture
+
+1. **Code Parsing**: Use Tree-sitter to parse source files into semantic blocks (functions, classes, methods, structs, impls)
+2. **Embedding Generation**: Convert each code block into a vector embedding using a configurable embedding provider (OpenAI, Google Gemini, Ollama for local/offline)
+3. **Vector Storage**: Store embeddings in an embedded vector database (e.g., `qdrant` or `hnsw` via Rust crate) for fast similarity search
+4. **Search Interface**: The `codebase_search` tool accepts natural language queries and returns ranked code snippets with file paths and line numbers
+
+#### Features
+
+| Feature | Description |
+|---------|-------------|
+| Incremental indexing | Only re-index modified files (hash-based change detection) |
+| File watching | Monitor workspace for changes in real-time |
+| Branch awareness | Detect git branch switches and re-index as needed |
+| Configurable threshold | Similarity score threshold for result relevance (0.0–1.0) |
+| .gitignore / .ragentignore aware | Exclude ignored files from indexing |
+| Tree-sitter fallback | Line-based chunking for unsupported file types |
+
+#### Configuration
+
+```jsonc
+{
+  "indexing": {
+    "enabled": true,
+    "embedding_provider": "openai",       // "openai" | "gemini" | "ollama"
+    "embedding_model": "text-embedding-3-small",
+    "vector_store": "embedded",           // "embedded" | "qdrant"
+    "qdrant_url": "http://localhost:6333",
+    "similarity_threshold": 0.4,
+    "max_results": 20
+  }
+}
+```
+
+#### Semantic Query Examples
+
+- "authentication middleware logic"
+- "error handling for database connections"
+- "how are tool permissions checked"
+
+---
+
+### 3.23 Post-Edit Diagnostics
+
+After file modifications, ragent can pause briefly to collect diagnostics (compiler errors, lint warnings) from the LSP before proceeding, catching errors introduced by edits immediately.
+
+#### Flow
+
+1. Agent executes a `write`, `edit`, or `patch` tool
+2. ragent waits for a configurable delay (default: 1000 ms) for LSP diagnostics to update
+3. New diagnostics (errors only, not pre-existing ones) are captured
+4. If new errors are detected, they are automatically injected into the conversation as context
+5. The agent can then fix the introduced errors before proceeding
+
+#### Configuration
+
+```jsonc
+{
+  "diagnostics": {
+    "post_edit_check": true,
+    "delay_ms": 1000,
+    "severity": "error"      // "error" | "warning" | "all"
+  }
+}
+```
+
+This integrates with the existing LSP integration (§ 3.12) and the auto-approve system. When auto-approve is enabled for writes, the delay gives the LSP time to detect issues before the agent moves on.
+
+---
+
+### 3.24 Task Todo List
+
+Complex multi-step tasks are tracked via an interactive todo list that persists throughout the session, giving both the agent and user visibility into progress.
+
+#### Features
+
+- Agent can create, update, and complete todo items via `todo_read` / `todo_write` tools
+- Todo list is displayed in the TUI status bar with progress indicator
+- Each item has status: `pending` | `in_progress` | `completed`
+- User can view the full todo list with `/todo` slash command
+- User can edit todo items (add, remove, change status) via the TUI
+- Todo state is stored in the session's SQLite database and persists across reconnections
+
+#### Display
+
+The TUI shows a compact summary in the status bar:
+
+```
+[TODO: 3/7 ✓] Current: Implement user auth endpoint
+```
+
+A full expanded view shows all items with status indicators:
+- `○` pending
+- `◐` in progress
+- `●` completed
+
+#### Agent Integration
+
+The orchestrator agent always creates todo lists when decomposing complex tasks. Other agents create them for multi-step work. The todo list appears in the system prompt as a "REMINDERS" block, giving the agent persistent awareness of remaining work.
+
+---
+
+### 3.25 Prompt Enhancement
+
+An optional AI-powered prompt enhancement feature that refines the user's input before sending it to the agent, making prompts clearer, more specific, and more likely to produce high-quality results.
+
+#### How It Works
+
+1. User types a prompt in the input area
+2. User triggers enhancement (keyboard shortcut or button)
+3. ragent sends the original prompt to the LLM with an enhancement meta-prompt
+4. The enhanced prompt replaces the original in the input area
+5. User reviews, optionally edits, and sends
+
+#### Features
+
+- **Context-aware**: Can include recent conversation history for better enhancement
+- **Customisable**: The enhancement meta-prompt template is user-configurable
+- **Undo**: `Ctrl+Z` restores the original prompt
+- **Non-blocking**: Enhancement happens asynchronously
+
+#### Configuration
+
+```jsonc
+{
+  "enhance_prompt": {
+    "enabled": true,
+    "use_conversation_context": true,
+    "max_history_messages": 10,
+    "custom_prompt": null   // null = use default; string = custom template
+  }
+}
+```
+
+---
+
+### 3.26 Hierarchical Custom Instructions
+
+Custom instructions shape agent behaviour across multiple levels — global settings, project rules, and agent-specific (mode-specific) rules — with a clear precedence hierarchy.
+
+#### Instruction Sources (lowest → highest priority)
+
+| Level | Location | Scope |
+|-------|----------|-------|
+| Global rules directory | `~/.config/ragent/rules/` | All projects, all agents |
+| Global agent-specific rules | `~/.config/ragent/rules-{agent}/` | All projects, specific agent |
+| Project rules directory | `.ragent/rules/` | Current project, all agents |
+| Project agent-specific rules | `.ragent/rules-{agent}/` | Current project, specific agent |
+| Project rules file (fallback) | `.ragentrules` | Current project (if no rules directory) |
+| AGENTS.md | `./AGENTS.md` | Current project (existing feature) |
+| Config custom instructions | `ragent.json` → `custom_instructions` | Per project config |
+
+Rules are loaded recursively from directories, sorted alphabetically by filename, and concatenated into the system prompt. Files can be `.md`, `.txt`, or any plain text format.
+
+#### Agent-Specific Rules
+
+Agent-specific rules only apply when that agent is active:
+
+```
+.ragent/
+├── rules/              # Applied to all agents
+│   ├── 01-coding-style.md
+│   └── 02-documentation.md
+├── rules-general/      # Applied only to "general" agent
+│   └── typescript-rules.md
+├── rules-plan/         # Applied only to "plan" agent
+│   └── planning-guidelines.md
+└── rules-debug/        # Applied only to "debug" agent
+    └── debug-workflow.md
+```
+
+#### System Prompt Assembly
+
+Instructions are injected into the system prompt in this order:
+1. Agent role definition
+2. Global rules
+3. Global agent-specific rules
+4. Project rules
+5. Project agent-specific rules
+6. AGENTS.md content
+7. Config custom instructions
+8. Tool definitions
+
+---
+
+### 3.27 File Ignore Patterns
+
+A `.ragentignore` file controls which files ragent can access, modify, or include in context — analogous to `.gitignore` but for agent access control.
+
+#### Behaviour
+
+- File uses `.gitignore` syntax (glob patterns, negation with `!`, comments with `#`)
+- The `.ragentignore` file itself is always implicitly ignored (agent cannot modify its own access rules)
+- Changes to `.ragentignore` are hot-reloaded without restarting
+
+#### Enforcement
+
+| Tool | Enforcement |
+|------|-------------|
+| `read`, `office_read`, `pdf_read` | Blocked — returns "file ignored" error |
+| `write`, `create`, `edit`, `multiedit`, `patch` | Blocked — returns "file ignored" error |
+| `list`, `glob` | Excluded from results (or marked with 🔒) |
+| `grep` | Excluded from search results |
+| `bash` | File-reading commands (cat, head, tail) targeting ignored files are blocked |
+| `codebase_search` | Excluded from indexing |
+
+#### Example `.ragentignore`
+
+```gitignore
+# Secrets and credentials
+.env*
+config/secrets.json
+
+# Build output
+target/
+dist/
+node_modules/
+
+# Large assets
+*.mp4
+*.zip
+assets/images/
+
+# Allow one specific env file
+!.env.example
+```
+
+#### Interaction with Permissions
+
+`.ragentignore` is enforced **in addition to** the permission system. A file can be allowed by permissions but still blocked by `.ragentignore`. The ignore file acts as a hard boundary that cannot be overridden by the agent.
+
+---
+
+### 3.28 Suggested Responses
+
+After each assistant message, ragent can generate context-aware follow-up suggestions that the user can select or edit, speeding up iterative workflows.
+
+#### Behaviour
+
+1. After the agent completes a response, it optionally generates 2–4 suggested follow-up messages
+2. Suggestions appear as selectable chips below the assistant message in the TUI
+3. User can: select a suggestion (sends it immediately), edit before sending, or type their own message
+4. Suggestions are generated using a lightweight LLM call with recent conversation context
+
+#### Configuration
+
+```jsonc
+{
+  "suggested_responses": {
+    "enabled": false,
+    "max_suggestions": 3
+  }
+}
+```
+
+Suggestions are disabled by default to avoid unnecessary LLM calls, but can be enabled for interactive exploration sessions.
 
 ---
 
@@ -1630,6 +2152,16 @@ A built-in mock server (feature-gated behind `#[cfg(test)]`) replays canned LLM 
 | F8 | Enterprise features | Managed config, audit logging, SSO |
 | F9 | Voice input | Microphone input transcribed to text for hands-free coding |
 | F10 | Image/screenshot input | Vision model support for UI debugging |
+| F11 | ACP (Agent Client Protocol) | Support the open standard Agent Client Protocol for interoperability with other AI agent ecosystems |
+| F12 | `/feedback` command | Built-in user feedback submission mechanism |
+| F13 | Sub-agent spawning | Launch specialized sub-agents (e.g., explore, code-review) from within a session for focused tasks |
+| F14 | Background agents | Run multiple agent instances concurrently for parallel task execution |
+| F15 | Marketplace | Community hub for sharing and discovering custom agents, skills, and rule sets |
+| F16 | API configuration profiles | Named profiles for different API providers/models, switchable per agent or session |
+| F17 | Concurrent file operations | Parallel file reads and edits for faster multi-file workflows |
+| F18 | Model temperature control | Per-session or per-agent temperature override exposed in TUI settings |
+| F19 | Agent import/export | Export agent definitions (including rules) to portable YAML/JSON for team sharing |
+| F20 | Custom tools (user-defined) | Define project-specific tools in a scripting language that ragent can invoke |
 
 ---
 
