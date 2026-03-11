@@ -8,6 +8,7 @@
 //! provided via [`create_default_registry`].
 
 pub mod bash;
+pub mod create;
 pub mod edit;
 pub mod glob;
 pub mod grep;
@@ -233,12 +234,13 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 21);
+/// assert_eq!(registry.list().len(), 22);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(read::ReadTool));
     registry.register(Arc::new(write::WriteTool));
+    registry.register(Arc::new(create::CreateTool));
     registry.register(Arc::new(edit::EditTool));
     registry.register(Arc::new(multiedit::MultiEditTool));
     registry.register(Arc::new(patch::PatchTool));

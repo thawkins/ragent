@@ -1,22 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-alpha.4
+## Current Version: 0.1.0-alpha.5
 
-### Added (since 0.1.0-alpha.3)
-- 8 new tools: `multiedit`, `patch`, `webfetch`, `websearch`, `plan_enter`, `plan_exit`, `todo_read`, `todo_write` (21 tools total)
-- Agent delegation system — `plan_enter`/`plan_exit` tools enable switching to a planning agent and back, with agent stack management
-- Web tools — `webfetch` fetches URLs and converts HTML to markdown; `websearch` queries Tavily API
-- TODO persistence — `todo_read`/`todo_write` tools with SQLite-backed session-scoped TODOs
-- `multiedit` tool for applying multiple edits to a single file atomically
-- `patch` tool for applying unified diff patches to files
-- `Storage` layer extended with `todos` table, full CRUD, and `clear_todos()`
-- `ToolContext` now carries optional `Storage` handle for tools that need database access
-- Event variants: `AgentSwitchRequested`, `AgentRestoreRequested` for agent delegation
-- TUI: agent stack with push/pop, pending plan task/restore handling on `MessageEnd`
-- TUI display summaries for all 8 new tools (input + result lines)
-- SSE serialization for new event variants
-- `todo` permission rule (Allow) in default agent permissions
+### Added (since 0.1.0-alpha.4)
+- `create` tool — create/overwrite a file with content, creating parent directories as needed (22 tools total)
+- Slash command output headers — `From: /<command>` prefix on all slash command output
+- Each slash command output appears as a separate message block with its own indicator
 
-### Fixed (since 0.1.0-alpha.3)
-- Processor breaks agent loop on `agent_switch` or `agent_restore` metadata to support delegation
-- `event_matches_session()` updated for exhaustive matching of new event variants
+### Fixed (since 0.1.0-alpha.4)
+- Slash command output truncation — scroll calculation now accounts for word-wrapped lines via `Paragraph::line_count()`
+- Slash command viewport not scrolling to bottom — `scroll_offset` resets on every slash command
+- `ratatui` `unstable-rendered-line-info` feature enabled for accurate line measurement

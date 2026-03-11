@@ -922,6 +922,8 @@ impl App {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
         self.slash_menu = None;
+        self.scroll_offset = 0;
+        self.force_new_message = true;
 
         // Split into command and optional argument text.
         let (cmd, args) = stripped
@@ -959,7 +961,7 @@ impl App {
                     env!("CARGO_PKG_VERSION"),
                     option_env!("RAGENT_BUILD_DATE").unwrap_or("dev"),
                 );
-                self.append_assistant_text(&about);
+                self.append_assistant_text(&format!("From: /about\n{about}"));
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
                 }
@@ -1088,7 +1090,7 @@ impl App {
                         }
                     }
                 }
-                let mut help_lines = String::from("Available commands:\n");
+                let mut help_lines = String::from("From: /help\nAvailable commands:\n");
                 for cmd_def in SLASH_COMMANDS {
                     help_lines.push_str(&format!(
                         "  /{:<18} {}\n",
@@ -1137,7 +1139,7 @@ impl App {
                 if args.is_empty() {
                     // Show current system prompt
                     if let Some(ref prompt) = self.agent_info.prompt {
-                        self.append_assistant_text(&format!("Current system prompt:\n{prompt}"));
+                        self.append_assistant_text(&format!("From: /system\nCurrent system prompt:\n{prompt}"));
                         if self.current_screen == ScreenMode::Home {
                             self.current_screen = ScreenMode::Chat;
                         }
@@ -1168,7 +1170,7 @@ impl App {
                 }
 
                 let tool_defs = self.session_processor.tool_registry.definitions();
-                let mut output = String::from("Built-in Tools:\n\n");
+                let mut output = String::from("From: /tools\nBuilt-in Tools:\n\n");
                 for def in &tool_defs {
                     output.push_str(&format!("  {:<16} {}\n", def.name, def.description));
                 }

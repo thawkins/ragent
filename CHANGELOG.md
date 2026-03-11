@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.5] - 2026-03-11
+
+### Added
+- `create` tool — create a new file with content, truncating if it already exists; creates parent directories as needed (22 tools total)
+- Slash command output headers — all slash commands (`/about`, `/help`, `/system`, `/tools`) now prefix output with `From: /<command>` for clarity
+- Each slash command now produces a separate message block with its own indicator dot
+
+### Fixed
+- Slash command output truncation — messages panel scroll calculation now uses `Paragraph::line_count()` to account for word-wrapped lines instead of logical line count
+- Slash command viewport not scrolling to bottom — `scroll_offset` now resets to 0 when any slash command is executed
+- `ratatui` `unstable-rendered-line-info` feature enabled for accurate wrapped-line measurement
+
+### Changed
+- Tool registry now contains 22 tools (up from 21)
+- TUI display summaries added for `create` tool (input path + result line count)
+
 ## [0.1.0-alpha.4] - 2026-03-11
 
 ### Added

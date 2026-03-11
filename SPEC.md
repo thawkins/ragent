@@ -624,6 +624,7 @@ pub struct ToolContext {
 |------|-----------|-------------|--------|
 | `read` | `file:read` | Read file contents (with optional line range) | ✅ |
 | `write` | `file:write` | Create or overwrite a file | ✅ |
+| `create` | `file:write` | Create a new file, truncating if it already exists | ✅ |
 | `edit` | `file:write` | Replace a specific string in a file | ✅ |
 | `multiedit` | `file:write` | Apply multiple edits to one or more files atomically | ✅ |
 | `bash` | `bash:execute` | Execute a shell command and capture output | ✅ |
@@ -702,7 +703,7 @@ First matching rule wins. If no rule matches, the default is `Ask`.
 
 | Permission | Triggers On |
 |------------|------------|
-| `edit` | `write`, `edit`, `multiedit`, `patch` tools |
+| `edit` | `write`, `create`, `edit`, `multiedit`, `patch` tools |
 | `bash` | `bash` tool (all shell commands) |
 | `external_directory` | Any file access outside the project root |
 | `doom_loop` | Agent exceeding `max_steps` iterations |

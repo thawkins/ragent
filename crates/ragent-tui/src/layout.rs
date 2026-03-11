@@ -1044,7 +1044,7 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "edit" | "patch" | "list" => input
+        "read" | "write" | "create" | "edit" | "patch" | "list" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
@@ -1174,6 +1174,18 @@ fn tool_result_summary(
                 .unwrap_or_default();
             Some(format!(
                 "{} line{} written to {}",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                path
+            ))
+        }
+        "create" => {
+            let path = input["path"]
+                .as_str()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} line{} created in {}",
                 line_count,
                 if line_count == 1 { "" } else { "s" },
                 path
@@ -1402,21 +1414,25 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    // Apply scroll offset
-    let total = lines.len() as u16;
-    let visible = area.height.saturating_sub(2);
-    let max_scroll = total.saturating_sub(visible);
-    app.message_max_scroll = max_scroll;
-    let scroll = max_scroll.saturating_sub(app.scroll_offset);
-
+    // Build the paragraph with wrapping so we can measure the true rendered height.
     let messages_block = Block::default()
         .borders(Borders::LEFT | Borders::RIGHT)
         .title(" Messages ");
 
     let paragraph = Paragraph::new(lines)
         .block(messages_block)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
+        .wrap(Wrap { trim: false });
+
+    // Use line_count() which accounts for word-wrap at the inner width
+    // (area width minus left+right borders).
+    let inner_width = area.width.saturating_sub(2);
+    let total = paragraph.line_count(inner_width) as u16;
+    let visible = area.height.saturating_sub(2);
+    let max_scroll = total.saturating_sub(visible);
+    app.message_max_scroll = max_scroll;
+    let scroll = max_scroll.saturating_sub(app.scroll_offset);
+
+    let paragraph = paragraph.scroll((scroll, 0));
 
     frame.render_widget(paragraph, area);
 

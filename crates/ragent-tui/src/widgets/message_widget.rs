@@ -56,7 +56,7 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "edit" | "list" => input
+        "read" | "write" | "create" | "edit" | "list" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
@@ -106,6 +106,18 @@ fn tool_result_summary(
                 .unwrap_or_default();
             Some(format!(
                 "{} line{} written to {}",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                path
+            ))
+        }
+        "create" => {
+            let path = input["path"]
+                .as_str()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} line{} created in {}",
                 line_count,
                 if line_count == 1 { "" } else { "s" },
                 path
