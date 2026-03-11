@@ -122,6 +122,30 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "to": to,
             }),
         ),
+        Event::AgentSwitchRequested {
+            session_id,
+            to,
+            task,
+            context,
+        } => (
+            "agent_switch_requested",
+            serde_json::json!({
+                "session_id": session_id,
+                "to": to,
+                "task": task,
+                "context": context,
+            }),
+        ),
+        Event::AgentRestoreRequested {
+            session_id,
+            summary,
+        } => (
+            "agent_restore_requested",
+            serde_json::json!({
+                "session_id": session_id,
+                "summary": summary,
+            }),
+        ),
         Event::AgentError { session_id, error } => (
             "agent_error",
             serde_json::json!({ "session_id": session_id, "error": error }),
@@ -176,6 +200,7 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
             tool,
             content,
             content_line_count,
+            metadata,
             success,
         } => (
             "tool_result",
@@ -185,6 +210,7 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "tool": tool,
                 "content": content,
                 "content_line_count": content_line_count,
+                "metadata": metadata,
                 "success": success,
             }),
         ),

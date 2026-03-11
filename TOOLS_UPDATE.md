@@ -16,7 +16,7 @@ All tools implement the `Tool` trait in `crates/ragent-core/src/tool/` and are r
 
 ## Tasks
 
-### TASK-T01: `multiedit` — Apply multiple edits to one or more files
+### TASK-T01: `multiedit` — Apply multiple edits to one or more files ✅ DONE
 
 **Priority:** 1 (High)
 **Permission:** `file:write`
@@ -42,7 +42,7 @@ All tools implement the `Tool` trait in `crates/ragent-core/src/tool/` and are r
 
 ---
 
-### TASK-T02: `patch` — Apply a unified diff patch
+### TASK-T02: `patch` — Apply a unified diff patch ✅ DONE
 
 **Priority:** 2 (Medium)
 **Permission:** `file:write`
@@ -68,7 +68,7 @@ All tools implement the `Tool` trait in `crates/ragent-core/src/tool/` and are r
 
 ---
 
-### TASK-T03: `webfetch` — Fetch a URL and return its content
+### TASK-T03: `webfetch` — Fetch a URL and return its content ✅ DONE
 
 **Priority:** 1 (High)
 **Permission:** `web`
@@ -239,14 +239,14 @@ Recommended order based on priority and dependencies:
 
 | Order | Task | Tool | Priority | Dependencies |
 |-------|------|------|----------|-------------|
-| 1 | TASK-T01 | `multiedit` | 1 | None (extends existing edit.rs patterns) |
-| 2 | TASK-T03 | `webfetch` | 1 | `reqwest` crate |
-| 3 | TASK-T02 | `patch` | 2 | None (or `diffy`/`similar` crate) |
-| 4 | TASK-T04 | `websearch` | 2 | `reqwest` + search API |
-| 5 | TASK-T07 | `todo_read` | 3 | Storage schema migration |
-| 6 | TASK-T08 | `todo_write` | 3 | TASK-T07 (shared schema) |
-| 7 | TASK-T05 | `plan_enter` | 2 | Agent switching infrastructure |
-| 8 | TASK-T06 | `plan_exit` | 2 | TASK-T05 |
+| 1 | TASK-T01 | `multiedit` | 1 | ✅ Done |
+| 2 | TASK-T03 | `webfetch` | 1 | ✅ Done |
+| 3 | TASK-T02 | `patch` | 2 | ✅ Done |
+| 4 | TASK-T04 | `websearch` | 2 | ✅ Done |
+| 5 | TASK-T07 | `todo_read` | 3 | ✅ Done |
+| 6 | TASK-T08 | `todo_write` | 3 | ✅ Done |
+| 7 | TASK-T05 | `plan_enter` | 2 | ✅ Done |
+| 8 | TASK-T06 | `plan_exit` | 2 | ✅ Done |
 
 ---
 

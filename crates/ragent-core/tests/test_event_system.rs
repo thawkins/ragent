@@ -78,6 +78,16 @@ fn test_event_serialization_roundtrip_all_variants() {
             from: "general".into(),
             to: "build".into(),
         },
+        Event::AgentSwitchRequested {
+            session_id: "s1".into(),
+            to: "plan".into(),
+            task: "Analyze codebase".into(),
+            context: String::new(),
+        },
+        Event::AgentRestoreRequested {
+            session_id: "s1".into(),
+            summary: "Plan complete".into(),
+        },
         Event::AgentError {
             session_id: "s1".into(),
             error: "something broke".into(),
@@ -111,6 +121,7 @@ fn test_event_serialization_roundtrip_all_variants() {
             tool: "read".into(),
             content: "file contents here".into(),
             content_line_count: 1,
+            metadata: None,
             success: true,
         },
         Event::CopilotDeviceFlowComplete {

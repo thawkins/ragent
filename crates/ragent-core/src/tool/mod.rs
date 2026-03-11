@@ -12,14 +12,20 @@ pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod list;
+pub mod multiedit;
 pub mod office_common;
 pub mod office_info;
 pub mod office_read;
 pub mod office_write;
+pub mod patch;
 pub mod pdf_read;
 pub mod pdf_write;
+pub mod plan;
 pub mod question;
 pub mod read;
+pub mod todo;
+pub mod webfetch;
+pub mod websearch;
 pub mod write;
 
 use anyhow::Result;
@@ -70,6 +76,7 @@ impl Default for ToolOutput {
 ///     session_id: "session-1".to_string(),
 ///     working_dir: PathBuf::from("/tmp"),
 ///     event_bus: Arc::new(EventBus::new(128)),
+///     storage: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -81,6 +88,8 @@ pub struct ToolContext {
     pub working_dir: PathBuf,
     /// Event bus for publishing tool events (e.g., permission requests).
     pub event_bus: Arc<EventBus>,
+    /// Optional storage handle for tools that need database access.
+    pub storage: Option<Arc<crate::storage::Storage>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -224,18 +233,26 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 13);
+/// assert_eq!(registry.list().len(), 21);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(read::ReadTool));
     registry.register(Arc::new(write::WriteTool));
     registry.register(Arc::new(edit::EditTool));
+    registry.register(Arc::new(multiedit::MultiEditTool));
+    registry.register(Arc::new(patch::PatchTool));
     registry.register(Arc::new(bash::BashTool));
     registry.register(Arc::new(grep::GrepTool));
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(list::ListTool));
     registry.register(Arc::new(question::QuestionTool));
+    registry.register(Arc::new(webfetch::WebFetchTool));
+    registry.register(Arc::new(websearch::WebSearchTool));
+    registry.register(Arc::new(plan::PlanEnterTool));
+    registry.register(Arc::new(plan::PlanExitTool));
+    registry.register(Arc::new(todo::TodoReadTool));
+    registry.register(Arc::new(todo::TodoWriteTool));
     registry.register(Arc::new(office_read::OfficeReadTool));
     registry.register(Arc::new(office_write::OfficeWriteTool));
     registry.register(Arc::new(office_info::OfficeInfoTool));

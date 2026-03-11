@@ -625,6 +625,7 @@ pub struct ToolContext {
 | `read` | `file:read` | Read file contents (with optional line range) | ✅ |
 | `write` | `file:write` | Create or overwrite a file | ✅ |
 | `edit` | `file:write` | Replace a specific string in a file | ✅ |
+| `multiedit` | `file:write` | Apply multiple edits to one or more files atomically | ✅ |
 | `bash` | `bash:execute` | Execute a shell command and capture output | ✅ |
 | `grep` | `file:read` | Search file contents using string matching | ✅ |
 | `glob` | `file:read` | Find files matching glob patterns | ✅ |
@@ -635,19 +636,18 @@ pub struct ToolContext {
 | `office_info` | `file:read` | Get metadata about Office documents | ✅ |
 | `pdf_read` | `file:read` | Read text and metadata from PDF files | ✅ |
 | `pdf_write` | `file:write` | Create PDF files from structured content | ✅ |
+| `patch` | `file:write` | Apply a unified diff patch to one or more files | ✅ |
+| `webfetch` | `web` | Fetch URL content with HTML-to-text conversion | ✅ |
 
 **Planned (not yet implemented):**
 
 | Tool | Permission | Description | Status |
 |------|-----------|-------------|--------|
-| `multiedit` | `file:write` | Apply multiple edits to one or more files | 🔲 |
-| `patch` | `file:write` | Apply a unified diff patch | 🔲 |
-| `webfetch` | `web` | Fetch a URL and return its content | 🔲 |
-| `websearch` | `web` | Perform a web search and return results | 🔲 |
-| `plan_enter` | `plan` | Switch the active agent to the plan agent | 🔲 |
-| `plan_exit` | `plan` | Switch back from plan agent to the previous agent | 🔲 |
-| `todo_read` | `todo` | Read the current TODO list | 🔲 |
-| `todo_write` | `todo` | Update the TODO list | 🔲 |
+| `websearch` | `web` | Perform a web search and return results | ✅ |
+| `plan_enter` | `plan` | Switch the active agent to the plan agent | ✅ |
+| `plan_exit` | `plan` | Switch back from plan agent to the previous agent | ✅ |
+| `todo_read` | `todo` | Read the current TODO list | ✅ |
+| `todo_write` | `todo` | Update the TODO list | ✅ |
 
 #### Tool Execution Flow
 

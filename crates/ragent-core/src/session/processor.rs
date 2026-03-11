@@ -242,6 +242,7 @@ impl SessionProcessor {
         };
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut step = 0;
+        let mut agent_switch_requested = false;
 
         loop {
             step += 1;
@@ -426,6 +427,7 @@ impl SessionProcessor {
                     session_id: session_id.to_string(),
                     working_dir: working_dir.clone(),
                     event_bus: self.event_bus.clone(),
+                    storage: Some(self.session_manager.storage().clone()),
                 };
 
                 let result = self
@@ -499,12 +501,15 @@ impl SessionProcessor {
                 } else {
                     result_content.clone()
                 };
+                let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
+
                 self.event_bus.publish(Event::ToolResult {
                     session_id: session_id.to_string(),
                     call_id: tc.id.clone(),
                     tool: tc.name.clone(),
                     content: result_preview,
                     content_line_count,
+                    metadata: tool_metadata,
                     success,
                 });
 
@@ -512,6 +517,25 @@ impl SessionProcessor {
                     tool_use_id: tc.id.clone(),
                     content: result_content,
                 });
+
+                // Check if a tool requested an agent switch or restore
+                if let Some(meta) = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|o| o.metadata.as_ref())
+                {
+                    if meta.get("agent_switch").is_some()
+                        || meta.get("agent_restore").is_some()
+                    {
+                        agent_switch_requested = true;
+                        break;
+                    }
+                }
+            }
+
+            // If an agent switch was requested, exit the main loop too
+            if agent_switch_requested {
+                break;
             }
 
             // Add assistant message with tool uses to chat history

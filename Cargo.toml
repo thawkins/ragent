@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -51,6 +51,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 ratatui = "0.29"
 crossterm = "0.28"
 globset = "0.4"
+html2text = "0.16"
 similar = "2"
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-stream = "0.3"

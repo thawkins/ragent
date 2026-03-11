@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.4] - 2026-03-11
+
+### Added
+- `multiedit` tool — apply multiple edits to a single file atomically with line-based targeting
+- `patch` tool — apply unified diff patches to files with fuzzy matching
+- `webfetch` tool — fetch URLs and convert HTML to clean markdown via `htmd`
+- `websearch` tool — web search via Tavily API with structured results (titles, URLs, snippets)
+- `plan_enter` tool — delegate a task to the planning agent via event-driven agent switching
+- `plan_exit` tool — return from planning agent to previous agent with summary injection
+- `todo_read` tool — list session-scoped TODO items with optional status filter
+- `todo_write` tool — add, update, remove, or clear TODO items with persistent SQLite storage
+- Agent delegation architecture: `AgentSwitchRequested` / `AgentRestoreRequested` events, agent stack in TUI, pending action dispatch on `MessageEnd`
+- `ToolContext.storage` field (`Option<Arc<Storage>>`) for tools needing database access
+- `todos` table in Storage with full CRUD (`create_todo`, `get_todos`, `update_todo`, `delete_todo`, `clear_todos`)
+- `todo` permission rule (Allow) in default agent permissions
+- TUI display summaries for all 8 new tools (input descriptions + result summaries)
+- SSE serialization for `AgentSwitchRequested` and `AgentRestoreRequested` events
+- 111 new tests across 7 test files (538 total)
+
+### Changed
+- Tool registry now contains 21 tools (up from 13)
+- Processor detects `agent_switch` / `agent_restore` metadata in tool results and breaks agent loop
+
 ## [0.1.0-alpha.3] - 2026-03-10
 
 ### Added

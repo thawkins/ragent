@@ -20,6 +20,7 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         session_id: "test-office".to_string(),
         working_dir: dir,
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     }
 }
 

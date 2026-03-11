@@ -1044,11 +1044,39 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "edit" | "list" => input
+        "read" | "write" | "edit" | "patch" | "list" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
             .unwrap_or_default(),
+        "webfetch" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| {
+                if u.len() > 60 {
+                    format!("{}…", &u[..60])
+                } else {
+                    u.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "websearch" => input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|q| format!("\"{}\"", q))
+            .unwrap_or_default(),
+        "multiedit" => {
+            let count = input
+                .get("edits")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            format!(
+                "{} edit{}",
+                count,
+                if count == 1 { "" } else { "s" }
+            )
+        }
         "glob" => input
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -1066,6 +1094,58 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             match path {
                 Some(p) if !p.is_empty() => format!("\"{}\" in {}", pattern, p),
                 _ => format!("\"{}\"", pattern),
+            }
+        }
+        "plan_enter" => {
+            let task = input
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let truncated = if task.len() > 60 {
+                format!("{}…", &task[..60])
+            } else {
+                task.to_string()
+            };
+            format!("→ plan: {}", truncated)
+        }
+        "plan_exit" => {
+            let summary = input
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let truncated = if summary.len() > 60 {
+                format!("{}…", &summary[..60])
+            } else {
+                summary.to_string()
+            };
+            format!("← plan: {}", truncated)
+        }
+        "todo_read" => {
+            let status = input
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            format!("📋 filter: {}", status)
+        }
+        "todo_write" => {
+            let action = input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let id = input
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let title = input
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match action {
+                "add" => format!("📋 +{}", if title.len() > 40 { &title[..40] } else { title }),
+                "update" => format!("📋 ~{}", id),
+                "remove" => format!("📋 -{}", id),
+                "clear" => "📋 clear all".to_string(),
+                _ => format!("📋 {}", action),
             }
         }
         _ => String::new(),
@@ -1104,6 +1184,28 @@ fn tool_result_summary(
             line_count,
             if line_count == 1 { "" } else { "s" }
         )),
+        "multiedit" => {
+            let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0);
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} edit{} across {} file{}",
+                edits,
+                if edits == 1 { "" } else { "s" },
+                files,
+                if files == 1 { "" } else { "s" }
+            ))
+        }
+        "patch" => {
+            let hunks = out.get("hunks").and_then(|v| v.as_u64()).unwrap_or(0);
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} hunk{} applied across {} file{}",
+                hunks,
+                if hunks == 1 { "" } else { "s" },
+                files,
+                if files == 1 { "" } else { "s" }
+            ))
+        }
         "bash" => Some(format!(
             "{} line{}...",
             line_count,
@@ -1124,6 +1226,55 @@ fn tool_result_summary(
             line_count,
             if line_count == 1 { "y" } else { "ies" }
         )),
+        "webfetch" => {
+            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} line{} (HTTP {})",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                status,
+            ))
+        }
+        "websearch" => {
+            let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} result{} found",
+                results,
+                if results == 1 { "" } else { "s" },
+            ))
+        }
+        "plan_enter" => {
+            let task = out
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("plan");
+            Some(format!("delegated → plan: {}", task))
+        }
+        "plan_exit" => {
+            let len = out
+                .get("summary_length")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("returned ({} chars)", len))
+        }
+        "todo_read" => {
+            let count = out
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} item{}", count, if count == 1 { "" } else { "s" }))
+        }
+        "todo_write" => {
+            let action = out
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let count = out
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} → {} remaining", action, count))
+        }
         _ => None,
     }
 }

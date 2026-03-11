@@ -496,6 +496,12 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         | Event::AgentSwitched {
             session_id: sid, ..
         }
+        | Event::AgentSwitchRequested {
+            session_id: sid, ..
+        }
+        | Event::AgentRestoreRequested {
+            session_id: sid, ..
+        }
         | Event::AgentError {
             session_id: sid, ..
         }

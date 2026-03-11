@@ -318,6 +318,21 @@ fn default_permissions() -> PermissionRuleset {
             pattern: "*".to_string(),
             action: PermissionAction::Ask,
         },
+        PermissionRule {
+            permission: "web".into(),
+            pattern: "*".to_string(),
+            action: PermissionAction::Ask,
+        },
+        PermissionRule {
+            permission: "plan".into(),
+            pattern: "*".to_string(),
+            action: PermissionAction::Ask,
+        },
+        PermissionRule {
+            permission: "todo".into(),
+            pattern: "*".to_string(),
+            action: PermissionAction::Allow,
+        },
     ]
 }
 

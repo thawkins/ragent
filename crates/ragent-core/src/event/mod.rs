@@ -122,6 +122,24 @@ pub enum Event {
         /// Name of the newly active agent.
         to: String,
     },
+    /// A tool has requested switching to a different agent.
+    AgentSwitchRequested {
+        /// Session in which the switch was requested.
+        session_id: String,
+        /// Name of the target agent.
+        to: String,
+        /// Task description for the target agent.
+        task: String,
+        /// Optional additional context.
+        context: String,
+    },
+    /// A tool has requested restoring the previous agent from the stack.
+    AgentRestoreRequested {
+        /// Session in which the restore was requested.
+        session_id: String,
+        /// Summary/output from the sub-agent to pass back.
+        summary: String,
+    },
     /// An unrecoverable error occurred in the agentic loop.
     AgentError {
         /// Session in which the error occurred.
@@ -182,6 +200,8 @@ pub enum Event {
         content: String,
         /// Total number of lines in the full (untruncated) result content.
         content_line_count: usize,
+        /// Optional structured metadata from the tool (e.g. file counts, edit counts).
+        metadata: Option<serde_json::Value>,
         /// Whether the tool succeeded.
         success: bool,
     },

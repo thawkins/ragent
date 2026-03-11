@@ -20,6 +20,7 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
 globset = { workspace = true }
+html2text = { workspace = true }
 similar = { workspace = true }
 tokio-stream = { workspace = true }
 async-stream = { workspace = true }

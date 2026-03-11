@@ -15,6 +15,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
   out of the box, with an extensible provider trait for adding more
 - **8 built-in tools** — file read/write/edit, bash execution, grep, glob, directory
   listing, and interactive questions
+- **13 extended tools** — multiedit, patch, webfetch, websearch, plan delegation,
+  todo management, office document read/write/info, and PDF read/write
 - **Terminal UI** — full-screen ratatui interface with home screen, provider setup
   dialog, slash-command autocomplete, agent cycling, and streaming chat
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent

@@ -197,6 +197,20 @@ impl Storage {
                 value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS todos (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_todos_session
+                ON todos(session_id, status);
             ",
         )?;
         Ok(())
@@ -655,6 +669,160 @@ impl Storage {
             .optional()?;
         Ok(val)
     }
+
+    // ── Todo CRUD ───────────────────────────────────────────────────
+
+    /// Creates a new TODO item in the given session.
+    pub fn create_todo(
+        &self,
+        id: &str,
+        session_id: &str,
+        title: &str,
+        status: &str,
+        description: &str,
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO todos (id, session_id, title, status, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, session_id, title, status, description, &now, &now],
+        )?;
+        Ok(())
+    }
+
+    /// Lists TODO items for a session, optionally filtered by status.
+    ///
+    /// Pass `Some("pending")` etc. to filter, or `None` / `Some("all")` for all.
+    pub fn get_todos(
+        &self,
+        session_id: &str,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<TodoRow>> {
+        let conn = lock_conn!(self)?;
+        let rows = match status_filter {
+            Some(s) if s != "all" => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, session_id, title, status, description, created_at, updated_at
+                     FROM todos WHERE session_id = ?1 AND status = ?2
+                     ORDER BY created_at",
+                )?;
+                stmt.query_map(params![session_id, s], |row| {
+                    Ok(TodoRow {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        title: row.get(2)?,
+                        status: row.get(3)?,
+                        description: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+            _ => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, session_id, title, status, description, created_at, updated_at
+                     FROM todos WHERE session_id = ?1
+                     ORDER BY created_at",
+                )?;
+                stmt.query_map(params![session_id], |row| {
+                    Ok(TodoRow {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        title: row.get(2)?,
+                        status: row.get(3)?,
+                        description: row.get(4)?,
+                        created_at: row.get(5)?,
+                        updated_at: row.get(6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+            }
+        };
+        Ok(rows)
+    }
+
+    /// Updates a TODO item's status and/or title/description.
+    pub fn update_todo(
+        &self,
+        id: &str,
+        session_id: &str,
+        title: Option<&str>,
+        status: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut sets = vec!["updated_at = ?1"];
+        let mut idx = 2u32;
+        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(now.clone())];
+
+        if let Some(t) = title {
+            sets.push(if idx == 2 { "title = ?2" } else { unreachable!() });
+            vals.push(Box::new(t.to_string()));
+            idx += 1;
+        }
+        if let Some(s) = status {
+            let placeholder = match idx {
+                2 => "status = ?2",
+                3 => "status = ?3",
+                _ => unreachable!(),
+            };
+            sets.push(placeholder);
+            vals.push(Box::new(s.to_string()));
+            idx += 1;
+        }
+        if let Some(d) = description {
+            let placeholder = match idx {
+                2 => "description = ?2",
+                3 => "description = ?3",
+                4 => "description = ?4",
+                _ => unreachable!(),
+            };
+            sets.push(placeholder);
+            vals.push(Box::new(d.to_string()));
+            idx += 1;
+        }
+
+        // id and session_id placeholders
+        let id_ph = format!("?{idx}");
+        let sid_ph = format!("?{}", idx + 1);
+        vals.push(Box::new(id.to_string()));
+        vals.push(Box::new(session_id.to_string()));
+
+        let sql = format!(
+            "UPDATE todos SET {} WHERE id = {} AND session_id = {}",
+            sets.join(", "),
+            id_ph,
+            sid_ph
+        );
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            vals.iter().map(|b| b.as_ref()).collect();
+        let changed = conn.execute(&sql, params.as_slice())?;
+        Ok(changed > 0)
+    }
+
+    /// Deletes a TODO item.
+    pub fn delete_todo(&self, id: &str, session_id: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "DELETE FROM todos WHERE id = ?1 AND session_id = ?2",
+            params![id, session_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Deletes all TODO items for a session. Returns the number removed.
+    pub fn clear_todos(&self, session_id: &str) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let changed = conn.execute(
+            "DELETE FROM todos WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(changed)
+    }
 }
 
 /// Raw row representation of a session as stored in SQLite.
@@ -670,4 +838,16 @@ pub struct SessionRow {
     pub updated_at: String,
     pub archived_at: Option<String>,
     pub summary: Option<String>,
+}
+
+/// Row representation of a TODO item.
+#[derive(Debug, Clone)]
+pub struct TodoRow {
+    pub id: String,
+    pub session_id: String,
+    pub title: String,
+    pub status: String,
+    pub description: String,
+    pub created_at: String,
+    pub updated_at: String,
 }

@@ -16,13 +16,21 @@ fn test_default_registry_has_all_tools() {
         "glob",
         "grep",
         "list",
+        "multiedit",
         "office_info",
         "office_read",
         "office_write",
+        "patch",
         "pdf_read",
         "pdf_write",
+        "plan_enter",
+        "plan_exit",
         "question",
         "read",
+        "todo_read",
+        "todo_write",
+        "webfetch",
+        "websearch",
         "write",
     ];
     assert_eq!(tools.len(), expected.len());
@@ -49,6 +57,9 @@ fn test_registry_get_existing_tool() {
         "read",
         "write",
         "edit",
+        "multiedit",
+        "patch",
+        "webfetch",
         "bash",
         "grep",
         "glob",
@@ -81,7 +92,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 13);
+    assert_eq!(defs.len(), 21);
 
     for def in &defs {
         assert!(
@@ -194,6 +205,7 @@ async fn test_read_tool_execute() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool
@@ -222,6 +234,7 @@ async fn test_read_tool_line_range() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool
@@ -255,6 +268,7 @@ async fn test_read_tool_missing_file() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -277,6 +291,7 @@ async fn test_write_tool_execute() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool
@@ -312,6 +327,7 @@ async fn test_list_tool_execute() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -340,6 +356,7 @@ async fn test_glob_tool_execute() {
         session_id: "s1".to_string(),
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
     };
 
     let result = tool

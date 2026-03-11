@@ -372,6 +372,14 @@ pub struct App {
     /// of appending to the current one. Set by `MessageEnd` events to
     /// separate init-exchange output from the main response.
     pub force_new_message: bool,
+    /// Saved agent stack for returning from sub-agents (e.g. plan → general).
+    pub agent_stack: Vec<AgentInfo>,
+    /// Pending plan delegation: `(task, context)` set by `AgentSwitchRequested`,
+    /// consumed by `MessageEnd` to auto-send the task to the plan agent.
+    pub pending_plan_task: Option<(String, String)>,
+    /// Pending agent restore: summary from `AgentRestoreRequested`,
+    /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
+    pub pending_plan_restore: Option<String>,
 }
 
 impl App {
@@ -480,6 +488,9 @@ impl App {
             home_input_area: Rect::default(),
             mcp_servers: Vec::new(),
             force_new_message: false,
+            agent_stack: Vec::new(),
+            pending_plan_task: None,
+            pending_plan_restore: None,
         }
     }
 
@@ -1624,6 +1635,119 @@ impl App {
         }
     }
 
+    /// Execute a plan agent delegation.
+    ///
+    /// Pushes the current agent onto the agent stack, switches to the plan
+    /// agent, and spawns an async task to send the task to the plan agent.
+    fn execute_plan_delegation(
+        &mut self,
+        session_id: &str,
+        task: String,
+        context: String,
+    ) {
+        // Push current agent to stack so plan_exit can restore it
+        self.agent_stack.push(self.agent_info.clone());
+
+        // Find and switch to the plan agent
+        let plan_agent = self
+            .cycleable_agents
+            .iter()
+            .find(|a| a.name == "plan")
+            .cloned();
+
+        if let Some(mut plan) = plan_agent {
+            let prev_name = self.agent_name.clone();
+
+            // Apply current model override to plan agent
+            if let Some(ref model_str) = self.selected_model {
+                if let Some((provider, model)) = model_str.split_once('/') {
+                    plan.model = Some(ModelRef {
+                        provider_id: provider.to_string(),
+                        model_id: model.to_string(),
+                    });
+                }
+            }
+
+            self.agent_info = plan.clone();
+            self.agent_name = "plan".to_string();
+            self.status = format!("agent: plan (delegated from {})", prev_name);
+            self.push_log(
+                LogLevel::Info,
+                format!("plan delegation: {} → plan", prev_name),
+            );
+
+            // Publish the switch event
+            self.event_bus.publish(Event::AgentSwitched {
+                session_id: session_id.to_string(),
+                from: prev_name,
+                to: "plan".to_string(),
+            });
+
+            // Build the task message
+            let full_task = if context.is_empty() {
+                task
+            } else {
+                format!("{}\n\nContext:\n{}", task, context)
+            };
+
+            // Add user message to UI
+            let sid = session_id.to_string();
+            let msg = Message::user_text(&sid, &full_task);
+            self.messages.push(msg);
+
+            // Spawn async processing
+            let processor = self.session_processor.clone();
+            let agent = self.agent_info.clone();
+            let task_text = full_task;
+            tokio::spawn(async move {
+                if let Err(e) = processor.process_message(&sid, &task_text, &agent).await {
+                    tracing::debug!(error = %e, "Plan agent failed");
+                }
+            });
+        } else {
+            self.push_log(LogLevel::Error, "plan agent not found".to_string());
+            // Pop the agent we just pushed since we can't delegate
+            self.agent_stack.pop();
+        }
+    }
+
+    /// Restore the previous agent after plan_exit.
+    ///
+    /// Pops the agent stack, switches back to the previous agent, publishes
+    /// an `AgentSwitched` event, and injects the plan summary into the
+    /// conversation as an assistant message.
+    fn execute_plan_restore(&mut self, session_id: &str, summary: &str) {
+        if let Some(prev_agent) = self.agent_stack.pop() {
+            let from_name = self.agent_name.clone();
+            let to_name = prev_agent.name.clone();
+
+            self.agent_info = prev_agent;
+            self.agent_name = to_name.clone();
+            self.status = format!("agent: {}", to_name);
+            self.push_log(
+                LogLevel::Info,
+                format!("plan restore: plan → {}", to_name),
+            );
+
+            self.event_bus.publish(Event::AgentSwitched {
+                session_id: session_id.to_string(),
+                from: from_name,
+                to: to_name,
+            });
+
+            // Inject the plan summary into the chat so the restored agent
+            // can see it in context.
+            let plan_text = format!("📋 **Plan summary:**\n{}", summary);
+            self.append_assistant_text(&plan_text);
+            self.force_new_message = true;
+        } else {
+            self.push_log(
+                LogLevel::Error,
+                "plan_exit called but agent stack is empty".to_string(),
+            );
+        }
+    }
+
     /// Handle an [`Event`] from the agent event bus and update application state.
     ///
     /// # Examples
@@ -1728,6 +1852,16 @@ impl App {
                     self.status = "ready".to_string();
                     self.force_new_message = true;
                     self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
+
+                    // Handle pending plan delegation: switch agent and auto-send task
+                    if let Some((task, context)) = self.pending_plan_task.take() {
+                        self.execute_plan_delegation(session_id, task, context);
+                    }
+
+                    // Handle pending agent restore: pop stack and inject summary
+                    if let Some(summary) = self.pending_plan_restore.take() {
+                        self.execute_plan_restore(session_id, &summary);
+                    }
                 }
             }
             Event::PermissionRequested {
@@ -1774,6 +1908,35 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.agent_name = to.clone();
                     self.push_log(LogLevel::Info, format!("agent switched: {} → {}", from, to));
+                }
+            }
+            Event::AgentSwitchRequested {
+                ref session_id,
+                ref to,
+                ref task,
+                ref context,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("agent switch requested → {} ({})", to, task),
+                    );
+                    self.pending_plan_task = Some((task.clone(), context.clone()));
+                }
+            }
+            Event::AgentRestoreRequested {
+                ref session_id,
+                ref summary,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "agent restore requested ({} chars)",
+                            summary.len()
+                        ),
+                    );
+                    self.pending_plan_restore = Some(summary.clone());
                 }
             }
             Event::AgentError {
@@ -1848,11 +2011,12 @@ impl App {
                 ref tool,
                 ref content,
                 content_line_count,
+                ref metadata,
                 success,
                 ..
             } => {
                 if self.is_current_session(session_id) {
-                    self.update_tool_call_output(call_id, content_line_count);
+                    self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
                     let icon = if success { "✓" } else { "✗" };
                     self.push_log(LogLevel::Tool, format!("← {} {} {}", tool, icon, content));
                 }
@@ -2047,8 +2211,21 @@ impl App {
         }
     }
 
-    fn update_tool_call_output(&mut self, call_id: &str, content_line_count: usize) {
-        let value = serde_json::json!({ "line_count": content_line_count });
+    fn update_tool_call_output(
+        &mut self,
+        call_id: &str,
+        content_line_count: usize,
+        metadata: Option<&serde_json::Value>,
+    ) {
+        let mut value = serde_json::json!({ "line_count": content_line_count });
+        // Merge tool metadata fields into the output for the TUI
+        if let Some(meta) = metadata {
+            if let Some(obj) = meta.as_object() {
+                for (k, v) in obj {
+                    value[k] = v.clone();
+                }
+            }
+        }
         for msg in self.messages.iter_mut().rev() {
             for part in msg.parts.iter_mut() {
                 if let MessagePart::ToolCall {
