@@ -1407,12 +1407,23 @@ impl App {
             let line_idx = screen_row.saturating_sub(inner_y) as usize;
             let line = lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
             let line_start = if screen_row == start_row {
-                start_col.saturating_sub(inner_x) as usize
+                let byte_idx = start_col.saturating_sub(inner_x) as usize;
+                // Snap to a valid char boundary
+                let mut idx = byte_idx.min(line.len());
+                while idx < line.len() && !line.is_char_boundary(idx) {
+                    idx += 1;
+                }
+                idx
             } else {
                 0
             };
             let line_end = if screen_row == end_row {
-                (end_col.saturating_sub(inner_x) as usize + 1).min(line.len())
+                let byte_idx = (end_col.saturating_sub(inner_x) as usize + 1).min(line.len());
+                let mut idx = byte_idx;
+                while idx < line.len() && !line.is_char_boundary(idx) {
+                    idx += 1;
+                }
+                idx
             } else {
                 line.len()
             };

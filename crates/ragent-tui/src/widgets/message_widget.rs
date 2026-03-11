@@ -56,7 +56,8 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "create" | "edit" | "list" => input
+        "read" | "write" | "create" | "edit" | "list" | "office_read" | "office_write"
+        | "office_info" | "pdf_read" | "pdf_write" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
@@ -147,6 +148,28 @@ fn tool_result_summary(
             "{} entr{}",
             line_count,
             if line_count == 1 { "y" } else { "ies" }
+        )),
+        "office_read" | "pdf_read" => Some(format!(
+            "{} line{} read",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
+        )),
+        "office_write" | "pdf_write" => {
+            let path = input["path"]
+                .as_str()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} line{} written to {}",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                path
+            ))
+        }
+        "office_info" => Some(format!(
+            "{} line{} of metadata",
+            line_count,
+            if line_count == 1 { "" } else { "s" }
         )),
         _ => None,
     }

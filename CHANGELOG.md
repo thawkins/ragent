@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.6] - 2026-03-11
+
+### Added
+- TUI display summaries for `office_read`, `office_write`, `office_info`, `pdf_read`, and `pdf_write` tools (file path + line count)
+
+### Fixed
+- Panic in text selection when selecting lines containing multi-byte UTF-8 characters (e.g., `●`) — byte offsets now snap to valid char boundaries
+- `office_read`, `office_write`, `office_info`, `pdf_read`, `pdf_write` tools now show file path and line count in the messages panel
+
 ## [0.1.0-alpha.5] - 2026-03-11
 
 ### Added
