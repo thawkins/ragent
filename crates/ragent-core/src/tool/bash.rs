@@ -55,14 +55,14 @@ impl Tool for BashTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let command = input["command"]
             .as_str()
-            .context("Missing 'command' parameter")?;
+            .context("Missing required 'command' parameter")?;
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
         tracing::info!(command = %command, working_dir = %ctx.working_dir.display(), "Executing bash command");
 
         for pattern in DENIED_PATTERNS {
             if command.contains(pattern) {
-                bail!("Command denied: contains dangerous pattern '{pattern}'");
+                bail!("Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system.");
             }
         }
 
@@ -119,10 +119,10 @@ impl Tool for BashTool {
                     })),
                 })
             }
-            Ok(Err(e)) => Ok(ToolOutput {
-                content: format!("Failed to execute command: {}", e),
-                metadata: None,
-            }),
+            Ok(Err(e)) => Err(anyhow::anyhow!(
+                "Failed to execute command: {}. Check that the command exists and is accessible.",
+                e
+            )),
             Err(_) => Ok(ToolOutput {
                 content: format!("Command timed out after {} seconds", timeout_secs),
                 metadata: Some(json!({

@@ -14,10 +14,15 @@ use std::path::PathBuf;
 /// The `files` map stores each file's absolute path to its raw byte content.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
+    /// Unique identifier for this snapshot.
     pub id: String,
+    /// Session this snapshot belongs to.
     pub session_id: String,
+    /// Message that triggered this snapshot.
     pub message_id: String,
+    /// Map of file paths to their captured byte contents.
     pub files: HashMap<PathBuf, Vec<u8>>,
+    /// Timestamp when the snapshot was taken.
     pub created_at: DateTime<Utc>,
 }
 

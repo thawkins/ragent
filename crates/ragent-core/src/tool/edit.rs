@@ -52,19 +52,19 @@ impl Tool for EditTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let old_str = input["old_str"]
             .as_str()
-            .context("Missing 'old_str' parameter")?;
+            .context("Missing required 'old_str' parameter")?;
         let new_str = input["new_str"]
             .as_str()
-            .context("Missing 'new_str' parameter")?;
+            .context("Missing required 'new_str' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
         let content = tokio::fs::read_to_string(&path)
             .await
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+            .with_context(|| format!("Cannot read file '{}': file may not exist or is not accessible", path.display()))?;
 
         let count = content.matches(old_str).count();
         if count == 0 {
@@ -89,6 +89,7 @@ impl Tool for EditTool {
         // Show a small diff summary
         let old_lines = old_str.lines().count();
         let new_lines = new_str.lines().count();
+        let lines_changed = old_lines.max(new_lines);
 
         Ok(ToolOutput {
             content: format!(
@@ -99,7 +100,12 @@ impl Tool for EditTool {
                 new_lines,
                 if new_lines == 1 { "" } else { "s" },
             ),
-            metadata: None,
+            metadata: Some(json!({
+                "path": path.display().to_string(),
+                "old_lines": old_lines,
+                "new_lines": new_lines,
+                "lines": lines_changed,
+            })),
         })
     }
 }

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Result, bail};
@@ -28,10 +29,15 @@ use crate::tool::{ToolContext, ToolRegistry};
 /// Holds shared references to the session manager, LLM provider registry,
 /// tool registry, permission checker, and event bus.
 pub struct SessionProcessor {
+    /// Manages session persistence and lifecycle.
     pub session_manager: Arc<SessionManager>,
+    /// Registry of available LLM providers.
     pub provider_registry: Arc<ProviderRegistry>,
+    /// Registry of available tools the agent may invoke.
     pub tool_registry: Arc<ToolRegistry>,
+    /// Checks whether a tool invocation is permitted.
     pub permission_checker: Arc<tokio::sync::RwLock<PermissionChecker>>,
+    /// Bus for broadcasting session and processing events.
     pub event_bus: Arc<EventBus>,
 }
 
@@ -52,13 +58,15 @@ impl SessionProcessor {
     /// ```no_run
     /// # async fn example() -> anyhow::Result<()> {
     /// use std::sync::Arc;
+    /// use std::sync::atomic::AtomicBool;
     /// use ragent_core::session::processor::SessionProcessor;
     /// use ragent_core::agent::AgentInfo;
     ///
     /// // Assumes `processor` is a fully configured SessionProcessor.
     /// # let processor: SessionProcessor = todo!();
     /// let agent = AgentInfo::new("coder", "A coding assistant");
-    /// let reply = processor.process_message("session-1", "Hello!", &agent).await?;
+    /// let cancel = Arc::new(AtomicBool::new(false));
+    /// let reply = processor.process_message("session-1", "Hello!", &agent, cancel).await?;
     /// println!("Assistant replied: {}", reply.text_content());
     /// # Ok(())
     /// # }
@@ -68,6 +76,7 @@ impl SessionProcessor {
         session_id: &str,
         user_text: &str,
         agent: &AgentInfo,
+        cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
         // 1. Store user message
         let user_msg = Message::user_text(session_id, user_text);
@@ -232,7 +241,7 @@ impl SessionProcessor {
         }
 
         // 5. Agent loop
-        let max_steps = agent.max_steps.unwrap_or(50) as usize;
+        let max_steps = agent.max_steps.unwrap_or(500) as usize;
         // Single-step agents (e.g. "chat") don't use tools — omit definitions
         // so providers aren't confused by unused tool schemas.
         let tool_definitions = if max_steps <= 1 {
@@ -253,6 +262,23 @@ impl SessionProcessor {
                     error: format!("Reached maximum steps ({})", max_steps),
                 });
                 break;
+            }
+
+            // Check if the user cancelled (e.g. pressed ESC)
+            if cancel_flag.load(Ordering::Relaxed) {
+                warn!("Agent loop cancelled by user at step {}", step);
+                // Save partial progress
+                let assistant_msg =
+                    Message::new(session_id, Role::Assistant, assistant_parts);
+                self.session_manager
+                    .storage()
+                    .create_message(&assistant_msg)?;
+                self.event_bus.publish(Event::MessageEnd {
+                    session_id: session_id.to_string(),
+                    message_id: assistant_msg.id.clone(),
+                    reason: FinishReason::Cancelled,
+                });
+                return Ok(assistant_msg);
             }
 
             debug!("Agent loop step {}/{}", step, max_steps);

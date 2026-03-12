@@ -4,15 +4,16 @@
 //! scroll position, and permission state. It processes both terminal key events
 //! and agent bus events to drive the UI.
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use ragent_core::{
     agent::{AgentInfo, ModelRef},
-    event::{Event, EventBus},
+    event::{Event, EventBus, FinishReason},
     mcp::McpServer,
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
@@ -195,6 +196,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "quit",
         description: "Exit ragent",
+    },
+    SlashCommandDef {
+        trigger: "resume",
+        description: "Resume the agent from where it was halted",
     },
     SlashCommandDef {
         trigger: "system",
@@ -380,6 +385,16 @@ pub struct App {
     /// Pending agent restore: summary from `AgentRestoreRequested`,
     /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
     pub pending_plan_restore: Option<String>,
+    /// Whether the agent is currently processing a message.
+    pub is_processing: bool,
+    /// Cancellation flag shared with the processor task; set to `true` on ESC.
+    pub cancel_flag: Option<Arc<AtomicBool>>,
+    /// Whether the last agent run was halted by the user (ESC).
+    pub agent_halted: bool,
+    /// Monotonically increasing step counter for tool calls.
+    pub tool_step_counter: u32,
+    /// Maps tool call IDs to their step numbers for log/message correlation.
+    pub tool_step_map: HashMap<String, u32>,
 }
 
 impl App {
@@ -491,6 +506,11 @@ impl App {
             agent_stack: Vec::new(),
             pending_plan_task: None,
             pending_plan_restore: None,
+            is_processing: false,
+            cancel_flag: None,
+            agent_halted: false,
+            tool_step_counter: 0,
+            tool_step_map: HashMap::new(),
         }
     }
 
@@ -649,6 +669,41 @@ impl App {
         self.current_screen = ScreenMode::Chat;
         self.status = format!("resumed ({} messages)", msg_count);
 
+        // Rebuild step counter from restored tool calls and populate log
+        self.tool_step_counter = 0;
+        self.tool_step_map.clear();
+        let mut restored_logs: Vec<(u32, String, String)> = Vec::new();
+        for msg in &self.messages {
+            for part in &msg.parts {
+                if let MessagePart::ToolCall {
+                    call_id,
+                    tool,
+                    state,
+                } = part
+                {
+                    self.tool_step_counter += 1;
+                    self.tool_step_map
+                        .insert(call_id.clone(), self.tool_step_counter);
+                    let icon = match state.status {
+                        ragent_core::message::ToolCallStatus::Completed => "✓",
+                        ragent_core::message::ToolCallStatus::Error => "✗",
+                        _ => "…",
+                    };
+                    restored_logs.push((
+                        self.tool_step_counter,
+                        tool.clone(),
+                        icon.to_string(),
+                    ));
+                }
+            }
+        }
+        for (step, tool, icon) in restored_logs {
+            self.push_log(
+                LogLevel::Tool,
+                format!("[#{step}] {tool} {icon} (restored)"),
+            );
+        }
+
         // Update cwd to match the session's working directory
         if !session.directory.is_empty() {
             self.cwd = session.directory.clone();
@@ -724,7 +779,7 @@ impl App {
                 .flatten()
                 .filter(|k| !k.is_empty())
                 .or_else(|| {
-                    let storage = self.storage.clone();
+                    let _storage = self.storage.clone();
                     let db_lookup = move || -> Option<String> { None }; // already checked
                     ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
                 });
@@ -959,7 +1014,7 @@ impl App {
                      \x20 Authors:\n\
                      \x20   Tim Hawkins <tim.thawkins@gmail.com>\n",
                     env!("CARGO_PKG_VERSION"),
-                    option_env!("RAGENT_BUILD_DATE").unwrap_or("dev"),
+                    env!("BUILD_TIMESTAMP"),
                 );
                 self.append_assistant_text(&format!("From: /about\n{about}"));
                 if self.current_screen == ScreenMode::Home {
@@ -1017,6 +1072,8 @@ impl App {
             "clear" => {
                 self.messages.clear();
                 self.scroll_offset = 0;
+                self.tool_step_counter = 0;
+                self.tool_step_map.clear();
                 self.status = "messages cleared".to_string();
                 self.push_log(LogLevel::Info, "Message history cleared".to_string());
             }
@@ -1060,7 +1117,7 @@ impl App {
                 let event_bus = self.event_bus.clone();
                 tokio::spawn(async move {
                     match processor
-                        .process_message(&sid, &summary_prompt, &agent)
+                        .process_message(&sid, &summary_prompt, &agent, Arc::new(AtomicBool::new(false)))
                         .await
                     {
                         Ok(_) => {
@@ -1134,6 +1191,51 @@ impl App {
             }
             "quit" => {
                 self.is_running = false;
+            }
+            "resume" => {
+                if !self.agent_halted {
+                    self.status = "Nothing to resume — agent was not halted".to_string();
+                    self.push_log(LogLevel::Warn, "Nothing to resume".to_string());
+                    return;
+                }
+                if self.session_id.is_none() {
+                    self.status = "No active session".to_string();
+                    return;
+                }
+
+                self.agent_halted = false;
+                let sid = self.session_id.clone().unwrap();
+                let resume_text =
+                    "You were previously interrupted by the user. Continue the task from where you left off.";
+                let msg = Message::user_text(&sid, resume_text);
+                self.messages.push(msg);
+                self.status = "processing...".to_string();
+                self.push_log(LogLevel::Info, "Resuming halted agent".to_string());
+
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+
+                let mut agent = self.agent_info.clone();
+                if let Some(ref model_str) = self.selected_model {
+                    if let Some((provider, model)) = model_str.split_once('/') {
+                        agent.model = Some(ModelRef {
+                            provider_id: provider.to_string(),
+                            model_id: model.to_string(),
+                        });
+                    }
+                }
+
+                let processor = self.session_processor.clone();
+                let flag = Arc::new(AtomicBool::new(false));
+                self.cancel_flag = Some(flag.clone());
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        processor.process_message(&sid, resume_text, &agent, flag).await
+                    {
+                        tracing::debug!(error = %e, "Failed to resume agent");
+                    }
+                });
             }
             "system" => {
                 if args.is_empty() {
@@ -1571,8 +1673,10 @@ impl App {
 
                     // Spawn async task to process the message
                     let processor = self.session_processor.clone();
+                    let flag = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(flag.clone());
                     tokio::spawn(async move {
-                        if let Err(e) = processor.process_message(&sid, &text, &agent).await {
+                        if let Err(e) = processor.process_message(&sid, &text, &agent, flag).await {
                             // Error is already surfaced via Event::AgentError;
                             // only trace at debug level to avoid duplicating
                             // output below the TUI.
@@ -1655,6 +1759,13 @@ impl App {
                 InputAction::SlashCommand(cmd) => {
                     self.execute_slash_command(&cmd);
                 }
+                InputAction::CancelAgent => {
+                    if let Some(ref flag) = self.cancel_flag {
+                        flag.store(true, Ordering::Relaxed);
+                        self.status = "halting agent…".to_string();
+                        self.push_log(LogLevel::Warn, "User pressed ESC — halting agent".to_string());
+                    }
+                }
             }
         }
     }
@@ -1724,7 +1835,7 @@ impl App {
             let agent = self.agent_info.clone();
             let task_text = full_task;
             tokio::spawn(async move {
-                if let Err(e) = processor.process_message(&sid, &task_text, &agent).await {
+                if let Err(e) = processor.process_message(&sid, &task_text, &agent, Arc::new(AtomicBool::new(false))).await {
                     tracing::debug!(error = %e, "Plan agent failed");
                 }
             });
@@ -1822,11 +1933,14 @@ impl App {
                 ref tool,
             } => {
                 if self.is_current_session(session_id) {
+                    self.tool_step_counter += 1;
+                    let step = self.tool_step_counter;
+                    self.tool_step_map.insert(call_id.clone(), step);
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
                     self.push_log(
                         LogLevel::Tool,
-                        format!("tool call: {} ({})", tool, &call_id[..8.min(call_id.len())]),
+                        format!("[#{}] tool call: {}", step, tool),
                     );
                 }
             }
@@ -1838,16 +1952,21 @@ impl App {
                 duration_ms,
             } => {
                 if self.is_current_session(session_id) {
-                    self.update_tool_call_status(call_id, error.is_none());
+                    self.update_tool_call_status(call_id, error.is_none(), error.as_deref());
+                    let step_tag = self
+                        .tool_step_map
+                        .get(call_id)
+                        .map(|s| format!("[#{}] ", s))
+                        .unwrap_or_default();
                     if let Some(err) = error {
                         self.push_log(
                             LogLevel::Error,
-                            format!("tool {} failed: {} ({}ms)", tool, err, duration_ms),
+                            format!("{}tool {} failed: {} ({}ms)", step_tag, tool, err, duration_ms),
                         );
                     } else {
                         self.push_log(
                             LogLevel::Tool,
-                            format!("tool {} completed ({}ms)", tool, duration_ms),
+                            format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
                         );
                     }
                 }
@@ -1857,6 +1976,8 @@ impl App {
                 ref message_id,
             } => {
                 if self.is_current_session(session_id) {
+                    self.is_processing = true;
+                    self.agent_halted = false;
                     self.status = "processing...".to_string();
                     self.push_log(
                         LogLevel::Info,
@@ -1873,7 +1994,16 @@ impl App {
                 ..
             } => {
                 if self.is_current_session(session_id) {
-                    self.status = "ready".to_string();
+                    self.is_processing = false;
+                    self.cancel_flag = None;
+                    if *reason == FinishReason::Cancelled {
+                        self.agent_halted = true;
+                        self.status = "halted — /resume to continue".to_string();
+                        self.push_log(LogLevel::Warn, "Agent halted by user".to_string());
+                    } else {
+                        self.agent_halted = false;
+                        self.status = "ready".to_string();
+                    }
                     self.force_new_message = true;
                     self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
 
@@ -2020,13 +2150,34 @@ impl App {
             } => {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_input(call_id, args);
-                    // Truncate args for log display only
-                    let log_args = if args.len() > 200 {
-                        format!("{}…", &args[..args.floor_char_boundary(200)])
+                    let step_tag = self
+                        .tool_step_map
+                        .get(call_id)
+                        .map(|s| format!("[#{}] ", s))
+                        .unwrap_or_default();
+                    // Pretty-print JSON args across multiple log lines
+                    let pretty = serde_json::from_str::<serde_json::Value>(args)
+                        .ok()
+                        .and_then(|v| serde_json::to_string_pretty(&v).ok());
+                    if let Some(formatted) = pretty {
+                        let mut first = true;
+                        for line in formatted.lines() {
+                            if first {
+                                self.push_log(
+                                    LogLevel::Tool,
+                                    format!("{}→ {} {}", step_tag, tool, line),
+                                );
+                                first = false;
+                            } else {
+                                self.push_log(LogLevel::Tool, format!("  {}", line));
+                            }
+                        }
                     } else {
-                        args.clone()
-                    };
-                    self.push_log(LogLevel::Tool, format!("→ {}({})", tool, log_args));
+                        self.push_log(
+                            LogLevel::Tool,
+                            format!("{}→ {}({})", step_tag, tool, args),
+                        );
+                    }
                 }
             }
             Event::ToolResult {
@@ -2041,8 +2192,13 @@ impl App {
             } => {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
+                    let step_tag = self
+                        .tool_step_map
+                        .get(call_id)
+                        .map(|s| format!("[#{}] ", s))
+                        .unwrap_or_default();
                     let icon = if success { "✓" } else { "✗" };
-                    self.push_log(LogLevel::Tool, format!("← {} {} {}", tool, icon, content));
+                    self.push_log(LogLevel::Tool, format!("{}← {} {} {}", step_tag, tool, icon, content));
                 }
             }
             _ => {}
@@ -2193,7 +2349,7 @@ impl App {
         }
     }
 
-    fn update_tool_call_status(&mut self, call_id: &str, success: bool) {
+    fn update_tool_call_status(&mut self, call_id: &str, success: bool, error: Option<&str>) {
         use ragent_core::message::ToolCallStatus;
 
         for msg in self.messages.iter_mut().rev() {
@@ -2210,6 +2366,9 @@ impl App {
                     } else {
                         ToolCallStatus::Error
                     };
+                    if let Some(err) = error {
+                        state.error = Some(err.to_string());
+                    }
                     return;
                 }
             }

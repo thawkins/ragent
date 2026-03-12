@@ -21,9 +21,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use futures::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use tokio_stream::wrappers::BroadcastStream;
 
 use ragent_core::agent::AgentInfo;
 use ragent_core::event::EventBus;
@@ -94,9 +92,25 @@ pub async fn run_tui(
         }
     }
 
-    let mut bus_stream = BroadcastStream::new(event_bus.subscribe());
+    let mut bus_rx = event_bus.subscribe();
 
     while app.is_running {
+        // Drain ALL pending bus events before rendering so the screen
+        // always reflects the latest state.
+        loop {
+            match bus_rx.try_recv() {
+                Ok(event) => app.handle_event(event),
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                    app.push_log(
+                        app::LogLevel::Warn,
+                        format!("{n} events dropped (event bus lag)"),
+                    );
+                    // After Lagged, the receiver is reset — continue draining
+                }
+                Err(_) => break, // Empty or Closed
+            }
+        }
+
         terminal.draw(|frame| layout::render(frame, &mut app))?;
 
         tokio::select! {
@@ -110,9 +124,18 @@ pub async fn run_tui(
                     }
                 }
             }
-            // Events from the agent event bus
-            Some(Ok(event)) = bus_stream.next() => {
-                app.handle_event(event);
+            // Wake up when a new bus event arrives (handled in drain loop above)
+            result = bus_rx.recv() => {
+                match result {
+                    Ok(event) => app.handle_event(event),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        app.push_log(
+                            app::LogLevel::Warn,
+                            format!("{n} events dropped (event bus lag)"),
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                }
             }
         }
     }

@@ -53,10 +53,10 @@ impl Tool for PlanEnterTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task = input["task"]
             .as_str()
-            .context("Missing 'task' parameter")?;
+            .context("Missing required 'task' parameter")?;
 
         if task.trim().is_empty() {
-            bail!("Task description must not be empty");
+            bail!("Task description must not be empty. Provide a description of what to plan or analyse.");
         }
 
         let context = input["context"]
@@ -129,10 +129,10 @@ impl Tool for PlanExitTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let summary = input["summary"]
             .as_str()
-            .context("Missing 'summary' parameter")?;
+            .context("Missing required 'summary' parameter")?;
 
         if summary.trim().is_empty() {
-            bail!("Summary must not be empty");
+            bail!("Summary must not be empty. Provide the plan or analysis result to return to the calling agent.");
         }
 
         ctx.event_bus.publish(Event::AgentRestoreRequested {

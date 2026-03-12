@@ -8,6 +8,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -58,6 +59,10 @@ struct Cli {
     /// Path to config file
     #[arg(long, global = true)]
     config: Option<String>,
+
+    /// Maximum number of agentic loop steps (default: 500)
+    #[arg(long, global = true)]
+    maxsteps: Option<u32>,
 }
 
 /// Available top-level sub-commands.
@@ -157,7 +162,7 @@ async fn main() -> Result<()> {
     let storage = Arc::new(Storage::open(&db_path)?);
 
     // Create event bus
-    let event_bus = Arc::new(EventBus::default());
+    let event_bus = Arc::new(EventBus::new(2048));
 
     // Create registries
     let provider_registry = Arc::new(provider::create_default_registry());
@@ -168,7 +173,12 @@ async fn main() -> Result<()> {
 
     // Resolve the active agent
     let agent_name = &cli.agent;
-    let resolved_agent = agent::resolve_agent(agent_name, &config)?;
+    let mut resolved_agent = agent::resolve_agent(agent_name, &config)?;
+
+    // Apply CLI --maxsteps override if provided
+    if let Some(max) = cli.maxsteps {
+        resolved_agent.max_steps = Some(max);
+    }
 
     let config = Arc::new(tokio::sync::RwLock::new(config));
 
@@ -198,7 +208,7 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     match session_processor
-                        .process_message(&session.id, &line, &resolved_agent)
+                        .process_message(&session.id, &line, &resolved_agent, Arc::new(AtomicBool::new(false)))
                         .await
                     {
                         Ok(msg) => writeln!(stdout, "{}", msg.text_content())?,
@@ -222,7 +232,7 @@ async fn main() -> Result<()> {
             let dir = std::fs::canonicalize(".")?;
             let session = session_manager.create_session(dir)?;
             match session_processor
-                .process_message(&session.id, &prompt, &resolved_agent)
+                .process_message(&session.id, &prompt, &resolved_agent, Arc::new(AtomicBool::new(false)))
                 .await
             {
                 Ok(msg) => {

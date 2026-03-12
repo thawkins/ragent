@@ -1,254 +1,293 @@
-# Project Index — Markdown Files
+# Documentation Index
 
-This document lists all markdown files in the project root with a summary of their contents.
-
----
-
-## Files Summary
-
-### AGENTS.md
-**Purpose:** Agent guidelines and development standards for Rust projects
-**Key Content:**
-- Technology stack (Rust edition 2021+)
-- Build, test, and lint commands with timeouts
-- Test organization requirements (tests/ directories, naming conventions)
-- Unit system specifications (UTC for dates, mm for dimensions, UTF8 for text)
-- GitHub access procedures and push workflows
-- Changelog and RELEASE.md management guidelines
-- Documentation standards (docblocks, module documentation)
-- Code style guidelines (4-space indent, 100 max width, snake_case/PascalCase naming)
-- Logging requirements (tracing crate, no println!)
-- Workflow procedures and task management
+An overview of all documentation files in the ragent project.
 
 ---
 
-### AGENTS_FIX.md
-**Purpose:** Comprehensive list of incomplete/stub code implementations
-**Key Content:**
-- Summary of 8 incomplete tasks (3 critical, 3 high, 2 medium priority)
-- Detailed task breakdown:
-  - **P0 (Critical):** MCP client methods (connect, list_tools, call_tool)
-  - **P1 (High):** HTTP abort_session endpoint, TUI agent switching, slash command parsing
-  - **P2 (Medium):** CLI session resume and import persistence
+## Root Level Documentation
+
+### [AGENTS.md](AGENTS.md)
+Guidelines for AI agents and developers working with the ragent project. Covers:
+- Technology stack and Rust edition requirements
+- Build and test commands with timeout specifications
+- Test organization and naming conventions  
+- Code style guidelines (4 spaces, max 100 width, snake_case naming)
+- Linting and formatting with clippy and rustfmt
+- Unit standards (UTC dates, millimeters for dimensions, UTF8 encoding)
+- GitHub workflow and version control practices
+- Changelog management using Keep a Changelog format
+- Semantic versioning with alpha suffix during development
+- Documentation standards for functions, modules, and markdown files
+- Workflow for handling "whats next" task lists
+- Priority levels for issues (P0-P4)
+
+**Status:** Primary reference document for the project
+
+---
+
+### [AGENTS_FIX.md](AGENTS_FIX.md)
+Comprehensive task list of incomplete and stub implementations across the codebase. Contains:
+- Summary table of tasks by priority (3 critical, 3 high, 2 medium)
+- Detailed breakdown of 8 unimplemented tasks:
+  - **TASK-001 to TASK-003**: MCP Client implementation (connect, list_tools, call_tool)
+  - **TASK-004**: HTTP Server abort_session endpoint
+  - **TASK-005**: TUI agent switching functionality
+  - **TASK-006**: Slash command parsing and dispatch
+  - **TASK-007**: Session resume functionality
+  - **TASK-008**: Session import persistence
 - Dependency graph showing task relationships
 - Recommended implementation order
-- Testing strategy for each task
-- Code quality checklist before marking tasks complete
-- Implementation notes for MCP, session management, and TUI features
+- Testing strategy for each task type
+- Code quality checklist
+- Implementation notes for complex features (MCP, session management, TUI)
+- Related documentation references
+
+**Status:** Active tracking document for incomplete features
 
 ---
 
-### CHANGELOG.md
-**Purpose:** Project changelog following Keep a Changelog format
-**Key Content:**
-- Current version: 0.1.0-alpha.4 (2026-03-11)
-- Added features across 4 alpha versions:
-  - 8 new tools (multiedit, patch, webfetch, websearch, plan_enter, plan_exit, todo_read, todo_write)
-  - Agent delegation system with AgentSwitchRequested/AgentRestoreRequested events
-  - Web tools and TODO persistence with SQLite storage
-  - AGENTS.md auto-loading on session start
-  - Office document and PDF read/write tools
-  - TUI improvements (tool call display, home screen, provider setup)
-- Fixed issues (compact command errors, line counts, tool result display)
-- Changed behaviors (ToolCallArgs event, content_line_count computation)
-- Comprehensive changelog since initial project scaffolding (v0.1.0-alpha.0)
+### [CHANGELOG.md](CHANGELOG.md)
+Complete history of project releases and changes. Includes:
+- Version 0.1.0-alpha.7 (latest): rm tool, /tools command enhancements, SPEC.md expansion
+- Version 0.1.0-alpha.6: Office document tool display summaries, UTF-8 bug fix
+- Version 0.1.0-alpha.5: create tool, slash command headers, wrapped-line fixes
+- Version 0.1.0-alpha.4: multiedit, patch, webfetch, websearch, plan agent delegation, todo management
+- Version 0.1.0-alpha.3: AGENTS.md auto-loading, init exchange, tool display improvements, INDEX.md
+- Version 0.1.0-alpha.2: provider reset, Copilot token persistence, device flow auth
+- Version 0.1.0-alpha.1: TUI home screen, provider setup, agent cycling, ask agent, settings persistence
+- Version 0.1.0-alpha.0: Initial project scaffolding with workspace structure
+
+**Format:** Keep a Changelog compatible with semantic versioning
 
 ---
 
-### DOC_INVENTRY.md
-**Purpose:** Inventory of public API functions and types requiring documentation
-**Key Content:**
-- Documentation coverage: 112 items, 100% documented ✅
-- Breakdown by crate:
-  - **ragent-core:** 87 documented items across 11 modules
-  - **ragent-server:** 3 documented items
-  - **ragent-tui:** 22 documented items
-- Detailed tables showing each function/type with line numbers
-- Status: COMPLETE — all items have documentation and examples
+### [DOC_INVENTRY.md](DOC_INVENTRY.md)
+Documentation audit and inventory of public API items:
+- Summary: 112 total items, all documented (100% coverage)
+- Detailed table tracking all public functions and types across crates:
+  - ragent-core: 87 items (agent, config, event, mcp, message, permission, provider, session, snapshot, storage, tool modules)
+  - ragent-server: 3 items (HTTP server routes and SSE)
+  - ragent-tui: 22 items (app, input, layout, widgets, tips)
+- Each item shows: name, line number, item type, documentation status, examples status
+- All items marked with ✅ for complete documentation
+
+**Status:** Complete — all public APIs documented
 
 ---
 
-### O365_TOOL.md
-**Purpose:** Specification for Office document read/write/info tools
-**Key Content:**
-- Overview of three new tools (office_read, office_write, office_info)
+### [O365_TOOL.md](O365_TOOL.md)
+Specification for Microsoft Office document read/write tools. Covers:
+- Goals: read/write Word (.docx), Excel (.xlsx), PowerPoint (.pptx) files
 - Recommended Rust crates (docx-rust, calamine, rust_xlsxwriter, ooxmlsdk)
-- Architecture with file structure for four new modules
-- Tool schemas with parameter definitions for all three tools
-- 11-task implementation plan:
-  - Add dependencies and create module skeleton
-  - Format detection and shared helpers
-  - office_read for Word, Excel, PowerPoint
-  - office_write for Word, Excel, PowerPoint
-  - office_info metadata extraction
-  - Tool registration and fixture files
-  - Documentation updates
-- Output format examples showing expected tool behavior
-- Risk mitigation table
-- Dependencies summary with version guidance
+- Architecture: three new tools (office_read, office_write, office_info)
+- Tool schemas for parameters and return values
+- Implementation plan with 11 tasks (TASK-001 to TASK-011):
+  - Module setup and dependencies
+  - Format detection helpers
+  - Per-format read/write implementations
+  - Integration testing with fixtures
+- Output format examples for Word, Excel, and PowerPoint
+- Risk assessment and mitigation strategies
+- Dependency specifications with versions
+
+**Status:** Implementation specification (tools already partially implemented)
 
 ---
 
-### QUICKSTART.md
-**Purpose:** Quick start guide for installing and using ragent
-**Key Content:**
+### [QUICKSTART.md](QUICKSTART.md)
+User-facing quick start guide for installing and using ragent:
 - Prerequisites and installation from source
-- Provider configuration (Anthropic, OpenAI, Copilot, Ollama)
-- First run commands with examples
-- Model listing across providers with cost information
-- Configuration file format (ragent.json) with merge precedence
-- Built-in agents (ask, general, build, plan, explore, title, summary, compaction)
-- Available tools (8 built-in + 13 extended tools including office/PDF/web tools)
+- Configuration via interactive TUI or environment variables
+- Provider setup options (Anthropic, OpenAI, Copilot, Ollama)
+- Default models and context windows for each provider
+- Configuration file format and load precedence
+- Built-in agents (ask, general, build, plan, explore, internal utilities)
+- Project guidelines via AGENTS.md auto-loading
+- Available tools with permission categories
 - Session management (list, resume, export, import)
-- HTTP server mode with API endpoints
+- HTTP server mode and API endpoints
 - Environment variables reference
-- Permission system overview
-- Common workflows and use cases
+- Permission system and rule configuration
+- Common workflows (code review, refactoring, local Ollama, project setup)
 - TUI interaction (mouse support, slash commands, key bindings)
-- Data storage locations
-- Troubleshooting guide
+- Data storage locations and troubleshooting guide
+
+**Status:** Primary user guide
 
 ---
 
-### README.md
-**Purpose:** Main project overview and introduction
-**Key Content:**
-- Project description: AI coding agent in Rust inspired by OpenCode
-- Feature summary:
-  - Multi-provider LLM support (Anthropic, OpenAI, Copilot, Ollama)
-  - 21 tools (8 built-in + 13 extended)
-  - Terminal UI with home screen and provider setup
-  - HTTP server for any frontend
-  - Session management with SQLite
-  - Permission system with configurable rules
-  - Agent presets with tailored prompts
-  - AGENTS.md auto-loading for project guidelines
-  - MCP client support
-  - Snapshot & undo functionality
-  - Event bus for real-time updates
-- Installation instructions
-- Quick start examples
-- Usage and command overview
-- Configuration file format (OpenCode-compatible)
-- Architecture diagram and module overview
-- Current project status (v0.1.0-alpha.2)
-- License (MIT)
+### [README.md](README.md)
+Project overview and introduction:
+- Brief description: AI coding agent for the terminal, built in Rust
+- Reimplementation of OpenCode as a learning exercise
+- Key features: multi-provider LLM, 23 built-in/extended tools, TUI, HTTP server, sessions, permissions, agents, project guidelines, MCP, snapshot/undo, event bus
+- Installation from source with Rust 1.85+ requirement
+- Quick start examples (configure key, launch TUI, one-shot prompt, HTTP server)
+- Usage summary with subcommands
+- Configuration file format and examples
+- Architecture diagram showing component relationships
+- Project status: v0.1.0-alpha.2 (early development)
+- License: MIT
+
+**Status:** Primary project introduction
 
 ---
 
-### RELEASE.md
-**Purpose:** Current release information and version tracking
-**Key Content:**
-- Current version: 0.1.0-alpha.4
-- Added features (since 0.1.0-alpha.3):
-  - 8 new tools with full descriptions
-  - Agent delegation system components
-  - Web tools (webfetch, websearch)
-  - TODO persistence with SQLite
-  - Storage layer extensions with todos table
-  - ToolContext storage handle
-  - Event variants for agent switching
-  - TUI agent stack management
-  - Tool display summaries
-  - SSE serialization for new events
-  - todo permission rule
-- Fixed issues in processor and event matching
+### [RELEASE.md](RELEASE.md)
+Latest release notes summary:
+- Current Version: 0.1.0-alpha.7
+- Summary of changes since 0.1.0-alpha.6:
+  - `rm` tool for file deletion
+  - `/tools` command enhancements
+  - SPEC.md expansion with new sections
+  - Feature comparison with competitor tools
+- Tool count: 23
+- SPEC.md line count: ~2168
+
+**Status:** Used for GitHub Releases page descriptions
 
 ---
 
-### SPEC.md
-**Purpose:** Comprehensive technical specification and architecture document
-**Key Content:**
-- Project goals and non-goals (10 goals, 5 non-goals)
-- Detailed architecture overview with data flow diagrams
-- 16 core modules documented:
-  1. CLI & entry point (clap, subcommands, global flags)
-  2. Configuration system (file format, load precedence, schema)
-  3. Provider system (7 implemented, 4 planned providers with examples)
-  4. Agent system (agent definitions, built-in agents, resolution, AGENTS.md)
-  5. Session management (lifecycle, persistence, resume/export/import)
-  6. Message model (parts-based structure, tool calls, reasoning)
-  7. Tool system (trait definition, 21 tools total)
-  8. Permission system (rules, evaluation, ask flow)
-  9. HTTP server (axum, SSE, route map)
-  10. Terminal UI (ratatui, home screen, chat layout, key bindings, mouse)
-  11. MCP client (server lifecycle, configuration, tool discovery)
-  12. LSP integration (supported languages, capabilities)
-  13. Event bus (event types, tokio broadcast)
-  14. Storage & database (SQLite schema with 6 tables)
-  15. Shell execution (safety features, timeout, kill_on_drop)
-  16. Snapshot & undo (per-tool, per-message, per-session levels)
-- Data flow documentation with doom loop protection
-- Full configuration file format with examples
-- Rust crate map (dependencies, purposes)
-- Project layout directory structure
-- Build & distribution instructions
-- Testing strategy (unit, integration, E2E, TUI, fuzzing)
-- Future/stretch goals (web UI, mobile, plugins, etc.)
+### [SPEC.md](SPEC.md)
+Comprehensive system specification document (2168+ lines). Includes:
+- Goals & non-goals (G1-G10 goals, N1-N5 non-goals)
+- Architecture overview with component diagram
+- Core modules (10 major sections):
+  1. CLI & entry point (subcommands, global flags)
+  2. Configuration (file format, load precedence, schema)
+  3. Provider system (supported providers, streaming interface, Ollama, Copilot)
+  4. Agent system (definition, built-in agents, tool groups, orchestrator, AGENTS.md loading)
+  5. Session management (lifecycle, resumption, archiving)
+  6. Message model (parts-based structure)
+  7. Tool system (registry, 23 built-in tools, execution flow)
+  8. Permission system (rules, evaluation order, ask flow)
+  9. HTTP server (REST + SSE routes, event types)
+  10. Terminal UI (home screen, provider setup, chat layout, tool display, slash commands, context compaction)
+- Advanced features (sections 3.11-3.28):
+  - MCP client, LSP integration, event bus
+  - Storage & database schema
+  - Shell execution and safety
+  - Snapshot & undo with shadow git
+  - Hooks, custom agents, skills
+  - Persistent memory, trusted directories
+  - Codebase indexing & semantic search
+  - Post-edit diagnostics, task todos
+  - Prompt enhancement, hierarchical instructions
+  - File ignore patterns (.ragentignore)
+  - Suggested responses
+- Data flow diagram
+- Configuration file format (minimal and full examples)
+- Rust crate map
+- Project layout
+- Build & distribution
+- Testing strategy
+- Future goals (F1-F20)
+
+**Status:** Living specification document, frequently updated
 
 ---
 
-### STATS.md
-**Purpose:** Project statistics and metrics
-**Key Content:**
-- Total Rust lines of code: 27,515
-- Rust file count: 90 files
+### [STATS.md](STATS.md)
+Project statistics snapshot:
+- Total Rust lines: 27,812
+- Rust file count: 92
 - Tests passed: 538
 - Tests failed: 0
-- Tools implemented: 21
+- Tools: 23
+
+**Status:** Summary metrics file
 
 ---
 
-### TOOLS_UPDATE.md
-**Purpose:** Implementation plan for 8 extended tools
-**Key Content:**
-- Current state: 13 implemented tools, 8 missing tools
-- 8 detailed task specifications:
-  - **TASK-T01:** multiedit — atomic multi-file edits ✅ Done
-  - **TASK-T02:** patch — unified diff application ✅ Done
-  - **TASK-T03:** webfetch — URL content fetching with HTML-to-text ✅ Done
-  - **TASK-T04:** websearch — web search with Tavily API ✅ Done
-  - **TASK-T07:** todo_read — read session TODOs ✅ Done
-  - **TASK-T08:** todo_write — update session TODOs ✅ Done
-  - **TASK-T05:** plan_enter — delegate to plan agent ✅ Done
-  - **TASK-T06:** plan_exit — return from plan agent ✅ Done
-- Implementation order with priority and dependencies
-- Per-tool checklist (trait implementation, registration, tests, TUI display)
-- All 8 tools marked as completed ✅
+### [TOOLS_UPDATE.md](TOOLS_UPDATE.md)
+Implementation plan for 8 originally-missing tools (now complete):
+- Current state: 13 implemented tools (mostly complete now)
+- Missing tools tracker (all marked as done):
+  - TASK-T01: `multiedit` ✅
+  - TASK-T02: `patch` ✅
+  - TASK-T03: `webfetch` ✅
+  - TASK-T04: `websearch` ✅
+  - TASK-T05: `plan_enter` ✅
+  - TASK-T06: `plan_exit` ✅
+  - TASK-T07: `todo_read` ✅
+  - TASK-T08: `todo_write` ✅
+- Per-tool implementation checklist
+- Tool registration and TUI display requirements
+- SPEC.md and CHANGELOG.md update requirements
+
+**Status:** Completed — all 8 tools now implemented
 
 ---
 
-### UPDATE_DOCS.md
-**Purpose:** Documentation update requirements for public functions
-**Key Content:**
-- Documentation coverage status: 1 missing docblock out of 23 functions (95.7%)
-- Single remediation task:
-  - Add docblock to `redact_secrets()` in crates/ragent-core/src/sanitize.rs
-  - Includes suggested docblock template with explanation and examples
-- Current status: Not started
-- Priority: Low (only 1 function)
-- All other public functions documented
+### [UPDATE_DOCS.md](UPDATE_DOCS.md)
+Documentation remediation tracking:
+- Audit of public API documentation coverage
+- Found 1 function without proper docblock:
+  - `redact_secrets()` in `crates/ragent-core/src/sanitize.rs`
+- Suggested docblock template
+- Overall documentation coverage: 95.7% (112 functions documented)
+
+**Status:** Minimal remediation needed
 
 ---
 
-## Quick Navigation
+### [WORD_SUM.md](WORD_SUM.md)
+Test summary of a sample Word document (testword1.docx):
+- Document topic: Cloudflare Browser Rendering crawl endpoint
+- Main features: URL submission, site crawl, multiple output formats
+- How it works: 4-step process with async job handling
+- Key capabilities: multiple output formats, crawl scope controls, page discovery, incremental crawling, bot etiquette
+- Use cases: ML training, RAG pipelines, website monitoring
+- Availability: Free and Paid plans
+- API example: curl commands for crawl initiation and result retrieval
 
-| File | Purpose | Audience |
-|------|---------|----------|
-| **AGENTS.md** | Development guidelines | Developers, CI/CD |
-| **AGENTS_FIX.md** | Incomplete tasks | Project manager, developers |
-| **CHANGELOG.md** | Version history | Users, release manager |
-| **DOC_INVENTRY.md** | API documentation status | Documentation team |
-| **O365_TOOL.md** | Office tools specification | Developers implementing office tools |
-| **QUICKSTART.md** | User guide | New users |
-| **README.md** | Project overview | Everyone |
-| **RELEASE.md** | Current release info | Release manager, users |
-| **SPEC.md** | Technical specification | Architects, developers |
-| **STATS.md** | Code metrics | Project manager |
-| **TOOLS_UPDATE.md** | Tool implementation plan | Tool developers |
-| **UPDATE_DOCS.md** | Documentation gaps | Documentation team |
+**Status:** Sample documentation test file
+
+---
+
+## Documentation in Subdirectories
+
+The following documentation files reside in the `docs/` folder (per AGENTS.md guidelines):
+
+- **docs/INDEX.md** — Documentation index for the docs folder
+- **docs/TODO.md** — Unimplemented functions and feature tracking
+- **docs/CODE_CLEANUP.md** — Code quality improvements (separate from missing features)
+
+---
+
+## How to Use This Index
+
+1. **Getting Started?** → Read [QUICKSTART.md](QUICKSTART.md) first
+2. **Understanding the Architecture?** → Read [SPEC.md](SPEC.md) (or sections 1–3)
+3. **Contributing Code?** → Read [AGENTS.md](AGENTS.md) for style and workflow
+4. **Implementing a Feature?** → Check [AGENTS_FIX.md](AGENTS_FIX.md) for pending tasks
+5. **Building Tools?** → Consult [TOOLS_UPDATE.md](TOOLS_UPDATE.md) for tool patterns
+6. **Writing Docs?** → Check [UPDATE_DOCS.md](UPDATE_DOCS.md) and [DOC_INVENTRY.md](DOC_INVENTRY.md)
+7. **Tracking Changes?** → See [CHANGELOG.md](CHANGELOG.md) and [RELEASE.md](RELEASE.md)
+8. **Project Metrics?** → View [STATS.md](STATS.md)
+
+---
+
+## File Summary Table
+
+| File | Purpose | Audience | Status |
+|------|---------|----------|--------|
+| [AGENTS.md](AGENTS.md) | Developer guidelines & standards | Developers | Reference |
+| [AGENTS_FIX.md](AGENTS_FIX.md) | Unimplemented tasks & stubs | Developers | Active |
+| [CHANGELOG.md](CHANGELOG.md) | Release history | All | Maintained |
+| [DOC_INVENTRY.md](DOC_INVENTRY.md) | API documentation audit | Developers | Complete |
+| [O365_TOOL.md](O365_TOOL.md) | Office tools specification | Developers | Specification |
+| [QUICKSTART.md](QUICKSTART.md) | Installation & usage guide | Users | Primary |
+| [README.md](README.md) | Project introduction | All | Primary |
+| [RELEASE.md](RELEASE.md) | Latest release notes | Users | Current |
+| [SPEC.md](SPEC.md) | System specification | Developers | Living |
+| [STATS.md](STATS.md) | Project metrics | All | Summary |
+| [TOOLS_UPDATE.md](TOOLS_UPDATE.md) | Tool implementation tracker | Developers | Completed |
+| [UPDATE_DOCS.md](UPDATE_DOCS.md) | Documentation gaps | Developers | Near-complete |
+| [WORD_SUM.md](WORD_SUM.md) | Test document summary | Testing | Sample |
 
 ---
 
 **Last Updated:** 2026-03-11  
-**Total Files:** 12 markdown files in project root
+**Total Root-Level Markdown Files:** 14  
+**Total Documentation Coverage:** ~8500 lines across all files

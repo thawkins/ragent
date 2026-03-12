@@ -44,7 +44,7 @@ impl Tool for QuestionTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let question = input["question"]
             .as_str()
-            .context("Missing 'question' parameter")?;
+            .context("Missing required 'question' parameter")?;
 
         let request_id = uuid::Uuid::new_v4().to_string();
 

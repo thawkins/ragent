@@ -129,6 +129,7 @@ struct OllamaModelDetails {
     parameter_size: String,
     /// Model family (e.g. `"llama"`, `"qwen"`).
     #[serde(default)]
+    #[allow(dead_code)]
     family: String,
 }
 

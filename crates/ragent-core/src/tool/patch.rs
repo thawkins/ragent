@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Applies a unified diff patch to one or more files.
 pub struct PatchTool;
 
 #[async_trait::async_trait]
@@ -55,14 +56,14 @@ impl Tool for PatchTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let patch_str = input["patch"]
             .as_str()
-            .context("Missing 'patch' parameter")?;
+            .context("Missing required 'patch' parameter")?;
         let path_override = input["path"].as_str();
         let fuzz = input["fuzz"].as_u64().unwrap_or(0) as usize;
 
         let file_patches = parse_unified_diff(patch_str)?;
 
         if file_patches.is_empty() {
-            bail!("No hunks found in the patch");
+            bail!("No valid diff hunks found in the patch content. Ensure the patch is in unified diff format (as produced by 'diff -u' or 'git diff').");
         }
 
         // Phase 1: Read all files and validate all hunks
@@ -331,7 +332,7 @@ fn apply_hunk(file_lines: &[String], hunk: &Hunk, fuzz: usize) -> Result<Vec<Str
     for fuzz_level in 0..=fuzz {
         let trimmed_old = trim_context(&old_content, fuzz_level);
         let trimmed_new = trim_context(&new_content, fuzz_level);
-        let context_offset = fuzz_level; // lines trimmed from top
+        let _context_offset = fuzz_level; // lines trimmed from top
 
         if let Some(pos) = find_match(file_lines, &trimmed_old, target_line) {
             let actual_pos = if fuzz_level > 0 {

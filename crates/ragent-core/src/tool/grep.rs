@@ -60,7 +60,7 @@ impl Tool for GrepTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let pattern = input["pattern"]
             .as_str()
-            .context("Missing 'pattern' parameter")?;
+            .context("Missing required 'pattern' parameter")?;
         let search_dir = input["path"]
             .as_str()
             .map(|p| resolve_path(&ctx.working_dir, p))

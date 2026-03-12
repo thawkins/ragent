@@ -20,33 +20,54 @@ pub use crate::event::FinishReason as LlmFinishReason;
 /// generated, enabling incremental rendering and tool-call handling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StreamEvent {
+    /// The model began a reasoning/thinking block.
     ReasoningStart,
+    /// An incremental chunk of reasoning text.
     ReasoningDelta {
+        /// The reasoning text fragment.
         text: String,
     },
+    /// The model finished the reasoning block.
     ReasoningEnd,
+    /// An incremental chunk of response text.
     TextDelta {
+        /// The text fragment.
         text: String,
     },
+    /// The model started a tool invocation.
     ToolCallStart {
+        /// Unique identifier for this tool call.
         id: String,
+        /// Name of the tool being invoked.
         name: String,
     },
+    /// An incremental chunk of tool-call argument JSON.
     ToolCallDelta {
+        /// Identifier of the tool call this delta belongs to.
         id: String,
+        /// Partial JSON fragment of the tool arguments.
         args_json: String,
     },
+    /// The model finished building a tool call.
     ToolCallEnd {
+        /// Identifier of the completed tool call.
         id: String,
     },
+    /// Token usage statistics for the request.
     Usage {
+        /// Number of tokens in the prompt/input.
         input_tokens: u64,
+        /// Number of tokens in the completion/output.
         output_tokens: u64,
     },
+    /// An error reported by the provider.
     Error {
+        /// Human-readable error description.
         message: String,
     },
+    /// The stream has ended.
     Finish {
+        /// Why the model stopped generating.
         reason: FinishReason,
     },
 }
@@ -57,13 +78,20 @@ pub enum StreamEvent {
 /// sampling parameters into a single payload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
+    /// Model identifier (e.g. `"claude-sonnet-4-20250514"`).
     pub model: String,
+    /// Ordered conversation history.
     pub messages: Vec<ChatMessage>,
+    /// Tools the model is allowed to invoke.
     #[serde(default)]
     pub tools: Vec<ToolDefinition>,
+    /// Sampling temperature (higher = more random).
     pub temperature: Option<f32>,
+    /// Nucleus-sampling probability mass cutoff.
     pub top_p: Option<f32>,
+    /// Maximum number of tokens to generate.
     pub max_tokens: Option<u32>,
+    /// Optional system prompt prepended to the conversation.
     pub system: Option<String>,
     /// Arbitrary key-value options forwarded to the provider (e.g. thinking control).
     #[serde(default)]
@@ -73,7 +101,9 @@ pub struct ChatRequest {
 /// A single message in a chat conversation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
+    /// The speaker role (e.g. `"user"`, `"assistant"`, `"tool"`).
     pub role: String,
+    /// The message body.
     pub content: ChatContent,
 }
 
@@ -84,7 +114,9 @@ pub struct ChatMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ChatContent {
+    /// Plain text content.
     Text(String),
+    /// A sequence of structured content parts.
     Parts(Vec<ContentPart>),
 }
 
@@ -94,17 +126,26 @@ pub enum ChatContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentPart {
+    /// A plain-text content block.
     Text {
+        /// The text content.
         text: String,
     },
+    /// A tool invocation issued by the model.
     ToolUse {
+        /// Unique identifier for this tool call.
         id: String,
+        /// Name of the tool to invoke.
         name: String,
         // TODO: Replace `Value` with a typed struct for tool-use input.
+        /// JSON input arguments for the tool.
         input: Value,
     },
+    /// The result returned from a tool execution.
     ToolResult {
+        /// Identifier of the tool call this result answers.
         tool_use_id: String,
+        /// The tool's output as a string.
         content: String,
     },
 }
@@ -112,9 +153,12 @@ pub enum ContentPart {
 /// Schema describing a tool that the LLM may invoke.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
+    /// The tool's unique name.
     pub name: String,
+    /// Human-readable description of what the tool does.
     pub description: String,
     // TODO: Replace `Value` with a typed JSON Schema struct.
+    /// JSON Schema describing the tool's accepted parameters.
     pub parameters: Value,
 }
 

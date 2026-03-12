@@ -44,7 +44,7 @@ impl Tool for TodoReadTool {
         let storage = ctx
             .storage
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Storage not available"))?;
+            .ok_or_else(|| anyhow::anyhow!("Storage is not available. Cannot read TODO items without a storage backend."))?;
 
         let status_filter = input["status"].as_str().unwrap_or("all");
 
@@ -132,17 +132,17 @@ impl Tool for TodoWriteTool {
         let storage = ctx
             .storage
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Storage not available"))?;
+            .ok_or_else(|| anyhow::anyhow!("Storage is not available. Cannot manage TODO items without a storage backend."))?;
 
         let action = input["action"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing required 'action' parameter"))?;
+            .ok_or_else(|| anyhow::anyhow!("Missing required 'action' parameter. Must be one of: add, update, remove, clear"))?;
 
         let (summary, action_label) = match action {
             "add" => {
                 let title = input["title"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing required 'title' for add action"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing required 'title' for add action. Provide a title for the new TODO item."))?;
                 if title.trim().is_empty() {
                     bail!("Title must not be empty");
                 }
@@ -169,7 +169,7 @@ impl Tool for TodoWriteTool {
             "update" => {
                 let id = input["id"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for update action"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for update action. Specify which TODO item to update."))?;
                 let title = input["title"].as_str();
                 let status = input["status"].as_str();
                 let description = input["description"].as_str();
@@ -201,7 +201,7 @@ impl Tool for TodoWriteTool {
             "remove" => {
                 let id = input["id"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for remove action"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for remove action. Specify which TODO item to delete."))?;
 
                 let removed = storage
                     .delete_todo(id, &ctx.session_id)

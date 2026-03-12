@@ -1,39 +1,41 @@
 # Summary of testword1.docx
 
 ## Overview
-This document describes Cloudflare's new Browser Rendering crawl endpoint, which is now available in open beta.
+This document describes Cloudflare's Browser Rendering API's new website crawling endpoint, currently available in open beta.
 
-## Main Features
-The crawl endpoint allows users to:
-- Submit a starting URL and automatically discover, render, and return multiple pages
-- Crawl entire websites with a single API call
-- Retrieve results in multiple formats: HTML, Markdown, and structured JSON
+## Key Functionality
+The crawling endpoint allows users to:
+- Submit a single URL to crawl an entire website
+- Automatically discover, render, and return pages in multiple formats (HTML, Markdown, and structured JSON)
+- Run crawl jobs asynchronously using a job ID tracking system
+
+## Intended Use Cases
+- Training machine learning models
+- Building RAG (Retrieval-Augmented Generation) pipelines
+- Researching or monitoring website content
 
 ## How It Works
 1. Submit a URL to initiate a crawl job
 2. Receive a job ID in response
-3. Check back on the job as pages are processed asynchronously
-4. Retrieve crawled content in your desired format
+3. Poll the API with the job ID to check results as pages are processed
 
-## Key Capabilities
-- **Multiple Output Formats**: HTML, Markdown, and structured JSON powered by Workers AI
-- **Crawl Scope Controls**: Configure depth, page limits, and URL patterns for inclusion/exclusion
-- **Automatic Page Discovery**: Discovers URLs from sitemaps and page links
-- **Incremental Crawling**: Supports `modifiedSince` and `maxAge` parameters to skip unchanged pages
-- **Static Mode**: Option to fetch static HTML without browser rendering for faster crawling
-- **Bot Etiquette**: Honors robots.txt directives including crawl-delay
+## Key Features
 
-## Use Cases
-- Training machine learning models
-- Building RAG (Retrieval-Augmented Generation) pipelines
-- Researching and monitoring website content
+1. **Multiple Output Formats**: HTML, Markdown, and structured JSON (powered by Workers AI)
+2. **Crawl Scope Controls**: Configure crawl depth, page limits, and wildcard patterns for URL inclusion/exclusion
+3. **Automatic Page Discovery**: Discovers URLs from sitemaps, page links, or both
+4. **Incremental Crawling**: Support for `modifiedSince` and `maxAge` parameters to skip unchanged pages and reduce costs
+5. **Static Mode**: Option to fetch static HTML without browser rendering for faster crawling
+6. **Bot Compliance**: Honors robots.txt directives including crawl-delay settings
 
 ## Availability
 - Available on both Workers Free and Paid plans
-- Documentation available in the crawl endpoint documentation
-- Includes best practices for robots.txt and sitemaps
 
-## API Example
-The document includes curl examples showing how to:
-- Initiate a crawl with a POST request
-- Check results with a GET request using the job ID
+## Getting Started
+- Refer to the crawl endpoint documentation
+- Review robots.txt and sitemaps best practices for site setup
+
+## Example API Calls
+The document includes example curl commands for:
+- Initiating a crawl
+- Checking crawl results using a job ID

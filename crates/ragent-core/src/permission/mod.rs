@@ -13,8 +13,11 @@ use std::fmt;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionAction {
+    /// Grant the operation without prompting.
     Allow,
+    /// Block the operation without prompting.
     Deny,
+    /// Prompt the user for an interactive decision.
     Ask,
 }
 
@@ -47,16 +50,27 @@ impl fmt::Display for PermissionAction {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Permission {
+    /// Read access to files or resources.
     Read,
+    /// Write/edit access to files or resources.
     Edit,
+    /// Shell command execution.
     Bash,
+    /// Network or web access.
     Web,
+    /// Interactive question to the user.
     Question,
+    /// Enter a planning phase.
     PlanEnter,
+    /// Exit a planning phase.
     PlanExit,
+    /// Create or modify to-do items.
     Todo,
+    /// Access directories outside the project root.
     ExternalDirectory,
+    /// Detect and break infinite processing loops.
     DoomLoop,
+    /// User-defined permission type with an arbitrary name.
     Custom(String),
 }
 
@@ -113,8 +127,11 @@ impl<'de> Deserialize<'de> for Permission {
 /// [`PermissionAction`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRule {
+    /// The permission type this rule applies to.
     pub permission: Permission,
+    /// Glob pattern matched against the resource path.
     pub pattern: String,
+    /// Action taken when this rule matches.
     pub action: PermissionAction,
 }
 
@@ -124,12 +141,18 @@ pub type PermissionRuleset = Vec<PermissionRule>;
 /// A pending permission request awaiting user resolution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRequest {
+    /// Unique identifier for this request.
     pub id: String,
+    /// Session that originated the request.
     pub session_id: String,
+    /// Permission type being requested (e.g. `"read"`, `"bash"`).
     pub permission: String,
+    /// Glob patterns describing the target resources.
     pub patterns: Vec<String>,
     // TODO: Replace `Value` with a typed `PermissionMetadata` struct.
+    /// Arbitrary JSON metadata attached to the request.
     pub metadata: Value,
+    /// Optional tool-call identifier that triggered this request.
     pub tool_call_id: Option<String>,
 }
 
@@ -137,8 +160,11 @@ pub struct PermissionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionDecision {
+    /// Allow this single occurrence only.
     Once,
+    /// Allow now and for all future matching requests.
     Always,
+    /// Deny the request.
     Deny,
 }
 

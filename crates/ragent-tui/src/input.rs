@@ -30,6 +30,8 @@ pub enum InputAction {
     SwitchAgent,
     /// Execute a `/`-prefixed command.
     SlashCommand(String),
+    /// Cancel the currently running agent (ESC while processing).
+    CancelAgent,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -202,6 +204,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::PageUp => Some(InputAction::ScrollUp),
         KeyCode::PageDown => Some(InputAction::ScrollDown),
         KeyCode::Tab | KeyCode::BackTab => Some(InputAction::SwitchAgent),
+        KeyCode::Esc if app.is_processing => Some(InputAction::CancelAgent),
         _ => None,
     }
 }

@@ -55,10 +55,10 @@ impl Tool for OfficeWriteTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let content = &input["content"];
         if content.is_null() {
-            bail!("Missing 'content' parameter");
+            bail!("Missing required 'content' parameter. Provide the document content as a JSON object.");
         }
 
         let path = resolve_path(&ctx.working_dir, path_str);
@@ -90,7 +90,7 @@ impl Tool for OfficeWriteTool {
             }
         })
         .await
-        .context("Task join error")??;
+        .context("Failed to write document: the background task exited unexpectedly")??;
 
         let file_size = tokio::fs::metadata(&path)
             .await

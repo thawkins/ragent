@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod message;
 pub mod permission;
 pub mod provider;
+/// Input sanitization and secret redaction utilities.
 pub mod sanitize;
 pub mod session;
 pub mod snapshot;

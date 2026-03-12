@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use axum::{
@@ -37,11 +38,17 @@ use crate::sse::event_to_sse;
 /// Shared application state passed to every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
+    /// Broadcast bus for server-sent events (SSE) to connected clients.
     pub event_bus: Arc<EventBus>,
+    /// Application configuration, behind an async read-write lock.
     pub config: Arc<tokio::sync::RwLock<Config>>,
+    /// Persistent storage backend for sessions and related data.
     pub storage: Arc<Storage>,
+    /// Processor responsible for running chat sessions to completion.
     pub session_processor: Arc<SessionProcessor>,
+    /// Bearer token required for authenticating incoming API requests.
     pub auth_token: String,
+    /// Per-client rate limiter tracking request counts and window timestamps.
     pub rate_limiter: Arc<std::sync::Mutex<HashMap<String, (u32, Instant)>>>,
 }
 
@@ -345,7 +352,7 @@ async fn send_message(
             .unwrap_or_else(|_| AgentInfo::new("general", "General-purpose agent"));
         drop(cfg);
         if let Err(e) = processor
-            .process_message(&session_id, &content, &agent)
+            .process_message(&session_id, &content, &agent, Arc::new(AtomicBool::new(false)))
             .await
         {
             tracing::error!(session_id = %session_id, error = %redact_secrets(&e.to_string()), "Failed to process message");

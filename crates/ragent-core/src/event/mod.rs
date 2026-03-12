@@ -21,6 +21,8 @@ pub enum FinishReason {
     Length,
     /// Response was blocked by the provider's content filter.
     ContentFilter,
+    /// The user cancelled the agent loop (e.g. pressed ESC).
+    Cancelled,
 }
 
 /// A discrete occurrence in the lifecycle of a session.
@@ -299,6 +301,7 @@ impl fmt::Display for FinishReason {
             FinishReason::ToolUse => write!(f, "tool_use"),
             FinishReason::Length => write!(f, "length"),
             FinishReason::ContentFilter => write!(f, "content_filter"),
+            FinishReason::Cancelled => write!(f, "cancelled"),
         }
     }
 }

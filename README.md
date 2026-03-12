@@ -18,7 +18,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
 - **15 extended tools** — multiedit, patch, webfetch, websearch, plan delegation,
   todo management, office document read/write/info, PDF read/write, and file deletion (rm)
 - **Terminal UI** — full-screen ratatui interface with home screen, provider setup
-  dialog, slash-command autocomplete, agent cycling, and streaming chat
+  dialog, slash-command autocomplete, agent cycling, streaming chat, step-numbered
+  tool calls with pretty-printed JSON in the log panel
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
 - **Session management** — persistent conversation history stored in SQLite
 - **Permission system** — configurable rules that gate file writes, shell commands,

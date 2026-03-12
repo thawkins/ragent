@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.8] - 2026-03-12
+
+### Added
+- Step numbers `[#N]` displayed next to tool calls in both message and log panels for cross-referencing
+- Pretty-printed JSON for tool call parameters in log panel
+- Restored session tool calls now appear in log panel with `(restored)` suffix
+- Event bus lag warning when broadcast events are dropped
+
+### Changed
+- Message/log panel split ratio changed from 70/30 to 60/40
+- Event bus capacity increased from 256 to 2048 events
+- TUI event loop now drains all pending bus events per cycle using `try_recv()` instead of processing one at a time
+- Log panel auto-scroll now uses rendered (wrapped) line count for correct bottom tracking
+
+### Fixed
+- Log panel missing entries when tool output wraps to many lines (scroll calculation used logical vs rendered line count)
+- Event bus lag causing silent loss of tool call log entries during burst activity
+- Resumed sessions not showing tool calls in log panel
+- 148 build warnings across workspace (missing docs, unused variables, dead code) — all resolved
+
 ## [0.1.0-alpha.7] - 2026-03-11
 
 ### Added

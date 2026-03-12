@@ -60,14 +60,14 @@ impl Tool for WebFetchTool {
         "web"
     }
 
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let url = input["url"]
             .as_str()
-            .context("Missing 'url' parameter")?;
+            .context("Missing required 'url' parameter")?;
 
         // Validate URL scheme
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            bail!("Only http:// and https:// URLs are supported");
+            bail!("Only http:// and https:// URLs are supported. The provided URL '{}' uses an unsupported scheme.", url);
         }
 
         let format = input["format"].as_str().unwrap_or("text");

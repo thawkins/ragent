@@ -40,10 +40,10 @@ impl Tool for RmTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
 
         if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
-            bail!("Wildcards are not allowed: {}", path_str);
+            bail!("Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {}", path_str);
         }
 
         let path = resolve_path(&ctx.working_dir, path_str);

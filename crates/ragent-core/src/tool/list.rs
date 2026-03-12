@@ -54,7 +54,7 @@ impl Tool for ListTool {
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 
         if !dir.is_dir() {
-            anyhow::bail!("Not a directory: {}", dir.display());
+            anyhow::bail!("Path '{}' is not a directory or does not exist", dir.display());
         }
 
         let mut lines = Vec::new();

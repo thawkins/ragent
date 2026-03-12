@@ -56,7 +56,7 @@ impl Tool for PdfReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
 
         let format = input["format"].as_str().unwrap_or("text");
@@ -70,7 +70,7 @@ impl Tool for PdfReadTool {
             read_pdf(&path_clone, start_page, end_page, &format_owned)
         })
         .await
-        .context("PDF read task panicked")??;
+        .context("Failed to read PDF: the background task exited unexpectedly")??;
 
         Ok(ToolOutput {
             content: truncate_output(result),

@@ -168,7 +168,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                     .to_string(),
             ),
             permission: default_permissions(),
-            max_steps: Some(50),
+            max_steps: Some(500),
             options: HashMap::new(),
         },
         AgentInfo {

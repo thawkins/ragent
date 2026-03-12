@@ -89,7 +89,7 @@ static SESSION_TOKEN_CACHE: Mutex<Option<CachedSessionToken>> = Mutex::new(None)
 /// Copilot API. Requires an active GitHub Copilot subscription.
 pub struct CopilotProvider {
     /// Base URL of the Copilot API (without trailing slash).
-    base_url: String,
+    _base_url: String,
 }
 
 impl CopilotProvider {
@@ -104,7 +104,7 @@ impl CopilotProvider {
     /// ```
     pub fn new() -> Self {
         Self {
-            base_url: DEFAULT_COPILOT_API_BASE.to_string(),
+            _base_url: DEFAULT_COPILOT_API_BASE.to_string(),
         }
     }
 
@@ -119,7 +119,7 @@ impl CopilotProvider {
     /// ```
     pub fn with_url(base_url: &str) -> Self {
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            _base_url: base_url.trim_end_matches('/').to_string(),
         }
     }
 }
@@ -1328,7 +1328,7 @@ mod tests {
     #[test]
     fn test_with_custom_url() {
         let provider = CopilotProvider::with_url("https://proxy.example.com/");
-        assert_eq!(provider.base_url, "https://proxy.example.com");
+        assert_eq!(provider._base_url, "https://proxy.example.com");
     }
 
     #[test]

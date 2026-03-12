@@ -14,7 +14,7 @@ use ratatui::{
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
-fn capitalize_tool_name(name: &str) -> String {
+pub(crate) fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();
     match chars.next() {
         None => String::new(),
@@ -23,7 +23,7 @@ fn capitalize_tool_name(name: &str) -> String {
 }
 
 /// Strip the working directory prefix from a path to produce a project-relative path.
-fn make_relative_path(path: &str, cwd: &str) -> String {
+pub(crate) fn make_relative_path(path: &str, cwd: &str) -> String {
     // Expand ~ in cwd to the home directory for comparison
     let expanded_cwd = if cwd.starts_with('~') {
         if let Some(home) = std::env::var_os("HOME") {
@@ -48,7 +48,7 @@ fn make_relative_path(path: &str, cwd: &str) -> String {
 }
 
 /// Extract a brief summary from tool input for display next to the tool name.
-fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
+pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
     match tool {
         "bash" => input
             .get("command")
@@ -56,12 +56,47 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" | "write" | "create" | "edit" | "list" | "rm" | "office_read" | "office_write"
-        | "office_info" | "pdf_read" | "pdf_write" => input
+        "read" => {
+            input
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default()
+        }
+        "write" | "create" | "edit" | "patch" | "list" | "rm" | "office_read"
+        | "office_write" | "office_info" | "pdf_read" | "pdf_write" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
             .unwrap_or_default(),
+        "webfetch" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| {
+                if u.len() > 60 {
+                    format!("{}…", &u[..60])
+                } else {
+                    u.to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "websearch" => input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|q| format!("\"{}\"", q))
+            .unwrap_or_default(),
+        "multiedit" => {
+            let count = input
+                .get("edits")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            format!(
+                "{} edit{}",
+                count,
+                if count == 1 { "" } else { "s" }
+            )
+        }
         "glob" => input
             .get("pattern")
             .and_then(|v| v.as_str())
@@ -81,12 +116,105 @@ fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> Strin
                 _ => format!("\"{}\"", pattern),
             }
         }
+        "plan_enter" => {
+            let task = input
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let truncated = if task.len() > 60 {
+                format!("{}…", &task[..60])
+            } else {
+                task.to_string()
+            };
+            format!("→ plan: {}", truncated)
+        }
+        "plan_exit" => {
+            let summary = input
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let truncated = if summary.len() > 60 {
+                format!("{}…", &summary[..60])
+            } else {
+                summary.to_string()
+            };
+            format!("← plan: {}", truncated)
+        }
+        "todo_read" => {
+            let status = input
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            format!("📋 filter: {}", status)
+        }
+        "todo_write" => {
+            let action = input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let id = input
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let title = input
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match action {
+                "add" => format!("📋 +{}", if title.len() > 40 { &title[..40] } else { title }),
+                "update" => format!("📋 ~{}", id),
+                "remove" => format!("📋 -{}", id),
+                "clear" => "📋 clear all".to_string(),
+                _ => format!("📋 {}", action),
+            }
+        }
         _ => String::new(),
     }
 }
 
+/// Return a line-range label for the read tool (e.g. "lines 5-10").
+///
+/// Returns `None` when no `start_line` / `end_line` parameters are present.
+pub(crate) fn read_line_range(input: &serde_json::Value) -> Option<String> {
+    let start = input.get("start_line").and_then(|v| v.as_u64());
+    let end = input.get("end_line").and_then(|v| v.as_u64());
+    match (start, end) {
+        (Some(s), Some(e)) => Some(format!("lines {}-{}", s, e)),
+        (Some(s), None) => Some(format!("from line {}", s)),
+        _ => None,
+    }
+}
+
+/// Return inline diff stats `(+added, -removed)` for tools that support it.
+///
+/// Currently only the `edit`, `multiedit`, and `patch` tools provide the
+/// necessary `old_lines` / `new_lines` metadata.
+pub(crate) fn tool_inline_diff(
+    tool: &str,
+    output: &Option<serde_json::Value>,
+) -> Option<(usize, usize)> {
+    let out = output.as_ref()?;
+    match tool {
+        "edit" => {
+            let old_lines = out.get("old_lines").and_then(|v| v.as_u64())? as usize;
+            let new_lines = out.get("new_lines").and_then(|v| v.as_u64())? as usize;
+            Some((new_lines, old_lines))
+        }
+        "multiedit" | "patch" => {
+            let added = out.get("lines_added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let removed = out.get("lines_removed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if added > 0 || removed > 0 {
+                Some((added, removed))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Generate a result summary line for a completed tool call.
-fn tool_result_summary(
+pub(crate) fn tool_result_summary(
     tool: &str,
     output: &Option<serde_json::Value>,
     input: &serde_json::Value,
@@ -124,11 +252,29 @@ fn tool_result_summary(
                 path
             ))
         }
-        "edit" => Some(format!(
-            "{} line{} changed",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
+        "edit" => None,
+        "multiedit" => {
+            let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0);
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} edit{} across {} file{}",
+                edits,
+                if edits == 1 { "" } else { "s" },
+                files,
+                if files == 1 { "" } else { "s" }
+            ))
+        }
+        "patch" => {
+            let hunks = out.get("hunks").and_then(|v| v.as_u64()).unwrap_or(0);
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} hunk{} applied across {} file{}",
+                hunks,
+                if hunks == 1 { "" } else { "s" },
+                files,
+                if files == 1 { "" } else { "s" }
+            ))
+        }
         "bash" => Some(format!(
             "{} line{}...",
             line_count,
@@ -149,6 +295,55 @@ fn tool_result_summary(
             line_count,
             if line_count == 1 { "y" } else { "ies" }
         )),
+        "webfetch" => {
+            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} line{} (HTTP {})",
+                line_count,
+                if line_count == 1 { "" } else { "s" },
+                status,
+            ))
+        }
+        "websearch" => {
+            let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} result{} found",
+                results,
+                if results == 1 { "" } else { "s" },
+            ))
+        }
+        "plan_enter" => {
+            let task = out
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("plan");
+            Some(format!("delegated → plan: {}", task))
+        }
+        "plan_exit" => {
+            let len = out
+                .get("summary_length")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("returned ({} chars)", len))
+        }
+        "todo_read" => {
+            let count = out
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} item{}", count, if count == 1 { "" } else { "s" }))
+        }
+        "todo_write" => {
+            let action = out
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let count = out
+                .get("count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} → {} remaining", action, count))
+        }
         "office_read" | "pdf_read" => Some(format!(
             "{} line{} read",
             line_count,
@@ -187,6 +382,7 @@ fn tool_result_summary(
 pub struct MessageWidget<'a> {
     message: &'a Message,
     cwd: &'a str,
+    tool_step_map: &'a std::collections::HashMap<String, u32>,
 }
 
 impl<'a> MessageWidget<'a> {
@@ -196,10 +392,12 @@ impl<'a> MessageWidget<'a> {
     ///
     /// * `message` - The message to render.
     /// * `cwd` - Current working directory, used to make file paths relative.
+    /// * `tool_step_map` - Mapping from tool call IDs to step numbers.
     ///
     /// # Examples
     ///
     /// ```rust
+    /// use std::collections::HashMap;
     /// use ragent_core::message::{Message, MessagePart, Role};
     /// use ragent_tui::widgets::message_widget::MessageWidget;
     ///
@@ -208,10 +406,11 @@ impl<'a> MessageWidget<'a> {
     ///     Role::User,
     ///     vec![MessagePart::Text { text: "Hello!".into() }],
     /// );
-    /// let widget = MessageWidget::new(&msg, "/home/user/project");
+    /// let map = HashMap::new();
+    /// let widget = MessageWidget::new(&msg, "/home/user/project", &map);
     /// ```
-    pub fn new(message: &'a Message, cwd: &'a str) -> Self {
-        Self { message, cwd }
+    pub fn new(message: &'a Message, cwd: &'a str, tool_step_map: &'a std::collections::HashMap<String, u32>) -> Self {
+        Self { message, cwd, tool_step_map }
     }
 
     fn to_lines(&self) -> Vec<Line<'a>> {
@@ -251,7 +450,12 @@ impl<'a> MessageWidget<'a> {
                         }
                     }
                 }
-                MessagePart::ToolCall { tool, state, .. } => {
+                MessagePart::ToolCall { tool, call_id, state } => {
+                    let step_tag = self
+                        .tool_step_map
+                        .get(call_id)
+                        .map(|s| format!("[#{}] ", s))
+                        .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
                             "● ",
@@ -276,18 +480,54 @@ impl<'a> MessageWidget<'a> {
 
                     let display_name = capitalize_tool_name(tool);
                     let summary = tool_input_summary(tool, &state.input, self.cwd);
-                    if summary.is_empty() {
-                        lines.push(Line::from(vec![
-                            Span::styled(indicator, ind_style),
-                            Span::styled(display_name, name_style),
-                        ]));
+
+                    // Build the inline diff stats for edit tool (e.g. "(+25 -5)")
+                    let inline_diff = if state.status == ToolCallStatus::Completed {
+                        tool_inline_diff(tool, &state.output)
                     } else {
-                        lines.push(Line::from(vec![
-                            Span::styled(indicator, ind_style),
-                            Span::styled(format!("{} ", display_name), name_style),
-                            Span::styled(summary, Style::default().fg(Color::DarkGray)),
-                        ]));
+                        None
+                    };
+
+                    let mut spans = vec![
+                        Span::styled(indicator, ind_style),
+                        Span::styled(
+                            step_tag,
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    if summary.is_empty() {
+                        spans.push(Span::styled(display_name, name_style));
+                    } else {
+                        spans.push(Span::styled(format!("{} ", display_name), name_style));
+                        spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
                     }
+                    // Show line range for read tool in bold
+                    if tool == "read" {
+                        if let Some(range) = read_line_range(&state.input) {
+                            spans.push(Span::styled(
+                                format!(" {}", range),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                        }
+                    }
+                    if let Some((added, removed)) = inline_diff {
+                        spans.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(
+                            format!("+{}", added),
+                            Style::default().fg(Color::Green),
+                        ));
+                        spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(
+                            format!("-{}", removed),
+                            Style::default().fg(Color::Red),
+                        ));
+                        spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
+                    }
+                    lines.push(Line::from(spans));
 
                     if state.status == ToolCallStatus::Completed {
                         if let Some(result) =
@@ -301,12 +541,14 @@ impl<'a> MessageWidget<'a> {
                     }
 
                     if state.status == ToolCallStatus::Error {
-                        if let Some(ref err) = state.error {
-                            lines.push(Line::from(Span::styled(
-                                format!("  └ {}", err),
-                                Style::default().fg(Color::Red),
-                            )));
-                        }
+                        let err_msg = state
+                            .error
+                            .as_deref()
+                            .unwrap_or("Tool execution failed (no error details available)");
+                        lines.push(Line::from(Span::styled(
+                            format!("  └ Error: {}", err_msg),
+                            Style::default().fg(Color::Red),
+                        )));
                     }
                 }
                 MessagePart::Reasoning { text } => {

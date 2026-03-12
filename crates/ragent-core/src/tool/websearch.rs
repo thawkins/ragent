@@ -54,7 +54,7 @@ impl Tool for WebSearchTool {
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
-            .context("Missing 'query' parameter")?;
+            .context("Missing required 'query' parameter")?;
 
         if query.trim().is_empty() {
             bail!("Search query must not be empty");

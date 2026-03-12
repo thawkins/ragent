@@ -83,10 +83,10 @@ impl Tool for MultiEditTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let edits_arr = input["edits"]
             .as_array()
-            .context("Missing 'edits' array parameter")?;
+            .context("Missing required 'edits' array parameter")?;
 
         if edits_arr.is_empty() {
-            bail!("edits array is empty");
+            bail!("The 'edits' array is empty. Provide at least one edit operation.");
         }
 
         // Parse all edit operations

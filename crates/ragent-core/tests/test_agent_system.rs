@@ -75,7 +75,7 @@ fn test_resolve_builtin_agent() {
     assert_eq!(agent.description, "General-purpose coding agent");
     assert!(agent.model.is_some());
     assert!(agent.prompt.is_some());
-    assert_eq!(agent.max_steps, Some(50));
+    assert_eq!(agent.max_steps, Some(500));
 }
 
 #[test]

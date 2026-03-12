@@ -289,7 +289,7 @@ async fn test_patch_empty_patch() {
         .execute(json!({ "patch": "just some text\n" }), &ctx)
         .await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("No hunks"));
+    assert!(result.unwrap_err().to_string().contains("No valid diff hunks"));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

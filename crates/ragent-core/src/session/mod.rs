@@ -21,23 +21,36 @@ use crate::storage::Storage;
 /// version, timestamps, and an optional diff summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    /// Unique identifier for this session.
     pub id: String,
+    /// Human-readable title for the session.
     pub title: String,
+    /// Identifier of the project this session belongs to.
     pub project_id: String,
+    /// Working directory on disk associated with this session.
     pub directory: PathBuf,
+    /// Optional parent session id when this session was forked.
     pub parent_id: Option<String>,
+    /// Monotonically increasing version number for optimistic concurrency.
     pub version: i64,
+    /// Timestamp when the session was created.
     pub created_at: DateTime<Utc>,
+    /// Timestamp when the session was last modified.
     pub updated_at: DateTime<Utc>,
+    /// Timestamp when the session was archived, if applicable.
     pub archived_at: Option<DateTime<Utc>>,
+    /// Optional aggregate diff statistics for the session.
     pub summary: Option<SessionSummary>,
 }
 
 /// Aggregate statistics summarizing the changes made during a session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionSummary {
+    /// Total number of lines added.
     pub additions: u64,
+    /// Total number of lines deleted.
     pub deletions: u64,
+    /// Number of files that were modified.
     pub files_changed: u64,
 }
 

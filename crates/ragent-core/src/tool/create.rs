@@ -48,10 +48,10 @@ impl Tool for CreateTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let content = input["content"]
             .as_str()
-            .context("Missing 'content' parameter")?;
+            .context("Missing required 'content' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
 

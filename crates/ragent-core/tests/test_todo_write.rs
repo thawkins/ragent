@@ -362,7 +362,7 @@ async fn test_no_storage() {
         .execute(json!({"action": "add", "title": "X"}), &ctx)
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("Storage not available"));
+    assert!(err.to_string().contains("Storage is not available"));
 }
 
 // ── Registry ────────────────────────────────────────────────────────

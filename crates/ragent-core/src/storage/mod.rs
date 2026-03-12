@@ -828,26 +828,43 @@ impl Storage {
 /// Raw row representation of a session as stored in SQLite.
 #[derive(Debug, Clone)]
 pub struct SessionRow {
+    /// Unique session identifier.
     pub id: String,
+    /// Human-readable session title.
     pub title: String,
+    /// Project this session belongs to.
     pub project_id: String,
+    /// Working directory path stored as a string.
     pub directory: String,
+    /// Optional parent session id for forked sessions.
     pub parent_id: Option<String>,
+    /// Optimistic-concurrency version counter.
     pub version: i64,
+    /// ISO-8601 creation timestamp.
     pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
+    /// ISO-8601 archive timestamp, if archived.
     pub archived_at: Option<String>,
+    /// JSON-encoded session summary, if available.
     pub summary: Option<String>,
 }
 
 /// Row representation of a TODO item.
 #[derive(Debug, Clone)]
 pub struct TodoRow {
+    /// Unique todo identifier.
     pub id: String,
+    /// Session this todo belongs to.
     pub session_id: String,
+    /// Short title of the todo item.
     pub title: String,
+    /// Current status (e.g. pending, done).
     pub status: String,
+    /// Detailed description of the todo.
     pub description: String,
+    /// ISO-8601 creation timestamp.
     pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
 }

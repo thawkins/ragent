@@ -13,7 +13,9 @@ use std::fmt;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
+    /// A human user.
     User,
+    /// An AI assistant.
     Assistant,
 }
 
@@ -30,9 +32,13 @@ impl fmt::Display for Role {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolCallStatus {
+    /// The tool call has been created but not yet started.
     Pending,
+    /// The tool call is currently executing.
     Running,
+    /// The tool call finished successfully.
     Completed,
+    /// The tool call failed with an error.
     Error,
 }
 
@@ -70,12 +76,17 @@ impl fmt::Display for ToolCallStatus {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallState {
+    /// Current lifecycle status of the tool call.
     pub status: ToolCallStatus,
     // TODO: Replace `Value` with a typed struct for tool call input/output once
     // tool schemas are well-defined.
+    /// JSON arguments passed to the tool.
     pub input: Value,
+    /// JSON result returned by the tool, if available.
     pub output: Option<Value>,
+    /// Error message if the tool call failed.
     pub error: Option<String>,
+    /// Wall-clock execution time in milliseconds.
     pub duration_ms: Option<u64>,
 }
 
@@ -86,15 +97,23 @@ pub struct ToolCallState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MessagePart {
+    /// Plain text content.
     Text {
+        /// The text body.
         text: String,
     },
+    /// A tool invocation with its execution state.
     ToolCall {
+        /// Name of the tool being called.
         tool: String,
+        /// Unique identifier for this tool call.
         call_id: String,
+        /// Execution state of the tool call.
         state: ToolCallState,
     },
+    /// Internal model reasoning or chain-of-thought.
     Reasoning {
+        /// The reasoning text.
         text: String,
     },
 }
@@ -105,11 +124,17 @@ pub enum MessagePart {
 /// and contains one or more [`MessagePart`]s.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
+    /// Unique identifier for this message (UUID v4).
     pub id: String,
+    /// Identifier of the session this message belongs to.
     pub session_id: String,
+    /// Who sent the message.
     pub role: Role,
+    /// Ordered content blocks that make up the message.
     pub parts: Vec<MessagePart>,
+    /// Timestamp when the message was created (UTC).
     pub created_at: DateTime<Utc>,
+    /// Timestamp when the message was last modified (UTC).
     pub updated_at: DateTime<Utc>,
 }
 

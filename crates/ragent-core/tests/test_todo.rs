@@ -187,7 +187,7 @@ async fn test_todo_read_no_storage() {
 
     let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Storage not available"));
+    assert!(result.unwrap_err().to_string().contains("Storage is not available"));
 }
 
 #[tokio::test]

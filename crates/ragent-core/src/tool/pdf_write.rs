@@ -124,7 +124,7 @@ impl Tool for PdfWriteTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let content = input
             .get("content")
@@ -138,7 +138,7 @@ impl Tool for PdfWriteTool {
             write_pdf(&path_clone, &content, &working_dir)
         })
         .await
-        .context("PDF write task panicked")??;
+        .context("Failed to write PDF: the background task exited unexpectedly")??;
 
         Ok(ToolOutput {
             content: format!(

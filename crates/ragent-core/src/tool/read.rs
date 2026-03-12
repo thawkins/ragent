@@ -51,50 +51,71 @@ impl Tool for ReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing 'path' parameter")?;
+        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
+        if path.is_dir() {
+            anyhow::bail!(
+                "'{}' is a directory, not a file. Use the 'list' tool to view directory contents.",
+                path.display()
+            );
+        }
+
         let content = tokio::fs::read_to_string(&path)
             .await
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
+            .with_context(|| format!("Cannot read file '{}': file may not exist or is not accessible", path.display()))?;
 
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
         let end_line = input["end_line"].as_u64().map(|n| n as usize);
 
-        let output = match (start_line, end_line) {
+        let total_lines = content.lines().count();
+
+        let (output, actual_start, actual_end) = match (start_line, end_line) {
             (Some(start), Some(end)) => {
                 let lines: Vec<&str> = content.lines().collect();
                 let start = start.saturating_sub(1).min(lines.len());
                 let end = end.min(lines.len());
-                lines[start..end]
+                let text = lines[start..end]
                     .iter()
                     .enumerate()
                     .map(|(i, line)| format!("{:>4}  {}", start + i + 1, line))
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n");
+                (text, start + 1, end)
             }
             (Some(start), None) => {
                 let lines: Vec<&str> = content.lines().collect();
                 let start = start.saturating_sub(1).min(lines.len());
-                lines[start..]
+                let text = lines[start..]
                     .iter()
                     .enumerate()
                     .map(|(i, line)| format!("{:>4}  {}", start + i + 1, line))
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n");
+                (text, start + 1, lines.len())
             }
-            _ => content
-                .lines()
-                .enumerate()
-                .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
-                .collect::<Vec<_>>()
-                .join("\n"),
+            _ => {
+                let text = content
+                    .lines()
+                    .enumerate()
+                    .map(|(i, line)| format!("{:>4}  {}", i + 1, line))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (text, 1, total_lines)
+            }
         };
+
+        let lines_read = actual_end.saturating_sub(actual_start - 1);
 
         Ok(ToolOutput {
             content: output,
-            metadata: None,
+            metadata: Some(serde_json::json!({
+                "start_line": actual_start,
+                "end_line": actual_end,
+                "total_lines": total_lines,
+                "lines": lines_read,
+            })),
         })
     }
 }
