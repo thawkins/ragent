@@ -1,6 +1,6 @@
 # Release
 
-## Current Version: 0.1.0-alpha.8
+## Current Version: 0.1.0-alpha.9
 
 ### Added (since 0.1.0-alpha.7)
 - Step numbers `[#N]` in both message and log panels for tool call cross-referencing
