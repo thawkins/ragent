@@ -1,12 +1,22 @@
 # Release
 
-## Current Version: 0.1.0-alpha.10
+## Current Version: 0.1.0-alpha.11
 
-### Added (since 0.1.0-alpha.7)
-- Step numbers `[#N]` in both message and log panels for tool call cross-referencing
-- Pretty-printed JSON for tool call parameters in log panel
-- Restored session tool calls now appear in log panel with status icon and `(restored)` suffix
-- Event bus lag warning logged when broadcast events are dropped
+### Added (since 0.1.0-alpha.10)
+- Skills system fully implemented (SPEC §3.19) — 10 phases complete
+  - YAML frontmatter skill definitions in `SKILL.md` files
+  - Scope-priority registry (Bundled < Enterprise < Personal < Project)
+  - Argument substitution (`$ARGUMENTS`, `$N`, `$ARGUMENTS[N]`, `${RAGENT_*}`)
+  - Dynamic context injection via `` !`command` `` patterns
+  - Forked subagent execution context for isolated skill runs
+  - 4 bundled skills: simplify, batch, debug, loop
+  - `/skills` slash command with formatted table display
+  - Skill autocomplete in TUI slash menu (skills shown in yellow)
+  - Config `skill_dirs` for extra skill search paths
+  - `release` project skill for automated version bump, push, and tag
+- SPEC.md updated: Skills section marked ✅, implementation details added
+- QUICKSTART.md expanded with additional usage guidance
+- 781 tests passing (up from 672), including ~110 new skill tests
 
 ### Changed (since 0.1.0-alpha.7)
 - Message/log panel split: 60/40 (was 70/30)

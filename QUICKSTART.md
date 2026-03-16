@@ -31,7 +31,7 @@ Ragent needs at least one LLM provider. The easiest way is via the **interactive
 
 ```bash
 ragent        # launch ragent
-              # press 'p' on the home screen to open the provider setup dialog
+               # press 'p' on the home screen to open the provider setup dialog
 ```
 
 The dialog walks you through:
@@ -289,7 +289,139 @@ tools use the official `rmcp` SDK and support both stdio and HTTP transports.
 
 ---
 
-## 7. Sessions
+## 7. Skills
+
+Skills are reusable task packages that enhance the agent's capabilities. They support both user-initiated invocation (slash commands) and agent auto-invocation (via LLM reasoning).
+
+### Bundled Skills
+
+Ragent includes 4 built-in skills:
+
+| Skill | Description | Usage |
+|-------|-------------|-------|
+| `/simplify` | Reviews recently changed files for code quality and efficiency | Both user & agent |
+| `/batch <instruction>` | Orchestrates large-scale parallel changes across a codebase | Both user & agent |
+| `/debug [description]` | Troubleshoots by reading debug logs and error messages | Both user & agent |
+| `/loop [interval] <prompt>` | Runs a prompt repeatedly on an interval | User only |
+
+### Creating Custom Skills
+
+Create a skill in your project:
+
+```bash
+mkdir -p .ragent/skills/deploy
+cat > .ragent/skills/deploy/SKILL.md << 'EOF'
+---
+name: deploy
+description: Deploy the application to production
+argument-hint: "[environment]"
+agent: build
+context: fork
+---
+
+Deploy to $0:
+
+1. Run tests: cargo test --release
+2. Build: cargo build --release
+3. Deploy to $ARGUMENTS
+4. Verify the deployment succeeded
+
+Deployment endpoint: !`aws ssm get-parameter --name /deploy/$ARGUMENTS`
+EOF
+```
+
+### Using Skills
+
+**User invocation:**
+```bash
+# In TUI, type:
+/deploy production
+
+# Or via CLI:
+ragent run --agent general "/deploy staging"
+```
+
+**Agent auto-invocation:**
+
+The agent automatically sees available skills in its system prompt and can invoke them:
+
+```
+User: "Deploy to production"
+  ↓
+Agent: "I'll use the /deploy skill for this."
+  ↓
+Agent runs: /deploy production
+  ↓
+Skill executes (possibly in isolated subagent context)
+  ↓
+Result returned to agent
+```
+
+### Skill Features
+
+- **Arguments**: Use `$0`, `$ARGUMENTS[1]`, `${RAGENT_SESSION_ID}` for dynamic substitution
+- **Dynamic context**: Use `` !`command` `` to execute shell commands and inject output
+- **Forked execution**: Set `context: fork` to run in an isolated subagent (separate conversation history)
+- **Model override**: Use `model: "provider/model"` to use a different model for this skill
+- **Tool restrictions**: Use `allowed-tools: [bash, read]` to limit tools available when running the skill
+
+### Personal Skills
+
+Create skills in `~/.ragent/skills/` to make them available across all projects:
+
+```bash
+mkdir -p ~/.ragent/skills/code-review
+cat > ~/.ragent/skills/code-review/SKILL.md << 'EOF'
+---
+name: code-review
+description: My code review checklist
+---
+
+Review this code:
+- Variable naming clarity
+- Error handling
+- Test coverage
+- Performance concerns
+EOF
+```
+
+Then use `/code-review` in any project.
+
+---
+
+## 8. Subagents & Agent Switching
+
+Subagents are specialized agents that handle specific tasks. You can invoke them inline or switch to them interactively.
+
+### Built-in Subagents
+
+| Agent | Purpose | Use Case |
+|-------|---------|----------|
+| `general` | General-purpose coding (default) | Most tasks |
+| `build` | Build, test, and fix compilation errors | Running tests, debugging failures |
+| `plan` | Read-only analysis and architecture | Code review, design discussion |
+| `explore` | Fast codebase search and analysis | Finding code, understanding patterns |
+| `ask` | Quick Q&A without tools | Simple questions |
+
+### Switching Agents
+
+**Interactive switch (TUI):**
+```
+Tab / Shift+Tab         # Cycle through agents
+/agent                  # Open agent picker dialog
+/agent <name>           # Switch directly to an agent
+```
+
+**CLI invocation:**
+```bash
+ragent run --agent plan "Design a REST API"
+ragent run --agent explore "How does the auth system work?"
+ragent run --agent build "Fix the failing tests"
+```
+
+---
+
+## 9. Sessions
 
 Ragent persists conversations in sessions stored in SQLite.
 
@@ -309,7 +441,7 @@ ragent session import session.json
 
 ---
 
-## 8. HTTP Server Mode
+## 10. HTTP Server Mode
 
 Run ragent as a headless API server for IDE integrations or remote use:
 
@@ -347,7 +479,7 @@ Rate limit: 60 requests per minute per session on the messages endpoint.
 
 ---
 
-## 9. Environment Variables
+## 11. Environment Variables
 
 | Variable               | Purpose                                        | Default                    |
 |------------------------|------------------------------------------------|----------------------------|
@@ -362,7 +494,7 @@ Rate limit: 60 requests per minute per session on the messages endpoint.
 
 ---
 
-## 10. Permissions
+## 12. Permissions
 
 Ragent asks for approval before performing potentially dangerous actions.
 Control this behavior with permission rules in your config or with `--yes`:
@@ -391,7 +523,7 @@ Rules are evaluated last-match-wins. Example config:
 
 ---
 
-## 11. Common Workflows
+## 13. Common Workflows
 
 ### Code Review
 
@@ -437,7 +569,7 @@ ragent run "Add input validation to the create_user endpoint"
 
 ---
 
-## 12. TUI Interaction
+## 14. TUI Interaction
 
 ### Mouse Support
 
@@ -478,7 +610,7 @@ Type `/` in the input to open an autocomplete menu:
 
 ---
 
-## 13. Data Storage
+## 15. Data Storage
 
 | Item                | Location                                |
 |---------------------|-----------------------------------------|

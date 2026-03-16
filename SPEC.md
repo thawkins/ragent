@@ -59,11 +59,11 @@ ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/ope
 
 | Status | Count | Sections |
 |--------|-------|----------|
-| ✅ Implemented | 14 | CLI, Config, Session Mgmt, Messages, Tools, HTTP Server, TUI, MCP, Event Bus, Storage, Shell, Snapshot, Todo List, Extended Thinking |
+| ✅ Implemented | 15 | CLI, Config, Session Mgmt, Messages, Tools, HTTP Server, TUI, MCP, Event Bus, Storage, Shell, Snapshot, Todo List, Extended Thinking, **Skills** |
 | ⚠️ Partial | 8 | Providers (4/12), Agent System (8/10 agents), Permissions (core only), Custom Agents (struct only), Instructions (basic), Session Resume (by-ID only), Compaction (manual /compact), Headless (--no-tui only) |
-| ❌ Not Started | 12 | LSP, Hooks, Skills, Memory, Trusted Dirs, Codebase Indexing, Post-Edit Diagnostics, Prompt Enhancement, File Ignore, Suggested Responses, Worktree, @ References |
+| ❌ Not Started | 11 | LSP, Hooks, Memory, Trusted Dirs, Codebase Indexing, Post-Edit Diagnostics, Prompt Enhancement, File Ignore, Suggested Responses, Worktree, @ References |
 
-**Overall: 34 sections — 41% fully implemented, 24% partial, 35% not yet started**
+**Overall: 34 sections — 44% fully implemented, 24% partial, 32% not yet started**
 
 ---
 
@@ -1829,9 +1829,18 @@ Custom agents appear in the agent picker (`/agent`) and can be selected via `Tab
 
 ---
 
-### 3.19 Skills ❌
+### 3.19 Skills ✅
 
-Skills enhance the agent's ability to perform specialized tasks by bundling instructions, scripts, and resources into reusable packages. Skills follow a markdown-first format with YAML frontmatter for configuration.
+Skills enhance the agent's ability to perform specialized tasks by bundling instructions, scripts, and resources into reusable packages. Skills follow a markdown-first format with YAML frontmatter for configuration and are fully implemented. They support both user-initiated invocation (via slash commands) and agent-initiated auto-invocation (via LLM reasoning).
+
+#### Skill System Overview
+
+The skill system (`ragent-core/src/skill/`) provides:
+- **Discovery**: Automatic loading from project, personal, and extra directories
+- **Registry**: Centralized management with scope-based priority (Bundled < Personal < Project)
+- **Invocation**: User-triggered (`/name`) and agent-initiated (auto-invocation)
+- **Forking**: Isolated subagent execution context for complex tasks
+- **Argument substitution**: Dynamic `$ARGUMENTS` replacement and environment variable expansion
 
 #### Skill Structure
 
@@ -1840,7 +1849,7 @@ Skills enhance the agent's ability to perform specialized tasks by bundling inst
   deploy/
     SKILL.md            # Skill instructions and frontmatter (required)
     scripts/            # Helper scripts the skill can invoke
-    templates/          # Template files for Claude to fill in
+    templates/          # Template files for the agent to fill in
     examples/           # Example outputs showing expected format
     resources/          # Reference materials
 ```
@@ -1853,8 +1862,13 @@ Skills use markdown with YAML frontmatter:
 ---
 name: deploy
 description: Deploy the application to production
-disable-model-invocation: true
-allowed-tools: bash
+disable-model-invocation: false
+user-invocable: true
+allowed-tools:
+  - bash
+  - read
+  - write
+model: "anthropic/claude-sonnet-4-20250514"
 context: fork
 agent: general-purpose
 argument-hint: "[environment]"
@@ -1870,36 +1884,63 @@ Deploy $ARGUMENTS to production:
 
 #### Frontmatter Reference
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | No | Display name (defaults to directory name). Lowercase, hyphens, max 64 chars |
-| `description` | Recommended | What the skill does; used for auto-invocation matching |
-| `argument-hint` | No | Hint shown during autocomplete (e.g., `[issue-number]`) |
-| `disable-model-invocation` | No | If `true`, only user can invoke via `/name` (default: `false`) |
-| `user-invocable` | No | If `false`, hidden from `/` menu; only agent can invoke (default: `true`) |
-| `allowed-tools` | No | Tools the agent can use without permission when skill is active |
-| `model` | No | Override model when this skill is active |
-| `context` | No | Set to `fork` to run in a forked subagent context |
-| `agent` | No | Subagent type when `context: fork` (e.g., `explore`, `plan`, `general-purpose`) |
-| `hooks` | No | Hooks scoped to this skill's lifecycle |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | string | No | Directory name | Unique skill identifier (lowercase, hyphens, max 64 chars) |
+| `description` | string | No | None | What the skill does; used for auto-invocation matching |
+| `argument-hint` | string | No | None | Hint shown during autocomplete (e.g., `[environment]`, `[issue-number]`) |
+| `disable-model-invocation` | bool | No | `false` | If `true`, only user can invoke via `/name`; agent cannot auto-invoke |
+| `user-invocable` | bool | No | `true` | If `false`, hidden from `/` menu; only agent can invoke |
+| `allowed-tools` | string[] | No | `[]` | Tools the agent can use without permission when skill is active (single string or list) |
+| `model` | string | No | None | Override model when this skill is active (e.g., `"anthropic/claude-sonnet-4-20250514"`) |
+| `context` | enum | No | None | Set to `fork` to run in isolated subagent context |
+| `agent` | string | No | None | Subagent type when `context: fork` (e.g., `"explore"`, `"plan"`, `"general-purpose"`) |
+| `hooks` | object | No | None | Hooks scoped to this skill's lifecycle (raw YAML, stored as JSON) |
+
+#### Skill Name Validation
+
+Skill names must:
+- Contain only lowercase ASCII letters, digits, and hyphens
+- Be between 1 and 64 characters
+- Match the directory name unless overridden in frontmatter
+
+Example: `my-deploy-skill` ✅, `MySkill` ❌, `my_skill` ❌
 
 #### Argument Substitution
 
-Skills support dynamic argument substitution:
+Skills support dynamic argument substitution via environment variables and placeholders:
 
-| Variable | Description |
-|----------|-------------|
-| `$ARGUMENTS` | All arguments passed when invoking the skill |
-| `$ARGUMENTS[N]` | Specific argument by 0-based index |
-| `$N` | Shorthand for `$ARGUMENTS[N]` |
-| `${RAGENT_SESSION_ID}` | Current session ID |
-| `${RAGENT_SKILL_DIR}` | Directory containing the skill's SKILL.md |
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `$ARGUMENTS` | All arguments passed when invoking the skill | `/deploy staging prod` → `staging prod` |
+| `$ARGUMENTS[N]` | Specific argument by 0-based index | `$ARGUMENTS[0]` → `staging` |
+| `$N` | Shorthand for `$ARGUMENTS[N]` | `$0` → `staging` |
+| `${RAGENT_SESSION_ID}` | Current session ID (UUID/ULID) | Useful for logging, tracking |
+| `${RAGENT_SKILL_DIR}` | Directory containing the skill's SKILL.md | Access skill-local scripts/templates |
+| `${env.VAR_NAME}` | Environment variable expansion | `${env.HOME}`, `${env.GITHUB_TOKEN}` |
 
-Example: `/deploy staging` replaces `$ARGUMENTS` with `staging`.
+Example skill using arguments:
+
+```markdown
+---
+name: deploy
+description: Deploy to an environment
+argument-hint: "[environment]"
+---
+
+Deploying to $0:
+
+1. Load credentials from ~/.config/deploy/$0.yaml
+2. Run deployment to $ARGUMENTS environment
+3. Verify at $ARGUMENTS-api.example.com
+4. Log results to /tmp/$RAGENT_SESSION_ID-deploy.log
+```
+
+Invocation: `/deploy staging` → `$0` becomes `staging`, `$ARGUMENTS` becomes `staging`.
 
 #### Dynamic Context Injection
 
-The `` !`command` `` syntax runs shell commands before the skill content is sent to the agent. The command output replaces the placeholder:
+The `` !`command` `` syntax executes shell commands before the skill content is sent to the agent. Command output replaces the placeholder:
 
 ```markdown
 ---
@@ -1912,48 +1953,749 @@ agent: explore
 ## Pull request context
 - PR diff: !`gh pr diff`
 - Changed files: !`gh pr diff --name-only`
+- PR title: !`gh pr view --json title -q .title`
 
 ## Your task
-Summarize this pull request...
+Summarize this pull request in 2-3 sentences, highlighting key changes.
 ```
 
-#### Subagent Execution
+When invoked, ragent:
+1. Executes each `` !`command` `` in the shell
+2. Replaces the placeholder with the command's stdout
+3. Sends the expanded content to the agent
 
-Skills with `context: fork` run in an isolated subagent context:
+Errors in dynamic commands are logged as warnings; the placeholder is replaced with an error message.
 
-1. A new isolated context is created (no access to conversation history)
-2. The subagent receives the skill content as its prompt
-3. The `agent` field determines the execution environment (model, tools, permissions)
-4. Results are summarized and returned to the main conversation
+#### Skill Scopes & Priority
 
-#### Skill Scopes
+Skills are discovered from multiple sources with the following priority (lowest → highest):
 
-| Scope | Path | Applies To |
-|-------|------|------------|
-| Enterprise | Managed settings | All users in organization |
-| Personal | `~/.ragent/skills/<name>/SKILL.md` | All projects for this user |
-| Project | `.ragent/skills/<name>/SKILL.md` | This project only |
+| Scope | Path | Priority | Applies To | Note |
+|-------|------|----------|------------|------|
+| Bundled | Compiled into ragent | 0 (lowest) | All installations | `/simplify`, `/batch`, `/debug`, `/loop` |
+| Enterprise | Managed settings | 1 | All users in organization | Future feature |
+| Personal | `~/.ragent/skills/<name>/SKILL.md` | 2 | All projects for this user | Persistent across projects |
+| Project | `.ragent/skills/<name>/SKILL.md` | 3 (highest) | This project only | Can override bundled/personal |
 
-Higher-priority scopes override lower ones when names conflict.
+When a skill exists in multiple scopes with the same name, the **highest-priority scope wins** completely (lower scopes are ignored for that name).
+
+Example:
+- Bundled `simplify` skill exists
+- User creates `~/.ragent/skills/simplify/SKILL.md` (Personal scope)
+- Project creates `.ragent/skills/simplify/SKILL.md` (Project scope)
+- → Project scope skill is used; bundled and personal are ignored
+
+#### Monorepo Support
+
+For monorepo projects, ragent automatically discovers skills in nested subdirectories:
+
+```
+project/
+├── .ragent/skills/          # Root-level project skills
+│   └── shared-deploy/SKILL.md
+├── packages/
+│   ├── frontend/
+│   │   └── .ragent/skills/  # Frontend-specific skills (discovered & loaded)
+│   │       └── build-frontend/SKILL.md
+│   └── backend/
+│       └── .ragent/skills/  # Backend-specific skills (discovered & loaded)
+│           └── start-server/SKILL.md
+```
+
+All discovered skills are registered into a single `SkillRegistry` at session start. The scope resolution ensures project-level skills (including nested ones) can override personal and bundled skills.
+
+#### Subagent Execution (Context Forking)
+
+Skills with `context: fork` run in an **isolated subagent context**:
+
+1. **Isolation**: No access to parent conversation history; runs independently
+2. **Agent Selection**: The `agent` field specifies the execution environment:
+   - `"general-purpose"` — Full tool access, multi-step reasoning
+   - `"explore"` — Read-only (grep, glob, list, read, bash)
+   - `"plan"` — Analysis-focused (read-only, no edits)
+   - Custom agent names are also supported
+3. **Context Assembly**: Skill body (with substitutions) becomes the isolated agent's prompt
+4. **Result Return**: Isolated agent completes, results are summarized and returned to parent conversation
+5. **History Preservation**: Parent conversation history is unaffected; the skill invocation appears as a single tool call in parent history
+
+**Example: Forked skill for PR analysis**
+
+```markdown
+---
+name: pr-analyze
+description: Analyze a pull request in an isolated context
+context: fork
+agent: explore
+argument-hint: "[pr-number]"
+disable-model-invocation: false
+---
+
+Analyze PR #$0 and provide:
+- Summary of changes
+- Files modified
+- Potential risks
+- Test coverage assessment
+```
+
+When invoked by the agent: `/pr-analyze 42`
+1. A new subagent (explore) is spawned with isolated context
+2. The expanded skill body is sent to the explore agent
+3. Explore agent can only use read-only tools
+4. Results are summarized and injected as tool output in the parent conversation
+5. Parent agent continues with the summary as context
 
 #### Bundled Skills
 
-| Skill | Description |
-|-------|-------------|
-| `/simplify` | Reviews recently changed files for code quality, reuse, and efficiency issues |
-| `/batch <instruction>` | Orchestrates large-scale parallel changes across a codebase |
-| `/debug [description]` | Troubleshoots current session by reading debug logs |
-| `/loop [interval] <prompt>` | Runs a prompt repeatedly on an interval (scheduled tasks) |
+Ragent includes 4 bundled skills (lowest priority, overridable):
 
-#### Invocation Control
+| Skill | Description | Context | Agent | Invocable |
+|-------|-------------|---------|-------|-----------|
+| `/simplify` | Reviews recently changed files for code quality, reuse, and efficiency issues | Normal | N/A | Both user & agent |
+| `/batch <instruction>` | Orchestrates large-scale parallel changes across a codebase | Fork | N/A | Both user & agent |
+| `/debug [description]` | Troubleshoots current session by reading debug logs and error messages | Normal | N/A | Both user & agent |
+| `/loop [interval] <prompt>` | Runs a prompt repeatedly on an interval (scheduled background tasks) | Normal | N/A | User only (`disable-model-invocation: true`) |
+
+**Implementation notes:**
+- Bundled skills are registered first, then overlaid with discovered skills
+- Project-scope skills can override bundled skills by using the same name
+- Bundled skill implementations are in `crates/ragent-core/src/skill/bundled.rs`
+
+#### Skill Invocation Methods
+
+**User Invocation:**
+```bash
+/deploy staging              # Invoke "deploy" skill with argument "staging"
+/pr-analyze 42               # Invoke "pr-analyze" skill with "42"
+/batch "Add error handling"  # Invoke "batch" skill with instruction
+```
+
+**Agent Auto-Invocation:**
+```
+Agent: "Let me simplify the code for you..."
+→ Internally calls `/simplify` without user trigger
+```
+
+Control this with `disable-model-invocation`:
 
 | Setting | User Can Invoke | Agent Can Invoke |
-|---------|----------------|-----------------|
+|---------|-----------------|------------------|
 | (default) | Yes | Yes |
 | `disable-model-invocation: true` | Yes | No |
 | `user-invocable: false` | No | Yes |
 
-Skills are automatically loaded from `.ragent/skills/` and personal `~/.ragent/skills/`. Nested `.ragent/skills/` in subdirectories are discovered automatically for monorepo support.
+#### Skill Registry API
+
+The `SkillRegistry` (in `ragent-core/src/skill/mod.rs`) is the central manager:
+
+```rust
+/// Load all discoverable skills from working directory
+pub fn load(working_dir: &Path, extra_dirs: &[String]) -> SkillRegistry;
+
+/// Register a single skill (highest scope wins)
+pub fn register(&mut self, skill: SkillInfo);
+
+/// Lookup by name
+pub fn get(&self, name: &str) -> Option<&SkillInfo>;
+
+/// List all user-invocable skills
+pub fn list_user_invocable(&self) -> Vec<&SkillInfo>;
+
+/// List all agent-invocable skills
+pub fn list_agent_invocable(&self) -> Vec<&SkillInfo>;
+
+/// All registered skills (sorted by name)
+pub fn list_all(&self) -> Vec<&SkillInfo>;
+```
+
+#### Skill File Format Details
+
+**YAML Frontmatter parsing** (`loader.rs`):
+- Splits file on opening `---` at start of file
+- Parses YAML between opening and closing `---` delimiters
+- Everything after closing `---` is the markdown body
+- Supports both single-string and list formats for `allowed-tools`
+- Converts YAML hooks to JSON for storage
+
+**Example multiformat field**:
+```yaml
+# Single string
+allowed-tools: bash
+
+# List format
+allowed-tools:
+  - bash
+  - read
+  - write
+
+# Both are valid and produce Vec<String>
+```
+
+#### Configuration Integration
+
+Skills can be configured via `ragent.json`:
+
+```jsonc
+{
+  "skill_dirs": [
+    "/path/to/shared/skills",  // Extra skill directories (Personal scope)
+    "$HOME/my-skills"
+  ]
+}
+```
+
+This allows organizations to share skills across projects without per-project setup.
+
+#### Error Handling
+
+- **Missing SKILL.md**: Directory is skipped with a warning
+- **Invalid YAML**: Skill is skipped; error logged (e.g., "Failed to parse frontmatter")
+- **Invalid name**: Validation error if name contains invalid characters, exceeds 64 chars, or is empty
+- **Malformed arguments**: Substitution errors are logged; original `$VARIABLE` is kept if expansion fails
+
+All skill loading errors are logged but don't halt the session — other skills continue loading.
+
+#### Skill Loader Implementation Details
+
+The skill loader (`ragent-core/src/skill/loader.rs`) is responsible for discovering, parsing, and registering skills from the filesystem. It handles multiple scopes and provides comprehensive error recovery.
+
+**Discovery Algorithm:**
+
+1. **Personal Skills** (`~/.ragent/skills/`)
+   - Reads user's home directory via `dirs::home_dir()`
+   - Scans `~/.ragent/skills/` directory (if it exists)
+   - Each subdirectory with a `SKILL.md` file becomes a skill
+   - Scope: `SkillScope::Personal`
+   - Load order: Alphabetically by directory name
+
+2. **Extra Directories** (from config `skill_dirs`)
+   - User-configured directories passed via `extra_dirs: &[String]`
+   - Treated as `SkillScope::Personal` (overridable by project skills)
+   - Useful for shared organization skills or team skill libraries
+   - Warnings logged if directory doesn't exist
+
+3. **Project Skills** (`.ragent/skills/`)
+   - Scans `{working_dir}/.ragent/skills/` (if it exists)
+   - Scope: `SkillScope::Project`
+   - Load order: Alphabetically by directory name
+
+4. **Nested/Monorepo Skills** (`.ragent/skills/` in subdirectories)
+   - Automatically discovers nested `.ragent/skills/` directories
+   - Scans first-level subdirectories of `working_dir` (e.g., `packages/*/`, `services/*/`)
+   - Each discovered nested directory is registered as `SkillScope::Project`
+   - Enables monorepo support without explicit configuration
+
+**File Structure for Each Skill:**
+
+```
+.ragent/skills/<skill-name>/
+├── SKILL.md                 # Required (≤100 KB recommended)
+├── scripts/                 # Optional
+│   ├── deploy.sh
+│   ├── validate.sh
+│   └── ...
+├── templates/               # Optional
+│   ├── config.toml
+│   ├── docker-compose.yml
+│   └── ...
+├── examples/                # Optional
+│   ├── successful-output.txt
+│   ├── error-case.txt
+│   └── ...
+├── resources/               # Optional
+│   ├── reference.md
+│   ├── checklists.txt
+│   └── ...
+└── README.md                # Optional (documentation only)
+```
+
+**Disk Footprint Considerations:**
+
+| Component | Typical Size | Notes |
+|-----------|--------------|-------|
+| SKILL.md (minimal) | 0.5–5 KB | Just frontmatter + simple instructions |
+| SKILL.md (typical) | 5–50 KB | Frontmatter + detailed instructions + examples |
+| SKILL.md (max) | 100+ KB | Large skills with extensive documentation |
+| `scripts/` directory | 10–500 KB | Helper scripts; typically bash/python files |
+| `templates/` directory | 5–100 KB | Config templates, manifests, etc. |
+| `examples/` directory | 10–200 KB | Example outputs, reference files |
+| Single skill total | 20–500 KB | Typical skill bundle |
+| Personal `~/.ragent/skills/` | 1–10 MB | All personal skills combined |
+| Project `.ragent/skills/` | 1–50 MB | Project-specific skills (variable) |
+| Nested `packages/*/.ragent/skills/` | 0.5–20 MB per package | Monorepo sub-package skills |
+
+**Memory Footprint at Runtime:**
+
+- Per `SkillInfo` struct: ~2–4 KB (name, description, frontmatter, body text in memory)
+- Registry with 100 skills: ~200–400 KB
+- Registry with 500 skills: ~1–2 MB
+- All skills loaded at session start and kept in memory for the session lifetime
+
+**Parsing Details:**
+
+The `parse_skill_md()` function performs the following steps:
+
+1. **Frontmatter Extraction** (`split_frontmatter()`)
+   - Looks for opening `---` at the start of file (ignoring leading whitespace)
+   - Scans line-by-line for closing `---` delimiter that appears at the start of a line
+   - Returns `(frontmatter_str, body_str)` tuple
+   - Handles `\n` and `\r\n` line endings transparently
+
+2. **YAML Parsing** (via `serde_yaml`)
+   - Parses frontmatter using `serde_yaml::from_str()`
+   - Deserializes into `SkillFrontmatter` struct with sensible defaults
+   - Handles both single-string and list formats for `allowed-tools`:
+     ```yaml
+     # Single string form
+     allowed-tools: bash
+     
+     # List form
+     allowed-tools:
+       - bash
+       - read
+       - write
+     ```
+   - Both forms deserialize to `Vec<String>` internally
+
+3. **Hook Conversion** (YAML to JSON)
+   - Hooks are stored in YAML but converted to JSON for persistence
+   - Uses `yaml_to_json()` helper which round-trips through `serde_json`
+   - Ensures hooks are portable and language-agnostic
+
+4. **Name Validation** (`validate_skill_name()`)
+   - Checks for empty name (error)
+   - Checks length ≤ 64 characters (error if exceeded)
+   - Checks character set: lowercase ASCII letters, digits, hyphens only
+   - Falls back to directory name if frontmatter omits `name` field
+
+5. **Path Resolution**
+   - Sets `skill_dir` to parent directory of `SKILL.md`
+   - Sets `source_path` to absolute path of `SKILL.md`
+   - Both stored for later reference (e.g., `${RAGENT_SKILL_DIR}` substitution)
+
+**Skill Discovery Function (`discover_skills()`):**
+
+```rust
+pub fn discover_skills(
+    working_dir: &Path,
+    extra_dirs: &[String]
+) -> Vec<SkillInfo>
+```
+
+Returns all discovered skills from all scopes (personal, extra, project, nested) as a flat list. The caller (usually `SkillRegistry::load()`) handles scope-based deduplication.
+
+**Efficiency Considerations:**
+
+- **Lazy Loading**: Skills are loaded into memory at session start, not on-demand
+- **No Caching**: Skills are re-discovered on each session (enables dynamic updates)
+- **Parallel Discovery**: Directory reads are sequential (not parallelized)
+- **Early Error Handling**: Individual skill parse failures don't block loading of other skills
+
+**Special Cases:**
+
+1. **Empty Directories**: Subdirectories without `SKILL.md` are silently skipped
+2. **Files vs. Directories**: Only directories are considered; loose files in `skills/` are ignored
+3. **Symlinks**: Followed transparently (no special handling)
+4. **Hidden Directories**: Discovered normally (dot-names don't exclude them)
+5. **Non-existent Paths**: Extra directories that don't exist are logged as warnings; session continues
+
+**Logging Output:**
+
+When a skill is successfully loaded, the logger emits:
+```
+DEBUG: Loaded skill '<name>' from <path> (scope: <scope>)
+```
+
+On parse error:
+```
+WARN: Failed to parse <path>: <error details>
+```
+
+On registry load completion:
+```
+INFO: Skill registry loaded: <bundled_count> bundled, <discovered_count> discovered, <total_count> registered (after dedup)
+```
+
+#### Paths Reference
+
+All paths below are relative to the user's system (not project-specific unless noted):
+
+| Type | Path Pattern | Example | Created By | Scope |
+|------|--------------|---------|-----------|-------|
+| **Personal Skills** | `~/.ragent/skills/<name>/SKILL.md` | `~/.ragent/skills/deploy/SKILL.md` | User or script | Personal |
+| **Extra Skill Dir** | `<configured-path>/<name>/SKILL.md` | `/shared/skills/ci-deploy/SKILL.md` | Organization | Personal |
+| **Project Skills** | `.ragent/skills/<name>/SKILL.md` | `.ragent/skills/build-frontend/SKILL.md` | Version control | Project |
+| **Nested Skills** | `<subdir>/.ragent/skills/<name>/SKILL.md` | `packages/api/.ragent/skills/test/SKILL.md` | Version control | Project |
+| **Skill Scripts** | `.ragent/skills/<name>/scripts/<script>` | `.ragent/skills/deploy/scripts/deploy.sh` | Manual | — |
+| **Skill Templates** | `.ragent/skills/<name>/templates/<file>` | `.ragent/skills/deploy/templates/docker-compose.yml` | Manual | — |
+| **Skill Examples** | `.ragent/skills/<name>/examples/<file>` | `.ragent/skills/deploy/examples/success.log` | Manual | — |
+
+**Environment Variable Substitution in Paths:**
+
+Paths in config (e.g., `skill_dirs`) support environment variable expansion:
+
+```jsonc
+{
+  "skill_dirs": [
+    "$HOME/my-skills",           // Expands to user's home directory
+    "${HOME}/org-skills",         // Alternative syntax
+    "/opt/shared/skills",         // Absolute (no expansion needed)
+    "$XDG_CONFIG_HOME/skills"     // XDG standard
+  ]
+}
+```
+
+**Disk Usage Audit:**
+
+To find all skills and their total size:
+
+```bash
+# Find all SKILL.md files
+find ~ -name "SKILL.md" -type f
+
+# Calculate total size of all skills
+find ~/.ragent/skills .ragent/skills -type d -name "skills" \
+  -exec du -sh {} \; 2>/dev/null
+
+# List largest skills
+find ~/.ragent/skills .ragent/skills -name "SKILL.md" \
+  -exec sh -c 'du -h "$1" | awk "{print \$1, \"$(dirname \"$1\" | xargs basename)\"}"' _ {} \; \
+  2>/dev/null | sort -rh
+```
+
+#### How to Define and Use Skills
+
+**Creating a project-specific skill:**
+
+```bash
+mkdir -p .ragent/skills/deploy
+cat > .ragent/skills/deploy/SKILL.md << 'EOF'
+---
+name: deploy
+description: Deploy the application to production with validation
+argument-hint: "[environment]"
+model: "anthropic/claude-sonnet-4-20250514"
+context: fork
+agent: build
+allowed-tools: [bash, read]
+---
+
+# Deploy to $0
+
+You are a deployment specialist. Perform the following steps:
+
+1. **Validate environment**: Ensure $ARGUMENTS is a valid target
+2. **Run tests**: Execute `cargo test --release`
+3. **Build**: Execute `cargo build --release`
+4. **Deploy**: Push to $ARGUMENTS
+5. **Verify**: Run smoke tests
+
+Target endpoint: !`aws ssm get-parameter --name /deploy/$ARGUMENTS`
+
+Return a summary of the deployment.
+EOF
+```
+
+**Using the skill:**
+
+```bash
+# In TUI, type:
+/deploy production
+
+# Or programmatically:
+ragent run --agent general "/deploy staging"
+```
+
+**Agent auto-invocation:**
+
+The agent sees the skill in the "## Available Skills" section of the system prompt and can decide to use it:
+
+```
+User: "Deploy to production"
+  ↓
+Agent: "I'll use the /deploy skill to handle this safely."
+  ↓
+Agent invokes: /deploy production
+  ↓
+Forked build subagent runs the deployment
+  ↓
+Result returned to parent agent
+```
+
+**Creating a personal skill** (available across all projects):
+
+```bash
+mkdir -p ~/.ragent/skills/my-review
+cat > ~/.ragent/skills/my-review/SKILL.md << 'EOF'
+---
+name: my-review
+description: My custom code review checklist
+---
+
+Review this code against my personal standards:
+- Are variable names clear and descriptive?
+- Is error handling consistent with project style?
+- Are there any performance concerns?
+- Is there sufficient test coverage?
+EOF
+```
+
+Now available in all projects:
+
+```bash
+cd ~/project1
+/my-review        # Works in project 1
+
+cd ~/project2
+/my-review        # Also works in project 2
+```
+
+**Creating a dynamic skill with context injection:**
+
+```markdown
+---
+name: pr-summary
+description: Summarize a pull request
+argument-hint: "[pr-number]"
+context: fork
+agent: explore
+---
+
+## PR #$0 Summary
+
+Current branch: !`git rev-parse --abbrev-ref HEAD`
+
+PR Files:
+!`gh pr diff --name-only --repo . $0 2>/dev/null || echo "(No PR found)"`
+
+PR Description:
+!`gh pr view $0 --json body -q .body --repo . 2>/dev/null || echo "(Could not fetch)"`
+
+Your task: Summarize this PR in 2-3 bullet points, highlighting the main changes.
+EOF
+```
+
+**Skill with inline-only invocation:**
+
+```markdown
+---
+name: security-check
+description: Internal security scanning (for agents only)
+user-invocable: false
+disable-model-invocation: false
+---
+
+Perform a comprehensive security audit...
+```
+
+Only the agent can invoke this (hidden from `/` menu, agent can auto-use it).
+
+**Skill with user-only invocation:**
+
+```markdown
+---
+name: scheduled-task
+description: Run periodic checks
+disable-model-invocation: true
+user-invocable: true
+---
+
+Check the following at midnight:
+- Build status
+- Deployment health
+- Test coverage
+EOF
+```
+
+Only the user can invoke via `/scheduled-task` (agent cannot auto-invoke).
+
+---
+
+### 3.18.1 Subagents & Agent Delegation ✅
+
+Subagents are specialized agents invoked from within a session to handle focused, isolated tasks. They differ from the primary agent in scope, context, tools, and reasoning style.
+
+#### Built-in Subagents
+
+| Agent | Purpose | Tools | Use Cases |
+|-------|---------|-------|-----------|
+| `explore` | Fast codebase search and analysis | Read-only: grep, glob, list, read, bash | Find patterns, understand architecture, code review |
+| `plan` | Read-only analysis and planning | Read-only: grep, glob, list, read, bash | Design systems, plan refactoring, analyze impacts |
+| `build` | Compile, test, debug | Full: bash, read, write, edit | Run tests, build projects, fix compilation errors |
+| `general` | Full-capability coding | All tools | General coding, refactoring, writing features |
+
+#### Subagent Invocation Methods
+
+**Method 1: Tab cycling in TUI**
+```
+Tab / Shift+Tab
+# Cycles through: general → build → plan → explore → general
+```
+
+**Method 2: Slash command**
+```
+/agent explore
+# Opens picker dialog if no name, or switches directly
+```
+
+**Method 3: Via `context: fork` skills**
+```markdown
+---
+name: code-analysis
+context: fork
+agent: explore    # Skill runs in explore subagent
+---
+Analyze this code...
+```
+
+The skill runs in an isolated explore subagent context, then returns the result.
+
+**Method 4: Via `plan_enter` / `plan_exit` tools**
+
+The agent can explicitly delegate to the plan subagent:
+
+```
+Agent: "Let me analyze the architecture..."
+Tool use: plan_enter
+  task: "Analyze current modularization"
+  context: "We have 15 source files..."
+  ↓
+Plan agent enters (isolated context)
+  ↓
+Plan agent uses read tools: grep, list, bash
+  ↓
+Plan agent exits via plan_exit tool
+  summary: "Architecture is tightly coupled. Suggests splitting into modules."
+  ↓
+Summary injected into parent conversation
+  ↓
+Parent agent continues: "Based on the plan analysis, I'll refactor as follows..."
+```
+
+#### Context Isolation
+
+Subagents run in **fully isolated contexts**:
+
+| Aspect | Subagent Context | Parent Agent |
+|--------|------------------|--------------|
+| Conversation history | Empty — no prior messages | Full history maintained |
+| System prompt | Custom per subagent | Standard system prompt |
+| Working directory | Same as parent | Same as parent |
+| Tool access | Restricted per subagent | Configured tool groups |
+| Session storage | Separate session in DB | Original session |
+| Snapshots/undo | Own snapshot chain | Own snapshot chain |
+| TODOs | Empty list | Original todos |
+
+**Example: Plan delegation with isolation**
+
+```
+Parent (general agent) at message 15 in conversation
+
+User: "Should we refactor this?"
+  ↓
+Parent agent uses plan_enter tool
+  ↓
+Plan subagent created (new session, empty history)
+  ↓
+Plan agent prompt: "Analyze whether we should refactor..."
+  ↓
+Plan agent: can only use grep, glob, list, read, bash (no write)
+  ↓
+Plan agent: "The code is tightly coupled..."
+  ↓
+Plan agent calls plan_exit with summary
+  ↓
+Parent conversation continues at message 16
+  ↓
+Message 16 contains: "Plan result: The code is tightly coupled..."
+```
+
+Parent agent never sees the plan agent's internal reasoning, only the summary.
+
+#### Tool Availability by Subagent
+
+| Tool | General | Build | Plan | Explore | Ask |
+|------|---------|-------|------|---------|-----|
+| read | ✅ | ✅ | ✅ | ✅ | ❌ |
+| write | ✅ | ✅ | ❌ | ❌ | ❌ |
+| edit | ✅ | ✅ | ❌ | ❌ | ❌ |
+| patch | ✅ | ✅ | ❌ | ❌ | ❌ |
+| bash | ✅ | ✅ | ✅ | ✅ | ❌ |
+| grep | ✅ | ✅ | ✅ | ✅ | ❌ |
+| glob | ✅ | ✅ | ✅ | ✅ | ❌ |
+| list | ✅ | ✅ | ✅ | ✅ | ❌ |
+| plan_enter | ✅ | ✅ | ❌ | ❌ | ❌ |
+| plan_exit | ❌ | ❌ | ✅ | ❌ | ❌ |
+| question | ✅ | ✅ | ✅ | ✅ | ✅ |
+| webfetch / websearch | ✅ | ✅ | ✅ | ✅ | ✅ |
+| todo_read / todo_write | ✅ | ✅ | ✅ | ✅ | ❌ |
+| MCP tools | ✅ | ✅ | ✅ | ✅ | ❌ |
+
+#### Agent Delegation Tools
+
+**`plan_enter` tool:**
+- **Purpose**: Pause current agent, request analysis from the plan agent
+- **Permission**: `plan`
+- **Parameters**:
+  - `task` (required, string): What to analyze or plan
+  - `context` (optional, string): Additional context for the plan agent
+- **Returns**: Metadata with `agent_switch: "plan"` flag
+- **Effect**: Breaks the current agent loop, publishes `AgentSwitchRequested` event
+- **TUI**: Shows tool call, plan agent takes over in isolation, result returned
+
+**`plan_exit` tool:**
+- **Purpose**: Return from plan agent to previous agent with summary
+- **Permission**: `plan`
+- **Parameters**:
+  - `summary` (required, string): Analysis/planning result to return
+- **Returns**: Metadata with `agent_restore: true` flag
+- **Effect**: Breaks plan agent loop, publishes `AgentRestoreRequested` event
+- **TUI**: Shows plan result, previous agent continues
+
+#### Custom Subagents
+
+Users can define custom agents that function as specialized subagents:
+
+```jsonc
+{
+  "agents": {
+    "security-reviewer": {
+      "description": "Security-focused code reviewer",
+      "mode": "subagent",
+      "prompt": "You are a security expert. Focus on vulnerabilities, authentication, data protection, and compliance.",
+      "tool_groups": ["read", "question"],
+      "max_steps": 50
+    },
+    "performance-analyst": {
+      "description": "Performance and optimization specialist",
+      "mode": "subagent",
+      "prompt": "You are a performance engineer. Focus on bottlenecks, algorithmic efficiency, and optimization opportunities.",
+      "tool_groups": ["read", "bash", "question"],
+      "max_steps": 50
+    }
+  }
+}
+```
+
+Then invoke via:
+- Slash command: `/agent security-reviewer`
+- Skill: `agent: security-reviewer` in `context: fork` skill
+- Tab cycling if in the agent list
+
+#### Orchestrator Agent (Future)
+
+When implemented, the orchestrator agent will decompose complex tasks into subtasks:
+
+```
+User: "Implement a user authentication system"
+  ↓
+Orchestrator decomposes:
+  1. Subtask: plan agent → design architecture
+  2. Subtask: build agent → implement endpoints
+  3. Subtask: build agent → write tests
+  4. Subtask: plan agent → security review
+  ↓
+Orchestrator synthesizes results → final response
+```
 
 ---
 

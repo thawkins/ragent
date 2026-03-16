@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.11] - 2026-03-16
+
+### Added
+- **Skills system** fully implemented (SPEC §3.19) across 10 phases
+  - YAML frontmatter-based skill definitions (`SKILL.md` format)
+  - Multi-scope skill registry with priority: Bundled < Enterprise < Personal < Project
+  - Argument substitution: `$ARGUMENTS`, `$N` (0-indexed), `$ARGUMENTS[N]`, `${RAGENT_SESSION_ID}`, `${RAGENT_SKILL_DIR}`
+  - Dynamic context injection via `` !`command` `` shell execution patterns
+  - Forked subagent execution for `context: fork` skills
+  - 4 bundled skills: `simplify`, `batch`, `debug`, `loop`
+  - `/skills` slash command with table display (Command, Scope, Access, Description)
+  - Skill autocomplete in TUI slash menu (skills rendered in yellow)
+  - Config `skill_dirs` for additional skill search directories
+  - System prompt integration: active skills injected into agent context
+  - `release` project skill for automated version bump, commit, push, and tag
+- ~110 new tests for skill system (parsing, args, context, discovery, invocation, TUI)
+
+### Changed
+- SPEC.md: Skills section (§3.19) marked ✅ with implementation details
+- QUICKSTART.md expanded with additional usage guidance
+- Total test count: 781 (up from 672)
+
 ## [0.1.0-alpha.10] - 2026-03-13
 
 ### Changed
