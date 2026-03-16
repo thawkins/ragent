@@ -5,8 +5,9 @@
 //! error handling ([`error`]), event streaming ([`event`]), LLM provider
 //! integration ([`llm`], [`provider`]), MCP server support ([`mcp`]),
 //! message types ([`message`]), permission management ([`permission`]),
-//! session orchestration ([`session`]), state snapshots ([`snapshot`]),
-//! persistent storage ([`storage`]), and tool execution ([`tool`]).
+//! session orchestration ([`session`]), skill management ([`skill`]),
+//! state snapshots ([`snapshot`]), persistent storage ([`storage`]),
+//! and tool execution ([`tool`]).
 
 pub mod agent;
 pub mod config;
@@ -21,6 +22,8 @@ pub mod provider;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
 pub mod session;
+/// Skill discovery, loading, argument substitution, and invocation.
+pub mod skill;
 pub mod snapshot;
 pub mod storage;
 pub mod tool;

@@ -284,5 +284,5 @@ async fn test_websearch_mock_auth_error() {
 async fn test_websearch_registered() {
     let registry = create_default_registry();
     assert!(registry.get("websearch").is_some());
-    assert_eq!(registry.list().len(), 21);
+    assert_eq!(registry.list().len(), 23);
 }

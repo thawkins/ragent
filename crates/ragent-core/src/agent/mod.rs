@@ -67,6 +67,9 @@ pub struct AgentInfo {
     pub permission: PermissionRuleset,
     /// Maximum number of agentic loop iterations.
     pub max_steps: Option<u32>,
+    /// Skill names this agent should preload into its prompt context.
+    #[serde(default)]
+    pub skills: Vec<String>,
     /// Arbitrary key-value options forwarded to the provider.
     // TODO: Replace `Value` with typed agent option structs.
     pub options: HashMap<String, Value>,
@@ -97,6 +100,7 @@ impl AgentInfo {
             prompt: None,
             permission: Vec::new(),
             max_steps: None,
+            skills: Vec::new(),
             options: HashMap::new(),
         }
     }
@@ -146,6 +150,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: read_only_permissions(),
             max_steps: Some(1),
+            skills: Vec::new(),
             options: HashMap::from([("thinking".to_string(), json!("disabled"))]),
         },
         AgentInfo {
@@ -169,6 +174,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: default_permissions(),
             max_steps: Some(500),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -191,6 +197,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: default_permissions(),
             max_steps: Some(30),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -213,6 +220,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: read_only_permissions(),
             max_steps: Some(20),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -235,6 +243,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: read_only_permissions(),
             max_steps: Some(15),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -255,6 +264,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: Vec::new(),
             max_steps: Some(1),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -275,6 +285,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: Vec::new(),
             max_steps: Some(1),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
         AgentInfo {
@@ -296,6 +307,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             ),
             permission: Vec::new(),
             max_steps: Some(1),
+            skills: Vec::new(),
             options: HashMap::new(),
         },
     ]
@@ -406,6 +418,9 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
             agent.permission = agent_config.permission.clone();
         }
         agent.hidden = agent_config.hidden;
+        if !agent_config.skills.is_empty() {
+            agent.skills = agent_config.skills.clone();
+        }
         for (k, v) in &agent_config.options {
             agent.options.insert(k.clone(), v.clone());
         }
@@ -415,6 +430,19 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
 }
 
 /// Build the system prompt for an agent invocation.
+///
+/// Assembles the system prompt in the order specified by the SPEC:
+/// 1. Agent role definition
+/// 2. Working directory context
+/// 3. Project structure (file tree)
+/// 4. AGENTS.md project guidelines
+/// 5. Available skills (agent-invocable skills from the registry)
+/// 6. Tool usage guidelines
+///
+/// When `skills` is `Some`, agent-invocable skills are listed so the model
+/// can invoke them automatically. If the agent has specific skills configured
+/// in its `skills` field, only those are shown; otherwise all agent-invocable
+/// skills from the registry are included.
 ///
 /// # Examples
 ///
@@ -426,11 +454,16 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
 /// agent.prompt = Some("You are a helpful assistant.".to_string());
 /// agent.max_steps = Some(10);
 ///
-/// let prompt = build_system_prompt(&agent, Path::new("/tmp/project"), "src/\n  main.rs");
+/// let prompt = build_system_prompt(&agent, Path::new("/tmp/project"), "src/\n  main.rs", None);
 /// assert!(prompt.contains("You are a helpful assistant."));
 /// assert!(prompt.contains("/tmp/project"));
 /// ```
-pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &str) -> String {
+pub fn build_system_prompt(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+) -> String {
     let mut prompt = String::new();
 
     // Agent identity and role
@@ -468,6 +501,43 @@ pub fn build_system_prompt(agent: &AgentInfo, working_dir: &Path, file_tree: &st
             prompt.push_str("## Project Guidelines (AGENTS.md)\n");
             prompt.push_str(&contents);
             prompt.push_str("\n\n");
+        }
+    }
+
+    // Available skills (per SPEC §3.19 prompt assembly order)
+    if let Some(registry) = skills {
+        let skill_list = if agent.skills.is_empty() {
+            // No agent-specific skills configured: show all agent-invocable skills
+            registry.list_agent_invocable()
+        } else {
+            // Agent has specific skills configured: filter to those names
+            registry
+                .list_agent_invocable()
+                .into_iter()
+                .filter(|s| agent.skills.contains(&s.name))
+                .collect()
+        };
+
+        if !skill_list.is_empty() {
+            prompt.push_str("## Available Skills\n\n");
+            prompt.push_str(
+                "You can invoke the following skills by including `/skillname` \
+                 (with optional arguments) in your response when contextually \
+                 appropriate:\n\n",
+            );
+            for skill in &skill_list {
+                let desc = skill
+                    .description
+                    .as_deref()
+                    .unwrap_or("(no description)");
+                let hint = skill
+                    .argument_hint
+                    .as_deref()
+                    .map(|h| format!(" {h}"))
+                    .unwrap_or_default();
+                prompt.push_str(&format!("- `/{}{}`  — {}\n", skill.name, hint, desc));
+            }
+            prompt.push('\n');
         }
     }
 

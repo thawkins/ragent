@@ -167,7 +167,13 @@ impl SessionProcessor {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
         let file_tree = build_file_tree(&working_dir, 2);
-        let system_prompt = build_system_prompt(agent, &working_dir, &file_tree);
+
+        // Load skill registry for system prompt injection
+        let skill_dirs = crate::config::Config::load()
+            .map(|c| c.skill_dirs)
+            .unwrap_or_default();
+        let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+        let system_prompt = build_system_prompt(agent, &working_dir, &file_tree, Some(&skill_registry));
 
         // 4. Build chat messages from history
         let history = self.session_manager.get_messages(session_id)?;

@@ -249,5 +249,5 @@ async fn test_todo_read_empty_filter_message() {
 fn test_todo_read_in_registry() {
     let registry = ragent_core::tool::create_default_registry();
     assert!(registry.get("todo_read").is_some());
-    assert_eq!(registry.list().len(), 21);
+    assert_eq!(registry.list().len(), 23);
 }

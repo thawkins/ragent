@@ -37,6 +37,9 @@ pub struct Config {
     /// Additional instruction strings appended to agent prompts.
     #[serde(default)]
     pub instructions: Vec<String>,
+    /// Additional directories to scan for skill definitions.
+    #[serde(default)]
+    pub skill_dirs: Vec<String>,
     /// Feature flags for experimental functionality.
     #[serde(default)]
     pub experimental: ExperimentalFlags,
@@ -150,6 +153,9 @@ pub struct AgentConfig {
     pub permission: Vec<crate::permission::PermissionRule>,
     /// Maximum agentic loop iterations.
     pub max_steps: Option<u32>,
+    /// Skill names to preload into this agent's prompt context.
+    #[serde(default)]
+    pub skills: Vec<String>,
     /// Arbitrary agent-specific options.
     // TODO: Replace `Value` with typed agent option structs.
     #[serde(default)]
@@ -315,9 +321,10 @@ impl Config {
         for (k, v) in overlay.mcp {
             base.mcp.insert(k, v);
         }
-        // Permissions and instructions append
+        // Permissions, instructions, and skill dirs append
         base.permission.extend(overlay.permission);
         base.instructions.extend(overlay.instructions);
+        base.skill_dirs.extend(overlay.skill_dirs);
 
         if overlay.experimental.open_telemetry {
             base.experimental.open_telemetry = true;

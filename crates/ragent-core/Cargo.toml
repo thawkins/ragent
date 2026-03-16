@@ -39,3 +39,4 @@ zip = { workspace = true }
 printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }
+serde_yaml = { workspace = true }

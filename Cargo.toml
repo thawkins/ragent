@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -72,6 +72,7 @@ zip = { version = "7", default-features = false, features = ["deflate"] }
 printpdf = { version = "0.9", default-features = false, features = ["text_layout", "png", "jpeg"] }
 pdf-extract = "0.10"
 lopdf = "0.39"
+serde_yaml = "0.9"
 
 [[bin]]
 name = "ragent"

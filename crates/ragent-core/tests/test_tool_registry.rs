@@ -12,6 +12,7 @@ fn test_default_registry_has_all_tools() {
 
     let expected = [
         "bash",
+        "create",
         "edit",
         "glob",
         "grep",
@@ -27,6 +28,7 @@ fn test_default_registry_has_all_tools() {
         "plan_exit",
         "question",
         "read",
+        "rm",
         "todo_read",
         "todo_write",
         "webfetch",
@@ -92,7 +94,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 21);
+    assert_eq!(defs.len(), 23);
 
     for def in &defs {
         assert!(

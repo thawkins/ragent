@@ -17,7 +17,7 @@ use ratatui::{
 use ragent_core::message::{MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
-    App, LogLevel, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS, ScreenMode, SelectionPane,
+    App, LogLevel, PROVIDER_LIST, ProviderSetupStep, ScreenMode, SelectionPane,
 };
 use crate::logo;
 use crate::widgets::message_widget::{
@@ -646,8 +646,7 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
-    for (i, &cmd_idx) in menu.matches.iter().enumerate() {
-        let cmd = &SLASH_COMMANDS[cmd_idx];
+    for (i, entry) in menu.matches.iter().enumerate() {
         let is_selected = i == menu.selected;
         let (indicator, name_style, desc_style) = if is_selected {
             (
@@ -660,14 +659,18 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         } else {
             (
                 "  ",
-                Style::default().fg(Color::White),
+                Style::default().fg(if entry.is_skill {
+                    Color::Yellow
+                } else {
+                    Color::White
+                }),
                 Style::default().fg(Color::DarkGray),
             )
         };
         lines.push(Line::from(vec![
             Span::styled(indicator, name_style),
-            Span::styled(format!("/{}", cmd.trigger), name_style),
-            Span::styled(format!("  {}", cmd.description), desc_style),
+            Span::styled(format!("/{}", entry.trigger), name_style),
+            Span::styled(format!("  {}", entry.description), desc_style),
         ]));
     }
 

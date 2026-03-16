@@ -187,6 +187,7 @@ fn test_build_system_prompt_with_tools() {
         &agent,
         std::path::Path::new("/my/project"),
         "src/\n  main.rs\n  lib.rs\n",
+        None,
     );
 
     assert!(prompt.contains("You are a helpful agent."));
@@ -208,6 +209,7 @@ fn test_build_system_prompt_single_step_skips_context() {
         &agent,
         std::path::Path::new("/project"),
         "big file tree here",
+        None,
     );
 
     assert!(prompt.contains("Answer questions."));
@@ -230,7 +232,7 @@ fn test_build_system_prompt_empty_file_tree() {
         ..AgentInfo::default()
     };
 
-    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "");
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "", None);
 
     assert!(prompt.contains("Hello."));
     assert!(prompt.contains("/proj"));
@@ -249,7 +251,7 @@ fn test_build_system_prompt_no_prompt() {
         ..AgentInfo::default()
     };
 
-    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "files");
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "files", None);
 
     assert!(prompt.contains("/proj"));
     assert!(prompt.contains("files"));
@@ -268,4 +270,230 @@ fn test_model_ref_serde() {
     let deserialized: ModelRef = serde_json::from_str(&json).unwrap();
     assert_eq!(deserialized.provider_id, "anthropic");
     assert_eq!(deserialized.model_id, "claude-sonnet-4-20250514");
+}
+
+// ── System prompt + skills integration ──────────────────────────
+
+#[test]
+fn test_build_system_prompt_with_skills() {
+    use ragent_core::skill::{SkillInfo, SkillRegistry, SkillScope};
+
+    let agent = AgentInfo {
+        name: "general".into(),
+        prompt: Some("You are a helpful agent.".into()),
+        max_steps: Some(50),
+        ..AgentInfo::default()
+    };
+
+    let mut registry = SkillRegistry::new();
+    let mut skill = SkillInfo::new("deploy", "Deploy the app");
+    skill.description = Some("Deploy the application to a target environment".into());
+    skill.argument_hint = Some("<environment>".into());
+    skill.scope = SkillScope::Project;
+    registry.register(skill);
+
+    let mut skill2 = SkillInfo::new("lint", "Lint the code");
+    skill2.description = Some("Run linter and fix issues".into());
+    skill2.scope = SkillScope::Project;
+    registry.register(skill2);
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "src/\n  main.rs",
+        Some(&registry),
+    );
+
+    assert!(prompt.contains("## Available Skills"), "Should have skills section");
+    assert!(prompt.contains("/deploy"), "Should list deploy skill");
+    assert!(prompt.contains("<environment>"), "Should show argument hint");
+    assert!(
+        prompt.contains("Deploy the application"),
+        "Should show description"
+    );
+    assert!(prompt.contains("/lint"), "Should list lint skill");
+}
+
+#[test]
+fn test_build_system_prompt_no_skills_registry() {
+    let agent = AgentInfo {
+        name: "general".into(),
+        prompt: Some("Agent prompt.".into()),
+        max_steps: Some(50),
+        ..AgentInfo::default()
+    };
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "src/",
+        None,
+    );
+
+    assert!(
+        !prompt.contains("Available Skills"),
+        "No skills section when registry is None"
+    );
+}
+
+#[test]
+fn test_build_system_prompt_empty_skills_registry() {
+    use ragent_core::skill::SkillRegistry;
+
+    let agent = AgentInfo {
+        name: "general".into(),
+        prompt: Some("Agent prompt.".into()),
+        max_steps: Some(50),
+        ..AgentInfo::default()
+    };
+
+    let registry = SkillRegistry::new();
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "src/",
+        Some(&registry),
+    );
+
+    assert!(
+        !prompt.contains("Available Skills"),
+        "No skills section when registry is empty"
+    );
+}
+
+#[test]
+fn test_build_system_prompt_skills_excludes_agent_only_disabled() {
+    use ragent_core::skill::{SkillInfo, SkillRegistry, SkillScope};
+
+    let agent = AgentInfo {
+        name: "general".into(),
+        prompt: Some("Agent prompt.".into()),
+        max_steps: Some(50),
+        ..AgentInfo::default()
+    };
+
+    let mut registry = SkillRegistry::new();
+
+    // Agent-invocable skill
+    let mut skill = SkillInfo::new("review", "Review code");
+    skill.description = Some("Code review".into());
+    skill.scope = SkillScope::Project;
+    registry.register(skill);
+
+    // Skill with model invocation disabled (user-only)
+    let mut user_only = SkillInfo::new("manual", "Manual only");
+    user_only.description = Some("User-only skill".into());
+    user_only.disable_model_invocation = true;
+    user_only.scope = SkillScope::Project;
+    registry.register(user_only);
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "",
+        Some(&registry),
+    );
+
+    assert!(prompt.contains("/review"), "Should list agent-invocable skill");
+    assert!(
+        !prompt.contains("/manual"),
+        "Should exclude model-invocation-disabled skill"
+    );
+}
+
+#[test]
+fn test_build_system_prompt_agent_specific_skills() {
+    use ragent_core::skill::{SkillInfo, SkillRegistry, SkillScope};
+
+    let agent = AgentInfo {
+        name: "builder".into(),
+        prompt: Some("Build agent.".into()),
+        max_steps: Some(50),
+        skills: vec!["build-check".to_string()],
+        ..AgentInfo::default()
+    };
+
+    let mut registry = SkillRegistry::new();
+
+    let mut s1 = SkillInfo::new("build-check", "Check build");
+    s1.description = Some("Run build checks".into());
+    s1.scope = SkillScope::Project;
+    registry.register(s1);
+
+    let mut s2 = SkillInfo::new("deploy", "Deploy");
+    s2.description = Some("Deploy app".into());
+    s2.scope = SkillScope::Project;
+    registry.register(s2);
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "",
+        Some(&registry),
+    );
+
+    assert!(
+        prompt.contains("/build-check"),
+        "Should include agent-specific skill"
+    );
+    assert!(
+        !prompt.contains("/deploy"),
+        "Should exclude skills not in agent's skills list"
+    );
+}
+
+#[test]
+fn test_build_system_prompt_skills_order_after_agents_md() {
+    use ragent_core::skill::{SkillInfo, SkillRegistry, SkillScope};
+
+    let agent = AgentInfo {
+        name: "general".into(),
+        prompt: Some("Agent.".into()),
+        max_steps: Some(50),
+        ..AgentInfo::default()
+    };
+
+    let mut registry = SkillRegistry::new();
+    let mut skill = SkillInfo::new("test-skill", "A test");
+    skill.description = Some("Test skill".into());
+    skill.scope = SkillScope::Project;
+    registry.register(skill);
+
+    let prompt = build_system_prompt(
+        &agent,
+        std::path::Path::new("/proj"),
+        "",
+        Some(&registry),
+    );
+
+    // Skills section should appear before Guidelines
+    let skills_pos = prompt.find("Available Skills").unwrap();
+    let guidelines_pos = prompt.find("Guidelines").unwrap();
+    assert!(
+        skills_pos < guidelines_pos,
+        "Skills should appear before Guidelines in prompt"
+    );
+}
+
+// ── Agent config skills field ───────────────────────────────────
+
+#[test]
+fn test_resolve_agent_with_skills_config() {
+    use std::collections::HashMap;
+
+    let mut config = Config::default();
+    let mut agent_config = ragent_core::config::AgentConfig::default();
+    agent_config.skills = vec!["deploy".to_string(), "review".to_string()];
+    config.agent.insert("general".to_string(), agent_config);
+
+    let agent = resolve_agent("general", &config).unwrap();
+    assert_eq!(agent.skills, vec!["deploy", "review"]);
+}
+
+#[test]
+fn test_resolve_agent_without_skills_config() {
+    let config = Config::default();
+    let agent = resolve_agent("general", &config).unwrap();
+    assert!(agent.skills.is_empty());
 }

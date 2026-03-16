@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, PROVIDER_LIST, ProviderSetupStep, SLASH_COMMANDS};
+use crate::app::{App, PROVIDER_LIST, ProviderSetupStep};
 
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
@@ -128,8 +128,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Enter => {
                 // Select the highlighted command, or use the typed text
                 let trigger = if let Some(ref menu) = app.slash_menu {
-                    if let Some(&idx) = menu.matches.get(menu.selected) {
-                        SLASH_COMMANDS[idx].trigger.to_string()
+                    if let Some(entry) = menu.matches.get(menu.selected) {
+                        entry.trigger.clone()
                     } else {
                         menu.filter.clone()
                     }

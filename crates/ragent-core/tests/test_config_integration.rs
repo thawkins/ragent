@@ -269,3 +269,37 @@ fn test_config_merge_agent_configs() {
     assert_eq!(merged.agent["general"].temperature, Some(0.8));
     assert!(merged.agent.contains_key("build"));
 }
+
+// ── Skill dirs append ────────────────────────────────────────────
+
+#[test]
+fn test_config_merge_skill_dirs_append() {
+    let base: Config =
+        serde_json::from_str(r#"{"skill_dirs": ["/home/user/skills"]}"#).unwrap();
+
+    let overlay: Config =
+        serde_json::from_str(r#"{"skill_dirs": ["/opt/team/skills", "/shared/skills"]}"#).unwrap();
+
+    let merged = Config::merge(base, overlay);
+    assert_eq!(
+        merged.skill_dirs,
+        vec!["/home/user/skills", "/opt/team/skills", "/shared/skills"]
+    );
+}
+
+#[test]
+fn test_config_skill_dirs_default_empty() {
+    let config: Config = serde_json::from_str(r#"{}"#).unwrap();
+    assert!(config.skill_dirs.is_empty());
+}
+
+#[test]
+fn test_config_skill_dirs_deserialize() {
+    let config: Config = serde_json::from_str(
+        r#"{"skill_dirs": ["/custom/skills", "relative/skills"]}"#,
+    )
+    .unwrap();
+    assert_eq!(config.skill_dirs.len(), 2);
+    assert_eq!(config.skill_dirs[0], "/custom/skills");
+    assert_eq!(config.skill_dirs[1], "relative/skills");
+}

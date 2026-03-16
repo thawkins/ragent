@@ -209,13 +209,28 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "tools",
         description: "List all available tools (built-in and MCP)",
     },
+    SlashCommandDef {
+        trigger: "skills",
+        description: "List all registered skills and their descriptions",
+    },
 ];
+
+/// A single entry in the slash-command autocomplete menu.
+#[derive(Debug, Clone)]
+pub struct SlashMenuEntry {
+    /// The trigger word (without the leading `/`).
+    pub trigger: String,
+    /// Short description shown in the menu.
+    pub description: String,
+    /// Whether this entry is a skill (vs. a builtin command).
+    pub is_skill: bool,
+}
 
 /// State of the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
 pub struct SlashMenuState {
-    /// Indices into [`SLASH_COMMANDS`] that match the current filter.
-    pub matches: Vec<usize>,
+    /// Entries that match the current filter.
+    pub matches: Vec<SlashMenuEntry>,
     /// Currently highlighted index within `matches`.
     pub selected: usize,
     /// The filter text typed after `/` (e.g. `"mo"` for `/mo`).
@@ -935,16 +950,56 @@ impl App {
     pub fn update_slash_menu(&mut self) {
         if let Some(filter) = self.input.strip_prefix('/') {
             let needle = filter.to_lowercase();
-            let matches: Vec<usize> = SLASH_COMMANDS
+
+            // Collect builtin command matches
+            let mut matches: Vec<SlashMenuEntry> = SLASH_COMMANDS
                 .iter()
-                .enumerate()
-                .filter(|(_, cmd)| {
+                .filter(|cmd| {
                     needle.is_empty()
                         || cmd.trigger.starts_with(&needle)
                         || cmd.description.to_lowercase().contains(&needle)
                 })
-                .map(|(i, _)| i)
+                .map(|cmd| SlashMenuEntry {
+                    trigger: cmd.trigger.to_string(),
+                    description: cmd.description.to_string(),
+                    is_skill: false,
+                })
                 .collect();
+
+            // Collect user-invocable skill matches
+            let working_dir = std::env::current_dir().unwrap_or_default();
+            let skill_dirs = ragent_core::config::Config::load()
+                .map(|c| c.skill_dirs)
+                .unwrap_or_default();
+            let registry = ragent_core::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+            for skill in registry.list_user_invocable() {
+                let desc = skill
+                    .description
+                    .as_deref()
+                    .unwrap_or("(skill)")
+                    .to_string();
+                let hint = skill
+                    .argument_hint
+                    .as_deref()
+                    .map(|h| format!(" — {h}"))
+                    .unwrap_or_default();
+
+                // Skip if a builtin command has the same trigger
+                if matches.iter().any(|m| m.trigger == skill.name) {
+                    continue;
+                }
+
+                if needle.is_empty()
+                    || skill.name.starts_with(&needle)
+                    || desc.to_lowercase().contains(&needle)
+                {
+                    matches.push(SlashMenuEntry {
+                        trigger: skill.name.clone(),
+                        description: format!("{desc}{hint}"),
+                        is_skill: true,
+                    });
+                }
+            }
 
             let prev_selected = self.slash_menu.as_ref().map(|m| m.selected).unwrap_or(0);
             let selected = if matches.is_empty() {
@@ -1154,6 +1209,33 @@ impl App {
                         cmd_def.trigger, cmd_def.description
                     ));
                 }
+
+                // Append user-invocable skills
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                let skill_dirs = ragent_core::config::Config::load()
+                    .map(|c| c.skill_dirs)
+                    .unwrap_or_default();
+                let registry = ragent_core::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+                let skills = registry.list_user_invocable();
+                if !skills.is_empty() {
+                    help_lines.push_str("\nSkills:\n");
+                    for skill in &skills {
+                        let desc = skill
+                            .description
+                            .as_deref()
+                            .unwrap_or("(no description)");
+                        let hint = skill
+                            .argument_hint
+                            .as_deref()
+                            .map(|h| format!(" {h}"))
+                            .unwrap_or_default();
+                        help_lines.push_str(&format!(
+                            "  /{:<18} {}\n",
+                            format!("{}{}", skill.name, hint),
+                            desc
+                        ));
+                    }
+                }
                 self.append_assistant_text(&help_lines);
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
@@ -1317,9 +1399,254 @@ impl App {
                 }
                 self.status = "tools".to_string();
             }
+            "skills" => {
+                // Ensure a session exists so the output can be displayed
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                let skill_dirs = ragent_core::config::Config::load()
+                    .map(|c| c.skill_dirs)
+                    .unwrap_or_default();
+                let registry = ragent_core::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+                let skills = registry.list_all();
+
+                let mut output = String::from("From: /skills\nRegistered Skills:\n\n");
+
+                if skills.is_empty() {
+                    output.push_str("  (no skills found)\n\n");
+                    output.push_str("  Skills are loaded from:\n");
+                    output.push_str("    Personal:  ~/.ragent/skills/<name>/SKILL.md\n");
+                    output.push_str("    Project:   .ragent/skills/<name>/SKILL.md\n");
+                } else {
+                    // Compute column widths from data
+                    let col_cmd = skills
+                        .iter()
+                        .map(|s| {
+                            let hint_len = s
+                                .argument_hint
+                                .as_ref()
+                                .map_or(0, |h| h.len() + 1);
+                            s.name.len() + 1 + hint_len // +1 for leading '/'
+                        })
+                        .max()
+                        .unwrap_or(7)
+                        .max(7); // "Command"
+                    let col_scope = 10; // "Scope" header is 5, but values up to 10
+                    let col_access = 10; // "Access" header is 6, values up to 10
+
+                    // Header
+                    output.push_str(&format!(
+                        "  {:<col_cmd$}  {:<col_scope$}  {:<col_access$}  Description\n",
+                        "Command",
+                        "Scope",
+                        "Access",
+                        col_cmd = col_cmd,
+                        col_scope = col_scope,
+                        col_access = col_access,
+                    ));
+                    // Separator
+                    output.push_str(&format!(
+                        "  {:-<col_cmd$}  {:-<col_scope$}  {:-<col_access$}  {:-<11}\n",
+                        "", "", "", "",
+                        col_cmd = col_cmd,
+                        col_scope = col_scope,
+                        col_access = col_access,
+                    ));
+
+                    for skill in &skills {
+                        let hint = skill
+                            .argument_hint
+                            .as_deref()
+                            .map(|h| format!(" {h}"))
+                            .unwrap_or_default();
+                        let cmd_col = format!("/{}{}", skill.name, hint);
+                        let scope = format!("{}", skill.scope);
+                        let access = match (skill.user_invocable, !skill.disable_model_invocation) {
+                            (true, true) => "both",
+                            (true, false) => "user-only",
+                            (false, true) => "agent-only",
+                            (false, false) => "disabled",
+                        };
+                        let desc = skill
+                            .description
+                            .as_deref()
+                            .unwrap_or("(no description)");
+                        output.push_str(&format!(
+                            "  {:<col_cmd$}  {:<col_scope$}  {:<col_access$}  {}\n",
+                            cmd_col,
+                            scope,
+                            access,
+                            desc,
+                            col_cmd = col_cmd,
+                            col_scope = col_scope,
+                            col_access = col_access,
+                        ));
+                    }
+                    output.push_str(&format!("\n  {} skill(s) registered\n", skills.len()));
+                }
+
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "skills".to_string();
+            }
             _ => {
-                self.status = format!("Unknown command: /{}", cmd);
-                self.push_log(LogLevel::Warn, format!("Unknown command: /{}", cmd));
+                // Check if this is a skill invocation before reporting unknown command.
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                let skill_dirs = ragent_core::config::Config::load()
+                    .map(|c| c.skill_dirs)
+                    .unwrap_or_default();
+                let registry = ragent_core::skill::SkillRegistry::load(&working_dir, &skill_dirs);
+                if let Some(skill) = registry.get(cmd) {
+                    if !skill.user_invocable {
+                        self.status = format!("Skill '{}' is not user-invocable", cmd);
+                        self.push_log(
+                            LogLevel::Warn,
+                            format!("Skill /{} is not user-invocable", cmd),
+                        );
+                        return;
+                    }
+                    // Check provider/model are configured
+                    if self.configured_provider.is_none() {
+                        self.status =
+                            "⚠ No provider configured — use /provider to set up".to_string();
+                        return;
+                    }
+                    if self.selected_model.is_none() {
+                        self.status = "⚠ No model selected — use /model to choose".to_string();
+                        return;
+                    }
+                    // Ensure a session exists
+                    if self.session_id.is_none() {
+                        let dir = std::env::current_dir().unwrap_or_default();
+                        match self.session_processor.session_manager.create_session(dir) {
+                            Ok(session) => {
+                                self.session_id = Some(session.id);
+                            }
+                            Err(e) => {
+                                self.status = format!("error: {}", e);
+                                return;
+                            }
+                        }
+                    }
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
+                    }
+
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    let skill = skill.clone();
+                    let args_owned = args.to_string();
+                    let processor = self.session_processor.clone();
+
+                    let mut agent = self.agent_info.clone();
+                    // Apply skill model override if present, otherwise use selected model
+                    if let Some(ref model_str) = skill
+                        .model
+                        .as_ref()
+                        .or(self.selected_model.as_ref())
+                    {
+                        if let Some((provider, model)) = model_str.split_once('/') {
+                            agent.model = Some(ModelRef {
+                                provider_id: provider.to_string(),
+                                model_id: model.to_string(),
+                            });
+                        }
+                    }
+
+                    self.status = format!("invoking skill /{}…", cmd);
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("Invoking skill /{} with args: {}", cmd, args),
+                    );
+
+                    // Show the skill invocation as a user message in the chat
+                    let display_text = if args.is_empty() {
+                        format!("/{}", cmd)
+                    } else {
+                        format!("/{} {}", cmd, args)
+                    };
+                    let user_msg = Message::user_text(&sid, &display_text);
+                    self.messages.push(user_msg);
+                    self.input_history.push(display_text);
+                    self.history_index = None;
+                    self.history_draft.clear();
+
+                    let flag = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(flag.clone());
+
+                    tokio::spawn(async move {
+                        match ragent_core::skill::invoke::invoke_skill(
+                            &skill,
+                            &args_owned,
+                            &sid,
+                            &working_dir,
+                        )
+                        .await
+                        {
+                            Ok(invocation) => {
+                                if invocation.forked {
+                                    // Execute in an isolated sub-session
+                                    match ragent_core::skill::invoke::invoke_forked_skill(
+                                        &invocation,
+                                        &processor,
+                                        &sid,
+                                        &working_dir,
+                                        flag,
+                                    )
+                                    .await
+                                    {
+                                        Ok(result) => {
+                                            tracing::info!(
+                                                skill = %result.skill_name,
+                                                forked_session = %result.forked_session_id,
+                                                "Forked skill completed"
+                                            );
+                                            // The forked result is already displayed via events;
+                                            // no additional process_message call needed.
+                                        }
+                                        Err(e) => {
+                                            tracing::debug!(
+                                                error = %e,
+                                                "Failed to execute forked skill"
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    let message =
+                                        ragent_core::skill::invoke::format_skill_message(
+                                            &invocation,
+                                        );
+                                    if let Err(e) = processor
+                                        .process_message(&sid, &message, &agent, flag)
+                                        .await
+                                    {
+                                        tracing::debug!(
+                                            error = %e,
+                                            "Failed to process skill message"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!(error = %e, "Failed to invoke skill");
+                            }
+                        }
+                    });
+                } else {
+                    self.status = format!("Unknown command: /{}", cmd);
+                    self.push_log(LogLevel::Warn, format!("Unknown command: /{}", cmd));
+                }
             }
         }
     }
