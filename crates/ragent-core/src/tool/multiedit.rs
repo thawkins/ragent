@@ -133,7 +133,7 @@ impl Tool for MultiEditTool {
                 .get_mut(&op.path)
                 .expect("file content must exist");
 
-            let (start, end) = match find_replacement_range(content, &op.old_str) {
+            let (start, end, effective_new_str) = match find_replacement_range(content, &op.old_str, &op.new_str) {
                 Ok(range) => range,
                 Err(FindError::NotFound) => bail!(
                     "Edit {}: old_str not found in {}. Make sure it matches exactly.",
@@ -149,10 +149,10 @@ impl Tool for MultiEditTool {
                 ),
             };
 
-            *content = format!("{}{}{}", &content[..start], op.new_str, &content[end..]);
+            *content = format!("{}{}{}", &content[..start], effective_new_str, &content[end..]);
             *files_modified.entry(op.path.clone()).or_insert(0) += 1;
             total_edits += 1;
-            total_lines_changed += op.new_str.lines().count();
+            total_lines_changed += effective_new_str.lines().count();
         }
 
         // Phase 3: Write all modified files

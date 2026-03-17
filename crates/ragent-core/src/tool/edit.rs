@@ -3,7 +3,7 @@
 //! Provides [`EditTool`], which replaces exactly one occurrence of a search
 //! string with a replacement string in a file, ensuring precise edits.
 //!
-//! Matching is attempted in three passes to handle common LLM output quirks:
+//! Matching is attempted in four passes to handle common LLM output quirks:
 //!
 //! 1. **Exact match** – the fastest and most precise path.
 //! 2. **CRLF-normalised match** – handles files with `\r\n` line endings when
@@ -11,6 +11,15 @@
 //!    strips `\r` via `.lines()`).
 //! 3. **Trailing-whitespace-stripped match** – handles lines where the file has
 //!    trailing spaces/tabs that the LLM silently omitted in `old_str`.
+//! 4. **Leading-whitespace-stripped match** – handles LLMs that read
+//!    line-numbered output (e.g. `" 281  registry.register(...)"`) and
+//!    accidentally strip the code's leading indentation when writing `old_str`.
+//!    When matched this way, the detected indentation is automatically
+//!    re-applied to every line of `new_str`.
+//! 5. **Collapsed-whitespace match** – collapses ALL whitespace (leading,
+//!    trailing, and internal runs) to single spaces before comparing.
+//!    Since matches are always whole-line replacements there is no partial-
+//!    match ambiguity. Handles tabs-vs-spaces, double spaces, mixed indentation.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -75,7 +84,7 @@ impl Tool for EditTool {
             .await
             .with_context(|| format!("Cannot read file '{}': file may not exist or is not accessible", path.display()))?;
 
-        let (start, end) = match find_replacement_range(&content, old_str) {
+        let (start, end, effective_new_str) = match find_replacement_range(&content, old_str, new_str) {
             Ok(range) => range,
             Err(FindError::NotFound) => bail!(
                 "old_str not found in {}. Make sure it matches exactly.",
@@ -89,13 +98,13 @@ impl Tool for EditTool {
             ),
         };
 
-        let new_content = format!("{}{}{}", &content[..start], new_str, &content[end..]);
+        let new_content = format!("{}{}{}", &content[..start], effective_new_str, &content[end..]);
         tokio::fs::write(&path, &new_content)
             .await
             .with_context(|| format!("Failed to write file: {}", path.display()))?;
 
         let old_lines = old_str.lines().count();
-        let new_lines = new_str.lines().count();
+        let new_lines = effective_new_str.lines().count();
         let lines_changed = old_lines.max(new_lines);
 
         Ok(ToolOutput {
@@ -126,21 +135,32 @@ pub(crate) enum FindError {
 }
 
 /// Try to find the unique byte range `[start, end)` in `content` where `needle`
-/// should be replaced.  Three passes are attempted in order:
+/// should be replaced, and compute the effective replacement text.
+///
+/// Returns `(start, end, effective_new_str)` on success, where `effective_new_str`
+/// equals `new_str` for passes 1–3, but may have leading indentation re-applied
+/// for passes 4–5 when the LLM stripped the code's leading whitespace.
+///
+/// Five passes are attempted in order:
 ///
 /// 1. **Exact** – raw substring search.
-/// 2. **CRLF-normalised** – strip `\r` from both sides, then map the match
-///    position back to the original bytes via character-level tracking.
-/// 3. **Trailing-whitespace-stripped** – strip trailing spaces/tabs from every
-///    line in both sides, find the match by line number, then return the
-///    corresponding span in the original (including original trailing whitespace
-///    so it is replaced cleanly).
-pub(crate) fn find_replacement_range(content: &str, needle: &str) -> Result<(usize, usize), FindError> {
+/// 2. **CRLF-normalised** – strip `\r` from both sides, then map back to original bytes.
+/// 3. **Trailing-whitespace-stripped** – strip trailing spaces/tabs from every line.
+/// 4. **Leading-whitespace-stripped** – strip leading spaces/tabs from every line.
+///    The indentation of the first matched line is re-applied to every line of `new_str`.
+/// 5. **Collapsed-whitespace** – collapse ALL whitespace runs (leading, trailing,
+///    internal) to single spaces for comparison, then replace whole lines.
+///    Handles tabs-vs-spaces, multiple spaces, and mixed indentation differences.
+pub(crate) fn find_replacement_range(
+    content: &str,
+    needle: &str,
+    new_str: &str,
+) -> Result<(usize, usize, String), FindError> {
     // ── Pass 1: exact ────────────────────────────────────────────────────────
     let exact_count = content.matches(needle).count();
     if exact_count == 1 {
         let start = content.find(needle).unwrap();
-        return Ok((start, start + needle.len()));
+        return Ok((start, start + needle.len(), new_str.to_string()));
     }
     if exact_count > 1 {
         return Err(FindError::MultipleMatches(exact_count));
@@ -153,17 +173,15 @@ pub(crate) fn find_replacement_range(content: &str, needle: &str) -> Result<(usi
     if crlf_count == 1 {
         let norm_start = norm_content.find(norm_needle.as_str()).unwrap();
         let norm_end   = norm_start + norm_needle.len();
-        // Map normalised byte offsets back to positions in the original string.
         let start = norm_to_orig_byte(content, norm_start);
         let end   = norm_to_orig_byte(content, norm_end);
-        return Ok((start, end));
+        return Ok((start, end, new_str.to_string()));
     }
     if crlf_count > 1 {
         return Err(FindError::MultipleMatches(crlf_count));
     }
 
     // ── Pass 3: trailing-whitespace stripping ────────────────────────────────
-    // Normalise both sides: strip_cr first so .lines() sees clean \n endings.
     let ws_content = strip_trailing_ws(&norm_content);
     let ws_needle  = strip_trailing_ws(&norm_needle);
     if ws_needle.is_empty() {
@@ -172,17 +190,100 @@ pub(crate) fn find_replacement_range(content: &str, needle: &str) -> Result<(usi
     let ws_count = ws_content.matches(ws_needle.as_str()).count();
     if ws_count == 1 {
         let ws_start = ws_content.find(ws_needle.as_str()).unwrap();
-        // Determine which lines of the normalised (CRLF-stripped) content are covered.
         let start_line = ws_content[..ws_start].chars().filter(|&c| c == '\n').count();
         let needle_line_count = ws_needle.lines().count();
-        let end_line = start_line + needle_line_count; // first line NOT in the match
-
+        let end_line = start_line + needle_line_count;
         let orig_start = byte_offset_of_line(content, start_line);
         let orig_end   = byte_offset_of_line(content, end_line);
-        return Ok((orig_start, orig_end));
+        return Ok((orig_start, orig_end, new_str.to_string()));
     }
     if ws_count > 1 {
         return Err(FindError::MultipleMatches(ws_count));
+    }
+
+    // ── Pass 4: leading-whitespace stripping ─────────────────────────────────
+    // Handles LLMs that read line-numbered output (e.g. " 281  registry.register(...)")
+    // and accidentally strip the code's leading indentation from old_str/new_str.
+    // We compare trimmed lines; on a unique match we re-apply the original
+    // indentation of the first matched line to every line of new_str.
+    let content_lines: Vec<&str> = content.lines().collect();
+    let needle_lines_trimmed: Vec<&str> = needle.lines().map(str::trim_start).collect();
+    let n = needle_lines_trimmed.len();
+
+    if n > 0 && !needle_lines_trimmed.iter().all(|l| l.is_empty()) {
+        let mut lws_matches: Vec<usize> = Vec::new(); // start line indices
+        'outer: for start_idx in 0..=content_lines.len().saturating_sub(n) {
+            for i in 0..n {
+                let file_line = content_lines.get(start_idx + i).copied().unwrap_or("");
+                if file_line.trim_start() != needle_lines_trimmed[i] {
+                    continue 'outer;
+                }
+            }
+            lws_matches.push(start_idx);
+        }
+        match lws_matches.len() {
+            0 => {}
+            1 => {
+                let start_idx = lws_matches[0];
+                let orig_start = byte_offset_of_line(content, start_idx);
+                let orig_end   = byte_offset_of_line(content, start_idx + n);
+                // Detect indentation from the first matched line in the original file.
+                let indent = leading_ws(content_lines[start_idx]);
+                let effective_new = if indent.is_empty() {
+                    new_str.to_string()
+                } else {
+                    reindent_with(new_str, indent)
+                };
+                return Ok((orig_start, orig_end, effective_new));
+            }
+            count => return Err(FindError::MultipleMatches(count)),
+        }
+    }
+
+    // ── Pass 5: collapse-all-whitespace ──────────────────────────────────────
+    // Normalise every line by trimming and collapsing internal whitespace runs
+    // to a single space, then compare line-by-line. Because we always do whole-
+    // line replacements, partial-match ambiguity cannot arise. On a unique match
+    // the leading indent from the first matched file line is re-applied to new_str.
+    let needle_lines_collapsed: Vec<String> = needle
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let n5 = needle_lines_collapsed.len();
+
+    if n5 > 0 && needle_lines_collapsed.iter().any(|l| !l.is_empty()) {
+        let mut cws_matches: Vec<usize> = Vec::new();
+        'cws: for start_idx in 0..=content_lines.len().saturating_sub(n5) {
+            for i in 0..n5 {
+                let file_collapsed = content_lines
+                    .get(start_idx + i)
+                    .copied()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if file_collapsed != needle_lines_collapsed[i] {
+                    continue 'cws;
+                }
+            }
+            cws_matches.push(start_idx);
+        }
+        match cws_matches.len() {
+            0 => {}
+            1 => {
+                let start_idx = cws_matches[0];
+                let orig_start = byte_offset_of_line(content, start_idx);
+                let orig_end   = byte_offset_of_line(content, start_idx + n5);
+                let indent = leading_ws(content_lines[start_idx]);
+                let effective_new = if indent.is_empty() {
+                    new_str.to_string()
+                } else {
+                    reindent_with(new_str, indent)
+                };
+                return Ok((orig_start, orig_end, effective_new));
+            }
+            count => return Err(FindError::MultipleMatches(count)),
+        }
     }
 
     Err(FindError::NotFound)
@@ -234,6 +335,25 @@ pub(crate) fn byte_offset_of_line(s: &str, line_idx: usize) -> usize {
     s.len()
 }
 
+/// Extract leading whitespace (spaces/tabs) from a line.
+fn leading_ws(line: &str) -> &str {
+    let trimmed_len = line.trim_start().len();
+    &line[..line.len() - trimmed_len]
+}
+
+/// Prepend `indent` to every line of `s`, preserving the trailing newline if present.
+fn reindent_with(s: &str, indent: &str) -> String {
+    let mut result = s
+        .lines()
+        .map(|l| format!("{}{}", indent, l))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if s.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
@@ -250,7 +370,12 @@ mod tests {
     use super::*;
 
     fn check(content: &str, needle: &str) -> (usize, usize) {
-        find_replacement_range(content, needle).expect("should find match")
+        let (s, e, _) = find_replacement_range(content, needle, "").expect("should find match");
+        (s, e)
+    }
+
+    fn check_with_new(content: &str, needle: &str, new_str: &str) -> (usize, usize, String) {
+        find_replacement_range(content, needle, new_str).expect("should find match")
     }
 
     #[test]
@@ -291,7 +416,7 @@ mod tests {
     fn not_found_returns_err() {
         let c = "hello world\n";
         assert!(matches!(
-            find_replacement_range(c, "goodbye"),
+            find_replacement_range(c, "goodbye", ""),
             Err(FindError::NotFound)
         ));
     }
@@ -300,7 +425,7 @@ mod tests {
     fn multiple_matches_returns_err() {
         let c = "foo\nfoo\n";
         assert!(matches!(
-            find_replacement_range(c, "foo"),
+            find_replacement_range(c, "foo", ""),
             Err(FindError::MultipleMatches(2))
         ));
     }
@@ -313,6 +438,45 @@ mod tests {
         assert_eq!(byte_offset_of_line(s, 2), 4);
         assert_eq!(byte_offset_of_line(s, 3), 6);
         assert_eq!(byte_offset_of_line(s, 99), 6); // beyond end → len
+    }
+
+    #[test]
+    fn leading_whitespace_stripped_match() {
+        // Simulates LLM reading "281  registry.register(A);\n282  registry.register(B);"
+        // and writing old_str without the 4-space code indentation.
+        let c = "fn setup() {\n    registry.register(A);\n    registry.register(B);\n}\n";
+        let needle = "registry.register(A);\nregistry.register(B);\n"; // no leading spaces
+        let new_str = "registry.register(A);\nregistry.register(C);\n"; // no leading spaces
+        let (s, e, effective) = check_with_new(c, needle, new_str);
+        // Should span both register lines including their indentation
+        assert_eq!(&c[s..e], "    registry.register(A);\n    registry.register(B);\n");
+        // new_str should have the 4-space indent re-applied to each line
+        assert_eq!(effective, "    registry.register(A);\n    registry.register(C);\n");
+    }
+
+    #[test]
+    fn leading_whitespace_match_preserves_relative_indent() {
+        // The LLM drops the common 4-space indent but keeps relative indent within the block.
+        let c = "    fn foo() {\n        let x = 1;\n    }\n";
+        let needle = "fn foo() {\n    let x = 1;\n}\n"; // 4-space common indent dropped
+        let new_str = "fn foo() {\n    let x = 2;\n}\n";
+        let (s, e, effective) = check_with_new(c, needle, new_str);
+        assert_eq!(&c[s..e], "    fn foo() {\n        let x = 1;\n    }\n");
+        assert_eq!(effective, "    fn foo() {\n        let x = 2;\n    }\n");
+    }
+
+    #[test]
+    fn collapsed_whitespace_match() {
+        // File uses tab indentation AND has extra internal spaces (e.g. formatted alignment).
+        // LLM wrote spaces for indent and single spaces internally — both differ from file.
+        let c = "\tlet  x  =  1;\n\tlet  y  =  2;\n";
+        let needle = "let x = 1;\nlet y = 2;\n"; // spaces for indent, single internal spaces
+        let new_str = "let x = 1;\nlet y = 99;\n";
+        let (s, e, effective) = check_with_new(c, needle, new_str);
+        // Should span both original lines (with tabs and extra spaces)
+        assert_eq!(&c[s..e], "\tlet  x  =  1;\n\tlet  y  =  2;\n");
+        // new_str should get the tab indent re-applied from the first matched line
+        assert_eq!(effective, "\tlet x = 1;\n\tlet y = 99;\n");
     }
 }
 
