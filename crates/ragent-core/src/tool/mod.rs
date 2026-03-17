@@ -37,6 +37,7 @@ pub mod todo;
 pub mod webfetch;
 pub mod websearch;
 pub mod write;
+pub mod file_ops_tool;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

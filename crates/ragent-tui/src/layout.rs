@@ -14,6 +14,8 @@ use ratatui::{
     },
 };
 
+use crate::layout_active_agents::render_active_agents_subpanel;
+
 use ragent_core::message::{MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
@@ -1013,13 +1015,29 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Reserve 8 rows at the bottom for the active-agents subpanel.
+    // The log content gets the remaining height above it.
+    const AGENT_PANEL_HEIGHT: u16 = 8;
+    let (log_inner, agent_area_opt) = if inner.height > AGENT_PANEL_HEIGHT + 1 {
+        let log_h = inner.height - AGENT_PANEL_HEIGHT;
+        (
+            Rect { height: log_h, ..inner },
+            Some(Rect { y: inner.y + log_h, height: AGENT_PANEL_HEIGHT, ..inner }),
+        )
+    } else {
+        (inner, None)
+    };
+
     if app.log_entries.is_empty() {
         app.log_max_scroll = 0;
         let empty = Paragraph::new(Line::from(Span::styled(
             "No log entries yet",
             Style::default().fg(Color::DarkGray),
         )));
-        frame.render_widget(empty, inner);
+        frame.render_widget(empty, log_inner);
+        if let Some(agent_area) = agent_area_opt {
+            render_active_agents_subpanel(frame, app, agent_area);
+        }
         return;
     }
 
@@ -1065,15 +1083,15 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Use the rendered (wrapped) line count so the scroll reaches the true
     // bottom. `line_count(width)` accounts for word-wrapping; `lines.len()`
     // only counts logical lines and under-scrolls when entries are long.
-    let total_lines = paragraph.line_count(inner.width) as u16;
-    let visible_height = inner.height;
+    let total_lines = paragraph.line_count(log_inner.width) as u16;
+    let visible_height = log_inner.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
     app.log_max_scroll = max_scroll;
     let scroll = app.log_scroll_offset.min(max_scroll);
 
     let paragraph = paragraph.scroll((max_scroll.saturating_sub(scroll), 0));
 
-    frame.render_widget(paragraph, inner);
+    frame.render_widget(paragraph, log_inner);
 
     // Render scrollbar when content overflows
     if total_lines > visible_height {
@@ -1082,9 +1100,15 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             ScrollbarState::new(max_scroll as usize).position(scroll_position);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
+    }
+
+    // Render active-agents subpanel in the reserved bottom area
+    if let Some(agent_area) = agent_area_opt {
+        render_active_agents_subpanel(frame, app, agent_area);
     }
 }
+
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let session_display = app

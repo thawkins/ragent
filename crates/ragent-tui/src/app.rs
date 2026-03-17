@@ -538,6 +538,10 @@ pub struct App {
     pub message_max_scroll: u16,
     /// Maximum scroll value for the log pane (set during render).
     pub log_max_scroll: u16,
+    /// Scroll offset for the active-agents subpanel (lines from top).
+    pub active_agents_scroll_offset: u16,
+    /// Maximum scroll value for the active-agents subpanel (set during render).
+    pub active_agents_max_scroll: u16,
     /// Active scrollbar drag, if any.
     pub scrollbar_drag: Option<ScrollbarDragPane>,
     /// Active text selection, if any.
@@ -693,6 +697,8 @@ impl App {
             log_area: Rect::default(),
             message_max_scroll: 0,
             log_max_scroll: 0,
+            active_agents_scroll_offset: 0,
+            active_agents_max_scroll: 0,
             scrollbar_drag: None,
             text_selection: None,
             message_content_lines: Vec::new(),

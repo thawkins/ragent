@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::file_ops::{apply_batch_edits, CommitResult};
+
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
 ///

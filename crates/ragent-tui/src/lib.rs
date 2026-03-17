@@ -7,6 +7,7 @@
 pub mod app;
 pub mod input;
 pub mod layout;
+pub mod layout_active_agents;
 pub mod logo;
 pub mod tips;
 pub mod widgets;

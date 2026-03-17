@@ -15,6 +15,11 @@ use tokio::fs::OpenOptions;
 use uuid::Uuid;
 use std::fs as stdfs;
 
+pub mod wrapper;
+mod api;
+pub use api::apply_batch_edits;
+
+
 /// Result of reading a single file.
 pub struct FileReadResult {
     pub path: PathBuf,
