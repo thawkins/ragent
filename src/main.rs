@@ -286,6 +286,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Serve { addr }) => {
             let auth_token = uuid::Uuid::new_v4().to_string();
+            let orchestrator_registry = ragent_core::orchestrator::AgentRegistry::new();
+            let coordinator = ragent_core::orchestrator::Coordinator::new(orchestrator_registry);
+
             let state = ragent_server::routes::AppState {
                 event_bus,
                 config,
@@ -293,6 +296,7 @@ async fn main() -> Result<()> {
                 session_processor,
                 auth_token,
                 rate_limiter: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                coordinator: Some(coordinator),
             };
             ragent_server::start_server(&addr, state).await?;
         }

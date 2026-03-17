@@ -51,6 +51,8 @@ pub struct AppState {
     pub auth_token: String,
     /// Per-client rate limiter tracking request counts and window timestamps.
     pub rate_limiter: Arc<std::sync::Mutex<HashMap<String, (u32, Instant)>>>,
+    /// Optional in-process coordinator for orchestration features.
+    pub coordinator: Option<ragent_core::orchestrator::Coordinator>,
 }
 
 /// Bind to `addr` and serve the ragent HTTP/SSE API.
@@ -109,6 +111,10 @@ pub fn router(state: AppState) -> Router {
             get(get_task).delete(cancel_task),
         )
         .route("/events", get(events_stream))
+        // Orchestration endpoints (Milestone 3 — Task 3.1)
+        .route("/orchestrator/metrics", get(orch_metrics))
+        .route("/orchestrator/start", post(orch_start))
+        .route("/orchestrator/jobs/{id}", get(orch_job))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -404,6 +410,97 @@ async fn events_stream(
         }
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+// ── Orchestration (Milestone 3) ───────────────────────────────────
+
+/// Request body for `POST /orchestrator/start`.
+#[derive(Deserialize)]
+struct OrchestrateRequest {
+    /// Optional job id; a UUID is generated when absent.
+    id: Option<String>,
+    /// Capability tags used to match agents for the job.
+    required_capabilities: Vec<String>,
+    /// Payload forwarded verbatim to every matched agent.
+    payload: String,
+    /// `"sync"` waits for all agents; `"async"` (default) returns immediately.
+    mode: Option<String>,
+}
+
+/// `GET /orchestrator/metrics` — return live counter snapshot.
+async fn orch_metrics(
+    State(state): State<AppState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match &state.coordinator {
+        Some(c) => {
+            let snap = c.metrics_snapshot();
+            serialize_response(snap, "orch_metrics")
+        }
+        None => error_response(StatusCode::SERVICE_UNAVAILABLE, "orchestrator not enabled"),
+    }
+}
+
+/// `POST /orchestrator/start` — start a multi-agent job.
+async fn orch_start(
+    State(state): State<AppState>,
+    Json(body): Json<OrchestrateRequest>,
+) -> impl IntoResponse {
+    let coord = match &state.coordinator {
+        Some(c) => c.clone(),
+        None => {
+            return error_response(StatusCode::SERVICE_UNAVAILABLE, "orchestrator not enabled")
+                .into_response();
+        }
+    };
+
+    let job_id = body.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let desc = ragent_core::orchestrator::JobDescriptor {
+        id: job_id.clone(),
+        required_capabilities: body.required_capabilities,
+        payload: body.payload,
+    };
+
+    let mode = body.mode.unwrap_or_else(|| "async".to_string());
+    if mode == "sync" {
+        match coord.start_job_sync(desc).await {
+            Ok(result) => (
+                StatusCode::OK,
+                Json(serde_json::json!({ "job_id": job_id, "result": result })),
+            )
+                .into_response(),
+            Err(e) => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            }
+        }
+    } else {
+        match coord.start_job_async(desc).await {
+            Ok(id) => (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({ "job_id": id })),
+            )
+                .into_response(),
+            Err(e) => {
+                error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+            }
+        }
+    }
+}
+
+/// `GET /orchestrator/jobs/{id}` — poll job status / result.
+async fn orch_job(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    match &state.coordinator {
+        Some(c) => match c.get_job_result(&id).await {
+            Some((status, result)) => (
+                StatusCode::OK,
+                Json(serde_json::json!({ "id": id, "status": status, "result": result })),
+            ),
+            None => error_response(StatusCode::NOT_FOUND, "job not found"),
+        },
+        None => error_response(StatusCode::SERVICE_UNAVAILABLE, "orchestrator not enabled"),
+    }
 }
 
 // ── Task Endpoints ────────────────────────────────────────────────

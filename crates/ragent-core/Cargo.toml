@@ -42,3 +42,7 @@ lopdf = { workspace = true }
 serde_yaml = { workspace = true }
 lsp-types = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
