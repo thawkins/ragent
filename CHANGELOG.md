@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Milestone 5 — Multi-agent orchestration hardening** (F6 extensions)
+  - **Pluggable transport** — `HttpRouter` routes jobs to remote agents via HTTP POST; `RouterComposite` chains multiple routers with first-success fallback
+  - **Leader election** — `LeaderElector` provides vote-based in-process leader election with deterministic tie-breaking and `LeaderEvent` broadcast; `CoordinatorCluster` routes jobs to the elected leader node
+  - **Policy-based conflict resolution** — `ConflictResolver` wraps any `ConflictPolicy` variant (`Concat`, `FirstSuccess`, `LastResponse`, `Consensus{threshold}`, `HumanReview`); `HumanFallback` trait with `LoggingFallback` default
+  - `Coordinator::with_policy()` consuming builder wires a `ConflictResolver` into `start_job_sync`
+  - 41 new tests across `test_orchestrator_transport.rs`, `test_orchestrator_leader.rs`, `test_orchestrator_policy.rs`
+  - SPEC.md and QUICKSTART.md updated with M5 API reference and examples
+
 ## [0.1.0-alpha.15] - 2026-03-18
 
 ### Added

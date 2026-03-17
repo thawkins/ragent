@@ -2752,9 +2752,33 @@ The `ragent-core` crate provides a full multi-agent orchestration layer. Multipl
 
 | Method | Description |
 |---|---|
-| `start_job_sync(desc)` | Fan-out to all matched agents; await all responses; concatenate |
+| `start_job_sync(desc)` | Fan-out to all matched agents; await all responses; apply `ConflictPolicy` |
 | `start_job_first_success(desc)` | Try agents in order; return first non-error response; skip timeouts |
 | `start_job_async(desc)` | Fire-and-forget; returns `job_id`; poll via `get_job_result(id)` or subscribe via `subscribe_job_events(id)` |
+
+**Pluggable transport (M5):**
+
+| Type | Description |
+|---|---|
+| `HttpRouter` | Routes jobs to remote agents via HTTP POST; configurable `base_url` per agent |
+| `RouterComposite` | Chains multiple routers; tries each in order, returning the first success |
+
+**Leader election (M5):**
+
+| Type | Description |
+|---|---|
+| `LeaderElector` | Vote-based in-process election; deterministic tie-breaking; broadcasts `LeaderEvent` on change |
+| `CoordinatorCluster` | Manages a set of `Coordinator` nodes; routes jobs to the elected leader |
+
+**Policy-based conflict resolution (M5):**
+
+| Policy | Description |
+|---|---|
+| `Concat` | Concatenate all agent responses (default) |
+| `FirstSuccess` | Return the first response that does not start with `"error:"` |
+| `LastResponse` | Return the final agent's response |
+| `Consensus{threshold}` | Return response that appears ≥ threshold times; otherwise returns all with `[no consensus]` |
+| `HumanReview` | Delegate to a `HumanFallback` impl; default `LoggingFallback` logs and returns formatted results |
 
 **HTTP API (ragent-server):**
 
@@ -2768,6 +2792,7 @@ The `ragent-core` crate provides a full multi-agent orchestration layer. Multipl
 
 ```rust
 use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
+use ragent_core::orchestrator::policy::{ConflictPolicy, ConflictResolver};
 use futures::future::FutureExt;
 use std::sync::Arc;
 
@@ -2775,7 +2800,8 @@ let registry = AgentRegistry::new();
 let r: Responder = Arc::new(|p| async move { format!("handled: {}", p) }.boxed());
 registry.register("my-agent", vec!["search".to_string()], Some(r)).await;
 
-let coord = Coordinator::new(registry);
+let coord = Coordinator::new(registry)
+    .with_policy(ConflictResolver::new(ConflictPolicy::FirstSuccess));
 let result = coord.start_job_sync(JobDescriptor {
     id: "job-1".to_string(),
     required_capabilities: vec!["search".to_string()],
@@ -3823,7 +3849,7 @@ A built-in mock server (feature-gated behind `#[cfg(test)]`) replays canned LLM 
 | F14 | Background agents | Run multiple agent instances concurrently for parallel task execution | ✅ |
 | F15 | Marketplace | Community hub for sharing and discovering custom agents, skills, and rule sets | ❌ |
 | F16 | API configuration profiles | Named profiles for different API providers/models, switchable per agent or session | ❌ |
-| F17 | Concurrent file operations | Parallel file reads and edits for faster multi-file workflows | ❌ |
+| F17 | Concurrent file operations | Parallel file reads and edits for| F17 | Concurrent file operations | Parallel file reads and edits for faster multi-file workflows | ❌ | faster multi-file workflows | ❌ |
 | F18 | Model temperature control | Per-session or per-agent temperature override exposed in TUI settings | ❌ |
 | F19 | Agent import/export | Export agent definitions (including rules) to portable YAML/JSON for team sharing | ❌ |
 | F20 | Custom tools (user-defined) | Define project-specific tools in a scripting language that ragent can invoke | ❌ |

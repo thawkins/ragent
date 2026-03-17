@@ -702,6 +702,7 @@ Type `/` in the input to open an autocomplete menu:
 
 ```rust
 use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
+use ragent_core::orchestrator::policy::{ConflictPolicy, ConflictResolver};
 use futures::future::FutureExt;
 use std::sync::Arc;
 
@@ -713,15 +714,16 @@ let r_b: Responder = Arc::new(|p| async move { format!("B: {}", p) }.boxed());
 registry.register("agent-a", vec!["search".to_string()], Some(r_a)).await;
 registry.register("agent-b", vec!["search".to_string()], Some(r_b)).await;
 
-let coord = Coordinator::new(registry);
+// Apply a conflict resolution policy (optional; default is Concat).
+let coord = Coordinator::new(registry)
+    .with_policy(ConflictResolver::new(ConflictPolicy::FirstSuccess));
 
-// Sync: fan-out to all matching agents, aggregate responses.
+// Sync: fan-out to all matching agents, aggregate per policy.
 let result = coord.start_job_sync(JobDescriptor {
     id: "job-1".to_string(),
     required_capabilities: vec!["search".to_string()],
     payload: "find TODOs".to_string(),
 }).await?;
-println!("{}", result);  // "--- agent: agent-a ---\nA: find TODOs\n..."
 
 // Async: returns immediately; poll for status.
 let job_id = coord.start_job_async(JobDescriptor { ... }).await?;
@@ -731,6 +733,52 @@ let (status, result) = coord.get_job_result(&job_id).await.unwrap();
 Run the complete example with:
 ```sh
 cargo run -p ragent-core --example orchestration
+```
+
+### Conflict resolution policies
+
+| Policy | Behaviour |
+|---|---|
+| `Concat` | Concatenate all responses (default) |
+| `FirstSuccess` | Return the first response that doesn't start with `"error:"` |
+| `LastResponse` | Return only the final agent's response |
+| `Consensus{threshold}` | Return a response that appears ≥ N times; otherwise return all with `[no consensus]` |
+| `HumanReview` | Delegate to a `HumanFallback` impl (`LoggingFallback` by default) |
+
+### Remote agents via pluggable transport
+
+```rust
+use ragent_core::orchestrator::transport::{HttpRouter, RemoteAgentDescriptor, RouterComposite};
+
+let mut http_router = HttpRouter::new();
+http_router.register(RemoteAgentDescriptor {
+    agent_id: "remote-search".to_string(),
+    base_url: "http://search-service:8080".to_string(),
+    capabilities: vec!["search".to_string()],
+});
+
+// Chain: try local router first, fall back to remote.
+let local = InProcessRouter::new(registry.clone());
+let composite = RouterComposite::new(vec![
+    Arc::new(local),
+    Arc::new(http_router),
+]);
+let coord = Coordinator::with_router(registry, Arc::new(composite));
+```
+
+### Leader election for distributed coordinators
+
+```rust
+use ragent_core::orchestrator::leader::{CoordinatorCluster, LeaderElector};
+
+let elector = LeaderElector::new(3); // quorum size
+let cluster = CoordinatorCluster::new(elector);
+
+cluster.add("node-1", Coordinator::new(registry_a)).await;
+cluster.add("node-2", Coordinator::new(registry_b)).await;
+
+cluster.elect("node-1").await;  // elect node-1 as leader
+cluster.start_job(desc).await?; // routes to elected leader
 ```
 
 ### HTTP API

@@ -34,3 +34,4 @@ pub mod storage;
 pub mod task;
 pub mod orchestrator;
 pub mod tool;
+pub mod file_ops;

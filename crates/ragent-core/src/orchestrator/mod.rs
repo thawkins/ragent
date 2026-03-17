@@ -3,6 +3,15 @@
 //! Provides an in-process AgentRegistry, an InProcessRouter (actor-style
 //! inboxes), and a Coordinator that can start jobs synchronously and
 //! asynchronously with basic negotiation and aggregation strategies.
+//!
+//! ## Submodules (Milestone 5 extensions)
+//! - [`transport`] — pluggable transport adapters (HttpRouter, RouterComposite)
+//! - [`leader`]    — in-process leader election and CoordinatorCluster
+//! - [`policy`]    — conflict resolution policies and human-in-the-loop fallbacks
+
+pub mod transport;
+pub mod leader;
+pub mod policy;
 
 use anyhow::Result;
 use futures::future::BoxFuture;
@@ -259,6 +268,8 @@ pub struct Coordinator {
     router: Arc<dyn Router>,
     jobs: Arc<RwLock<HashMap<String, JobEntry>>>,
     metrics: Arc<Metrics>,
+    /// Optional conflict-resolution policy applied by `start_job_sync`.
+    policy: Option<Arc<policy::ConflictResolver>>,
 }
 
 impl Coordinator {
@@ -283,12 +294,12 @@ impl Coordinator {
     /// Default constructor using InProcessRouter.
     pub fn new(registry: AgentRegistry) -> Self {
         let router = Arc::new(InProcessRouter::new(registry.clone()));
-        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()) }
+        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()), policy: None }
     }
 
     /// Constructor that accepts a custom Router implementation.
     pub fn with_router(registry: AgentRegistry, router: Arc<dyn Router>) -> Self {
-        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()) }
+        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()), policy: None }
     }
 
     /// Constructor that sets a custom per-request timeout on the default InProcessRouter.
@@ -296,7 +307,15 @@ impl Coordinator {
         let mut r = InProcessRouter::new(registry.clone());
         r.request_timeout = timeout;
         let router: Arc<dyn Router> = Arc::new(r);
-        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()) }
+        Self { registry, router, jobs: Arc::new(RwLock::new(HashMap::new())), metrics: Arc::new(Metrics::new()), policy: None }
+    }
+
+    /// Attach a [`policy::ConflictResolver`] to this coordinator.  When set,
+    /// `start_job_sync` applies the policy to agent responses instead of
+    /// concatenating them directly.
+    pub fn with_policy(mut self, resolver: policy::ConflictResolver) -> Self {
+        self.policy = Some(Arc::new(resolver));
+        self
     }
 
     /// Start a job synchronously: match agents, send the payload to each matched
@@ -325,11 +344,11 @@ impl Coordinator {
         }
 
         // Collect responses
-        let mut parts = Vec::new();
+        let mut responses: Vec<(String, String)> = Vec::new();
         for h in handles {
             match h.await? {
                 Ok((agent_id, resp)) => {
-                    parts.push(format!("--- agent: {} ---\n{}", agent_id, resp));
+                    responses.push((agent_id, resp));
                 }
                 Err(e) => {
                     let err_str = e.to_string();
@@ -338,14 +357,26 @@ impl Coordinator {
                     } else {
                         self.metrics.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
-                    parts.push(format!("--- agent error: {} ---\n{}", err_str, ""));
                 }
             }
         }
 
         self.metrics.active_jobs.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         self.metrics.completed_jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(parts.join("\n"))
+
+        // Apply conflict-resolution policy if configured; otherwise concatenate.
+        if let Some(resolver) = &self.policy {
+            resolver.resolve(&desc.id, &responses).map_err(|e| {
+                self.metrics.errors.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                e
+            })
+        } else {
+            let parts: Vec<String> = responses
+                .into_iter()
+                .map(|(id, resp)| format!("--- agent: {} ---\n{}", id, resp))
+                .collect();
+            Ok(parts.join("\n"))
+        }
     }
 
     /// Start a job using the "first-success" strategy: try matched agents in
