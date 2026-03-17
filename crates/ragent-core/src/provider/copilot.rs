@@ -241,6 +241,18 @@ impl Provider for CopilotProvider {
         };
         Ok(Box::new(client))
     }
+
+    /// Returns the detected Copilot plan label (e.g. `"Pro"`, `"Business"`) from
+    /// the cached session token, or `None` if no session token has been exchanged yet.
+    ///
+    /// The plan is inferred from the plan-specific API base URL embedded in the
+    /// Copilot token exchange response (e.g. `api.individual.githubcopilot.com`).
+    async fn fetch_usage(&self, _api_key: &str) -> Option<crate::provider::UsageInfo> {
+        Some(crate::provider::UsageInfo {
+            plan: cached_copilot_plan(),
+            percent: None,
+        })
+    }
 }
 
 /// HTTP client for the GitHub Copilot API with streaming SSE support.
@@ -279,10 +291,15 @@ impl CopilotClient {
                                 "type": "text",
                                 "text": text
                             })),
+                            ContentPart::ImageUrl { url } => Some(json!({
+                                "type": "image_url",
+                                "image_url": { "url": url }
+                            })),
                             ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
                         })
                         .collect();
-                    if content_parts.len() == 1 {
+                    if content_parts.len() == 1 && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+                        // Single plain-text part — collapse to a bare string for compatibility.
                         content_parts[0]["text"].clone()
                     } else {
                         json!(content_parts)
@@ -1190,6 +1207,48 @@ pub async fn discover_copilot_api_base(github_token: &str) -> Option<String> {
         .map(|u| u.trim_end_matches('/').to_string());
     tracing::debug!(api_base = ?result, "copilot API base discovery result");
     result
+}
+
+/// Infers the Copilot plan label from a plan-specific API base URL.
+///
+/// GitHub Copilot's token exchange returns plan-scoped API endpoints whose
+/// hostnames encode the plan tier, e.g. `api.individual.githubcopilot.com`.
+fn plan_label_from_api_base(api_base: &str) -> String {
+    if api_base.contains("individual") {
+        "Pro".to_string()
+    } else if api_base.contains("business") {
+        "Business".to_string()
+    } else if api_base.contains("enterprise") {
+        "Enterprise".to_string()
+    } else if api_base.contains("free") {
+        "Free".to_string()
+    } else {
+        "Copilot".to_string()
+    }
+}
+
+/// Returns the detected Copilot plan label from the cached session token.
+///
+/// After the first successful token exchange the plan-specific API base URL
+/// is cached in [`SESSION_TOKEN_CACHE`].  This function reads that cache
+/// synchronously and infers the plan from the hostname
+/// (e.g. `api.individual.githubcopilot.com` → `"Pro"`).  Returns `None`
+/// before any session token has been exchanged.
+///
+/// # Examples
+///
+/// ```no_run
+/// use ragent_core::provider::copilot::cached_copilot_plan;
+///
+/// if let Some(plan) = cached_copilot_plan() {
+///     println!("Copilot plan: {plan}");
+/// }
+/// ```
+pub fn cached_copilot_plan() -> Option<String> {
+    let cache = SESSION_TOKEN_CACHE.lock().unwrap();
+    let cached = cache.as_ref()?;
+    let api_base = cached.api_base.as_deref()?;
+    Some(plan_label_from_api_base(api_base))
 }
 
 /// Fetches the list of available Copilot models dynamically from the API.

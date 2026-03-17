@@ -126,6 +126,10 @@ impl OpenAiClient {
                                 "type": "text",
                                 "text": text
                             })),
+                            ContentPart::ImageUrl { url } => Some(json!({
+                                "type": "image_url",
+                                "image_url": { "url": url }
+                            })),
                             ContentPart::ToolResult {
                                 tool_use_id: _,
                                 content: _,

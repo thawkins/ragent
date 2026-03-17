@@ -116,6 +116,17 @@ pub enum MessagePart {
         /// The reasoning text.
         text: String,
     },
+    /// An image attachment (e.g. pasted from clipboard via Alt+V).
+    ///
+    /// The image data is read from `path` at send time and base64-encoded for
+    /// the LLM API. Storing the path rather than raw bytes keeps the session
+    /// database small.
+    Image {
+        /// MIME type, e.g. `"image/png"`.
+        mime_type: String,
+        /// Absolute path to the image file on disk.
+        path: std::path::PathBuf,
+    },
 }
 
 /// A single message in a conversation session.

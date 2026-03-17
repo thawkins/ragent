@@ -122,7 +122,7 @@ pub enum ChatContent {
 
 /// A typed content block within a [`ChatMessage`].
 ///
-/// Variants cover plain text, tool invocations, and tool results.
+/// Variants cover plain text, tool invocations, tool results, and images.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentPart {
@@ -147,6 +147,11 @@ pub enum ContentPart {
         tool_use_id: String,
         /// The tool's output as a string.
         content: String,
+    },
+    /// An image specified as a URL or `data:` URI.
+    ImageUrl {
+        /// The image URL or `data:image/png;base64,...` data URI.
+        url: String,
     },
 }
 

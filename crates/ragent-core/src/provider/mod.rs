@@ -45,6 +45,17 @@ pub struct ProviderInfo {
     pub models: Vec<ModelInfo>,
 }
 
+/// Plan-based usage information returned by [`Provider::fetch_usage`].
+#[derive(Debug, Clone)]
+pub struct UsageInfo {
+    /// Human-readable plan or tier label (e.g. `"Pro"`, `"Free"`, `"Business"`).
+    /// `None` if the provider does not expose plan information.
+    pub plan: Option<String>,
+    /// Usage as a percentage of the plan's quota (0.0–100.0).
+    /// `None` if the provider cannot determine quota usage.
+    pub percent: Option<f32>,
+}
+
 /// Trait for LLM provider backends.
 ///
 /// Implementors supply model metadata and can construct an [`LlmClient`] for
@@ -68,6 +79,29 @@ pub trait Provider: Send + Sync {
         base_url: Option<&str>,
         options: &HashMap<String, serde_json::Value>,
     ) -> Result<Box<dyn LlmClient>>;
+
+    /// Returns plan and quota usage information for the current API key.
+    ///
+    /// Providers that do not expose plan information return `None`. The default
+    /// implementation always returns `None`; providers override this to surface
+    /// plan labels and quota percentages.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::provider::copilot::CopilotProvider;
+    /// # use ragent_core::provider::Provider;
+    /// # async fn example() {
+    /// let provider = CopilotProvider::new();
+    /// if let Some(info) = provider.fetch_usage("ghu_xxx").await {
+    ///     println!("Plan: {:?}, Usage: {:?}%", info.plan, info.percent);
+    /// }
+    /// # }
+    /// ```
+    async fn fetch_usage(&self, api_key: &str) -> Option<UsageInfo> {
+        let _ = api_key;
+        None
+    }
 }
 
 /// Registry that holds all available [`Provider`] implementations and supports

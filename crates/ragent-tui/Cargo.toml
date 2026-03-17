@@ -21,6 +21,7 @@ futures = { workspace = true }
 chrono = { workspace = true }
 rand = { workspace = true }
 arboard = { workspace = true }
+image = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }

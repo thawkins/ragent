@@ -88,6 +88,9 @@ pub async fn run_tui(
     );
     app.check_provider_health();
 
+    // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
+    let mut bus_rx = event_bus.subscribe();
+
     // ── LSP startup ───────────────────────────────────────────────────────────
     // Create the LspManager, start configured servers, and wire events into
     // the app. This runs asynchronously; status changes propagate via events.
@@ -116,8 +119,6 @@ pub async fn run_tui(
             tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
         }
     }
-
-    let mut bus_rx = event_bus.subscribe();
 
     while app.is_running {
         // Drain ALL pending bus events before rendering so the screen

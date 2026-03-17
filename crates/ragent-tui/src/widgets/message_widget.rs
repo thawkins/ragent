@@ -343,7 +343,7 @@ pub(crate) fn tool_result_summary(
 pub struct MessageWidget<'a> {
     message: &'a Message,
     cwd: &'a str,
-    tool_step_map: &'a std::collections::HashMap<String, u32>,
+    tool_step_map: &'a std::collections::HashMap<String, (String, u32)>,
 }
 
 impl<'a> MessageWidget<'a> {
@@ -353,7 +353,7 @@ impl<'a> MessageWidget<'a> {
     ///
     /// * `message` - The message to render.
     /// * `cwd` - Current working directory, used to make file paths relative.
-    /// * `tool_step_map` - Mapping from tool call IDs to step numbers.
+    /// * `tool_step_map` - Mapping from tool call IDs to `(short_session_id, step_number)`.
     ///
     /// # Examples
     ///
@@ -370,7 +370,7 @@ impl<'a> MessageWidget<'a> {
     /// let map = HashMap::new();
     /// let widget = MessageWidget::new(&msg, "/home/user/project", &map);
     /// ```
-    pub fn new(message: &'a Message, cwd: &'a str, tool_step_map: &'a std::collections::HashMap<String, u32>) -> Self {
+    pub fn new(message: &'a Message, cwd: &'a str, tool_step_map: &'a std::collections::HashMap<String, (String, u32)>) -> Self {
         Self { message, cwd, tool_step_map }
     }
 
@@ -415,7 +415,7 @@ impl<'a> MessageWidget<'a> {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|s| format!("[#{}] ", s))
+                        .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
@@ -521,6 +521,16 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::ITALIC),
                         )));
                     }
+                }
+                MessagePart::Image { path, .. } => {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("image");
+                    lines.push(Line::from(Span::styled(
+                        format!("  📎 [image: {}]", name),
+                        Style::default().fg(Color::Yellow),
+                    )));
                 }
             }
         }

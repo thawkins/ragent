@@ -14,6 +14,19 @@ use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::{ModelInfo, Provider};
 
+/// Extract the MIME type from a `data:<mime>;base64,<data>` URI.
+fn extract_mime_from_data_uri(uri: &str) -> Option<&str> {
+    uri.strip_prefix("data:")
+        .and_then(|s| s.split(';').next())
+}
+
+/// Extract the raw base64 payload from a `data:<mime>;base64,<data>` URI.
+fn extract_base64_from_data_uri(uri: &str) -> Option<&str> {
+    uri.find(",base64,")
+        .map(|i| &uri[i + 8..])
+        .or_else(|| uri.find(",").map(|i| &uri[i + 1..]))
+}
+
 /// Provider implementation for the Anthropic Claude API.
 pub struct AnthropicProvider;
 
@@ -131,6 +144,14 @@ impl AnthropicClient {
                                 "type": "tool_result",
                                 "tool_use_id": tool_use_id,
                                 "content": content
+                            }),
+                            ContentPart::ImageUrl { url } => json!({
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": extract_mime_from_data_uri(url).unwrap_or("image/png"),
+                                    "data": extract_base64_from_data_uri(url).unwrap_or(url.as_str())
+                                }
                             }),
                         })
                         .collect();

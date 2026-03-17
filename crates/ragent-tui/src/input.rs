@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, PROVIDER_LIST, ProviderSetupStep};
+use crate::app::{App, ContextAction, PROVIDER_LIST, ProviderSetupStep};
 
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
@@ -56,6 +56,20 @@ pub enum InputAction {
 /// # }
 /// ```
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
+    // If context menu is active, route all keys there.
+    if app.context_menu.is_some() {
+        handle_context_menu_key(app, key);
+        return None;
+    }
+
+    // If shortcuts panel is active, only Esc or '?' dismiss it.
+    if app.show_shortcuts {
+        if key.code == KeyCode::Esc || key.code == KeyCode::Char('?') {
+            app.show_shortcuts = false;
+        }
+        return None;
+    }
+
     // If provider setup dialog is active, route all keys there
     if app.provider_setup.is_some() {
         handle_provider_setup_key(app, key);
@@ -248,6 +262,16 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::Quit)
+        }
+        KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
+            // Alt+V: paste image from clipboard as a staged attachment.
+            app.paste_image_from_clipboard();
+            None
+        }
+        KeyCode::Char('?') if app.input.is_empty() => {
+            // Show keybindings help panel when '?' is typed on an empty input.
+            app.show_shortcuts = true;
+            None
         }
         KeyCode::Char(c) => {
             app.input.push(c);
@@ -888,6 +912,60 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) if c.is_ascii_digit() => {
             if let Some(ref mut state) = app.mcp_discover {
                 state.number_input.push(c);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key input when the right-click context menu is open.
+///
+/// Up/Down navigate items; Enter activates the highlighted item; Esc closes
+/// without acting; any other key is ignored.
+fn handle_context_menu_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.context_menu = None;
+        }
+
+        KeyCode::Up => {
+            if let Some(ref mut menu) = app.context_menu {
+                // Skip disabled items going upward.
+                let count = menu.items.len();
+                let mut idx = menu.selected;
+                for _ in 0..count {
+                    idx = (idx + count - 1) % count;
+                    if menu.items[idx].1 {
+                        menu.selected = idx;
+                        break;
+                    }
+                }
+            }
+        }
+
+        KeyCode::Down => {
+            if let Some(ref mut menu) = app.context_menu {
+                let count = menu.items.len();
+                let mut idx = menu.selected;
+                for _ in 0..count {
+                    idx = (idx + 1) % count;
+                    if menu.items[idx].1 {
+                        menu.selected = idx;
+                        break;
+                    }
+                }
+            }
+        }
+
+        KeyCode::Enter => {
+            if let Some(menu) = app.context_menu.clone() {
+                let (action, enabled): (ContextAction, bool) = menu.items[menu.selected];
+                if enabled {
+                    app.execute_context_action(action);
+                } else {
+                    app.context_menu = None;
+                }
             }
         }
 

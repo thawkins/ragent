@@ -17,7 +17,7 @@ use ratatui::{
 use ragent_core::message::{MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
-    App, LogLevel, PROVIDER_LIST, ProviderSetupStep, ScreenMode, SelectionPane,
+    App, ContextAction, LogLevel, PROVIDER_LIST, ProviderSetupStep, ScreenMode, SelectionPane,
 };
 use crate::logo;
 use crate::widgets::message_widget::{
@@ -154,6 +154,16 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     if app.mcp_discover.is_some() {
         render_mcp_discover_dialog(frame, app);
     }
+
+    // Shortcuts help panel overlay
+    if app.show_shortcuts {
+        render_shortcuts_panel(frame);
+    }
+
+    // Context menu overlay
+    if app.context_menu.is_some() {
+        render_context_menu(frame, app);
+    }
 }
 
 fn render_logo(frame: &mut Frame, area: Rect) {
@@ -178,32 +188,60 @@ fn render_logo(frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, centered);
 }
 
+const INPUT_PLACEHOLDER: &str = "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
+
 fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
     let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
 
-    let input_text = format!("> {}", app.input);
     let inner_width = centered.width.saturating_sub(2).max(1) as usize;
 
-    // Character-wrap the text so cursor math (pos / width) stays correct
-    let wrapped_lines = char_wrap(&input_text, inner_width);
+    // Show staged attachments in the block title when present.
+    let title = if app.pending_attachments.is_empty() {
+        " Ask anything… ".to_string()
+    } else {
+        let names: Vec<String> = app
+            .pending_attachments
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(|s| format!("📎{s}")))
+            .collect();
+        format!(" Ask anything…  {} ", names.join("  "))
+    };
+    let title_style = if app.pending_attachments.is_empty() {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
-        .title(" Ask anything… ")
-        .title_style(Style::default().fg(Color::DarkGray));
+        .title(Span::styled(title, title_style));
 
-    let paragraph = Paragraph::new(wrapped_lines).block(block);
-    frame.render_widget(paragraph, centered);
+    if app.input.is_empty() {
+        // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
+        let ghost = Line::from(vec![
+            Span::raw("> "),
+            Span::styled(INPUT_PLACEHOLDER, Style::default().fg(Color::DarkGray)),
+        ]);
+        let paragraph = Paragraph::new(ghost).block(block);
+        frame.render_widget(paragraph, centered);
+        // Cursor sits right after the "> " prefix.
+        frame.set_cursor_position((centered.x + 1 + 2, centered.y + 1));
+    } else {
+        let input_text = format!("> {}", app.input);
+        let wrapped_lines = char_wrap(&input_text, inner_width);
+        let paragraph = Paragraph::new(wrapped_lines).block(block);
+        frame.render_widget(paragraph, centered);
 
-    // Position cursor accounting for wrapped lines
-    let cursor_pos = app.input.len() + 2; // "> " prefix
-    let cursor_line = cursor_pos / inner_width;
-    let cursor_col = cursor_pos % inner_width;
-    let cursor_x = centered.x + 1 + cursor_col as u16;
-    let cursor_y = centered.y + 1 + cursor_line as u16;
-    frame.set_cursor_position((cursor_x, cursor_y));
+        // Position cursor accounting for wrapped lines
+        let cursor_pos = app.input.len() + 2; // "> " prefix
+        let cursor_line = cursor_pos / inner_width;
+        let cursor_col = cursor_pos % inner_width;
+        let cursor_x = centered.x + 1 + cursor_col as u16;
+        let cursor_y = centered.y + 1 + cursor_line as u16;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
 }
 
 fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
@@ -647,10 +685,21 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         return;
     }
 
-    let item_count = menu.matches.len() as u16;
-    // +2 for the border
-    let height = (item_count + 2).min(input_area.y);
+    let total = menu.matches.len() as u16;
     let width = input_area.width.min(50);
+    // Available space above the input (minus 2 for borders).
+    let max_visible = input_area.y.saturating_sub(2);
+    // Visible rows: as many entries as fit, capped by total.
+    let visible_rows = total.min(max_visible.max(1));
+    let height = visible_rows + 2; // +2 for borders
+
+    // Compute scroll offset so the selected row is always in view.
+    let sel = menu.selected as u16;
+    let scroll_offset = if sel < visible_rows {
+        0
+    } else {
+        sel - visible_rows + 1
+    };
 
     let popup = Rect::new(
         input_area.x,
@@ -662,7 +711,13 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
-    for (i, entry) in menu.matches.iter().enumerate() {
+    for (i, entry) in menu
+        .matches
+        .iter()
+        .enumerate()
+        .skip(scroll_offset as usize)
+        .take(visible_rows as usize)
+    {
         let is_selected = i == menu.selected;
         let (indicator, name_style, desc_style) = if is_selected {
             (
@@ -690,9 +745,21 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         ]));
     }
 
+    // Scroll indicator in border title when list is scrolled.
+    let title = if total > visible_rows {
+        format!(
+            " {}/{} ",
+            menu.selected + 1,
+            menu.matches.len()
+        )
+    } else {
+        String::new()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(title, Style::default().fg(Color::DarkGray)));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup);
@@ -920,6 +987,16 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     if app.mcp_discover.is_some() {
         render_mcp_discover_dialog(frame, app);
     }
+
+    // Shortcuts help panel overlay
+    if app.show_shortcuts {
+        render_shortcuts_panel(frame);
+    }
+
+    // Context menu overlay
+    if app.context_menu.is_some() {
+        render_context_menu(frame, app);
+    }
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1082,7 +1159,26 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         right_parts.push(Span::styled(label, bar_style));
     }
 
-    // Add background task status
+    // Usage percentage / plan label (top-right of status bar).
+    {
+        let (usage_text, is_unknown) = app.usage_display();
+        let usage_style = if is_unknown {
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(Color::Green)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        };
+        right_parts.push(Span::styled(
+            format!("  [{}]", usage_text),
+            usage_style,
+        ));
+    }
+
     if !app.active_tasks.is_empty() {
         let running = app
             .active_tasks
@@ -1186,7 +1282,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     let step_tag = app
                         .tool_step_map
                         .get(call_id)
-                        .map(|s| format!("[#{}] ", s))
+                        .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
@@ -1291,6 +1387,16 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                         )));
                     }
                 }
+                MessagePart::Image { path, .. } => {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("image");
+                    lines.push(Line::from(Span::styled(
+                        format!("  📎 [image: {}]", name),
+                        Style::default().fg(Color::Yellow),
+                    )));
+                }
             }
 
             lines.push(Line::from(""));
@@ -1342,23 +1448,188 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
-    let input_text = format!("> {}", app.input);
     let inner_width = area.width.saturating_sub(2).max(1) as usize;
 
-    // Character-wrap the text so cursor math (pos / width) stays correct
-    let wrapped_lines = char_wrap(&input_text, inner_width);
+    // Build title: show staged attachments in the block title when present.
+    let title = if app.pending_attachments.is_empty() {
+        " Input ".to_string()
+    } else {
+        let names: Vec<String> = app
+            .pending_attachments
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(|s| format!("📎{s}")))
+            .collect();
+        format!(" Input  {} ", names.join("  "))
+    };
 
-    let block = Block::default().borders(Borders::ALL).title(" Input ");
-    let paragraph = Paragraph::new(wrapped_lines).block(block);
+    let attachment_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(title, attachment_style));
+
+    if app.input.is_empty() {
+        // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
+        let ghost = Line::from(vec![
+            Span::raw("> "),
+            Span::styled(INPUT_PLACEHOLDER, Style::default().fg(Color::DarkGray)),
+        ]);
+        let paragraph = Paragraph::new(ghost).block(block);
+        frame.render_widget(paragraph, area);
+        // Cursor sits right after the "> " prefix.
+        frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
+    } else {
+        let input_text = format!("> {}", app.input);
+        // Character-wrap the text so cursor math (pos / width) stays correct
+        let wrapped_lines = char_wrap(&input_text, inner_width);
+        let paragraph = Paragraph::new(wrapped_lines).block(block);
+        frame.render_widget(paragraph, area);
+
+        // Position cursor accounting for wrapped lines
+        let cursor_pos = app.input.len() + 2; // "> " prefix
+        let cursor_line = cursor_pos / inner_width;
+        let cursor_col = cursor_pos % inner_width;
+        let cursor_x = area.x + 1 + cursor_col as u16;
+        let cursor_y = area.y + 1 + cursor_line as u16;
+        frame.set_cursor_position((cursor_x, cursor_y));
+    }
+}
+
+/// All documented keybindings: (keys column, description column).
+const KEYBINDINGS: &[(&str, &str)] = &[
+    // ── Typing ──────────────────────────────────────────────────────────
+    ("@",                    "Mention a file — opens file picker"),
+    ("/",                    "Slash command — opens command menu"),
+    ("?",                    "Show this keybindings help panel"),
+    ("Alt+V",                "Paste image from clipboard as attachment"),
+    // ── Sending ─────────────────────────────────────────────────────────
+    ("Enter",                "Send message / confirm"),
+    ("Ctrl+C",               "Quit application"),
+    // ── Navigation ──────────────────────────────────────────────────────
+    ("Shift+↑ / PageUp",     "Scroll messages up"),
+    ("Shift+↓ / PageDown",   "Scroll messages down"),
+    ("↑ / ↓",                "Browse input history"),
+    ("Ctrl+PageUp",          "Scroll log panel up"),
+    ("Ctrl+PageDown",        "Scroll log panel down"),
+    // ── Agent ────────────────────────────────────────────────────────────
+    ("Tab",                  "Cycle to next agent"),
+    ("Esc",                  "Cancel running agent (while processing)"),
+    // ── Dialogs ──────────────────────────────────────────────────────────
+    ("Esc",                  "Close any open dialog or menu"),
+    ("y / a / n",            "Allow / Always / Deny permission request"),
+];
+
+fn render_shortcuts_panel(frame: &mut Frame) {
+    let full = frame.area();
+    // Responsive sizing: up to 80 wide, up to (rows+2) tall, capped at screen.
+    let w = 80u16.min(full.width.saturating_sub(4));
+    let content_h = KEYBINDINGS.len() as u16 + 2; // rows + footer + borders
+    let h = content_h.min(full.height.saturating_sub(2));
+    let area = Rect {
+        x: (full.width.saturating_sub(w)) / 2,
+        y: (full.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    frame.render_widget(Clear, area);
+
+    // Column widths inside the border (w - 2 for border, - 1 for gutter).
+    let inner_w = (w.saturating_sub(3)) as usize;
+    let key_col = 24usize;
+    let desc_col = inner_w.saturating_sub(key_col + 2);
+
+    let key_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(Color::White);
+    let dim_style = Style::default().fg(Color::DarkGray);
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    for (keys, desc) in KEYBINDINGS {
+        // Pad key column to fixed width for alignment.
+        let key_padded = format!("{:<width$}", keys, width = key_col);
+        // Truncate desc if it overflows.
+        let desc_str: &str = if desc.len() > desc_col {
+            &desc[..desc_col]
+        } else {
+            desc
+        };
+        lines.push(Line::from(vec![
+            Span::styled(key_padded, key_style),
+            Span::styled("  ", dim_style),
+            Span::styled(desc_str, desc_style),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Press Esc or ? to close",
+        dim_style,
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(Span::styled(
+            " ? Shortcuts ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, area);
+}
 
-    // Position cursor accounting for wrapped lines
-    let cursor_pos = app.input.len() + 2; // "> " prefix
-    let cursor_line = cursor_pos / inner_width;
-    let cursor_col = cursor_pos % inner_width;
-    let cursor_x = area.x + 1 + cursor_col as u16;
-    let cursor_y = area.y + 1 + cursor_line as u16;
-    frame.set_cursor_position((cursor_x, cursor_y));
+fn render_context_menu(frame: &mut Frame, app: &App) {
+    let menu = match app.context_menu.as_ref() {
+        Some(m) => m,
+        None => return,
+    };
+
+    let item_count = menu.items.len();
+    let w = 12u16;
+    let h = item_count as u16 + 2; // border top + items + border bottom
+
+    // Clamp position so menu stays on screen.
+    let full = frame.area();
+    let x = menu.x.min(full.width.saturating_sub(w));
+    let y = menu.y.min(full.height.saturating_sub(h));
+
+    let area = Rect { x, y, width: w, height: h };
+    frame.render_widget(Clear, area);
+
+    let enabled_style = Style::default().fg(Color::White);
+    let disabled_style = Style::default().fg(Color::DarkGray);
+    let selected_style = Style::default()
+        .fg(Color::Black)
+        .bg(Color::White)
+        .add_modifier(Modifier::BOLD);
+
+    let lines: Vec<Line<'_>> = menu.items.iter().enumerate().map(|(idx, &(action, enabled))| {
+        let label = match action {
+            ContextAction::Cut => "Cut",
+            ContextAction::Copy => "Copy",
+            ContextAction::Paste => "Paste",
+        };
+        let padded = format!(" {:<8}", label);
+        if idx == menu.selected && enabled {
+            Line::from(Span::styled(padded, selected_style))
+        } else if enabled {
+            Line::from(Span::styled(padded, enabled_style))
+        } else {
+            Line::from(Span::styled(padded, disabled_style))
+        }
+    }).collect();
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 fn render_permission_dialog(frame: &mut Frame, app: &App) {

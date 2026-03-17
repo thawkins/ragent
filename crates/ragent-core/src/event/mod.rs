@@ -6,7 +6,9 @@
 //! agent switches, errors, and token usage.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fmt;
+use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 
 /// Reason an LLM stopped generating a response.
@@ -277,6 +279,85 @@ pub enum Event {
 #[derive(Clone)]
 pub struct EventBus {
     sender: broadcast::Sender<Event>,
+    /// Per-session step counters.
+    ///
+    /// Keyed by session ID. The value is the current loop step for that agent
+    /// run. Using a shared `RwLock<HashMap>` means each clone of the bus sees
+    /// the same counters — important because the processor and TUI hold
+    /// different clones of the same bus.
+    steps: Arc<RwLock<HashMap<String, u64>>>,
+}
+
+impl Event {
+    /// Returns the variant name for use in log messages.
+    #[must_use]
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::SessionCreated { .. } => "SessionCreated",
+            Self::SessionUpdated { .. } => "SessionUpdated",
+            Self::MessageStart { .. } => "MessageStart",
+            Self::TextDelta { .. } => "TextDelta",
+            Self::ReasoningDelta { .. } => "ReasoningDelta",
+            Self::ToolCallStart { .. } => "ToolCallStart",
+            Self::ToolCallEnd { .. } => "ToolCallEnd",
+            Self::MessageEnd { .. } => "MessageEnd",
+            Self::PermissionRequested { .. } => "PermissionRequested",
+            Self::PermissionReplied { .. } => "PermissionReplied",
+            Self::AgentSwitched { .. } => "AgentSwitched",
+            Self::AgentSwitchRequested { .. } => "AgentSwitchRequested",
+            Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
+            Self::AgentError { .. } => "AgentError",
+            Self::McpStatusChanged { .. } => "McpStatusChanged",
+            Self::TokenUsage { .. } => "TokenUsage",
+            Self::ToolsSent { .. } => "ToolsSent",
+            Self::ModelResponse { .. } => "ModelResponse",
+            Self::ToolCallArgs { .. } => "ToolCallArgs",
+            Self::ToolResult { .. } => "ToolResult",
+            Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
+            Self::SessionAborted { .. } => "SessionAborted",
+            Self::SubagentStart { .. } => "SubagentStart",
+            Self::SubagentComplete { .. } => "SubagentComplete",
+            Self::SubagentCancelled { .. } => "SubagentCancelled",
+            Self::LspStatusChanged { .. } => "LspStatusChanged",
+        }
+    }
+
+    /// Returns the session ID carried by this event, if any.
+    ///
+    /// Infrastructure events (`McpStatusChanged`, `LspStatusChanged`,
+    /// `CopilotDeviceFlowComplete`) are not scoped to a session and return
+    /// `None`.
+    #[must_use]
+    pub fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::SessionCreated { session_id, .. }
+            | Self::SessionUpdated { session_id, .. }
+            | Self::MessageStart { session_id, .. }
+            | Self::TextDelta { session_id, .. }
+            | Self::ReasoningDelta { session_id, .. }
+            | Self::ToolCallStart { session_id, .. }
+            | Self::ToolCallEnd { session_id, .. }
+            | Self::MessageEnd { session_id, .. }
+            | Self::PermissionRequested { session_id, .. }
+            | Self::PermissionReplied { session_id, .. }
+            | Self::AgentSwitched { session_id, .. }
+            | Self::AgentSwitchRequested { session_id, .. }
+            | Self::AgentRestoreRequested { session_id, .. }
+            | Self::AgentError { session_id, .. }
+            | Self::TokenUsage { session_id, .. }
+            | Self::ToolsSent { session_id, .. }
+            | Self::ModelResponse { session_id, .. }
+            | Self::ToolCallArgs { session_id, .. }
+            | Self::ToolResult { session_id, .. }
+            | Self::SessionAborted { session_id, .. }
+            | Self::SubagentStart { session_id, .. }
+            | Self::SubagentComplete { session_id, .. }
+            | Self::SubagentCancelled { session_id, .. } => Some(session_id.as_str()),
+            Self::McpStatusChanged { .. }
+            | Self::CopilotDeviceFlowComplete { .. }
+            | Self::LspStatusChanged { .. } => None,
+        }
+    }
 }
 
 impl EventBus {
@@ -291,7 +372,35 @@ impl EventBus {
     /// ```
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
-        Self { sender }
+        Self {
+            sender,
+            steps: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Set the current step number for a specific agent session.
+    ///
+    /// Called by the session processor at the start of each loop iteration.
+    /// Pass `0` to clear (reset) the counter for that session.
+    pub fn set_step(&self, session_id: &str, step: u64) {
+        let mut map = self.steps.write().expect("step map poisoned");
+        if step == 0 {
+            map.remove(session_id);
+        } else {
+            map.insert(session_id.to_string(), step);
+        }
+    }
+
+    /// Returns the current step number for a specific agent session.
+    ///
+    /// Returns `0` if no step has been set for this session.
+    pub fn current_step(&self, session_id: &str) -> u64 {
+        self.steps
+            .read()
+            .expect("step map poisoned")
+            .get(session_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Returns a new receiver that will observe all future events.
@@ -331,8 +440,31 @@ impl EventBus {
     /// });
     /// ```
     pub fn publish(&self, event: Event) {
-        if self.sender.send(event).is_err() {
-            tracing::warn!("Event dropped: no active subscribers");
+        if self.sender.send(event.clone()).is_err() {
+            // Build a "[agent_id:step]" tag when we have a session with an
+            // active step counter; fall back to just the event type name.
+            let tag = event.session_id().and_then(|sid| {
+                let step = self.current_step(sid);
+                if step > 0 {
+                    // Use the last 8 chars of the session id as a short label.
+                    let short_id = &sid[sid.len().saturating_sub(8)..];
+                    Some(format!("[{short_id}:{step}]"))
+                } else {
+                    None
+                }
+            });
+            if let Some(tag) = tag {
+                tracing::warn!(
+                    "Event dropped (no active subscribers) {}: {}",
+                    tag,
+                    event.type_name()
+                );
+            } else {
+                tracing::warn!(
+                    "Event dropped (no active subscribers): {}",
+                    event.type_name()
+                );
+            }
         }
     }
 }

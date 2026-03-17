@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -63,6 +63,7 @@ regex = "1"
 base64 = "0.22"
 rand = "0.8"
 arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
 rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
 docx-rust = "0.1"
 calamine = "0.34"

@@ -26,7 +26,67 @@ use ragent_core::{
 use crate::input::{self, InputAction};
 use crate::tips;
 
-/// Severity level for a log entry.
+/// Returns `true` if `path` has a recognised image file extension.
+fn is_image_path(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif")
+    )
+}
+
+/// Decode `%XX` percent-encoding in a file-URI path component.
+fn percent_decode_path(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let h1 = chars.next();
+            let h2 = chars.next();
+            if let (Some(a), Some(b)) = (h1, h2) {
+                if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
+                    out.push(byte as char);
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a temp file.
+///
+/// Returns the path of the written file.
+fn save_clipboard_image_to_temp(
+    img_data: &arboard::ImageData<'_>,
+) -> anyhow::Result<std::path::PathBuf> {
+    use image::{ImageBuffer, Rgba};
+
+    let width = img_data.width as u32;
+    let height = img_data.height as u32;
+    let bytes = img_data.bytes.as_ref().to_vec();
+
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, bytes)
+            .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions mismatch pixel buffer"))?;
+
+    let tmp_dir = std::env::temp_dir();
+    let filename = format!(
+        "ragent_paste_{}.png",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
+    let path = tmp_dir.join(filename);
+    img.save(&path)?;
+    Ok(path)
+}
+
+/// Severity level for a log entry displayed in the log panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
     /// Informational message (prompts sent, session created, etc.).
@@ -341,7 +401,32 @@ impl TextSelection {
     }
 }
 
-/// State for the interactive `/lsp discover` dialog.
+/// Which action the context menu item represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextAction {
+    /// Copy selected text then delete it from the input.
+    Cut,
+    /// Copy selected text to the clipboard.
+    Copy,
+    /// Insert clipboard text at the current input cursor.
+    Paste,
+}
+
+/// State for the right-click context menu.
+#[derive(Debug, Clone)]
+pub struct ContextMenuState {
+    /// Screen column where the menu top-left should appear.
+    pub x: u16,
+    /// Screen row where the menu top-left should appear.
+    pub y: u16,
+    /// The pane that was right-clicked.
+    pub pane: SelectionPane,
+    /// Currently highlighted item index.
+    pub selected: usize,
+    /// Items available in this context (enabled/disabled).
+    pub items: Vec<(ContextAction, bool)>,
+}
+
 ///
 /// Shown as an overlay that lists discovered language servers with numbered
 /// rows. The user types a number and presses Enter to enable a server, or
@@ -398,6 +483,8 @@ pub struct App {
     pub permission_pending: Option<PermissionRequest>,
     /// Cumulative (input, output) token counts.
     pub token_usage: (u64, u64),
+    /// Input token count from the most recent LLM request (used for context-window % display).
+    pub last_input_tokens: u64,
     /// Which screen is currently displayed.
     pub current_screen: ScreenMode,
     /// Randomly selected tip shown on the home screen.
@@ -493,10 +580,16 @@ pub struct App {
     pub agent_halted: bool,
     /// Monotonically increasing step counter for tool calls.
     pub tool_step_counter: u32,
-    /// Maps tool call IDs to their step numbers for log/message correlation.
-    pub tool_step_map: HashMap<String, u32>,
+    /// Maps tool call IDs to their `(short_session_id, step_number)` for log/message correlation.
+    pub tool_step_map: HashMap<String, (String, u32)>,
     /// Active background sub-agent tasks (F14).
     pub active_tasks: Vec<ragent_core::task::TaskEntry>,
+    /// Whether the keybindings help panel is currently visible.
+    pub show_shortcuts: bool,
+    /// Active right-click context menu, if any.
+    pub context_menu: Option<ContextMenuState>,
+    /// Image files staged to be sent with the next message (populated by Alt+V).
+    pub pending_attachments: Vec<std::path::PathBuf>,
 }
 
 impl App {
@@ -573,6 +666,7 @@ impl App {
             status: "ready".to_string(),
             permission_pending: None,
             token_usage: (0, 0),
+            last_input_tokens: 0,
             current_screen: ScreenMode::Home,
             tip: tips::random_tip(),
             cwd,
@@ -620,6 +714,9 @@ impl App {
             tool_step_counter: 0,
             tool_step_map: HashMap::new(),
             active_tasks: Vec::new(),
+            show_shortcuts: false,
+            context_menu: None,
+            pending_attachments: Vec::new(),
         }
     }
 
@@ -953,8 +1050,13 @@ impl App {
                 } = part
                 {
                     self.tool_step_counter += 1;
+                    let short_sid = self
+                        .session_id
+                        .as_deref()
+                        .map(short_session_id)
+                        .unwrap_or_default();
                     self.tool_step_map
-                        .insert(call_id.clone(), self.tool_step_counter);
+                        .insert(call_id.clone(), (short_sid, self.tool_step_counter));
                     let icon = match state.status {
                         ragent_core::message::ToolCallStatus::Completed => "✓",
                         ragent_core::message::ToolCallStatus::Error => "✗",
@@ -969,9 +1071,14 @@ impl App {
             }
         }
         for (step, tool, icon) in restored_logs {
+            let short_sid = self
+                .session_id
+                .as_deref()
+                .map(short_session_id)
+                .unwrap_or_default();
             self.push_log(
                 LogLevel::Tool,
-                format!("[#{step}] {tool} {icon} (restored)"),
+                format!("[{short_sid}:{step}] {tool} {icon} (restored)"),
             );
         }
 
@@ -1188,6 +1295,59 @@ impl App {
         }
     }
 
+    /// Returns a `(text, is_unknown)` pair for the provider usage display in the status bar.
+    ///
+    /// For GitHub Copilot, returns the plan label (e.g. `"Pro"`) inferred from the
+    /// cached session token, combined with the context-window utilisation percentage
+    /// computed from the most recent request's input token count.
+    ///
+    /// For all other providers, `is_unknown` is `true` and the text is `"unknown"`,
+    /// indicating that usage information is not available.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_tui::App;
+    /// # fn example(app: &App) {
+    /// let (label, unknown) = app.usage_display();
+    /// println!("usage: {} (unknown={})", label, unknown);
+    /// # }
+    /// ```
+    pub fn usage_display(&self) -> (String, bool) {
+        let provider_id = self
+            .configured_provider
+            .as_ref()
+            .map(|p| p.id.as_str())
+            .unwrap_or("");
+
+        // Compute context-window usage % from last request's input token count.
+        let context_pct: Option<f32> = self
+            .selected_model
+            .as_deref()
+            .and_then(|m| {
+                let mut parts = m.splitn(2, '/');
+                let pid = parts.next()?;
+                let mid = parts.next()?;
+                self.provider_registry.resolve_model(pid, mid)
+            })
+            .filter(|m| m.context_window > 0)
+            .map(|m| {
+                (self.last_input_tokens as f32 / m.context_window as f32 * 100.0).min(100.0)
+            });
+
+        if provider_id == "copilot" {
+            let plan = ragent_core::provider::copilot::cached_copilot_plan()
+                .unwrap_or_else(|| "Copilot".to_string());
+            let text = match context_pct {
+                Some(p) => format!("{} {:.0}%", plan, p),
+                None => plan,
+            };
+            (text, false)
+        } else {
+            ("unknown".to_string(), true)
+        }
+    }
+
     /// Update the slash-command autocomplete menu based on the current input buffer.
     ///
     /// Shows the menu when input starts with `/`, filtering commands by the text
@@ -1265,11 +1425,20 @@ impl App {
                 }
             }
 
-            let prev_selected = self.slash_menu.as_ref().map(|m| m.selected).unwrap_or(0);
+            // Sort alphabetically by trigger so the list is predictable.
+            matches.sort_by(|a, b| a.trigger.cmp(&b.trigger));
+
+            // Select the entry whose trigger best matches the typed input:
+            // prefer an exact match, then the first entry whose trigger starts
+            // with the needle, then fall back to index 0.
             let selected = if matches.is_empty() {
                 0
+            } else if let Some(exact) = matches.iter().position(|m| m.trigger == needle) {
+                exact
+            } else if let Some(prefix) = matches.iter().position(|m| m.trigger.starts_with(&needle)) {
+                prefix
             } else {
-                prev_selected.min(matches.len() - 1)
+                0
             };
 
             self.slash_menu = Some(SlashMenuState {
@@ -2342,6 +2511,17 @@ impl App {
     /// # }
     /// ```
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
+        // If context menu is open, intercept clicks.
+        if self.context_menu.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = event.kind {
+                self.handle_context_menu_click(event.column, event.row);
+            } else if let MouseEventKind::Down(MouseButton::Right) = event.kind {
+                // Second right-click dismisses the menu.
+                self.context_menu = None;
+            }
+            return;
+        }
+
         match event.kind {
             MouseEventKind::ScrollUp => {
                 if self.show_log && self.log_area.contains((event.column, event.row).into()) {
@@ -2403,7 +2583,34 @@ impl App {
                 // Keep text_selection alive so it stays highlighted until right-click or next click
             }
             MouseEventKind::Down(MouseButton::Right) => {
-                self.copy_selection();
+                let col = event.column;
+                let row = event.row;
+                let pane = self.pane_at(col, row).unwrap_or(SelectionPane::Messages);
+
+                // Determine available actions based on context.
+                let has_selection = self.text_selection.is_some();
+                let in_input = matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
+                let has_clipboard = Self::get_clipboard().map_or(false, |s| !s.is_empty());
+
+                // Cut: only in input panes with selection
+                // Copy: anywhere with selection
+                // Paste: only in input panes with clipboard content
+                let items = vec![
+                    (ContextAction::Cut,   has_selection && in_input),
+                    (ContextAction::Copy,  has_selection),
+                    (ContextAction::Paste, in_input && has_clipboard),
+                ];
+
+                // Find first enabled item as default selection
+                let selected = items.iter().position(|(_, en)| *en).unwrap_or(0);
+
+                self.context_menu = Some(ContextMenuState {
+                    x: col,
+                    y: row,
+                    pane,
+                    selected,
+                    items,
+                });
             }
             _ => {}
         }
@@ -2568,6 +2775,154 @@ impl App {
         });
     }
 
+    /// Read the current clipboard contents synchronously.
+    fn get_clipboard() -> Option<String> {
+        arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_text().ok())
+    }
+
+    /// Attempt to paste an image from the clipboard and stage it as an attachment.
+    ///
+    /// Two clipboard formats are handled:
+    /// 1. **Text containing a `file://` URI or an absolute path** pointing to an existing
+    ///    image file — the path is used directly (no copy needed).
+    /// 2. **Raw RGBA pixel data** (`arboard::ImageData`) — encoded as a PNG and saved to a
+    ///    temporary file which is then staged.
+    ///
+    /// If neither format yields an image the caller is notified via the log.
+    pub fn paste_image_from_clipboard(&mut self) {
+        // --- Phase 1: look for a file reference in the text clipboard ---
+        if let Some(text) = Self::get_clipboard() {
+            let trimmed = text.trim();
+
+            // Resolve file:// URI
+            let candidate = if let Some(rest) = trimmed.strip_prefix("file://") {
+                Some(std::path::PathBuf::from(
+                    percent_decode_path(rest),
+                ))
+            } else if trimmed.starts_with('/') || trimmed.starts_with('.') {
+                // Plain absolute or relative path
+                Some(std::path::PathBuf::from(trimmed))
+            } else {
+                None
+            };
+
+            if let Some(path) = candidate {
+                if path.exists() && is_image_path(&path) {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("📎 Image attached from clipboard path: {}", path.display()),
+                    );
+                    self.pending_attachments.push(path);
+                    return;
+                }
+            }
+        }
+
+        // --- Phase 2: try raw pixel data ---
+        let img_result = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut cb| cb.get_image().ok());
+
+        if let Some(img_data) = img_result {
+            match save_clipboard_image_to_temp(&img_data) {
+                Ok(path) => {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("📎 Image saved from clipboard: {}", path.display()),
+                    );
+                    self.pending_attachments.push(path);
+                }
+                Err(e) => {
+                    self.push_log(
+                        LogLevel::Warn,
+                        format!("Failed to save clipboard image: {e}"),
+                    );
+                }
+            }
+        } else {
+            self.push_log(
+                LogLevel::Info,
+                "No image data found in clipboard".to_string(),
+            );
+        }
+    }
+
+    /// Execute a context menu action (Cut / Copy / Paste) and close the menu.
+    pub fn execute_context_action(&mut self, action: ContextAction) {
+        let pane = self.context_menu.as_ref().map(|m| m.pane);
+        self.context_menu = None;
+
+        match action {
+            ContextAction::Copy => {
+                self.copy_selection();
+            }
+            ContextAction::Cut => {
+                // Copy selected text then clear the input (cut only makes sense in input panes).
+                self.copy_selection();
+                if matches!(pane, Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)) {
+                    self.input.clear();
+                    self.slash_menu = None;
+                    self.file_menu = None;
+                }
+            }
+            ContextAction::Paste => {
+                // Only paste into input panes.
+                if matches!(pane, Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)) {
+                    if let Some(text) = Self::get_clipboard() {
+                        // Strip newlines for single-line input.
+                        let clean: String = text.chars().filter(|&c| c != '\n' && c != '\r').collect();
+                        self.input.push_str(&clean);
+                        if self.input.starts_with('/') {
+                            self.update_slash_menu();
+                        }
+                        if self.input.contains('@') {
+                            self.update_file_menu();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Handle a left-click when the context menu is open.
+    ///
+    /// Clicks within the menu bounds activate the item under the cursor.
+    /// Clicks outside dismiss the menu.
+    fn handle_context_menu_click(&mut self, col: u16, row: u16) {
+        if let Some(menu) = self.context_menu.clone() {
+            // Menu geometry: x, y is top-left; rows are y+1..y+1+items.len()
+            let menu_x = menu.x;
+            let menu_y = menu.y;
+            let menu_w = 12u16; // matches render_context_menu width
+            let item_count = menu.items.len() as u16;
+            let menu_h = item_count + 2; // border top + items + border bottom
+
+            if col >= menu_x
+                && col < menu_x + menu_w
+                && row >= menu_y
+                && row < menu_y + menu_h
+            {
+                // Row inside border
+                if row > menu_y && row < menu_y + menu_h - 1 {
+                    let item_idx = (row - menu_y - 1) as usize;
+                    if item_idx < menu.items.len() {
+                        let (action, enabled) = menu.items[item_idx];
+                        if enabled {
+                            self.execute_context_action(action);
+                        } else {
+                            self.context_menu = None;
+                        }
+                    }
+                }
+            } else {
+                // Click outside menu dismisses it.
+                self.context_menu = None;
+            }
+        }
+    }
+
     /// Map a mouse Y position to a scroll offset for the given pane.
     fn apply_scrollbar_drag(&mut self, mouse_y: u16, pane: ScrollbarDragPane) {
         let (area, max_scroll) = match pane {
@@ -2639,8 +2994,26 @@ impl App {
                         }
                     }
 
+                    // Drain image attachments and build proper MessagePart::Image parts.
+                    let image_paths: Vec<std::path::PathBuf> =
+                        self.pending_attachments.drain(..).collect();
+
                     let sid = self.session_id.clone().unwrap();
-                    let msg = Message::user_text(&sid, &text);
+
+                    // Build the display message shown in the chat window.
+                    // (This is separate from the one the processor stores — we show a
+                    // preview with attachment file names while the processor creates the
+                    // authoritative stored record.)
+                    let display_text = if image_paths.is_empty() {
+                        text.clone()
+                    } else {
+                        let names: Vec<String> = image_paths
+                            .iter()
+                            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+                            .collect();
+                        format!("[📎 {}] {}", names.join(", "), text)
+                    };
+                    let msg = Message::user_text(&sid, &display_text);
                     self.messages.push(msg);
                     self.input_history.push(text.clone());
                     self.history_index = None;
@@ -2710,10 +3083,52 @@ impl App {
                             text.clone()
                         };
 
-                        if let Err(e) =
-                            processor.process_message(&sid, &final_text, &agent, flag).await
-                        {
-                            tracing::debug!(error = %e, "Failed to process message");
+                        if image_paths.is_empty() {
+                            if let Err(e) =
+                                processor.process_message(&sid, &final_text, &agent, flag).await
+                            {
+                                tracing::debug!(error = %e, "Failed to process message");
+                            }
+                        } else {
+                            // Build a multi-part user message: images first, then text.
+                            let mut parts: Vec<ragent_core::message::MessagePart> = image_paths
+                                .into_iter()
+                                .filter(|p| p.exists())
+                                .map(|p| {
+                                    let mime = if p.extension()
+                                        .and_then(|e| e.to_str())
+                                        .map(|e| e.eq_ignore_ascii_case("png"))
+                                        .unwrap_or(false)
+                                    {
+                                        "image/png"
+                                    } else if p.extension()
+                                        .and_then(|e| e.to_str())
+                                        .map(|e| e.eq_ignore_ascii_case("gif"))
+                                        .unwrap_or(false)
+                                    {
+                                        "image/gif"
+                                    } else {
+                                        "image/jpeg"
+                                    };
+                                    ragent_core::message::MessagePart::Image {
+                                        mime_type: mime.to_string(),
+                                        path: p,
+                                    }
+                                })
+                                .collect();
+                            parts.push(ragent_core::message::MessagePart::Text {
+                                text: final_text,
+                            });
+                            let user_msg = ragent_core::message::Message::new(
+                                &sid,
+                                ragent_core::message::Role::User,
+                                parts,
+                            );
+                            if let Err(e) =
+                                processor.process_user_message(&sid, user_msg, &agent, flag).await
+                            {
+                                tracing::debug!(error = %e, "Failed to process message with images");
+                            }
                         }
                     });
                 }
@@ -2968,12 +3383,13 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.tool_step_counter += 1;
                     let step = self.tool_step_counter;
-                    self.tool_step_map.insert(call_id.clone(), step);
+                    let short_sid = short_session_id(session_id);
+                    self.tool_step_map.insert(call_id.clone(), (short_sid.clone(), step));
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
                     self.push_log(
                         LogLevel::Tool,
-                        format!("[#{}] tool call: {}", step, tool),
+                        format!("[{short_sid}:{step}] tool call: {}", tool),
                     );
                 }
             }
@@ -2989,7 +3405,7 @@ impl App {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|s| format!("[#{}] ", s))
+                        .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     if let Some(err) = error {
                         self.push_log(
@@ -3145,6 +3561,7 @@ impl App {
                 output_tokens,
             } => {
                 if self.is_current_session(session_id) {
+                    self.last_input_tokens = input_tokens;
                     self.token_usage.0 += input_tokens;
                     self.token_usage.1 += output_tokens;
                     self.push_log(
@@ -3186,7 +3603,7 @@ impl App {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|s| format!("[#{}] ", s))
+                        .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     // Pretty-print JSON args across multiple log lines
                     let pretty = serde_json::from_str::<serde_json::Value>(args)
@@ -3228,7 +3645,7 @@ impl App {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|s| format!("[#{}] ", s))
+                        .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     let icon = if success { "✓" } else { "✗" };
                     self.push_log(LogLevel::Tool, format!("{}← {} {} {}", step_tag, tool, icon, content));
@@ -3539,6 +3956,12 @@ impl App {
 
 /// Produces a short, user-facing summary from a raw error string.
 ///
+/// Returns the last 8 characters of a session ID as the short display form.
+fn short_session_id(session_id: &str) -> String {
+    let start = session_id.len().saturating_sub(8);
+    session_id[start..].to_string()
+}
+
 /// Strips JSON payloads, HTTP status codes, and verbose context so the
 /// chat panel only shows the essential message.
 fn summarise_error(raw: &str) -> String {

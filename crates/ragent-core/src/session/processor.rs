@@ -18,6 +18,7 @@ use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+use base64::Engine as _;
 use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::sanitize::redact_secrets;
@@ -85,8 +86,23 @@ impl SessionProcessor {
         agent: &AgentInfo,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
-        // 1. Store user message
         let user_msg = Message::user_text(session_id, user_text);
+        self.process_user_message(session_id, user_msg, agent, cancel_flag).await
+    }
+
+    /// Process a pre-built user [`Message`] (e.g. one containing image attachments).
+    ///
+    /// Unlike [`process_message`] which always creates a plain-text user message,
+    /// this method accepts any `Message` so the TUI can pass multipart messages
+    /// that include [`MessagePart::Image`] parts alongside the text.
+    pub async fn process_user_message(
+        &self,
+        session_id: &str,
+        user_msg: Message,
+        agent: &AgentInfo,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<Message> {
+        // 1. Store user message
         self.session_manager.storage().create_message(&user_msg)?;
 
         self.event_bus.publish(Event::MessageStart {
@@ -255,6 +271,8 @@ impl SessionProcessor {
 
         // 5. Agent loop
         let max_steps = agent.max_steps.unwrap_or(500) as usize;
+        // Reset step counter for this session so warnings are relative to this run.
+        self.event_bus.set_step(session_id, 0);
         // Single-step agents (e.g. "chat") don't use tools — omit definitions
         // so providers aren't confused by unused tool schemas.
         let tool_definitions = if max_steps <= 1 {
@@ -263,11 +281,11 @@ impl SessionProcessor {
             self.tool_registry.definitions()
         };
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
-        let mut step = 0;
         let mut agent_switch_requested = false;
 
         loop {
-            step += 1;
+            self.event_bus.set_step(session_id, self.event_bus.current_step(session_id) + 1);
+            let step = self.event_bus.current_step(session_id) as usize;
             if step > max_steps {
                 warn!("Reached max steps ({}), stopping agent loop", max_steps);
                 self.event_bus.publish(Event::AgentError {
@@ -718,6 +736,8 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
         let content = if msg.parts.len() == 1 {
             match &msg.parts[0] {
                 MessagePart::Text { text } => ChatContent::Text(text.clone()),
+                // Image parts must go through Parts() to get the image_url block.
+                MessagePart::Image { .. } => parts_to_chat_content(&msg.parts),
                 _ => parts_to_chat_content(&msg.parts),
             }
         } else {
@@ -782,6 +802,21 @@ fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
                 input: state.input.clone(),
             }),
             MessagePart::Reasoning { .. } => None,
+            MessagePart::Image { mime_type, path } => {
+                // Read the file and encode as a base64 data URI.
+                match std::fs::read(path) {
+                    Ok(bytes) => {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        Some(ContentPart::ImageUrl {
+                            url: format!("data:{mime_type};base64,{b64}"),
+                        })
+                    }
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e, "failed to read image attachment");
+                        None
+                    }
+                }
+            }
         })
         .collect();
     ChatContent::Parts(content_parts)
