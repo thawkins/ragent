@@ -1015,9 +1015,54 @@ The server exposes a REST + SSE API so any client can drive ragent.
 | `POST` | `/sessions/:id/messages` | Send user message (SSE response) |
 | `POST` | `/sessions/:id/abort` | Abort running agent loop (archives session, publishes `SessionAborted` event) |
 | `POST` | `/sessions/:id/permission/:req_id` | Reply to permission request |
+| `GET` | `/sessions/:id/tasks` | List background tasks for session |
+| `POST` | `/sessions/:id/tasks` | Spawn a background or sync sub-agent task |
+| `GET` | `/sessions/:id/tasks/:tid` | Get task details and result |
+| `DELETE` | `/sessions/:id/tasks/:tid` | Cancel a running background task |
 | `GET` | `/mcp` | List MCP servers |
 | `POST` | `/mcp/:id/restart` | Restart MCP server |
 | `GET` | `/events` | Global SSE event stream |
+
+#### Task Management (F13 / F14)
+
+**Spawn Task Request**
+```json
+POST /sessions/{id}/tasks
+Content-Type: application/json
+
+{
+  "agent": "explore",        // Agent to use
+  "task": "Analyze auth module",  // Task prompt
+  "background": true,        // Optional: false = sync (default), true = background
+  "model": "anthropic/claude-haiku"  // Optional: override model
+}
+```
+
+**Task Response**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "parent_session_id": "abc123",
+  "agent_name": "explore",
+  "task_prompt": "Analyze auth module",
+  "status": "running",       // running, completed, failed, or cancelled
+  "result": null,            // Set on completion
+  "error": null,             // Set on failure
+  "created_at": "2025-03-17T00:40:05Z",
+  "completed_at": null,
+  "background": true
+}
+```
+
+**List Tasks Response**
+```json
+GET /sessions/{id}/tasks
+[
+  { /* TaskResponse */ },
+  { /* TaskResponse */ },
+  ...
+]
+```
 
 #### SSE Event Types
 
@@ -1051,6 +1096,15 @@ data: {"finish_reason":"stop"}
 
 event: error
 data: {"message":"Rate limit exceeded","code":"rate_limit"}
+
+event: subagent_start
+data: {"session_id":"...","task_id":"...","child_session_id":"...","agent":"explore","task":"...","background":true}
+
+event: subagent_complete
+data: {"session_id":"...","task_id":"...","child_session_id":"...","summary":"...","success":true,"duration_ms":1234}
+
+event: subagent_cancelled
+data: {"session_id":"...","task_id":"..."}
 ```
 
 ---
@@ -3731,8 +3785,8 @@ A built-in mock server (feature-gated behind `#[cfg(test)]`) replays canned LLM 
 | F10 | Image/screenshot input | Vision model support for UI debugging | ❌ |
 | F11 | ACP (Agent Client Protocol) | Support the open standard Agent Client Protocol for interoperability with other AI agent ecosystems | ❌ |
 | F12 | `/feedback` command | Built-in user feedback submission mechanism | ❌ |
-| F13 | Sub-agent spawning | Launch specialized sub-agents (e.g., explore, code-review) from within a session for focused tasks | ❌ |
-| F14 | Background agents | Run multiple agent instances concurrently for parallel task execution | ❌ |
+| F13 | Sub-agent spawning | Launch specialized sub-agents (e.g., explore, code-review) from within a session for focused tasks | ✅ |
+| F14 | Background agents | Run multiple agent instances concurrently for parallel task execution | ✅ |
 | F15 | Marketplace | Community hub for sharing and discovering custom agents, skills, and rule sets | ❌ |
 | F16 | API configuration profiles | Named profiles for different API providers/models, switchable per agent or session | ❌ |
 | F17 | Concurrent file operations | Parallel file reads and edits for faster multi-file workflows | ❌ |
