@@ -8,5 +8,13 @@
         "rs"
       ]
     }
+  },
+  "provider": {
+    "tavily": {
+      "env": ["TAVILY_API_KEY"],
+      "options": {
+        "api_key": "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"
+      }
+    }
   }
 }

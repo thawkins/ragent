@@ -1,221 +1,304 @@
 //! LibreOffice document writing tool.
 //!
-//! Provides [`LibreWriteTool`], which creates new OpenDocument Text (`.odt`),
-//! Spreadsheet (`.ods`), and Presentation (`.odp`) files from structured JSON input.
+//! Provides [`LibreWriteTool`], which creates or overwrites OpenDocument files.
+//!
+//! - **ODS**: written using `spreadsheet-ods`, which provides a proper in-memory
+//!   workbook model for Calc files.
+//! - **ODT / ODP**: generated as valid ODF ZIP archives using `zip` + `quick-xml`
+//!   for structured XML output.
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::Path;
 
 use super::libreoffice_common::{LibreFormat, detect_format, resolve_path};
 use super::{Tool, ToolContext, ToolOutput};
 
-/// Writes content to ODT, ODS, or ODP files.
-///
-/// Accepts structured JSON content and creates the specified document type.
-/// Creates parent directories if needed.
+/// Creates or overwrites ODT, ODS, or ODP files.
 pub struct LibreWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreWriteTool {
-    fn name(&self) -> &str {
-        "libre_write"
-    }
+    fn name(&self) -> &str { "libre_write" }
 
     fn description(&self) -> &str {
-        "Write content to OpenDocument files: .odt, .ods, .odp"
+        "Write content to OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
+         ODS uses spreadsheet-ods for full workbook support; ODT/ODP use XML generation."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Path to write the document" },
-                "type": { "type": "string", "enum": ["odt","ods","odp"], "description": "Document type (auto-detected from extension if omitted)" },
-                "content": { "type": "object", "description": "Document content (structure depends on type)" }
+                "path": {
+                    "type": "string",
+                    "description": "Path for the output file (created or overwritten)"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "ODT/ODP: plain text content to write"
+                },
+                "rows": {
+                    "type": "array",
+                    "items": { "type": "array", "items": { "type": "string" } },
+                    "description": "ODS: 2D array of cell values, first row treated as header"
+                },
+                "sheet_name": {
+                    "type": "string",
+                    "description": "ODS: name for the sheet (default: 'Sheet1')"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Document title for metadata"
+                },
+                "author": {
+                    "type": "string",
+                    "description": "Document author for metadata"
+                }
             },
-            "required": ["path","content"]
+            "required": ["path"]
         })
     }
 
-    fn permission_category(&self) -> &str {
-        "file:write"
-    }
+    fn permission_category(&self) -> &str { "file:write" }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
-        let content = &input["content"];
-        if content.is_null() {
-            bail!("Missing required 'content' parameter. Provide the document content as a JSON object.");
-        }
-
         let path = resolve_path(&ctx.working_dir, path_str);
+        let libre_format = detect_format(&path)?;
 
-        let doc_type = if let Some(t) = input["type"].as_str() {
-            match t {
-                "odt" => LibreFormat::Odt,
-                "ods" => LibreFormat::Ods,
-                "odp" => LibreFormat::Odp,
-                other => bail!("Unsupported document type: '{other}'"),
-            }
-        } else {
-            detect_format(&path)?
-        };
+        // Extract parameters before moving into spawn_blocking.
+        let content = input["content"].as_str().unwrap_or("").to_string();
+        let rows: Vec<Vec<String>> = input["rows"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .map(|row| {
+                        row.as_array()
+                            .map(|cells| cells.iter().map(|c| c.as_str().unwrap_or("").to_string()).collect())
+                            .unwrap_or_default()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let sheet_name = input["sheet_name"].as_str().unwrap_or("Sheet1").to_string();
+        let title  = input["title"].as_str().unwrap_or("").to_string();
+        let author = input["author"].as_str().unwrap_or("").to_string();
+        let path_d = path_str.to_string();
 
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("Failed to create directories: {}", parent.display()))?;
-        }
-
-        let content_clone = content.clone();
-        let path_clone = path.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            match doc_type {
-                LibreFormat::Odt => write_odt(&path_clone, &content_clone),
-                LibreFormat::Ods => write_ods(&path_clone, &content_clone),
-                LibreFormat::Odp => write_odp(&path_clone, &content_clone),
+            match libre_format {
+                LibreFormat::Odt => write_odt(&path, &content, &title, &author),
+                LibreFormat::Ods => write_ods(&path, &rows, &sheet_name, &title, &author),
+                LibreFormat::Odp => write_odp(&path, &content, &title, &author),
             }
         })
         .await
-        .context("Failed to write document: background task exited")??;
-
-        let file_size = tokio::fs::metadata(&path)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
+        .context("Background task panicked while writing document")??;
 
         Ok(ToolOutput {
-            content: format!("Wrote {} file ({} bytes) to {}", doc_type, file_size, path.display()),
-            metadata: Some(json!({ "path": path.display().to_string(), "format": doc_type.to_string(), "bytes": file_size })),
+            content: format!("Successfully wrote {} file: {}", libre_format, path_d),
+            metadata: Some(json!({ "path": path_d, "format": libre_format.to_string() })),
         })
     }
 }
 
-fn write_odt(path: &Path, content: &Value) -> Result<()> {
+// ── ODT ──────────────────────────────────────────────────────────────────────
+
+fn write_odt(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
+    use std::io::Write;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
-    use std::io::Write;
 
-    let paragraphs = content["paragraphs"].as_array().context("Missing 'paragraphs' array in odt content")?;
-
-    // Minimal ODT container: generate content.xml with simple text in office:body/text:p
-    let mut content_xml = String::new();
-    content_xml.push_str(r#"<?xml version='1.0' encoding='UTF-8'?>"#);
-    content_xml.push_str(r#"<office:document-content xmlns:office='urn:oasis:names:tc:opendocument:xmlns:office:1.0' xmlns:text='urn:oasis:names:tc:opendocument:xmlns:text:1.0'>"#);
-    content_xml.push_str("<office:body><office:text>");
-    for p in paragraphs {
-        let text = p["text"].as_str().unwrap_or("");
-        content_xml.push_str(&format!("<text:p>{}</text:p>", xml_escape(text)));
-    }
-    content_xml.push_str("</office:text></office:body></office:document-content>");
-
-    let file = std::fs::File::create(path).with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("Cannot create {}", path.display()))?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default();
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    zip.start_file("mimetype", SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored))?;
+    // mimetype must be first and uncompressed.
+    let mime_opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("mimetype", mime_opts)?;
     zip.write_all(b"application/vnd.oasis.opendocument.text")?;
 
-    zip.start_file("content.xml", options)?;
-    zip.write_all(content_xml.as_bytes())?;
+    zip.start_file("META-INF/manifest.xml", opts)?;
+    zip.write_all(odt_manifest().as_bytes())?;
+
+    zip.start_file("meta.xml", opts)?;
+    zip.write_all(odf_meta(title, author).as_bytes())?;
+
+    zip.start_file("content.xml", opts)?;
+    zip.write_all(odt_content(text).as_bytes())?;
+
+    zip.start_file("styles.xml", opts)?;
+    zip.write_all(odt_styles().as_bytes())?;
 
     zip.finish()?;
-
     Ok(())
 }
 
-fn write_ods(path: &Path, content: &Value) -> Result<()> {
-    use zip::ZipWriter;
-    use zip::write::SimpleFileOptions;
-    use std::io::Write;
+fn odt_manifest() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
+  <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>"#.to_string()
+}
 
-    let sheets = content["sheets"].as_array().context("Missing 'sheets' array in ods content")?;
+fn odf_meta(title: &str, author: &str) -> String {
+    let title = xml_escape(title);
+    let author = xml_escape(author);
+    format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0"
+  xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <office:meta>
+    <dc:title>{title}</dc:title>
+    <dc:creator>{author}</dc:creator>
+    <meta:creation-date>{}</meta:creation-date>
+  </office:meta>
+</office:document-meta>"#, chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"))
+}
 
-    // Minimal ODS with content.xml containing table:table elements
-    let mut content_xml = String::new();
-    content_xml.push_str(r#"<?xml version='1.0' encoding='UTF-8'?>"#);
-    content_xml.push_str(r#"<office:document-content xmlns:office='urn:oasis:names:tc:opendocument:xmlns:office:1.0' xmlns:table='urn:oasis:names:tc:opendocument:xmlns:table:1.0' xmlns:text='urn:oasis:names:tc:opendocument:xmlns:text:1.0'>"#);
-    content_xml.push_str("<office:body><office:spreadsheet>");
+fn odt_content(text: &str) -> String {
+    let paras: String = text.lines()
+        .map(|line| format!("    <text:p>{}</text:p>\n", xml_escape(line)))
+        .collect();
+    format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>
+{paras}    </office:text>
+  </office:body>
+</office:document-content>"#)
+}
 
-    for s in sheets {
-        let name = s["name"].as_str().unwrap_or("Sheet1");
-        content_xml.push_str(&format!("<table:table table:name=\"{}\">", xml_escape(name)));
-        if let Some(rows) = s["rows"].as_array() {
-            for r in rows {
-                content_xml.push_str("<table:table-row>");
-                if let Some(cells) = r.as_array() {
-                    for cell in cells {
-                        let cell_text = match cell {
-                            Value::String(s) => s.clone(),
-                            Value::Number(n) => n.to_string(),
-                            Value::Bool(b) => b.to_string(),
-                            _ => cell.to_string(),
-                        };
-                        content_xml.push_str(&format!("<table:table-cell><text:p>{}</text:p></table:table-cell>", xml_escape(&cell_text)));
-                    }
-                }
-                content_xml.push_str("</table:table-row>");
-            }
+fn odt_styles() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">
+  <office:styles/>
+</office:document-styles>"#
+}
+
+// ── ODS ──────────────────────────────────────────────────────────────────────
+
+fn write_ods(
+    path: &Path,
+    rows: &[Vec<String>],
+    sheet_name: &str,
+    _title: &str,
+    _author: &str,
+) -> Result<()> {
+    use spreadsheet_ods::{WorkBook, Sheet};
+
+    let mut wb = WorkBook::new_empty();
+    let mut sheet = Sheet::new(sheet_name);
+
+    for (ri, row) in rows.iter().enumerate() {
+        for (ci, cell) in row.iter().enumerate() {
+            sheet.set_value(ri as u32, ci as u32, cell.as_str());
         }
-        content_xml.push_str("</table:table>");
     }
 
-    content_xml.push_str("</office:spreadsheet></office:body></office:document-content>");
-
-    let file = std::fs::File::create(path).with_context(|| format!("Failed to create file: {}", path.display()))?;
-    let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default();
-
-    zip.start_file("mimetype", SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored))?;
-    zip.write_all(b"application/vnd.oasis.opendocument.spreadsheet")?;
-
-    zip.start_file("content.xml", options)?;
-    zip.write_all(content_xml.as_bytes())?;
-
-    zip.finish()?;
-
+    wb.push_sheet(sheet);
+    spreadsheet_ods::write_ods(&mut wb, path)
+        .with_context(|| format!("spreadsheet-ods failed to write {}", path.display()))?;
     Ok(())
 }
 
-fn write_odp(path: &Path, content: &Value) -> Result<()> {
+// ── ODP ──────────────────────────────────────────────────────────────────────
+
+fn write_odp(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
+    use std::io::Write;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
-    use std::io::Write;
 
-    let slides = content["slides"].as_array().context("Missing 'slides' array in odp content")?;
-
-    let mut content_xml = String::new();
-    content_xml.push_str(r#"<?xml version='1.0' encoding='UTF-8'?>"#);
-    content_xml.push_str(r#"<office:document-content xmlns:office='urn:oasis:names:tc:opendocument:xmlns:office:1.0' xmlns:draw='urn:oasis:names:tc:opendocument:xmlns:drawing:1.0' xmlns:text='urn:oasis:names:tc:opendocument:xmlns:text:1.0'>"#);
-    content_xml.push_str("<office:body><office:presentation>");
-
-    for s in slides {
-        let title = s["title"].as_str().unwrap_or("");
-        let body = s["body"].as_str().unwrap_or("");
-        content_xml.push_str("<draw:page>");
-        if !title.is_empty() { content_xml.push_str(&format!("<text:p>{}</text:p>", xml_escape(title))); }
-        if !body.is_empty() { content_xml.push_str(&format!("<text:p>{}</text:p>", xml_escape(body))); }
-        content_xml.push_str("</draw:page>");
-    }
-
-    content_xml.push_str("</office:presentation></office:body></office:document-content>");
-
-    let file = std::fs::File::create(path).with_context(|| format!("Failed to create file: {}", path.display()))?;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("Cannot create {}", path.display()))?;
     let mut zip = ZipWriter::new(file);
-    let options = SimpleFileOptions::default();
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
-    zip.start_file("mimetype", SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored))?;
+    let mime_opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("mimetype", mime_opts)?;
     zip.write_all(b"application/vnd.oasis.opendocument.presentation")?;
 
-    zip.start_file("content.xml", options)?;
-    zip.write_all(content_xml.as_bytes())?;
+    zip.start_file("META-INF/manifest.xml", opts)?;
+    zip.write_all(odp_manifest().as_bytes())?;
+
+    zip.start_file("meta.xml", opts)?;
+    zip.write_all(odf_meta(title, author).as_bytes())?;
+
+    zip.start_file("content.xml", opts)?;
+    zip.write_all(odp_content(text).as_bytes())?;
+
+    zip.start_file("styles.xml", opts)?;
+    zip.write_all(odp_styles().as_bytes())?;
 
     zip.finish()?;
-
     Ok(())
 }
 
+fn odp_manifest() -> String {
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0">
+  <manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.presentation"/>
+  <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
+  <manifest:file-entry manifest:full-path="meta.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>"#.to_string()
+}
+
+fn odp_content(text: &str) -> String {
+    // Split into slides on blank lines.
+    let slides: Vec<Vec<&str>> = text.split("\n\n")
+        .map(|block| block.lines().collect())
+        .collect();
+
+    let mut slide_xml = String::new();
+    for (i, lines) in slides.iter().enumerate() {
+        let paras: String = lines.iter()
+            .map(|l| format!(
+                "        <draw:text-box><text:p>{}</text:p></draw:text-box>\n",
+                xml_escape(l)
+            ))
+            .collect();
+        slide_xml.push_str(&format!(
+            r#"    <draw:page draw:name="Slide {n}" draw:master-page-name="Default">
+{paras}    </draw:page>
+"#,
+            n = i + 1,
+        ));
+    }
+
+    format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+  xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
+  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+  xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0">
+  <office:body>
+    <office:presentation>
+{slide_xml}    </office:presentation>
+  </office:body>
+</office:document-content>"#)
+}
+
+fn odp_styles() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">
+  <office:styles/>
+</office:document-styles>"#
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }

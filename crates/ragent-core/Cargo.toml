@@ -40,6 +40,8 @@ calamine = { workspace = true }
 rust_xlsxwriter = { workspace = true }
 ooxmlsdk = { workspace = true }
 zip = { workspace = true }
+quick-xml = { workspace = true }
+spreadsheet-ods = { workspace = true }
 printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }

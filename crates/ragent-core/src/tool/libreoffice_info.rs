@@ -1,317 +1,205 @@
-//! LibreOffice document metadata/info tool.
+//! LibreOffice document info/metadata tool.
 //!
-//! Provides [`LibreInfoTool`], which extracts metadata and structural
-//! information from OpenDocument Text (`.odt`), Spreadsheet (`.ods`), and
-//! Presentation (`.odp`) files.
+//! Provides [`LibreInfoTool`], which returns metadata and structural statistics
+//! about OpenDocument files without reading all content.
+//!
+//! - **ODS**: uses `calamine` to enumerate sheets and row/column counts.
+//! - **ODT**: parses `meta.xml` for title/author/date; counts paragraphs in `content.xml`.
+//! - **ODP**: counts slides in `content.xml`; parses `meta.xml` for metadata.
 
 use anyhow::{Context, Result};
+use calamine::{Reader as CalaReader, Sheets, open_workbook_auto};
 use serde_json::{Value, json};
 use std::path::Path;
 
-use super::libreoffice_common::{LibreFormat, detect_format, resolve_path};
+use super::libreoffice_common::{
+    LibreFormat, detect_format, read_zip_entry, read_meta_field, resolve_path,
+};
 use super::{Tool, ToolContext, ToolOutput};
 
-/// Extracts metadata and structural information from OpenDocument files.
-///
-/// Returns file type, sheet/slide/paragraph counts, author, title, file size, and
-/// lightweight lists (sheet names, slide snippets).
+/// Returns metadata and structural information about ODF documents.
 pub struct LibreInfoTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreInfoTool {
-    fn name(&self) -> &str {
-        "libre_info"
-    }
+    fn name(&self) -> &str { "libre_info" }
 
     fn description(&self) -> &str {
-        "Get metadata and structural information about an OpenDocument (odt/ods/odp) file."
+        "Get metadata and structural info about an OpenDocument file: sheet list and dimensions \
+         for ODS, word/paragraph counts for ODT, slide count for ODP. Returns JSON."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Path to the OpenDocument file" }
+                "path": {
+                    "type": "string",
+                    "description": "Path to the OpenDocument file"
+                }
             },
             "required": ["path"]
         })
     }
 
-    fn permission_category(&self) -> &str {
-        "file:read"
-    }
+    fn permission_category(&self) -> &str { "file:read" }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let libre_format = detect_format(&path)?;
+        let path_d = path_str.to_string();
 
-        let file_size = tokio::fs::metadata(&path)
-            .await
-            .map(|m| m.len())
-            .unwrap_or(0);
-
-        let path_clone = path.clone();
-        let (content, metadata) = tokio::task::spawn_blocking(move || -> Result<(String, Value)> {
+        let info = tokio::task::spawn_blocking(move || -> Result<Value> {
             match libre_format {
-                LibreFormat::Odt => info_odt(&path_clone, file_size),
-                LibreFormat::Ods => info_ods(&path_clone, file_size),
-                LibreFormat::Odp => info_odp(&path_clone, file_size),
+                LibreFormat::Odt => info_odt(&path),
+                LibreFormat::Ods => info_ods(&path),
+                LibreFormat::Odp => info_odp(&path),
             }
         })
         .await
-        .context("Failed to process document: background task exited")??;
+        .context("Background task panicked while reading info")??;
 
-        Ok(ToolOutput { content, metadata: Some(metadata) })
+        Ok(ToolOutput {
+            content: serde_json::to_string_pretty(&info)?,
+            metadata: Some(json!({ "path": path_d, "format": libre_format.to_string() })),
+        })
     }
 }
 
-fn info_odt(path: &Path, file_size: u64) -> Result<(String, Value)> {
-    use zip::ZipArchive;
-    use std::fs::File;
-    use std::io::Read;
+// ── ODS ──────────────────────────────────────────────────────────────────────
 
-    let file = File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
-    let mut zip = ZipArchive::new(file).context("Failed to read ODT ZIP archive")?;
+fn info_ods(path: &Path) -> Result<Value> {
+    let mut wb: Sheets<_> = open_workbook_auto(path)
+        .with_context(|| format!("calamine failed to open {}", path.display()))?;
 
-    let mut content_xml = String::new();
-    if let Ok(mut f) = zip.by_name("content.xml") {
-        f.read_to_string(&mut content_xml).context("Failed to read content.xml")?;
+    let sheet_names = wb.sheet_names().to_vec();
+    let mut sheets_info = Vec::new();
+    for name in &sheet_names {
+        if let Ok(range) = wb.worksheet_range(name) {
+            let (rows, cols) = range.get_size();
+            sheets_info.push(json!({
+                "name": name,
+                "rows": rows,
+                "columns": cols,
+            }));
+        }
     }
 
-    let mut meta_xml = String::new();
-    if let Ok(mut f) = zip.by_name("meta.xml") {
-        f.read_to_string(&mut meta_xml).ok();
-    }
+    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let creator = read_meta_field(path, "creator").unwrap_or_default();
+    let created = read_meta_field(path, "creation-date").unwrap_or_default();
 
-    // Count paragraphs and words by naive tag scanning
-    let paragraph_count = count_tag_occurrences(&content_xml, "<text:p") as usize;
-    let word_count = count_words_in_text(&extract_text_from_xml(&content_xml));
-
-    // Try extract title/author from meta.xml
-    let title = extract_tag_text(&meta_xml, "dc:title").unwrap_or_default();
-    let author = extract_tag_text(&meta_xml, "dc:creator").unwrap_or_default();
-
-    let metadata = json!({
-        "format": "odt",
-        "file_size_bytes": file_size,
-        "paragraph_count": paragraph_count,
-        "word_count": word_count,
-        "title": title,
-        "author": author,
-    });
-
-    let content = format!(
-        "Format: OpenDocument Text (.odt)\nFile size: {} bytes\nTitle: {}\nAuthor: {}\nParagraphs: {}\nWord count: {}",
-        file_size,
-        if metadata["title"].as_str().unwrap_or("").is_empty() { "(none)" } else { metadata["title"].as_str().unwrap_or("") },
-        if metadata["author"].as_str().unwrap_or("").is_empty() { "(none)" } else { metadata["author"].as_str().unwrap_or("") },
-        paragraph_count,
-        word_count,
-    );
-
-    Ok((content, metadata))
-}
-
-fn info_ods(path: &Path, file_size: u64) -> Result<(String, Value)> {
-    use zip::ZipArchive;
-    use std::fs::File;
-    use std::io::Read;
-
-    let file = File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
-    let mut zip = ZipArchive::new(file).context("Failed to read ODS ZIP archive")?;
-
-    let mut content_xml = String::new();
-    zip.by_name("content.xml")?.read_to_string(&mut content_xml).context("Failed to read content.xml")?;
-
-    // Extract simple table info
-    let tables = extract_tables_info_from_ods(&content_xml);
-    let sheet_count = tables.len();
-
-    let mut sheets_info: Vec<Value> = Vec::new();
-    for t in &tables {
-        sheets_info.push(json!({ "name": t.name, "rows": t.rows as u64, "columns": t.cols as u64 }));
-    }
-
-    let metadata = json!({
+    Ok(json!({
         "format": "ods",
-        "file_size_bytes": file_size,
-        "sheet_count": sheet_count,
+        "path": path.display().to_string(),
+        "title": title,
+        "creator": creator,
+        "created": created,
+        "sheet_count": sheet_names.len(),
         "sheets": sheets_info,
-    });
-
-    let mut content_lines = vec![format!("Format: OpenDocument Spreadsheet (.ods)"), format!("File size: {} bytes", file_size), format!("Sheets: {}", sheet_count)];
-    for s in &tables {
-        content_lines.push(format!("  - {}: {} rows × {} columns", s.name, s.rows, s.cols));
-    }
-
-    Ok((content_lines.join("\n"), metadata))
+    }))
 }
 
-fn info_odp(path: &Path, file_size: u64) -> Result<(String, Value)> {
-    use zip::ZipArchive;
-    use std::fs::File;
-    use std::io::Read;
+// ── ODT ──────────────────────────────────────────────────────────────────────
 
-    let file = File::open(path).with_context(|| format!("Failed to open file: {}", path.display()))?;
-    let mut zip = ZipArchive::new(file).context("Failed to read ODP ZIP archive")?;
+fn info_odt(path: &Path) -> Result<Value> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
 
-    let mut content_xml = String::new();
-    zip.by_name("content.xml")?.read_to_string(&mut content_xml).context("Failed to read content.xml")?;
+    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let creator = read_meta_field(path, "creator").unwrap_or_default();
+    let created = read_meta_field(path, "creation-date").unwrap_or_default();
 
-    let slides = extract_slides_from_odp(&content_xml);
-    let slide_count = slides.len();
+    let xml = read_zip_entry(path, "content.xml")?;
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(true);
 
-    let mut titles: Vec<String> = Vec::new();
-    for s in &slides {
-        let t = s.lines().next().unwrap_or("").trim().to_string();
-        titles.push(if t.is_empty() { "(none)".to_string() } else { t });
-    }
+    let mut para_count = 0usize;
+    let mut word_count = 0usize;
+    let mut char_count = 0usize;
+    let mut buf = Vec::new();
 
-    let metadata = json!({
-        "format": "odp",
-        "file_size_bytes": file_size,
-        "slide_count": slide_count,
-        "slides": titles,
-    });
-
-    let mut content_lines = vec![format!("Format: OpenDocument Presentation (.odp)"), format!("File size: {} bytes", file_size), format!("Slides: {}", slide_count)];
-    for (i, t) in titles.iter().enumerate() {
-        content_lines.push(format!("  - Slide {}: {}", i + 1, t));
-    }
-
-    Ok((content_lines.join("\n"), metadata))
-}
-
-// --- Helpers ---
-
-fn extract_text_from_xml(xml: &str) -> String {
-    let mut out = String::new();
-    let mut in_tag = false;
-    for c in xml.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            '&' => out.push(' '),
-            _ => if !in_tag { out.push(c) }
-        }
-    }
-    out
-}
-
-fn count_tag_occurrences(hay: &str, tag: &str) -> usize {
-    hay.to_lowercase().matches(&tag.to_lowercase()).count()
-}
-
-fn count_words_in_text(text: &str) -> usize {
-    text.split_whitespace().count()
-}
-
-fn extract_tag_text(xml: &str, tag: &str) -> Option<String> {
-    let lower = xml.to_lowercase();
-    let tag_lower = tag.to_lowercase();
-    if let Some(start) = lower.find(&format!("<{}", tag_lower)) {
-        if let Some(gt) = xml[start..].find('>') {
-            let s = start + gt + 1;
-            if let Some(end) = xml[s..].find(&format!("</{}>", tag)) {
-                return Some(xml[s..s + end].trim().to_string());
-            }
-        }
-    }
-    None
-}
-
-#[derive(Debug, Clone)]
-struct SimpleTableInfo {
-    name: String,
-    rows: usize,
-    cols: usize,
-}
-
-fn extract_tables_info_from_ods(xml: &str) -> Vec<SimpleTableInfo> {
-    let mut tables: Vec<SimpleTableInfo> = Vec::new();
-    let mut pos = 0;
-    let lower = xml.to_lowercase();
-    while let Some(start) = lower[pos..].find("<table:table") {
-        let s = pos + start;
-        if let Some(end_tag) = lower[s..].find("</table:table>") {
-            let e = s + end_tag + "</table:table>".len();
-            let table_xml = &xml[s..e];
-            let name = extract_attribute(table_xml, "table:name").unwrap_or_else(|| "Sheet1".to_string());
-            let rows = extract_rows_from_table(table_xml).len();
-            let cols = extract_rows_from_table(table_xml).get(0).map(|r| r.len()).unwrap_or(0);
-            tables.push(SimpleTableInfo { name, rows, cols });
-            pos = e;
-        } else { break; }
-    }
-    tables
-}
-
-fn extract_rows_from_table(table_xml: &str) -> Vec<Vec<String>> {
-    let mut rows = Vec::new();
-    let lower = table_xml.to_lowercase();
-    let mut pos = 0;
-    while let Some(start) = lower[pos..].find("<table:table-row") {
-        let s = pos + start;
-        if let Some(end_tag) = lower[s..].find("</table:table-row>") {
-            let e = s + end_tag + "</table:table-row>".len();
-            let row_xml = &table_xml[s..e];
-            let cells = extract_cells_from_row(row_xml);
-            rows.push(cells);
-            pos = e;
-        } else { break; }
-    }
-    rows
-}
-
-fn extract_cells_from_row(row_xml: &str) -> Vec<String> {
-    let mut cells = Vec::new();
-    let lower = row_xml.to_lowercase();
-    let mut pos = 0;
-    while let Some(start) = lower[pos..].find("<table:table-cell") {
-        let s = pos + start;
-        if let Some(end_tag) = lower[s..].find("</table:table-cell>") {
-            let e = s + end_tag + "</table:table-cell>".len();
-            let cell_xml = &row_xml[s..e];
-            let value = extract_text_from_xml(cell_xml).trim().to_string();
-            cells.push(value);
-            pos = e;
-        } else { break; }
-    }
-    cells
-}
-
-fn extract_slides_from_odp(xml: &str) -> Vec<String> {
-    let mut slides = Vec::new();
-    let lower = xml.to_lowercase();
-    let mut pos = 0;
-    while let Some(start) = lower[pos..].find("<draw:page") {
-        let s = pos + start;
-        if let Some(end_tag) = lower[s..].find("</draw:page>") {
-            let e = s + end_tag + "</draw:page>".len();
-            let slide_xml = &xml[s..e];
-            let text = extract_text_from_xml(slide_xml).trim().to_string();
-            slides.push(text);
-            pos = e;
-        } else { break; }
-    }
-    slides
-}
-
-fn extract_attribute(xml: &str, attr: &str) -> Option<String> {
-    let lower = xml.to_lowercase();
-    let attr_lower = attr.to_lowercase();
-    if let Some(idx) = lower.find(&attr_lower) {
-        let rest = &xml[idx + attr.len()..];
-        if let Some(eq) = rest.find('=') {
-            let val = rest[eq + 1..].trim();
-            let quoted = val.chars().next()?;
-            if quoted == '"' || quoted == '\'' {
-                if let Some(end) = val[1..].find(quoted) {
-                    return Some(val[1..1 + end].to_string());
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let local = e.local_name();
+                if std::str::from_utf8(local.as_ref()).unwrap_or("") == "p" {
+                    para_count += 1;
                 }
             }
+            Ok(Event::Text(e)) => {
+                // Use raw bytes as UTF-8 (ODF is always UTF-8).
+                if let Ok(text) = std::str::from_utf8(e.as_ref()) {
+                    char_count += text.len();
+                    word_count += text.split_whitespace().count();
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
         }
+        buf.clear();
     }
-    None
+
+    Ok(json!({
+        "format": "odt",
+        "path": path.display().to_string(),
+        "title": title,
+        "creator": creator,
+        "created": created,
+        "paragraphs": para_count,
+        "words": word_count,
+        "characters": char_count,
+    }))
+}
+
+// ── ODP ──────────────────────────────────────────────────────────────────────
+
+fn info_odp(path: &Path) -> Result<Value> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let creator = read_meta_field(path, "creator").unwrap_or_default();
+    let created = read_meta_field(path, "creation-date").unwrap_or_default();
+
+    let xml = read_zip_entry(path, "content.xml")?;
+    let mut reader = Reader::from_str(&xml);
+    reader.config_mut().trim_text(true);
+
+    let mut slide_count = 0usize;
+    let mut slide_names: Vec<String> = Vec::new();
+    let mut buf = Vec::new();
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                let local = e.local_name();
+                if std::str::from_utf8(local.as_ref()).unwrap_or("") == "page" {
+                    slide_count += 1;
+                    let name = e.attributes()
+                        .flatten()
+                        .find(|a| {
+                            std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == "name"
+                        })
+                        .map(|a| std::str::from_utf8(&a.value).unwrap_or("").to_string())
+                        .unwrap_or_else(|| format!("Slide {slide_count}"));
+                    slide_names.push(name);
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(json!({
+        "format": "odp",
+        "path": path.display().to_string(),
+        "title": title,
+        "creator": creator,
+        "created": created,
+        "slide_count": slide_count,
+        "slides": slide_names,
+    }))
 }
