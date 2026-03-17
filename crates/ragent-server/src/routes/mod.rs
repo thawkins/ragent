@@ -99,6 +99,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/sessions/{id}/abort", post(abort_session))
         .route("/sessions/{id}/permission/{req_id}", post(reply_permission))
+        .route(
+            "/sessions/{id}/tasks",
+            get(list_tasks).post(spawn_task),
+        )
+        .route(
+            "/sessions/{id}/tasks/{tid}",
+            get(get_task).delete(cancel_task),
+        )
         .route("/events", get(events_stream))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -468,6 +476,258 @@ async fn events_stream(
         }
     });
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+// ── Task Endpoints ────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SpawnTaskRequest {
+    agent: String,
+    task: String,
+    background: Option<bool>,
+    model: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TaskResponse {
+    id: String,
+    parent_session_id: String,
+    agent_name: String,
+    task_prompt: String,
+    status: String,
+    result: Option<String>,
+    error: Option<String>,
+    created_at: String,
+    completed_at: Option<String>,
+    background: bool,
+}
+
+async fn spawn_task(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+    Json(body): Json<SpawnTaskRequest>,
+) -> impl IntoResponse {
+    // Verify session exists and get its directory
+    let session = match state.storage.get_session(&session_id) {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let working_dir = std::path::Path::new(&session.directory);
+    let background = body.background.unwrap_or(false);
+    let task_manager = match state.session_processor.task_manager.get() {
+        Some(tm) => tm,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "task manager not initialized" })),
+            )
+                .into_response();
+        }
+    };
+
+    let result = if background {
+        task_manager
+            .spawn_background(
+                &session_id,
+                &body.agent,
+                &body.task,
+                body.model.as_deref(),
+                working_dir,
+            )
+            .await
+    } else {
+        task_manager
+            .spawn_sync(
+                &session_id,
+                &body.agent,
+                &body.task,
+                body.model.as_deref(),
+                working_dir,
+            )
+            .await
+            .map(|result| result.entry)
+    };
+
+    match result {
+        Ok(entry) => {
+            let response = TaskResponse {
+                id: entry.id.clone(),
+                parent_session_id: entry.parent_session_id,
+                agent_name: entry.agent_name,
+                task_prompt: entry.task_prompt,
+                status: format!("{}", entry.status),
+                result: entry.result,
+                error: entry.error,
+                created_at: entry.created_at.to_rfc3339(),
+                completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
+                background,
+            };
+            (StatusCode::CREATED, Json(response)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn list_tasks(
+    State(state): State<AppState>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    // Verify session exists
+    match state.storage.get_session(&session_id) {
+        Ok(Some(_)) => {},
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "session not found" })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    }
+
+    let task_manager = match state.session_processor.task_manager.get() {
+        Some(tm) => tm,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "task manager not initialized" })),
+            )
+                .into_response();
+        }
+    };
+
+    let entries = task_manager.list_tasks(&session_id).await;
+    let tasks: Vec<TaskResponse> = entries
+        .into_iter()
+        .map(|entry| TaskResponse {
+            id: entry.id.clone(),
+            parent_session_id: entry.parent_session_id,
+            agent_name: entry.agent_name,
+            task_prompt: entry.task_prompt,
+            status: format!("{}", entry.status),
+            result: entry.result,
+            error: entry.error,
+            created_at: entry.created_at.to_rfc3339(),
+            completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
+            background: entry.background,
+        })
+        .collect();
+    (StatusCode::OK, Json(tasks)).into_response()
+}
+
+async fn get_task(
+    State(state): State<AppState>,
+    Path((session_id, task_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let task_manager = match state.session_processor.task_manager.get() {
+        Some(tm) => tm,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "task manager not initialized" })),
+            )
+                .into_response();
+        }
+    };
+
+    match task_manager.get_task(&task_id).await {
+        Some(entry) => {
+            if entry.parent_session_id != session_id {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({ "error": "task does not belong to this session" })),
+                )
+                    .into_response();
+            }
+            let response = TaskResponse {
+                id: entry.id.clone(),
+                parent_session_id: entry.parent_session_id,
+                agent_name: entry.agent_name,
+                task_prompt: entry.task_prompt,
+                status: format!("{}", entry.status),
+                result: entry.result,
+                error: entry.error,
+                created_at: entry.created_at.to_rfc3339(),
+                completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
+                background: entry.background,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "task not found" })),
+        )
+            .into_response(),
+    }
+}
+
+async fn cancel_task(
+    State(state): State<AppState>,
+    Path((session_id, task_id)): Path<(String, String)>,
+) -> impl IntoResponse {
+    let task_manager = match state.session_processor.task_manager.get() {
+        Some(tm) => tm,
+        None => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "task manager not initialized" })),
+            )
+                .into_response();
+        }
+    };
+
+    // Verify task belongs to this session
+    match task_manager.get_task(&task_id).await {
+        Some(entry) => {
+            if entry.parent_session_id != session_id {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({ "error": "task does not belong to this session" })),
+                )
+                    .into_response();
+            }
+        }
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "task not found" })),
+            )
+                .into_response();
+        }
+    }
+
+    match task_manager.cancel_task(&task_id).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
