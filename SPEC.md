@@ -2735,21 +2735,55 @@ Then invoke via:
 - Skill: `agent: security-reviewer` in `context: fork` skill
 - Tab cycling if in the agent list
 
-#### Orchestrator Agent (Future)
+#### Multi-Agent Orchestration (F6) ✅
 
-When implemented, the orchestrator agent will decompose complex tasks into subtasks:
+The `ragent-core` crate provides a full multi-agent orchestration layer. Multiple in-process agents can collaborate on a single job via capability-based routing, result aggregation, and event streams.
 
+**Key components:**
+
+| Component | Description |
+|---|---|
+| `AgentRegistry` | Register/unregister agents with capability tags; heartbeat and stale-pruning |
+| `Coordinator` | Accepts `JobDescriptor`s, matches agents by capability, dispatches subtasks, aggregates results |
+| `InProcessRouter` | Delivers messages to agent mailboxes via Tokio mpsc channels; configurable per-request timeout |
+| `MetricsSnapshot` | Live counters: `active_jobs`, `completed_jobs`, `timeouts`, `errors` |
+
+**Aggregation strategies:**
+
+| Method | Description |
+|---|---|
+| `start_job_sync(desc)` | Fan-out to all matched agents; await all responses; concatenate |
+| `start_job_first_success(desc)` | Try agents in order; return first non-error response; skip timeouts |
+| `start_job_async(desc)` | Fire-and-forget; returns `job_id`; poll via `get_job_result(id)` or subscribe via `subscribe_job_events(id)` |
+
+**HTTP API (ragent-server):**
+
+| Endpoint | Description |
+|---|---|
+| `POST /orchestrator/start` | Start a job; body: `{"required_capabilities":["search"],"payload":"...","mode":"async"}` |
+| `GET /orchestrator/metrics` | Metrics snapshot JSON |
+| `GET /orchestrator/jobs/{id}` | Poll job status and result |
+
+**Rust example:**
+
+```rust
+use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
+use futures::future::FutureExt;
+use std::sync::Arc;
+
+let registry = AgentRegistry::new();
+let r: Responder = Arc::new(|p| async move { format!("handled: {}", p) }.boxed());
+registry.register("my-agent", vec!["search".to_string()], Some(r)).await;
+
+let coord = Coordinator::new(registry);
+let result = coord.start_job_sync(JobDescriptor {
+    id: "job-1".to_string(),
+    required_capabilities: vec!["search".to_string()],
+    payload: "find TODOs".to_string(),
+}).await?;
 ```
-User: "Implement a user authentication system"
-  ↓
-Orchestrator decomposes:
-  1. Subtask: plan agent → design architecture
-  2. Subtask: build agent → implement endpoints
-  3. Subtask: build agent → write tests
-  4. Subtask: plan agent → security review
-  ↓
-Orchestrator synthesizes results → final response
-```
+
+See `crates/ragent-core/examples/orchestration.rs` for a complete runnable example.
 
 ---
 
@@ -3778,7 +3812,7 @@ A built-in mock server (feature-gated behind `#[cfg(test)]`) replays canned LLM 
 | F3 | Plugin system | WASM-based plugin execution for custom tools | ❌ |
 | F4 | ~~Git worktree isolation~~ | ~~Run each session in a separate git worktree for parallel work~~ → **Promoted to §3.30** | ❌ |
 | F5 | OpenTelemetry | Trace spans for LLM calls, tool execution, and session lifecycle | ❌ |
-| F6 | Multi-agent orchestration | Multiple agents collaborating on a single task | ❌ |
+| F6 | Multi-agent orchestration | Multiple agents collaborating on a single task | ✅ |
 | F7 | Code generation benchmarks | Automated evaluation harness for measuring agent quality | ❌ |
 | F8 | Enterprise features | Managed config, audit logging, SSO | ❌ |
 | F9 | Voice input | Microphone input transcribed to text for hands-free coding | ❌ |

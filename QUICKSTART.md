@@ -694,6 +694,70 @@ Type `/` in the input to open an autocomplete menu:
 
 ---
 
+## Multi-Agent Orchestration (F6)
+
+`ragent-core` includes a built-in orchestration layer that lets multiple agents collaborate on a single job.
+
+### Register agents and start a job (Rust)
+
+```rust
+use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
+use futures::future::FutureExt;
+use std::sync::Arc;
+
+let registry = AgentRegistry::new();
+
+// Register two agents with overlapping capabilities.
+let r_a: Responder = Arc::new(|p| async move { format!("A: {}", p) }.boxed());
+let r_b: Responder = Arc::new(|p| async move { format!("B: {}", p) }.boxed());
+registry.register("agent-a", vec!["search".to_string()], Some(r_a)).await;
+registry.register("agent-b", vec!["search".to_string()], Some(r_b)).await;
+
+let coord = Coordinator::new(registry);
+
+// Sync: fan-out to all matching agents, aggregate responses.
+let result = coord.start_job_sync(JobDescriptor {
+    id: "job-1".to_string(),
+    required_capabilities: vec!["search".to_string()],
+    payload: "find TODOs".to_string(),
+}).await?;
+println!("{}", result);  // "--- agent: agent-a ---\nA: find TODOs\n..."
+
+// Async: returns immediately; poll for status.
+let job_id = coord.start_job_async(JobDescriptor { ... }).await?;
+let (status, result) = coord.get_job_result(&job_id).await.unwrap();
+```
+
+Run the complete example with:
+```sh
+cargo run -p ragent-core --example orchestration
+```
+
+### HTTP API
+
+When running `ragent serve`, the orchestration endpoints are available under `/orchestrator`:
+
+```sh
+# Start a job (async)
+curl -X POST http://localhost:3000/orchestrator/start \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"required_capabilities":["search"],"payload":"find TODOs","mode":"async"}'
+# → {"job_id":"<uuid>"}
+
+# Poll for result
+curl http://localhost:3000/orchestrator/jobs/<uuid> \
+  -H 'Authorization: Bearer <token>'
+# → {"id":"...","status":"completed","result":"..."}
+
+# Live metrics
+curl http://localhost:3000/orchestrator/metrics \
+  -H 'Authorization: Bearer <token>'
+# → {"active_jobs":0,"completed_jobs":3,"timeouts":0,"errors":0}
+```
+
+---
+
 ## Troubleshooting
 
 **"No Copilot token found"**
