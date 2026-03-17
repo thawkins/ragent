@@ -4,6 +4,11 @@
 //! official `rmcp` SDK. Supports stdio (child process) and HTTP transports.
 //! After connecting, tools advertised by each server are discoverable via
 //! [`McpClient::list_tools`] and invocable via [`McpClient::call_tool`].
+//!
+//! Use [`McpClient::discover`] to scan `PATH`, npm global packages, and
+//! MCP registry directories for available servers (see [`discovery`] module).
+
+pub mod discovery;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +23,8 @@ use tokio::process::Command;
 use tokio::sync::RwLock;
 
 use crate::config::{McpServerConfig, McpTransport};
+
+pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
 
 /// Connection status of an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -643,6 +650,27 @@ impl McpClient {
         }
 
         Ok(())
+    }
+
+    /// Scan the system for available MCP servers and return them.
+    ///
+    /// Does not modify internal state — the caller decides what to do with results.
+    /// Scans `PATH` for known executables, npm global packages, and MCP registry
+    /// directories.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use ragent_core::mcp::McpClient;
+    /// # async fn example() {
+    /// let servers = McpClient::discover().await;
+    /// for server in servers {
+    ///     println!("Found: {} at {:?}", server.name, server.executable);
+    /// }
+    /// # }
+    /// ```
+    pub async fn discover() -> Vec<DiscoveredMcpServer> {
+        discovery::discover().await
     }
 }
 

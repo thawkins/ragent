@@ -15,7 +15,7 @@ use ragent_core::{
     agent::{AgentInfo, ModelRef},
     event::{Event, EventBus, FinishReason},
     lsp::{LspManager, LspServer, LspStatus, SharedLspManager, discovery::DiscoveredServer},
-    mcp::McpServer,
+    mcp::{McpClient, McpServer, discovery::DiscoveredMcpServer},
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
     provider::ProviderRegistry,
@@ -226,6 +226,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "lsp",
         description: "Show LSP server status (/lsp discover | /lsp connect <id> | /lsp disconnect <id>)",
     },
+    SlashCommandDef {
+        trigger: "mcp",
+        description: "Show MCP server status (/mcp discover | /mcp connect <id> | /mcp disconnect <id>)",
+    },
+    SlashCommandDef {
+        trigger: "todos",
+        description: "Show TODO items for the current session",
+    },
 ];
 
 /// A single entry in the slash-command autocomplete menu.
@@ -348,6 +356,21 @@ pub struct LspDiscoverState {
     pub feedback: Option<String>,
 }
 
+/// State for the interactive `/mcp discover` dialog.
+///
+/// Shown as an overlay that lists discovered MCP servers with numbered
+/// rows. The user types a number and presses Enter to enable a server, or
+/// presses Esc to dismiss.
+#[derive(Debug, Clone)]
+pub struct McpDiscoverState {
+    /// Servers found during discovery.
+    pub servers: Vec<DiscoveredMcpServer>,
+    /// Number being typed by the user (e.g. `"2"`).
+    pub number_input: String,
+    /// Feedback message shown after an enable action or on error.
+    pub feedback: Option<String>,
+}
+
 /// Core TUI application state.
 ///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
@@ -448,6 +471,8 @@ pub struct App {
     pub lsp_manager: Option<SharedLspManager>,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
+    /// Active MCP discovery dialog, if any.
+    pub mcp_discover: Option<McpDiscoverState>,
     /// When true, the next assistant text delta starts a new message instead
     /// of appending to the current one. Set by `MessageEnd` events to
     /// separate init-exchange output from the main response.
@@ -584,6 +609,7 @@ impl App {
             lsp_servers: Vec::new(),
             lsp_manager: None,
             lsp_discover: None,
+            mcp_discover: None,
             force_new_message: false,
             agent_stack: Vec::new(),
             pending_plan_task: None,
@@ -790,6 +816,71 @@ impl App {
 
         Ok(format!(
             "✓ '{}' added to ragent.json. Restart ragent to activate the LSP server.",
+            server.id
+        ))
+    }
+
+    /// Add a discovered MCP server to the `mcp` section in `ragent.json` and
+    /// enable it. Returns `Ok(())` on success or an error description.
+    pub fn enable_discovered_mcp_server(&self, server: &DiscoveredMcpServer) -> Result<String, String> {
+        use ragent_core::config::Config;
+
+        // Load (or default-construct) the current config.
+        let mut config = Config::load().unwrap_or_default();
+
+        if config.mcp.contains_key(&server.id) {
+            return Err(format!(
+                "'{}' is already in ragent.json. Edit it manually to change settings.",
+                server.id
+            ));
+        }
+
+        let cfg = server.to_config();
+        // Enable the server (discovery sets disabled=true by default)
+        let mut cfg = cfg;
+        cfg.disabled = false;
+        config.mcp.insert(server.id.clone(), cfg.clone());
+
+        // Persist back to ragent.json in the working directory.
+        let config_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("ragent.json");
+
+        match std::fs::read_to_string(&config_path) {
+            Ok(existing) => {
+                // Merge: parse existing JSON, insert/update the mcp key.
+                let mut json: serde_json::Value =
+                    serde_json::from_str(&existing).map_err(|e| e.to_string())?;
+                let mcp_entry = serde_json::json!({
+                    "type": "stdio",
+                    "command": server.executable.to_string_lossy(),
+                    "args": server.args,
+                    "env": server.env,
+                    "disabled": false,
+                });
+                json["mcp"][&server.id] = mcp_entry;
+                let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
+            }
+            Err(_) => {
+                // No existing file — write a minimal config.
+                let out =
+                    serde_json::to_string_pretty(&serde_json::json!({ "mcp": {
+                        &server.id: {
+                            "type": "stdio",
+                            "command": server.executable.to_string_lossy(),
+                            "args": server.args,
+                            "env": server.env,
+                            "disabled": false,
+                        }
+                    }}))
+                    .map_err(|e| e.to_string())?;
+                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(format!(
+            "✓ '{}' added to ragent.json. Restart ragent to activate the MCP server.",
             server.id
         ))
     }
@@ -1948,6 +2039,140 @@ impl App {
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "lsp".to_string();
+            }
+            "mcp" => {
+                if !self.ensure_session() {
+                    return;
+                }
+                let mcp_args: Vec<&str> = args.split_whitespace().collect();
+                let sub = mcp_args.first().copied().unwrap_or("");
+                match sub {
+                    "discover" => {
+                        // Run discovery synchronously using block_in_place.
+                        let found = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(McpClient::discover())
+                        });
+                        // Show interactive discover dialog.
+                        self.mcp_discover = Some(McpDiscoverState {
+                            servers: found,
+                            number_input: String::new(),
+                            feedback: None,
+                        });
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    "connect" => {
+                        if let Some(&id) = mcp_args.get(1) {
+                            let config = ragent_core::config::Config::load().ok()
+                                .and_then(|c| c.mcp.get(id).cloned());
+                            if let Some(_cfg) = config {
+                                self.status = format!("MCP connect not yet implemented for '{}'", id);
+                            } else {
+                                self.status = format!("MCP '{}' not found in config", id);
+                            }
+                        } else {
+                            self.status = "Usage: /mcp connect <id>".to_string();
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    "disconnect" => {
+                        if let Some(&id) = mcp_args.get(1) {
+                            self.status = format!("MCP disconnect not yet implemented for '{}'", id);
+                        } else {
+                            self.status = "Usage: /mcp disconnect <id>".to_string();
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    _ => {
+                        // Show all registered servers and status.
+                        let mut out = String::from("From: /mcp\nMCP Servers:\n\n");
+                        if self.mcp_servers.is_empty() {
+                            out.push_str("  (no MCP servers configured)\n\n");
+                            out.push_str("Run /mcp discover to scan for available servers.\n");
+                            out.push_str("Then add them to 'mcp' in ragent.json to activate.\n");
+                        } else {
+                            for s in &self.mcp_servers {
+                                let status_icon = match &s.status {
+                                    ragent_core::mcp::McpStatus::Connected => "🟢 connected",
+                                    ragent_core::mcp::McpStatus::Disabled => "⚪ disabled",
+                                    ragent_core::mcp::McpStatus::NeedsAuth => "🟡 needs auth",
+                                    ragent_core::mcp::McpStatus::Failed { error } => &format!("🔴 failed: {}", error),
+                                };
+                                out.push_str(&format!("  {:<18} {}\n", s.id, status_icon));
+                                if !s.tools.is_empty() {
+                                    out.push_str(&format!("    tools: {}\n", s.tools.len()));
+                                }
+                            }
+                            let connected = self.mcp_servers.iter()
+                                .filter(|s| s.status == ragent_core::mcp::McpStatus::Connected)
+                                .count();
+                            out.push_str(&format!("\n{}/{} server(s) connected\n", connected, self.mcp_servers.len()));
+                        }
+                        out.push_str("\nSubcommands: /mcp discover  /mcp connect <id>  /mcp disconnect <id>\n");
+                        self.append_assistant_text(&out);
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "mcp".to_string();
+            }
+            "todos" => {
+                if !self.ensure_session() {
+                    return;
+                }
+                let session_id = self.session_id.clone().unwrap();
+                let storage = self.session_processor.session_manager.storage();
+
+                // Fetch todos from storage
+                let status_filter = if args.is_empty() { None } else { Some(args) };
+                match storage.get_todos(&session_id, status_filter) {
+                    Ok(todos) => {
+                        let mut output = String::from("From: /todo_list\n");
+                        if todos.is_empty() {
+                            output.push_str("No TODO items found");
+                            if let Some(filter) = status_filter {
+                                output.push_str(&format!(" with status '{filter}'"));
+                            }
+                            output.push_str(".\n");
+                        } else {
+                            output.push_str(&format!("## TODOs ({} items)\n\n", todos.len()));
+                            for todo in &todos {
+                                let status_icon = match todo.status.as_str() {
+                                    "pending" => "⏳",
+                                    "in_progress" => "🔄",
+                                    "done" => "✅",
+                                    "blocked" => "🚫",
+                                    _ => "❓",
+                                };
+                                output.push_str(&format!(
+                                    "- {} **{}** — {} `[{}]`\n",
+                                    status_icon, todo.id, todo.title, todo.status
+                                ));
+                                if !todo.description.is_empty() {
+                                    output.push_str(&format!("  {}\n", todo.description));
+                                }
+                            }
+                        }
+                        self.append_assistant_text(&output);
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        self.status = format!("{} todo(s)", todos.len());
+                    }
+                    Err(e) => {
+                        self.status = format!("Failed to read todos: {}", e);
+                        self.push_log(LogLevel::Error, format!("todo_list error: {}", e));
+                    }
+                }
             }
             _ => {
                 // Check if this is a skill invocation before reporting unknown command.

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.14] - 2026-03-17
+
+### Added
+- **MCP server auto-discovery** — new `/mcp discover` command scans PATH, npm global packages, and well-known MCP registry directories for installed MCP servers
+  - Recognizes 18 known MCP servers (filesystem, GitHub, git, postgres, sqlite, memory, brave-search, fetch, puppeteer, slack, google-drive, google-maps, sentry, sequential-thinking, everything, time, aws-kb-retrieval, exa)
+  - Scans `@modelcontextprotocol` npm scope for installed servers
+  - Reads Claude Desktop, Cline, and generic MCP registry directories
+  - Discovered servers can be added to `ragent.json` config
+- **TUI MCP discovery panel** — F9 key opens discovery panel showing available MCP servers
+
+### Changed
+- MCP module structure reorganized with new `discovery.rs` submodule
+
 ## [0.1.0-alpha.13] - 2026-03-17
 
 ### Added

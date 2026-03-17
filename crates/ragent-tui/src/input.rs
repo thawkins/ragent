@@ -68,6 +68,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // If MCP discover dialog is active, route all keys there
+    if app.mcp_discover.is_some() {
+        handle_mcp_discover_key(app, key);
+        return None;
+    }
+
     // If permission dialog is active, intercept keys
     if app.permission_pending.is_some() {
         return match key.code {
@@ -807,6 +813,80 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
         // Digit character for number input
         KeyCode::Char(c) if c.is_ascii_digit() => {
             if let Some(ref mut state) = app.lsp_discover {
+                state.number_input.push(c);
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key events when the MCP discover dialog is active.
+fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Dismiss on Escape
+        KeyCode::Esc => {
+            app.mcp_discover = None;
+        }
+
+        // Confirm selection on Enter
+        KeyCode::Enter => {
+            let state = app.mcp_discover.as_mut().unwrap();
+            let input = state.number_input.trim().to_string();
+            if input.is_empty() {
+                // Empty input = close dialog
+                app.mcp_discover = None;
+                return;
+            }
+            match input.parse::<usize>() {
+                Ok(n) if n >= 1 => {
+                    // Take the server (avoids borrow issues)
+                    let server = {
+                        let state = app.mcp_discover.as_ref().unwrap();
+                        state.servers.get(n - 1).cloned()
+                    };
+                    match server {
+                        Some(srv) => {
+                            let result = app.enable_discovered_mcp_server(&srv);
+                            let state = app.mcp_discover.as_mut().unwrap();
+                            match result {
+                                Ok(msg) => {
+                                    state.feedback = Some(msg);
+                                    state.number_input.clear();
+                                }
+                                Err(e) => {
+                                    state.feedback = Some(format!("✗ {e}"));
+                                    state.number_input.clear();
+                                }
+                            }
+                        }
+                        None => {
+                            let count = app.mcp_discover.as_ref().unwrap().servers.len();
+                            let state = app.mcp_discover.as_mut().unwrap();
+                            state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                            state.number_input.clear();
+                        }
+                    }
+                }
+                _ => {
+                    let count = app.mcp_discover.as_ref().unwrap().servers.len();
+                    let state = app.mcp_discover.as_mut().unwrap();
+                    state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                    state.number_input.clear();
+                }
+            }
+        }
+
+        // Backspace in number input
+        KeyCode::Backspace => {
+            if let Some(ref mut state) = app.mcp_discover {
+                state.number_input.pop();
+            }
+        }
+
+        // Digit character for number input
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            if let Some(ref mut state) = app.mcp_discover {
                 state.number_input.push(c);
             }
         }

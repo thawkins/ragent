@@ -149,6 +149,11 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     if app.lsp_discover.is_some() {
         render_lsp_discover_dialog(frame, app);
     }
+
+    // MCP discover dialog overlay
+    if app.mcp_discover.is_some() {
+        render_mcp_discover_dialog(frame, app);
+    }
 }
 
 fn render_logo(frame: &mut Frame, area: Rect) {
@@ -910,6 +915,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     if app.lsp_discover.is_some() {
         render_lsp_discover_dialog(frame, app);
     }
+
+    // MCP discover dialog overlay
+    if app.mcp_discover.is_some() {
+        render_mcp_discover_dialog(frame, app);
+    }
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1532,6 +1542,165 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .title(" /lsp discover ")
         .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Left);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render the interactive MCP discovery dialog overlay.
+fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
+    let state = app.mcp_discover.as_ref().unwrap();
+
+    // Size the dialog: taller when there are more servers.
+    let server_rows = state.servers.len().max(1) as u16;
+    let dialog_height = (server_rows + 10).min(40); // header + rows + prompt + padding
+    let area = {
+        let full = frame.area();
+        let h = dialog_height.min(full.height.saturating_sub(4));
+        let w = full.width.min(90);
+        ratatui::layout::Rect {
+            x: (full.width.saturating_sub(w)) / 2,
+            y: (full.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        }
+    };
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "MCP Server Discovery",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    if state.servers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No MCP servers detected.",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Install MCP servers via npm (e.g. @modelcontextprotocol/server-filesystem)",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  or place configs in ~/.mcp/servers/ and retry.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        // Load current config once so we can flag already-enabled servers.
+        let enabled_ids: std::collections::HashSet<String> =
+            ragent_core::config::Config::load()
+                .map(|c| c.mcp.into_keys().collect())
+                .unwrap_or_default();
+
+        // Column header
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<3}  {:<20}  {:<40}  {}", "#", "ID", "Name", "Source"),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", "─".repeat(80)),
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        for (i, srv) in state.servers.iter().enumerate() {
+            let already_enabled = enabled_ids.contains(&srv.id);
+            let num = format!("{}", i + 1);
+            let name = if srv.name.len() > 38 {
+                format!("{}…", &srv.name[..37])
+            } else {
+                srv.name.clone()
+            };
+            let source = match &srv.source {
+                ragent_core::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
+                ragent_core::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),
+                ragent_core::mcp::McpDiscoverySource::McpRegistry { .. } => "MCP registry".to_string(),
+            };
+            let (num_color, id_color, name_color, source_color) = if already_enabled {
+                // Yellow tones for already-configured servers
+                (Color::Yellow, Color::Yellow, Color::Yellow, Color::Yellow)
+            } else {
+                (Color::Magenta, Color::White, Color::Green, Color::DarkGray)
+            };
+            let enabled_tag = if already_enabled { " ✓" } else { "" };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<3}", num),
+                    Style::default().fg(num_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {:<20}", format!("{}{}", srv.id, enabled_tag)),
+                    Style::default().fg(id_color),
+                ),
+                Span::styled(
+                    format!("  {:<40}", name),
+                    Style::default().fg(name_color),
+                ),
+                Span::styled(
+                    format!("  {}", source),
+                    Style::default().fg(source_color),
+                ),
+            ]));
+        }
+
+        lines.push(Line::from(Span::styled(
+            "  (yellow = already enabled in ragent.json)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Feedback line (error or success)
+    if let Some(ref msg) = state.feedback {
+        let color = if msg.starts_with('✓') { Color::Green } else { Color::Red };
+        lines.push(Line::from(Span::styled(
+            format!("  {msg}"),
+            Style::default().fg(color),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Input prompt
+    if state.servers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Press Esc to close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Enable server #: ",
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                state.number_input.as_str(),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("█", Style::default().fg(Color::Magenta)), // cursor
+        ]));
+        lines.push(Line::from(Span::styled(
+            "  Enter to enable  Esc to cancel",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" /mcp discover ")
+        .border_style(Style::default().fg(Color::Magenta));
 
     let paragraph = Paragraph::new(lines)
         .block(block)
