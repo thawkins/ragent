@@ -44,7 +44,7 @@ impl Tool for NewTaskTool {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "If true, run in the background and return immediately with a task_id. Default: false"
+                    "description": "If true, spawn in the background and return immediately — the agent runs concurrently. REQUIRED when spawning more than one task in the same response; background: false blocks all subsequent tool calls. Default: false (use only for a single task whose result you need immediately)"
                 },
                 "model": {
                     "type": "string",
@@ -77,7 +77,16 @@ impl Tool for NewTaskTool {
 
         let model = input
             .get("model")
-            .and_then(|v| v.as_str());
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                // Inherit the parent session's provider/model when no explicit override
+                // is given. This prevents failures when the parent uses a provider
+                // (e.g. copilot) that differs from the sub-agent's hardcoded default.
+                ctx.active_model.as_ref().map(|m| {
+                    format!("{}/{}", m.provider_id, m.model_id)
+                })
+            });
 
         let task_manager = ctx
             .task_manager
@@ -95,7 +104,7 @@ impl Tool for NewTaskTool {
                     &ctx.session_id,
                     agent,
                     task,
-                    model,
+                    model.as_deref(),
                     &ctx.working_dir,
                 )
                 .await?;
@@ -123,7 +132,7 @@ impl Tool for NewTaskTool {
                     &ctx.session_id,
                     agent,
                     task,
-                    model,
+                    model.as_deref(),
                     &ctx.working_dir,
                 )
                 .await?;

@@ -23,6 +23,7 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     }
 }
 

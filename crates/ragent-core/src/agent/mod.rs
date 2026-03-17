@@ -529,8 +529,10 @@ pub fn build_system_prompt(
 
         let mut section = String::from(
             "## Sub-Agent Spawning\n\n\
-             Use the `new_task` tool to delegate work to a specialised sub-agent whenever a task is \
-             clearly separable, time-consuming, or benefits from isolation.\n\n\
+             **CRITICAL: Prefer using sub-agents over doing the work yourself.**\n\
+             When sub-agents are available, your role shifts from a coder to a manager of \
+             specialised agents. Delegate exploration, builds, and planning to them — they run \
+             faster and cheaper than you would inline.\n\n\
              **Available agents:**\n",
         );
 
@@ -572,25 +574,51 @@ pub fn build_system_prompt(
 
         section.push_str(
             "\n**Choosing an agent:**\n\
-             - `explore` — fastest and cheapest; use for any codebase search, reading, or understanding.\n\
-               Cannot edit files. Ideal for parallel discovery tasks.\n\
+             - `explore` — fastest and cheapest; use for ANY codebase search, reading, or understanding.\n\
+               Read-only. Stateless — loses all context between calls.\n\
+               **Always prefer `explore` over doing file searches yourself.**\n\
              - `build`   — use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
              - `plan`    — use to produce a structured implementation plan without making any changes.\n\
              - `general` — full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
-             **Modes:**\n\
-             - `background: false` (default) — blocks until complete; result returned inline.\n\
-             - `background: true` — returns immediately with a `task_id`; agent runs concurrently.\n\
-               A SubagentComplete notification will arrive when it finishes.\n\n\
+             **CRITICAL — `background` mode rules:**\n\
+             - **Use `background: true` for ALL tasks whenever you spawn more than one in the same response.**\n\
+               `background: false` blocks the entire agent loop — every subsequent tool call in the same\n\
+               response waits for it to finish. This makes parallel spawning impossible.\n\
+             - Use `background: false` ONLY when you are spawning a single task and need its result\n\
+               before you can continue reasoning (e.g. a quick targeted lookup).\n\
+             - When in doubt, use `background: true`.\n\n\
+             **CRITICAL — Parallel explore agents for large codebase reviews:**\n\
+             When asked to review, understand, or analyse a codebase with multiple modules or\n\
+             directories, DO NOT do the work yourself. Instead:\n\
+             1. Identify 3-5 independent areas (e.g. by top-level crate, directory, or concern).\n\
+             2. Spawn a separate `explore` agent for EACH area in the SAME response turn,\n\
+                ALL with `background: true`. They will run concurrently.\n\
+             3. Use `list_tasks` to check progress. Synthesise results when all complete.\n\
+             This is dramatically faster and cheaper than sequential exploration.\n\n\
+             **CRITICAL — Batch all questions into one explore call:**\n\
+             The explore agent is stateless — it loses ALL context between calls. Every call starts fresh.\n\
+             - Batch ALL related questions into ONE explore call with a comprehensive prompt.\n\
+             - If you have independent exploration questions, launch multiple agents IN PARALLEL.\n\
+             - ANTI-PATTERN: Do NOT call explore, read the answer, then call explore again with a follow-up.\n\
+               Anticipate what you need and ask for everything up-front.\n\
+             - After an explore call, do NOT duplicate its work by reading files it already reported.\n\n\
              **When to spawn:**\n\
-             - Parallelize independent explorations (`explore`, background: true)\n\
-             - Offload a slow build/test cycle while you continue reasoning\n\
-             - Isolate risky or speculative work in a focused agent\n\n\
-             **Example calls:**\n\
+             - Large codebase review → multiple `explore` agents with `background: true`, one per area\n\
+             - Any file search or code understanding task → `explore` (never do it inline)\n\
+             - Slow build/test cycle → `build` with `background: true` while you keep reasoning\n\
+             - Risky or speculative work → isolate in a focused `general` agent\n\n\
+             **Example — parallel codebase review (ALL background: true):**\n\
              ```json\n\
-             {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/\", \"background\": false}\n\
-             {\"agent\": \"build\",   \"task\": \"Run cargo test and fix failing tests\",  \"background\": true}\n\
+             {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-core/src/agent/ and src/session/\", \"background\": true}\n\
+             {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-core/src/tool/ listing every tool\", \"background\": true}\n\
+             {\"agent\": \"explore\", \"task\": \"Summarise architecture in crates/ragent-core/src/provider/ and src/llm/\", \"background\": true}\n\
              ```\n\n\
-             Use `list_tasks` to check background task status. Use `cancel_task` to stop a task early.\n\n",
+             **Example — single blocking explore (background: false only when one task, result needed immediately):**\n\
+             ```json\n\
+             {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
+             ```\n\n\
+             Use `wait_tasks` to block until background tasks finish (preferred — no polling).\n\
+             Use `list_tasks` to check status without blocking. Use `cancel_task` to stop a task early.\n\n",
         );
 
         prompt.push_str(&section);

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.17] - 2026-03-17
+
+### Changed
+- Version bump — no functional changes since 0.1.0-alpha.16
+
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/),

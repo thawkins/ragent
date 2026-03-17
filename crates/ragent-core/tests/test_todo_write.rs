@@ -18,6 +18,7 @@ fn make_ctx(storage: Arc<Storage>) -> ToolContext {
         storage: Some(storage),
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     }
 }
 
@@ -360,6 +361,7 @@ async fn test_no_storage() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let err = TodoWriteTool

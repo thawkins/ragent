@@ -18,6 +18,7 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
     (ctx, bus)
 }

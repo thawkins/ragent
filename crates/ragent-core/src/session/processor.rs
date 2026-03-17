@@ -487,6 +487,7 @@ impl SessionProcessor {
                     storage: Some(self.session_manager.storage().clone()),
                     task_manager: self.task_manager.get().cloned(),
                     lsp_manager: self.lsp_manager.get().cloned(),
+                    active_model: Some(model_ref.clone()),
                 };
 
                 let result = self

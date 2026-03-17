@@ -218,6 +218,7 @@ async fn test_read_tool_execute() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool
@@ -249,6 +250,7 @@ async fn test_read_tool_line_range() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool
@@ -285,6 +287,7 @@ async fn test_read_tool_missing_file() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -332,6 +335,7 @@ async fn test_read_tool_large_file_section_map() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     // Read without line range → should get summary, not the whole file
@@ -370,6 +374,7 @@ async fn test_read_tool_large_file_with_range_returns_full() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     // Read WITH a line range → should return those exact lines, no summary
@@ -407,6 +412,7 @@ async fn test_read_tool_small_file_no_summary() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool.execute(json!({"path": "small.rs"}), &ctx).await.unwrap();
@@ -437,6 +443,7 @@ async fn test_write_tool_execute() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool
@@ -475,6 +482,7 @@ async fn test_list_tool_execute() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -506,6 +514,7 @@ async fn test_glob_tool_execute() {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     };
 
     let result = tool

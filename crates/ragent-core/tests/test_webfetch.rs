@@ -13,6 +13,7 @@ fn make_ctx() -> ToolContext {
         storage: None,
         task_manager: None,
             lsp_manager: None,
+            active_model: None,
     }
 }
 

@@ -22,6 +22,7 @@ pub mod lsp_references;
 pub mod lsp_symbols;
 pub mod multiedit;
 pub mod new_task;
+pub mod wait_tasks;
 pub mod office_common;
 pub mod office_info;
 pub mod office_read;
@@ -94,6 +95,7 @@ impl Default for ToolOutput {
 ///     storage: None,
 ///     task_manager: None,
 ///     lsp_manager: None,
+///     active_model: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -111,6 +113,10 @@ pub struct ToolContext {
     pub task_manager: Option<Arc<crate::task::TaskManager>>,
     /// Optional LSP manager for code-intelligence queries.
     pub lsp_manager: Option<crate::lsp::SharedLspManager>,
+    /// The active model (provider + model ID) used by the parent session.
+    /// Sub-agent tools use this to inherit the parent's provider when no
+    /// explicit model override is specified in the tool call.
+    pub active_model: Option<crate::agent::ModelRef>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -288,6 +294,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(new_task::NewTaskTool));
     registry.register(Arc::new(cancel_task::CancelTaskTool));
     registry.register(Arc::new(list_tasks::ListTasksTool));
+    registry.register(Arc::new(wait_tasks::WaitTasksTool));
     registry.register(Arc::new(lsp_symbols::LspSymbolsTool));
     registry.register(Arc::new(lsp_hover::LspHoverTool));
     registry.register(Arc::new(lsp_definition::LspDefinitionTool));
