@@ -193,6 +193,7 @@ async fn main() -> Result<()> {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
+            lsp_manager: std::sync::OnceLock::new(),
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)

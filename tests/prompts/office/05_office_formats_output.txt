@@ -1,0 +1,44 @@
+# Office Document Output Formats Test
+# Tests different output format options for office_read
+
+## Setup: Create test documents
+
+First create test documents if they don't exist:
+1. Create target/temp/format_test.docx with a heading and two paragraphs
+2. Create target/temp/format_test.xlsx with a simple 3x3 data table
+
+## Test 1: Read Word document in different formats
+
+Use office_read on format_test.docx with each format option:
+1. format: "text" - Plain text output
+2. format: "markdown" - Markdown formatted output
+3. format: "json" - Structured JSON output
+
+Compare the outputs:
+- Text should be plain with no formatting
+- Markdown should include heading markers (#)
+- JSON should have structured elements
+
+## Test 2: Read Excel in different formats
+
+Use office_read on format_test.xlsx with each format option:
+1. format: "text" - Tab/space separated values
+2. format: "markdown" - Markdown table format
+3. format: "json" - Array of row objects
+
+Compare the outputs:
+- Text should be readable but simple
+- Markdown should render as a proper table
+- JSON should have column names as keys
+
+## Test 3: Verify JSON structure
+
+For JSON output, verify:
+1. Word: Elements array with type, text, level properties
+2. Excel: Array of objects with column headers as keys
+
+Expected behavior:
+- All three formats should be supported for both document types
+- Markdown should be the default and most readable
+- JSON should provide structured data for programmatic use
+- Text should be simplest, suitable for plain processing

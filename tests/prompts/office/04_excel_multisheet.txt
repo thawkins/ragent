@@ -1,0 +1,41 @@
+# Excel Multi-Sheet Test
+# Tests reading and writing Excel files with multiple worksheets
+
+## Test 1: Create a multi-sheet workbook
+
+Use office_write to create target/temp/test_multisheet.xlsx with multiple sheets:
+- Sheet "Summary":
+  - Headers: "Category", "Total"
+  - Data: "Sales", 50000 | "Expenses", 35000 | "Profit", 15000
+- Sheet "Q1":
+  - Headers: "Month", "Revenue", "Costs"
+  - Data: "January", 15000, 10000 | "February", 18000, 12000 | "March", 17000, 13000
+- Sheet "Q2":
+  - Headers: "Month", "Revenue", "Costs"
+  - Data: "April", 20000, 14000 | "May", 22000, 15000 | "June", 25000, 16000
+
+## Test 2: Read specific sheets
+
+Use office_read with the sheet parameter:
+1. Read the "Summary" sheet by name
+2. Read the "Q1" sheet by name
+3. Read sheet by index (e.g., index 2 for Q2)
+
+## Test 3: Verify sheet isolation
+
+Confirm each sheet's data is independent:
+1. Read Q1 and verify it has 3 data rows
+2. Read Q2 and verify it has different data
+3. Read Summary and verify totals
+
+## Test 4: List all sheets
+
+Use office_info to:
+1. Get list of all sheet names
+2. Verify 3 sheets exist: Summary, Q1, Q2
+
+Expected behavior:
+- Multiple sheets should be created in a single workbook
+- Reading by sheet name or index should work
+- Each sheet should maintain its own data
+- office_info should list all available sheets

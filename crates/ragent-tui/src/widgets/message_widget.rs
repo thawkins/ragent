@@ -31,16 +31,6 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
-/// Extract a string value from a JSON object by key.
-fn get_json_str<'a>(json: &'a serde_json::Value, key: &str) -> Option<&'a str> {
-    json.get(key).and_then(|v| v.as_str())
-}
-
-/// Extract a u64 value from a JSON object by key.
-fn get_json_u64(json: &serde_json::Value, key: &str) -> Option<u64> {
-    json.get(key).and_then(|v| v.as_u64())
-}
-
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
 pub(crate) fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();

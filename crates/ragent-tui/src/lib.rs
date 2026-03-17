@@ -24,7 +24,9 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use ragent_core::agent::AgentInfo;
+use ragent_core::config::Config;
 use ragent_core::event::EventBus;
+use ragent_core::lsp::{LspManager, SharedLspManager};
 use ragent_core::provider::ProviderRegistry;
 use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
@@ -80,11 +82,34 @@ pub async fn run_tui(
         event_bus.clone(),
         storage,
         provider_registry,
-        session_processor,
+        session_processor.clone(),
         agent,
         show_log,
     );
     app.check_provider_health();
+
+    // ── LSP startup ───────────────────────────────────────────────────────────
+    // Create the LspManager, start configured servers, and wire events into
+    // the app. This runs asynchronously; status changes propagate via events.
+    let lsp_manager: SharedLspManager = {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let mgr = LspManager::new(cwd, event_bus.clone());
+        Arc::new(tokio::sync::RwLock::new(mgr))
+    };
+    {
+        let mut mgr = lsp_manager.write().await;
+        let lsp_configs = Config::load()
+            .map(|c| c.lsp)
+            .unwrap_or_default();
+        if !lsp_configs.is_empty() {
+            mgr.connect_all(lsp_configs).await;
+        }
+        // Populate the initial server snapshot in app.
+        app.lsp_servers = mgr.servers().to_vec();
+    }
+    app.set_lsp_manager(lsp_manager.clone());
+    // Also wire into the session processor so LSP tools can access the manager.
+    let _ = session_processor.lsp_manager.set(lsp_manager);
 
     if let Some(ref sid) = resume_session_id {
         if let Err(e) = app.load_session(sid) {

@@ -40,3 +40,5 @@ printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }
 serde_yaml = { workspace = true }
+lsp-types = { workspace = true }
+url = { workspace = true }

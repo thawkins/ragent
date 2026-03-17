@@ -113,7 +113,7 @@ fn test_registry_has_list_tasks() {
 #[test]
 fn test_registry_total_tool_count() {
     let registry = create_default_registry();
-    assert_eq!(registry.list().len(), 26);
+    assert_eq!(registry.list().len(), 31);
 }
 
 // ── cancel_task tool ───────────────────────────────────────────
@@ -125,6 +125,7 @@ fn make_ctx() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     }
 }
 

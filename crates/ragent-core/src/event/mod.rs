@@ -261,6 +261,16 @@ pub enum Event {
         /// Unique identifier for the cancelled task.
         task_id: String,
     },
+
+    // ── LSP lifecycle events ─────────────────────────────────────────────
+
+    /// An LSP server's connection status changed.
+    LspStatusChanged {
+        /// The server id as declared in `ragent.json` (e.g. `"rust"`).
+        server_id: String,
+        /// The new status.
+        status: crate::lsp::LspStatus,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.

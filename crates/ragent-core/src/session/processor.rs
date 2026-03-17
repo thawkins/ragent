@@ -42,6 +42,10 @@ pub struct SessionProcessor {
     /// Optional task manager for sub-agent spawning (F13/F14).
     /// Uses `OnceLock` to break the circular dependency with `TaskManager`.
     pub task_manager: std::sync::OnceLock<Arc<crate::task::TaskManager>>,
+    /// Optional LSP manager for code-intelligence tool context.
+    /// Uses `OnceLock` so it can be set after the processor is constructed
+    /// (the LspManager is created after the processor in `run_tui`).
+    pub lsp_manager: std::sync::OnceLock<crate::lsp::SharedLspManager>,
 }
 
 impl SessionProcessor {
@@ -464,6 +468,7 @@ impl SessionProcessor {
                     event_bus: self.event_bus.clone(),
                     storage: Some(self.session_manager.storage().clone()),
                     task_manager: self.task_manager.get().cloned(),
+                    lsp_manager: self.lsp_manager.get().cloned(),
                 };
 
                 let result = self

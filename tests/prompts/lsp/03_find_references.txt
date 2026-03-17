@@ -1,0 +1,18 @@
+# LSP Find References Test - Locate All Usages
+# Tests the lsp_references tool to find all usages of a symbol in the workspace
+
+Use the lsp_references tool to find all usages of the `Permission` enum in the codebase.
+
+Target: crates/ragent-core/src/permission/mod.rs - the Permission enum
+
+Expected behavior:
+1. The tool should return a list of file paths and line numbers where Permission is used
+2. References should include imports, type annotations, and pattern matches
+3. Should find usages across multiple files in the workspace
+
+Steps:
+1. Use lsp_symbols to find the Permission enum definition in permission/mod.rs
+2. Use lsp_references on the Permission symbol
+3. Count the total number of references found
+4. List the unique files that reference Permission
+5. Report which files use Permission most frequently

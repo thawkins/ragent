@@ -15,6 +15,8 @@ pub mod error;
 pub mod event;
 pub mod id;
 pub mod llm;
+/// Language Server Protocol client for code-intelligence queries.
+pub mod lsp;
 pub mod mcp;
 pub mod message;
 pub mod permission;

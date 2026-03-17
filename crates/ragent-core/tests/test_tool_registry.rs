@@ -19,6 +19,11 @@ fn test_default_registry_has_all_tools() {
         "grep",
         "list",
         "list_tasks",
+        "lsp_definition",
+        "lsp_diagnostics",
+        "lsp_hover",
+        "lsp_references",
+        "lsp_symbols",
         "multiedit",
         "new_task",
         "office_info",
@@ -97,7 +102,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 26);
+    assert_eq!(defs.len(), 31);
 
     for def in &defs {
         assert!(
@@ -212,6 +217,7 @@ async fn test_read_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool
@@ -242,6 +248,7 @@ async fn test_read_tool_line_range() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool
@@ -277,6 +284,7 @@ async fn test_read_tool_missing_file() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -323,6 +331,7 @@ async fn test_read_tool_large_file_section_map() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     // Read without line range → should get summary, not the whole file
@@ -360,6 +369,7 @@ async fn test_read_tool_large_file_with_range_returns_full() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     // Read WITH a line range → should return those exact lines, no summary
@@ -396,6 +406,7 @@ async fn test_read_tool_small_file_no_summary() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool.execute(json!({"path": "small.rs"}), &ctx).await.unwrap();
@@ -425,6 +436,7 @@ async fn test_write_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool
@@ -462,6 +474,7 @@ async fn test_list_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -492,6 +505,7 @@ async fn test_glob_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let result = tool

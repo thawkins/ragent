@@ -1,0 +1,20 @@
+# LSP Diagnostics Test - Compiler Errors and Warnings
+# Tests the lsp_diagnostics tool to retrieve compiler diagnostics
+
+Use the lsp_diagnostics tool to check for any errors or warnings in the Rust codebase.
+
+Expected behavior:
+1. The tool should return any compiler errors, warnings, or hints
+2. Diagnostics should include file path, line number, and severity
+3. Each diagnostic should have a descriptive message
+
+Steps:
+1. First trigger analysis by using lsp_hover or lsp_symbols on a few key files:
+   - crates/ragent-core/src/lib.rs
+   - crates/ragent-core/src/config/mod.rs
+   - crates/ragent-tui/src/lib.rs
+2. Use lsp_diagnostics to get all diagnostics
+3. Filter by severity (error vs warning vs hint)
+4. Report any errors that would prevent compilation
+5. Summarize the types of warnings present (e.g., unused variables, deprecated APIs)
+6. If no diagnostics, confirm the code is clean

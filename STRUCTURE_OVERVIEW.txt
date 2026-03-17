@@ -1,0 +1,283 @@
+================================================================================
+RAGENT PROJECT STRUCTURE - COMPLETE OVERVIEW FOR LSP INTEGRATION
+================================================================================
+
+PROJECT ROOT
+/home/thawkins/Projects/ragent/
+│
+├── Cargo.toml (Workspace definition, workspace.dependencies)
+├── src/main.rs (CLI entry point - parse args, initialize infra, dispatch)
+├── NEW: LSP_INTEGRATION_GUIDE.md (Complete planning guide)
+├── NEW: LSP_QUICK_REFERENCE.md (Quick lookup reference)
+│
+├── crates/
+│   │
+│   ├── ragent-core/ (Core library - ALL business logic)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs (Module exports)
+│   │       │
+│   │       ├── agent/
+│   │       │   └── mod.rs (AgentInfo, create_builtin_agents, build_system_prompt)
+│   │       │       LINE 18-27: Built-in agents (ask, general, build, plan, explore, etc)
+│   │       │       LINE 79-106: AgentInfo::new() constructor
+│   │       │       LINE 132-314: Agent roster with prompts and permissions
+│   │       │       LINE 348-407: resolve_agent() - merge config overrides
+│   │       │       LINE 409-550: build_system_prompt() - assemble complete system prompt
+│   │       │                     (Order: role → dir → tree → AGENTS.md → skills → guidelines)
+│   │       │
+│   │       ├── config/
+│   │       │   └── mod.rs (Config loading, types, config merging)
+│   │       │       LINE 13-46: Config struct (username, agent, provider, permission, mcp, etc)
+│   │       │       LINE 174-193: McpServerConfig (for MCP servers)
+│   │       │       LINE 208-218: McpTransport enum (Stdio, Sse, Http)
+│   │       │       LINE 252-300: load() - config precedence (global → project → env)
+│   │       │       ← LSP config would go here
+│   │       │
+│   │       ├── event/
+│   │       │   └── mod.rs (EventBus, Event enum with 30+ variants)
+│   │       │       LINE 13-26: FinishReason enum (Stop, ToolUse, Length, etc)
+│   │       │       LINE 35-200+: Event enum with tagged union (session, message, tool, permission, etc)
+│   │       │       LINE 250+: EventBus struct & impl
+│   │       │       ← LSP events could be added here
+│   │       │
+│   │       ├── llm/
+│   │       │   └── mod.rs (LlmClient trait, ChatRequest, ChatMessage, StreamEvent)
+│   │       │       LINE 22-73: StreamEvent enum (ReasoningStart, TextDelta, ToolCallStart, etc)
+│   │       │       LINE 80-99: ChatRequest struct (model, messages, tools, temperature, etc)
+│   │       │       LINE 150+: ToolDefinition struct (name, description, inputSchema)
+│   │       │
+│   │       ├── mcp/
+│   │       │   └── mod.rs (McpClient, MCP server management)
+│   │       │       LINE 22-36: McpStatus enum (Connected, Disabled, Failed, NeedsAuth)
+│   │       │       LINE 41-51: McpServer struct (id, config, status, tools)
+│   │       │       LINE 54-62: McpToolDef struct
+│   │       │       LINE 74-97: McpClient::new(), list_servers()
+│   │       │       LINE 129-200: McpClient::connect() - dial server, discover tools
+│   │       │       LINE 220+: McpClient::call_tool() - invoke tool on server
+│   │       │       ← LSP could be wrapped as MCP server
+│   │       │
+│   │       ├── message/
+│   │       │   └── mod.rs (Message, MessagePart, ToolCallState)
+│   │       │       LINE 15-29: Role enum (User, Assistant)
+│   │       │       LINE 34-56: ToolCallStatus enum (Pending, Running, Completed, Error)
+│   │       │       LINE 78-91: ToolCallState struct (status, input, output, error, duration_ms)
+│   │       │       LINE 98-119: MessagePart enum (Text, ToolCall, Reasoning)
+│   │       │       LINE 126-139: Message struct (id, session_id, role, parts, timestamps)
+│   │       │
+│   │       ├── permission/
+│   │       │   └── mod.rs (PermissionChecker, PermissionRequest)
+│   │       │       LINE 30+: Permission enum (Read, Edit, Bash, Web, PlanEnter, etc)
+│   │       │       LINE 50+: PermissionRule struct (permission, pattern, action)
+│   │       │       LINE 100+: PermissionChecker::check() → publishes PermissionRequested
+│   │       │
+│   │       ├── provider/
+│   │       │   ├── mod.rs (ProviderRegistry, create_default_registry)
+│   │       │   ├── anthropic.rs (Claude provider implementation)
+│   │       │   ├── openai.rs (GPT provider implementation)
+│   │       │   ├── copilot.rs (GitHub Copilot provider)
+│   │       │   └── ollama.rs (Ollama/local models)
+│   │       │
+│   │       ├── session/
+│   │       │   ├── mod.rs (Session, SessionManager)
+│   │       │   │   LINE 18-44: Session struct (id, title, directory, version, timestamps)
+│   │       │   │   LINE 59-148: SessionManager (create, get, update sessions)
+│   │       │   │
+│   │       │   └── processor.rs (SessionProcessor - THE AGENTIC LOOP)
+│   │       │       LINE 27-45: SessionProcessor struct (session_manager, provider_registry,
+│   │       │                   tool_registry, permission_checker, event_bus, task_manager)
+│   │       │       LINE 77-300+: process_message() - MAIN LOOP:
+│   │       │           1. Store user message
+│   │       │           2. Publish MessageStart event
+│   │       │           3. Load message history
+│   │       │           4. Build system prompt (file tree, AGENTS.md, skills)
+│   │       │           5. Create LLM client
+│   │       │           6. Stream LLM response (TextDelta, ToolCallStart/End events)
+│   │       │           7. Execute tool calls (fetch ToolOutput, embed in conversation)
+│   │       │           8. Feed results back to LLM (loop until stop)
+│   │       │           9. Store complete message
+│   │       │           10. Publish MessageEnd event
+│   │       │       ← LSP tool calls happen here
+│   │       │
+│   │       ├── skill/
+│   │       │   └── mod.rs (SkillRegistry, skill loading & invocation)
+│   │       │       LINE 30+: Skill struct (name, description, parameters, invocation_type)
+│   │       │       LINE 100+: SkillRegistry::load() - scan skill_dirs
+│   │       │       LINE 150+: SkillRegistry::invoke() - call skill
+│   │       │
+│   │       ├── storage/
+│   │       │   └── mod.rs (Storage, SQLite persistence)
+│   │       │       LINE 40+: Storage::open() - open or create ragent.db
+│   │       │       LINE 100+: Message CRUD (create_message, get_messages, etc)
+│   │       │       LINE 200+: Session CRUD (create_session, get_session, etc)
+│   │       │       LINE 300+: Settings storage (set_setting, get_setting)
+│   │       │
+│   │       ├── task/
+│   │       │   └── mod.rs (TaskManager - sub-agent task spawning)
+│   │       │       LINE 40+: TaskManager struct
+│   │       │       LINE 100+: spawn_task() - create background sub-agent
+│   │       │
+│   │       └── tool/
+│   │           ├── mod.rs (Tool trait, ToolRegistry, ToolContext, ToolOutput)
+│   │           │   LINE 46-65: ToolOutput struct (content, metadata)
+│   │           │   LINE 89-101: ToolContext struct (session_id, working_dir, event_bus, storage, task_manager)
+│   │           │   LINE 108-123: Tool trait (name, description, parameters_schema, permission_category, execute)
+│   │           │   LINE 129-180+: ToolRegistry (new, register, get, list, export)
+│   │           │   LINE 250+: create_default_registry() ← LSP tool registered here
+│   │           │
+│   │           ├── bash.rs (Shell execution with timeout & security checks)
+│   │           │   LINE 17-135: BashTool implementation
+│   │           │   LINE 55-134: execute() - spawn bash -c, timeout, output truncation
+│   │           │
+│   │           ├── read.rs (File reading with line ranges)
+│   │           ├── write.rs (File writing)
+│   │           ├── edit.rs (Edit file sections)
+│   │           ├── create.rs (Create files)
+│   │           ├── patch.rs (Apply patches)
+│   │           ├── multiedit.rs (Batch edits)
+│   │           ├── grep.rs (Search files)
+│   │           ├── glob.rs (Pattern matching)
+│   │           ├── list.rs (Directory listing)
+│   │           ├── question.rs (User input dialog)
+│   │           ├── todo.rs (TODO tracking)
+│   │           ├── plan.rs (Planning support)
+│   │           ├── webfetch.rs (HTTP GET)
+│   │           ├── websearch.rs (Search integration)
+│   │           ├── office_*.rs (Word/Excel/PowerPoint)
+│   │           └── pdf_*.rs (PDF reading/writing)
+│   │
+│   ├── ragent-tui/ (Terminal UI)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs (TUI entry point, run_tui())
+│   │       │
+│   │       ├── app.rs (App state & slash command execution)
+│   │       │   LINE 159-220: SLASH_COMMANDS const array with SlashCommandDef
+│   │       │       (about, agent, clear, cancel, compact, help, log, model, provider, 
+│   │       │        provider_reset, quit, resume, system, tools, skills)
+│   │       │       ← Add /lsp_* commands here
+│   │       │
+│   │       │   LINE 1150-1560: execute_slash_command() method
+│   │       │       LINE 1158: pub fn execute_slash_command(&mut self, raw: &str)
+│   │       │       LINE 1159: Strip '/', split into cmd + args
+│   │       │       LINE 1170-1550: match cmd { "about" => { ... }, "agent" => { ... }, etc }
+│   │       │       ← Add "lsp_*" patterns here
+│   │       │
+│   │       ├── input.rs (Keyboard event handling)
+│   │       │   LINE 11-35: InputAction enum (SendMessage, SlashCommand, SwitchAgent, etc)
+│   │       │   LINE 58-200: handle_key() - route key events
+│   │       │       - Permission dialog intercepts y/n/a
+│   │       │       - Slash menu intercepts up/down/enter
+│   │       │       - Otherwise returns InputAction
+│   │       │   LINE 105-150: Slash menu navigation (Up/Down/Enter)
+│   │       │
+│   │       ├── layout.rs (UI rendering with ratatui)
+│   │       ├── widgets/ (Custom UI widgets)
+│   │       └── tests/
+│   │           └── test_slash_commands.rs
+│   │               LINE 1-68: test_slash_clear_empties_messages()
+│   │               LINE 73-100: test_slash_help_shows_commands()
+│   │               ← Add tests for /lsp_* commands here
+│   │
+│   └── ragent-server/ (HTTP API server)
+│       ├── Cargo.toml
+│       └── src/
+│           ├── main.rs (Server entry point)
+│           └── routes/mod.rs (axum routes)
+│
+└── tests/
+    ├── test_mcp_client.rs
+    ├── test_skill_invocation.rs
+    ├── test_tool_registry.rs
+    ├── test_event_system.rs
+    ├── test_permission_system.rs
+    └── ... more tests
+
+================================================================================
+KEY DATA FLOWS FOR LSP INTEGRATION
+================================================================================
+
+1. CONFIGURATION LOADING
+   Config::load() (config/mod.rs:252)
+     → Check ~/.config/ragent/ragent.json
+     → Check ./ragent.json
+     → Check $RAGENT_CONFIG env var
+     → Check $RAGENT_CONFIG_CONTENT env var
+     → Merge precedence → Config struct
+     → Extract mcp servers
+     → Extract lsp config (new)
+
+2. TOOL EXECUTION
+   SessionProcessor::process_message() (session/processor.rs:77)
+     → LLM response with tool_call
+     → PermissionChecker::check() (publishes PermissionRequested event)
+     → Tool::execute(input, &ToolContext)
+     → ToolOutput returned
+     → Embedded in conversation as ToolResult
+     → Feed back to LLM
+
+3. SYSTEM PROMPT BUILDING
+   build_system_prompt() (agent/mod.rs:438)
+     → Agent prompt + working_dir
+     → File tree (first 2 levels)
+     → AGENTS.md contents
+     → Available skills
+     → Tool guidelines
+     → File reading practices
+     ← Can mention LSP availability here
+
+4. MESSAGE FLOW
+   Message { id, session_id, role, parts: [MessagePart] }
+     MessagePart::Text { text }
+     MessagePart::ToolCall { tool, call_id, state: ToolCallState }
+     MessagePart::Reasoning { text }
+
+5. EVENT PUBLISHING
+   Tool publish: event_bus.publish(Event::ToolCallStart { ... })
+   TUI subscribe: event_bus.subscribe() → loop { event.recv() }
+   Storage: Message persisted with tool results
+
+================================================================================
+INTEGRATION POINTS FOR LSP
+================================================================================
+
+✓ Tool Registration (tool/mod.rs:create_default_registry)
+  → Register LSP tool here
+  
+✓ Configuration (config/mod.rs)
+  → Add lsp config section
+  → Load LSP server configs at startup
+
+✓ System Prompt (agent/mod.rs:build_system_prompt)
+  → Mention LSP capabilities to agent
+  
+✓ Event System (event/mod.rs)
+  → Publish LSP-specific events (optional)
+  
+✓ Slash Commands (app.rs:SLASH_COMMANDS)
+  → Add /lsp_* commands
+  
+✓ Message Storage (message/mod.rs)
+  → LSP tool results stored as MessagePart::ToolCall
+
+✓ Permissions (permission/mod.rs)
+  → Declare permission category for LSP queries
+  
+✓ MCP Integration (mcp/mod.rs)
+  → Optionally wrap LSP as MCP server
+
+================================================================================
+RECOMMENDED IMPLEMENTATION ORDER
+================================================================================
+
+1. Create tool/lsp.rs with LSP tool implementation
+2. Register in tool/mod.rs create_default_registry()
+3. Add LSP config struct in config/mod.rs
+4. Test with single LSP capability (e.g., goto_definition)
+5. Add slash commands in app.rs
+6. Extend system prompt in agent/mod.rs
+7. Handle LSP server lifecycle (connect, reconnect, error handling)
+8. Add tests in tests/test_lsp_integration.rs
+9. Document in README
+
+================================================================================

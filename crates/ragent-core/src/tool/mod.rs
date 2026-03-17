@@ -15,6 +15,11 @@ pub mod glob;
 pub mod grep;
 pub mod list;
 pub mod list_tasks;
+pub mod lsp_definition;
+pub mod lsp_diagnostics;
+pub mod lsp_hover;
+pub mod lsp_references;
+pub mod lsp_symbols;
 pub mod multiedit;
 pub mod new_task;
 pub mod office_common;
@@ -83,6 +88,7 @@ impl Default for ToolOutput {
 ///     event_bus: Arc::new(EventBus::new(128)),
 ///     storage: None,
 ///     task_manager: None,
+///     lsp_manager: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -98,6 +104,8 @@ pub struct ToolContext {
     pub storage: Option<Arc<crate::storage::Storage>>,
     /// Optional task manager for spawning sub-agent tasks.
     pub task_manager: Option<Arc<crate::task::TaskManager>>,
+    /// Optional LSP manager for code-intelligence queries.
+    pub lsp_manager: Option<crate::lsp::SharedLspManager>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -241,7 +249,7 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 26);
+/// assert_eq!(registry.list().len(), 31);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -271,5 +279,10 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(new_task::NewTaskTool));
     registry.register(Arc::new(cancel_task::CancelTaskTool));
     registry.register(Arc::new(list_tasks::ListTasksTool));
+    registry.register(Arc::new(lsp_symbols::LspSymbolsTool));
+    registry.register(Arc::new(lsp_hover::LspHoverTool));
+    registry.register(Arc::new(lsp_definition::LspDefinitionTool));
+    registry.register(Arc::new(lsp_references::LspReferencesTool));
+    registry.register(Arc::new(lsp_diagnostics::LspDiagnosticsTool));
     registry
 }

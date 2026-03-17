@@ -1,0 +1,12 @@
+{
+  "lsp": {
+    "rust": {
+      "args": [],
+      "command": "/home/thawkins/.cargo/bin/rust-analyzer",
+      "disabled": false,
+      "extensions": [
+        "rs"
+      ]
+    }
+  }
+}

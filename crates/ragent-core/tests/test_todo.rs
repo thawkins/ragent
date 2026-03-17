@@ -20,6 +20,7 @@ fn make_ctx_with_storage(storage: Arc<Storage>) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         task_manager: None,
+            lsp_manager: None,
     }
 }
 
@@ -30,6 +31,7 @@ fn make_ctx_no_storage() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     }
 }
 
@@ -251,5 +253,5 @@ async fn test_todo_read_empty_filter_message() {
 fn test_todo_read_in_registry() {
     let registry = ragent_core::tool::create_default_registry();
     assert!(registry.get("todo_read").is_some());
-    assert_eq!(registry.list().len(), 26);
+    assert_eq!(registry.list().len(), 31);
 }

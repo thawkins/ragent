@@ -14,6 +14,7 @@ use ratatui::layout::Rect;
 use ragent_core::{
     agent::{AgentInfo, ModelRef},
     event::{Event, EventBus, FinishReason},
+    lsp::{LspManager, LspServer, LspStatus, SharedLspManager, discovery::DiscoveredServer},
     mcp::McpServer,
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
@@ -221,6 +222,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "tasks",
         description: "Show background task status and cancel tasks",
     },
+    SlashCommandDef {
+        trigger: "lsp",
+        description: "Show LSP server status (/lsp discover | /lsp connect <id> | /lsp disconnect <id>)",
+    },
 ];
 
 /// A single entry in the slash-command autocomplete menu.
@@ -328,6 +333,21 @@ impl TextSelection {
     }
 }
 
+/// State for the interactive `/lsp discover` dialog.
+///
+/// Shown as an overlay that lists discovered language servers with numbered
+/// rows. The user types a number and presses Enter to enable a server, or
+/// presses Esc to dismiss.
+#[derive(Debug, Clone)]
+pub struct LspDiscoverState {
+    /// Servers found during discovery.
+    pub servers: Vec<DiscoveredServer>,
+    /// Number being typed by the user (e.g. `"2"`).
+    pub number_input: String,
+    /// Feedback message shown after an enable action or on error.
+    pub feedback: Option<String>,
+}
+
 /// Core TUI application state.
 ///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
@@ -422,6 +442,12 @@ pub struct App {
     pub home_input_area: Rect,
     /// Snapshot of MCP servers and their tools (populated when MCP is connected).
     pub mcp_servers: Vec<McpServer>,
+    /// Snapshot of LSP server descriptors (populated via `LspStatusChanged` events).
+    pub lsp_servers: Vec<LspServer>,
+    /// Handle to the running LSP manager (kept alive for the lifetime of the TUI).
+    pub lsp_manager: Option<SharedLspManager>,
+    /// Active LSP discovery dialog, if any.
+    pub lsp_discover: Option<LspDiscoverState>,
     /// When true, the next assistant text delta starts a new message instead
     /// of appending to the current one. Set by `MessageEnd` events to
     /// separate init-exchange output from the main response.
@@ -555,6 +581,9 @@ impl App {
             input_area: Rect::default(),
             home_input_area: Rect::default(),
             mcp_servers: Vec::new(),
+            lsp_servers: Vec::new(),
+            lsp_manager: None,
+            lsp_discover: None,
             force_new_message: false,
             agent_stack: Vec::new(),
             pending_plan_task: None,
@@ -686,6 +715,103 @@ impl App {
     /// ```
     pub fn refresh_provider(&mut self) {
         self.configured_provider = Self::detect_provider(&self.storage);
+    }
+
+    /// Attach an [`LspManager`] to the app.
+    ///
+    /// Called from `run_tui()` after the manager has been created and initial
+    /// server connections have been started. The app keeps the manager alive
+    /// and uses it for `/lsp` command operations.
+    pub fn set_lsp_manager(&mut self, manager: SharedLspManager) {
+        self.lsp_manager = Some(manager);
+    }
+
+    /// Add a discovered server to the `lsp` section in `ragent.json` and
+    /// enable it. Returns `Ok(())` on success or an error description.
+    pub fn enable_discovered_server(&self, server: &DiscoveredServer) -> Result<String, String> {
+        use ragent_core::config::{Config, LspServerConfig};
+        use std::collections::HashMap;
+
+        // Load (or default-construct) the current config.
+        let mut config = Config::load().unwrap_or_default();
+
+        if config.lsp.contains_key(&server.id) {
+            return Err(format!(
+                "'{}' is already in ragent.json. Edit it manually to change settings.",
+                server.id
+            ));
+        }
+
+        let cfg = LspServerConfig {
+            command: Some(server.executable.to_string_lossy().into_owned()),
+            args: server.args.clone(),
+            env: HashMap::new(),
+            extensions: server.extensions.clone(),
+            disabled: false,
+            timeout_ms: LspServerConfig::default_timeout_ms(),
+        };
+        config.lsp.insert(server.id.clone(), cfg);
+
+        // Persist back to ragent.json in the working directory.
+        let config_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("ragent.json");
+
+        match std::fs::read_to_string(&config_path) {
+            Ok(existing) => {
+                // Merge: parse existing JSON, insert/update the lsp key.
+                let mut json: serde_json::Value =
+                    serde_json::from_str(&existing).map_err(|e| e.to_string())?;
+                let lsp_entry = serde_json::json!({
+                    "command": server.executable.to_string_lossy(),
+                    "args": server.args,
+                    "extensions": server.extensions,
+                    "disabled": false,
+                });
+                json["lsp"][&server.id] = lsp_entry;
+                let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
+            }
+            Err(_) => {
+                // No existing file — write a minimal config.
+                let out =
+                    serde_json::to_string_pretty(&serde_json::json!({ "lsp": {
+                        &server.id: {
+                            "command": server.executable.to_string_lossy(),
+                            "args": server.args,
+                            "extensions": server.extensions,
+                            "disabled": false,
+                        }
+                    }}))
+                    .map_err(|e| e.to_string())?;
+                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
+            }
+        }
+
+        Ok(format!(
+            "✓ '{}' added to ragent.json. Restart ragent to activate the LSP server.",
+            server.id
+        ))
+    }
+
+    /// Ensure a session exists, creating one if needed.
+    ///
+    /// Returns `false` and sets `self.status` if session creation fails.
+    fn ensure_session(&mut self) -> bool {
+        if self.session_id.is_some() {
+            return true;
+        }
+        let dir = std::env::current_dir().unwrap_or_default();
+        match self.session_processor.session_manager.create_session(dir) {
+            Ok(session) => {
+                self.session_id = Some(session.id);
+                true
+            }
+            Err(e) => {
+                self.status = format!("error: {}", e);
+                false
+            }
+        }
     }
 
     /// Load an existing session from storage and restore its state.
@@ -988,6 +1114,14 @@ impl App {
     /// ```
     pub fn update_slash_menu(&mut self) {
         if let Some(filter) = self.input.strip_prefix('/') {
+            // If the user has typed a space after the command (i.e., they are
+            // entering subcommand arguments like "/lsp discover"), close the
+            // menu so it doesn't obstruct the input.
+            if filter.contains(' ') {
+                self.slash_menu = None;
+                return;
+            }
+
             let needle = filter.to_lowercase();
 
             // Collect builtin command matches
@@ -1708,6 +1842,112 @@ impl App {
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "tasks".to_string();
+            }
+            "lsp" => {
+                if !self.ensure_session() {
+                    return;
+                }
+                let lsp_args: Vec<&str> = args.split_whitespace().collect();
+                let sub = lsp_args.first().copied().unwrap_or("");
+                match sub {
+                    "discover" => {
+                        // Run discovery synchronously using block_in_place.
+                        let found = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(LspManager::discover())
+                        });
+                        // Show interactive discover dialog.
+                        self.lsp_discover = Some(LspDiscoverState {
+                            servers: found,
+                            number_input: String::new(),
+                            feedback: None,
+                        });
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    "connect" => {
+                        if let Some(&id) = lsp_args.get(1) {
+                            if let Some(ref mgr) = self.lsp_manager {
+                                let mgr = mgr.clone();
+                                let id = id.to_string();
+                                let config = ragent_core::config::Config::load().ok()
+                                    .and_then(|c| c.lsp.get(id.as_str()).cloned());
+                                if let Some(cfg) = config {
+                                    let id_clone = id.clone();
+                                    tokio::spawn(async move {
+                                        mgr.write().await.connect(&id_clone, &id_clone, cfg).await;
+                                    });
+                                    self.status = format!("lsp connecting {}", id);
+                                } else {
+                                    self.status = format!("LSP '{}' not found in config", id);
+                                }
+                            } else {
+                                self.status = "LSP manager not initialised".to_string();
+                            }
+                        } else {
+                            self.status = "Usage: /lsp connect <id>".to_string();
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    "disconnect" => {
+                        if let Some(&id) = lsp_args.get(1) {
+                            if let Some(ref mgr) = self.lsp_manager {
+                                let mgr = mgr.clone();
+                                let id = id.to_string();
+                                let id_clone = id.clone();
+                                tokio::spawn(async move {
+                                    let _ = mgr.write().await.disconnect(&id_clone).await;
+                                });
+                                self.status = format!("lsp disconnecting {}", id);
+                            } else {
+                                self.status = "LSP manager not initialised".to_string();
+                            }
+                        } else {
+                            self.status = "Usage: /lsp disconnect <id>".to_string();
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
+                    _ => {
+                        // Show all registered servers and status.
+                        let mut out = String::from("From: /lsp\nLSP Servers:\n\n");
+                        if self.lsp_servers.is_empty() {
+                            out.push_str("  (no LSP servers configured)\n\n");
+                            out.push_str("Run /lsp discover to scan for available servers.\n");
+                            out.push_str("Then add them to 'lsp' in ragent.json to activate.\n");
+                        } else {
+                            for s in &self.lsp_servers {
+                                let status_icon = match &s.status {
+                                    LspStatus::Connected => "🟢 connected",
+                                    LspStatus::Starting => "🟡 starting",
+                                    LspStatus::Disabled => "⚪ disabled",
+                                    LspStatus::Failed { error } => &format!("🔴 failed: {}", error),
+                                };
+                                out.push_str(&format!("  {:<18} {}\n", s.id, status_icon));
+                                if let Some(ref caps) = s.capabilities_summary {
+                                    out.push_str(&format!("    capabilities: {}\n", caps));
+                                }
+                                if !s.config.extensions.is_empty() {
+                                    out.push_str(&format!("    extensions:   {}\n", s.config.extensions.join(", ")));
+                                }
+                            }
+                            let connected = self.lsp_servers.iter().filter(|s| s.status == LspStatus::Connected).count();
+                            out.push_str(&format!("\n{}/{} server(s) connected\n", connected, self.lsp_servers.len()));
+                        }
+                        out.push_str("\nSubcommands: /lsp discover  /lsp connect <id>  /lsp disconnect <id>\n");
+                        self.append_assistant_text(&out);
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "lsp".to_string();
             }
             _ => {
                 // Check if this is a skill invocation before reporting unknown command.
@@ -2824,6 +3064,28 @@ impl App {
                         format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
                     );
                 }
+            }
+            Event::LspStatusChanged { ref server_id, ref status } => {
+                // Update or insert the server descriptor for status display.
+                if let Some(s) = self.lsp_servers.iter_mut().find(|s| s.id == *server_id) {
+                    s.status = status.clone();
+                } else {
+                    // New server — create a minimal descriptor. Full descriptor
+                    // is populated when the LspManager initialises.
+                    let mut s = LspServer::unknown(server_id.clone());
+                    s.status = status.clone();
+                    self.lsp_servers.push(s);
+                }
+                let icon = match status {
+                    LspStatus::Connected => "🟢",
+                    LspStatus::Starting => "🟡",
+                    LspStatus::Disabled => "⚪",
+                    LspStatus::Failed { .. } => "🔴",
+                };
+                self.push_log(
+                    LogLevel::Info,
+                    format!("{icon} LSP '{}' → {:?}", server_id, status),
+                );
             }
             _ => {}
         }

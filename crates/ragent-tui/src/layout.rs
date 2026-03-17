@@ -144,6 +144,11 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
     }
+
+    // LSP discover dialog overlay
+    if app.lsp_discover.is_some() {
+        render_lsp_discover_dialog(frame, app);
+    }
 }
 
 fn render_logo(frame: &mut Frame, area: Rect) {
@@ -900,6 +905,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     if app.provider_setup.is_some() {
         render_provider_setup_dialog(frame, app);
     }
+
+    // LSP discover dialog overlay
+    if app.lsp_discover.is_some() {
+        render_lsp_discover_dialog(frame, app);
+    }
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1077,6 +1087,33 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .bg(Color::DarkGray)
                 .add_modifier(Modifier::BOLD),
         ));
+    }
+
+    // Add LSP server indicator
+    {
+        use ragent_core::lsp::LspStatus;
+        let connected = app
+            .lsp_servers
+            .iter()
+            .filter(|s| s.status == LspStatus::Connected)
+            .count();
+        let total = app.lsp_servers.len();
+        if total > 0 {
+            let (icon, color) = if connected == total {
+                ("⬡", Color::Cyan)
+            } else if connected > 0 {
+                ("⬡", Color::Yellow)
+            } else {
+                ("⬡", Color::DarkGray)
+            };
+            right_parts.push(Span::styled(
+                format!("  {icon} LSP {connected}/{total}"),
+                Style::default()
+                    .fg(color)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
     }
 
     right_parts.push(Span::styled("  ", Style::default().bg(Color::DarkGray)));
@@ -1352,9 +1389,158 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
     }
 }
 
+/// Render the interactive LSP discovery dialog overlay.
+fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
+    let state = app.lsp_discover.as_ref().unwrap();
+
+    // Size the dialog: taller when there are more servers.
+    let server_rows = state.servers.len().max(1) as u16;
+    let dialog_height = (server_rows + 10).min(40); // header + rows + prompt + padding
+    let area = {
+        let full = frame.area();
+        let h = dialog_height.min(full.height.saturating_sub(4));
+        let w = full.width.min(80);
+        ratatui::layout::Rect {
+            x: (full.width.saturating_sub(w)) / 2,
+            y: (full.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        }
+    };
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "LSP Server Discovery",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    if state.servers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No language servers detected.",
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(Span::styled(
+            "  Install a server on PATH (e.g. rust-analyzer, gopls) and retry.",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        // Load current config once so we can flag already-enabled servers.
+        let enabled_ids: std::collections::HashSet<String> =
+            ragent_core::config::Config::load()
+                .map(|c| c.lsp.into_keys().collect())
+                .unwrap_or_default();
+
+        // Column header
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<3}  {:<18}  {:<24}  {}", "#", "Name", "Extensions", "Executable"),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", "─".repeat(70)),
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        for (i, srv) in state.servers.iter().enumerate() {
+            let already_enabled = enabled_ids.contains(&srv.id);
+            let num = format!("{}", i + 1);
+            let exts = srv.extensions.join(", ");
+            let exe = {
+                let s = srv.executable.to_string_lossy();
+                if s.len() > 28 { format!("…{}", &s[s.len().saturating_sub(27)..]) } else { s.into_owned() }
+            };
+            let (num_color, name_color, ext_color, exe_color) = if already_enabled {
+                // Yellow tones for already-configured servers
+                (Color::Yellow, Color::Yellow, Color::Yellow, Color::Yellow)
+            } else {
+                (Color::Cyan, Color::White, Color::Green, Color::DarkGray)
+            };
+            let enabled_tag = if already_enabled { " ✓" } else { "" };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<3}", num),
+                    Style::default().fg(num_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("  {:<18}", format!("{}{}", srv.id, enabled_tag)),
+                    Style::default().fg(name_color),
+                ),
+                Span::styled(
+                    format!("  {:<24}", exts),
+                    Style::default().fg(ext_color),
+                ),
+                Span::styled(
+                    format!("  {}", exe),
+                    Style::default().fg(exe_color),
+                ),
+            ]));
+        }
+
+        lines.push(Line::from(Span::styled(
+            "  (yellow = already enabled in ragent.json)",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // Feedback line (error or success)
+    if let Some(ref msg) = state.feedback {
+        let color = if msg.starts_with('✓') { Color::Green } else { Color::Red };
+        lines.push(Line::from(Span::styled(
+            format!("  {msg}"),
+            Style::default().fg(color),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Input prompt
+    if state.servers.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Press Esc to close",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled(
+                "  Enable server #: ",
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                state.number_input.as_str(),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("█", Style::default().fg(Color::Cyan)), // cursor
+        ]));
+        lines.push(Line::from(Span::styled(
+            "  Enter to enable  Esc to cancel",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" /lsp discover ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Left);
+    frame.render_widget(paragraph, area);
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
         .constraints([
             Constraint::Percentage((100 - percent_y) / 2),
             Constraint::Percentage(percent_y),

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.13] - 2026-03-17
+
+### Added
+- **LSP test prompts** — 5 test prompts for LSP server integration testing (hover, go-to-definition, find-references, list-symbols, diagnostics) targeting Rust language servers
+- **Office 365 test prompts** — 5 test prompts for Office document read/write testing (Word, Excel, PowerPoint, multi-sheet Excel, output formats)
+- **LSP workspace folders support** — updated LSP client to use `workspace_folders` parameter instead of deprecated `root_uri`
+
+### Fixed
+- **Unused imports and dead code** — removed unused `LspDiscoverState` import and dead `get_json_str`/`get_json_u64` helper functions
+- **Missing documentation** — added doc comments for `ExperimentalFlags` struct and `VsCodeExtension` variant field
+
 ## [0.1.0-alpha.12] - 2026-03-17
 
 ### Added

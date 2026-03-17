@@ -669,5 +669,6 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         } => sid == session_id,
         Event::McpStatusChanged { .. } => false,
         Event::CopilotDeviceFlowComplete { .. } => false,
+        Event::LspStatusChanged { .. } => false,
     }
 }

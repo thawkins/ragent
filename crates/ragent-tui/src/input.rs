@@ -62,6 +62,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // If LSP discover dialog is active, route all keys there
+    if app.lsp_discover.is_some() {
+        handle_lsp_discover_key(app, key);
+        return None;
+    }
+
     // If permission dialog is active, intercept keys
     if app.permission_pending.is_some() {
         return match key.code {
@@ -126,17 +132,29 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Enter => {
-                // Select the highlighted command, or use the typed text
-                let trigger = if let Some(ref menu) = app.slash_menu {
+                // Select the highlighted command, or use the typed text.
+                // If the user typed more than just the trigger (e.g. "/lsp discover"
+                // vs. "/lsp"), preserve the full input so subcommands are not lost.
+                let command = if let Some(ref menu) = app.slash_menu {
+                    let raw = app.input.trim_end().to_string();
                     if let Some(entry) = menu.matches.get(menu.selected) {
-                        entry.trigger.clone()
+                        let with_slash = format!("/{}", entry.trigger);
+                        // Raw input extends beyond the matched trigger with a space → use raw
+                        if raw.starts_with(&with_slash)
+                            && raw.len() > with_slash.len()
+                            && raw.as_bytes().get(with_slash.len()) == Some(&b' ')
+                        {
+                            raw
+                        } else {
+                            entry.trigger.clone()
+                        }
                     } else {
                         menu.filter.clone()
                     }
                 } else {
                     return None;
                 };
-                return Some(InputAction::SlashCommand(trigger));
+                return Some(InputAction::SlashCommand(command));
             }
             KeyCode::Esc => {
                 app.input.clear();
@@ -721,4 +739,78 @@ fn start_copilot_device_flow_setup(app: &mut App) {
             }
         }
     });
+}
+
+/// Handle key events when the LSP discover dialog is active.
+fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // Dismiss on Escape
+        KeyCode::Esc => {
+            app.lsp_discover = None;
+        }
+
+        // Confirm selection on Enter
+        KeyCode::Enter => {
+            let state = app.lsp_discover.as_mut().unwrap();
+            let input = state.number_input.trim().to_string();
+            if input.is_empty() {
+                // Empty input = close dialog
+                app.lsp_discover = None;
+                return;
+            }
+            match input.parse::<usize>() {
+                Ok(n) if n >= 1 => {
+                    // Take the server (avoids borrow issues)
+                    let server = {
+                        let state = app.lsp_discover.as_ref().unwrap();
+                        state.servers.get(n - 1).cloned()
+                    };
+                    match server {
+                        Some(srv) => {
+                            let result = app.enable_discovered_server(&srv);
+                            let state = app.lsp_discover.as_mut().unwrap();
+                            match result {
+                                Ok(msg) => {
+                                    state.feedback = Some(msg);
+                                    state.number_input.clear();
+                                }
+                                Err(e) => {
+                                    state.feedback = Some(format!("✗ {e}"));
+                                    state.number_input.clear();
+                                }
+                            }
+                        }
+                        None => {
+                            let count = app.lsp_discover.as_ref().unwrap().servers.len();
+                            let state = app.lsp_discover.as_mut().unwrap();
+                            state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                            state.number_input.clear();
+                        }
+                    }
+                }
+                _ => {
+                    let count = app.lsp_discover.as_ref().unwrap().servers.len();
+                    let state = app.lsp_discover.as_mut().unwrap();
+                    state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                    state.number_input.clear();
+                }
+            }
+        }
+
+        // Backspace in number input
+        KeyCode::Backspace => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_input.pop();
+            }
+        }
+
+        // Digit character for number input
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_input.push(c);
+            }
+        }
+
+        _ => {}
+    }
 }

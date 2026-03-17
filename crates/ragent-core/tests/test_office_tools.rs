@@ -22,6 +22,7 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     }
 }
 

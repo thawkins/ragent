@@ -17,6 +17,7 @@ fn make_ctx(storage: Arc<Storage>) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         task_manager: None,
+            lsp_manager: None,
     }
 }
 
@@ -358,6 +359,7 @@ async fn test_no_storage() {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
 
     let err = TodoWriteTool
@@ -373,5 +375,5 @@ async fn test_no_storage() {
 fn test_todo_write_in_registry() {
     let registry = ragent_core::tool::create_default_registry();
     assert!(registry.get("todo_write").is_some());
-    assert_eq!(registry.list().len(), 26);
+    assert_eq!(registry.list().len(), 31);
 }

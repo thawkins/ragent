@@ -274,6 +274,13 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "task_id": task_id,
             }),
         ),
+        Event::LspStatusChanged { server_id, status } => (
+            "lsp_status_changed",
+            serde_json::json!({
+                "server_id": server_id,
+                "status": format!("{:?}", status),
+            }),
+        ),
     };
 
     SseEvent::default().event(event_type).data(data.to_string())

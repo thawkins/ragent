@@ -1,15 +1,19 @@
 # Release
 
-## Current Version: 0.1.0-alpha.12
+## Current Version: 0.1.0-alpha.13
 
-### Added (since 0.1.0-alpha.11)
-- **OpenSkills support** — extended skill loader to support OpenSkills-format skill files
-- **Output file support for `/simplify` skill** — skill now accepts optional output path argument to save findings to a markdown file
+### Added (since 0.1.0-alpha.12)
+- **LSP test prompts** — 5 test prompts for LSP server integration testing (hover, go-to-definition, find-references, list-symbols, diagnostics) targeting Rust language servers
+- **Office 365 test prompts** — 5 test prompts for Office document read/write testing (Word, Excel, PowerPoint, multi-sheet Excel, output formats)
+- **LSP workspace folders support** — updated LSP client to use `workspace_folders` parameter instead of deprecated `root_uri`
 
-### Fixed (since 0.1.0-alpha.11)
-- **Overly aggressive read function** — improved large file handling with section maps
+### Fixed (since 0.1.0-alpha.12)
+- **Unused imports and dead code** — removed unused `LspDiscoverState` import and dead `get_json_str`/`get_json_u64` helper functions
+- **Missing documentation** — added doc comments for `ExperimentalFlags` struct and `VsCodeExtension` variant field
 
-### Carried from 0.1.0-alpha.11
+### Carried from 0.1.0-alpha.12
+- OpenSkills support for extended skill file formats
+- Output file support for `/simplify` skill
 - Skills system fully implemented (SPEC §3.19) — 10 phases complete
   - YAML frontmatter skill definitions in `SKILL.md` files
   - Scope-priority registry (Bundled < Enterprise < Personal < Project)

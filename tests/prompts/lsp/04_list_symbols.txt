@@ -1,0 +1,16 @@
+# LSP List Symbols Test - Document Outline
+# Tests the lsp_symbols tool to list all symbols defined in a Rust source file
+
+Use the lsp_symbols tool to get a complete outline of symbols in crates/ragent-core/src/tool/read.rs
+
+Expected behavior:
+1. The tool should return all functions, structs, enums, and constants defined in the file
+2. Each symbol should include its kind (function, struct, etc.) and line number
+3. The symbols should be organized in a useful hierarchy
+
+Steps:
+1. Use lsp_symbols on crates/ragent-core/src/tool/read.rs
+2. Categorize the symbols by kind (functions vs structs vs constants)
+3. Identify the main public functions in the file
+4. Report the total count of each symbol type
+5. Note any nested symbols (e.g., methods within impl blocks)

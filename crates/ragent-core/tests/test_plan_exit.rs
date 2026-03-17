@@ -17,6 +17,7 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         event_bus: bus.clone(),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     };
     (ctx, bus)
 }
@@ -146,5 +147,5 @@ async fn test_plan_exit_metadata_has_restore_flag() {
 fn test_plan_exit_registered() {
     let registry = create_default_registry();
     assert!(registry.get("plan_exit").is_some());
-    assert_eq!(registry.list().len(), 26);
+    assert_eq!(registry.list().len(), 31);
 }

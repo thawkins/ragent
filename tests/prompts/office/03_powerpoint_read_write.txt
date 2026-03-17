@@ -1,0 +1,40 @@
+# PowerPoint Presentation Read/Write Test
+# Tests the office_read and office_write tools for .pptx files
+
+## Test 1: Create a new PowerPoint presentation
+
+Use office_write to create a new presentation at target/temp/test_presentation.pptx with:
+- Slide 1: Title slide
+  - Title: "Quarterly Review"
+  - Subtitle: "Q4 2024 Results"
+- Slide 2: Content slide
+  - Title: "Key Highlights"
+  - Bullet points: "Revenue up 15%", "Customer growth 22%", "New markets entered"
+- Slide 3: Content slide
+  - Title: "Next Steps"
+  - Bullet points: "Expand team", "Launch v2.0", "Partner integrations"
+
+## Test 2: Read all slides
+
+Use office_read to read the entire presentation:
+1. Read with markdown format
+2. Verify all 3 slides are present
+3. Check slide titles and content
+
+## Test 3: Read a specific slide
+
+Use office_read with the slide parameter:
+1. Read only slide 2
+2. Verify only that slide's content is returned
+
+## Test 4: Get presentation info
+
+Use office_info to get metadata:
+1. Count total slides
+2. Check slide dimensions or other metadata
+
+Expected behavior:
+- office_write should create a valid .pptx file
+- office_read should extract text content from all slides
+- Slide-specific reading should work correctly
+- office_info should report slide count and structure

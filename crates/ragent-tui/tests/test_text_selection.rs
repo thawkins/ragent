@@ -34,6 +34,7 @@ fn make_app() -> App {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
+            lsp_manager: std::sync::OnceLock::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

@@ -1,0 +1,18 @@
+# LSP Go To Definition Test - Navigate to Symbol Definition
+# Tests the lsp_definition tool to navigate to where a symbol is defined
+
+Use the lsp_definition tool to find where the `EventBus` type is defined.
+
+Starting point: crates/ragent-core/src/lsp/mod.rs
+Look for usage of EventBus and navigate to its definition.
+
+Expected behavior:
+1. The tool should return the file path and line number where EventBus is defined
+2. It should point to the actual struct definition, not a re-export
+3. The definition should be in crates/ragent-core/src/event/mod.rs
+
+Steps:
+1. Read the first 50 lines of crates/ragent-core/src/lsp/mod.rs to find EventBus usage
+2. Use lsp_definition on the EventBus symbol
+3. Verify the returned location contains the struct definition
+4. Report the file path and line number

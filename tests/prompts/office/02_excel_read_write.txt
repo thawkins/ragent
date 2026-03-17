@@ -1,0 +1,38 @@
+# Excel Spreadsheet Read/Write Test
+# Tests the office_read and office_write tools for .xlsx files
+
+## Test 1: Create a new Excel spreadsheet
+
+Use office_write to create a new Excel file at target/temp/test_spreadsheet.xlsx with:
+- Sheet name: "Sales Data"
+- Headers in row 1: "Product", "Quantity", "Price", "Total"
+- Data rows:
+  - "Widget A", 100, 9.99, 999.00
+  - "Widget B", 50, 19.99, 999.50
+  - "Widget C", 200, 4.99, 998.00
+  - "Widget D", 75, 14.99, 1124.25
+
+## Test 2: Read the entire spreadsheet
+
+Use office_read to read the spreadsheet:
+1. Read all data from the first sheet
+2. Verify headers and data rows are correct
+3. Check numeric values are preserved
+
+## Test 3: Read a specific range
+
+Use office_read with the range parameter:
+1. Read only cells A1:B3 (partial data)
+2. Verify only the specified range is returned
+
+## Test 4: Get spreadsheet info
+
+Use office_info to get metadata:
+1. List available sheet names
+2. Check row/column counts
+
+Expected behavior:
+- office_write should create a valid .xlsx file with formatted data
+- office_read should parse cells correctly, preserving numbers vs strings
+- Range reading should return only the specified cells
+- office_info should show sheet structure

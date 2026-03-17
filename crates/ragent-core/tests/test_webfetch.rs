@@ -12,6 +12,7 @@ fn make_ctx() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
+            lsp_manager: None,
     }
 }
 

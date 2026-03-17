@@ -1,0 +1,14 @@
+# LSP Hover Test - Type Information
+# Tests the lsp_hover tool to retrieve type information for Rust symbols
+
+Use the lsp_hover tool to get the type information for the `Config` struct in crates/ragent-core/src/config/mod.rs.
+
+Expected behavior:
+1. The tool should return type documentation for the Config struct
+2. It should show the struct definition and any doc comments
+3. Verify the hover works on line 1 where Config is likely defined or imported
+
+Steps:
+1. First use lsp_symbols to find where Config is defined in the file
+2. Then use lsp_hover on that location to get type information
+3. Report the type signature and any documentation found

@@ -34,6 +34,9 @@ pub struct Config {
     /// MCP server definitions keyed by server id.
     #[serde(default)]
     pub mcp: HashMap<String, McpServerConfig>,
+    /// LSP server definitions keyed by language id (e.g. `"rust"`, `"typescript"`).
+    #[serde(default)]
+    pub lsp: HashMap<String, LspServerConfig>,
     /// Additional instruction strings appended to agent prompts.
     #[serde(default)]
     pub instructions: Vec<String>,
@@ -217,8 +220,69 @@ pub enum McpTransport {
     Http,
 }
 
-/// Flags gating experimental features that may change or be removed.
+// ── LSP configuration ────────────────────────────────────────────────────────
+
+/// Configuration for a single Language Server Protocol server.
+///
+/// Servers communicate over stdio JSON-RPC. The server is started as a child
+/// process and the standard LSP initialize handshake is performed.
+///
+/// Example `ragent.json` entry:
+/// ```json
+/// {
+///   "lsp": {
+///     "rust": {
+///       "command": "rust-analyzer",
+///       "extensions": ["rs"]
+///     }
+///   }
+/// }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LspServerConfig {
+    /// Executable name or full path (e.g. `"rust-analyzer"`).
+    pub command: Option<String>,
+    /// Command-line arguments (e.g. `["--stdio"]` for some servers).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variable overrides injected into the server process.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// File extensions this server handles (e.g. `["rs"]` for Rust).
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// If `true`, this server is configured but will not be started.
+    #[serde(default)]
+    pub disabled: bool,
+    /// Maximum milliseconds to wait for an LSP response (default: 10 000 ms).
+    #[serde(default = "LspServerConfig::default_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+impl LspServerConfig {
+    /// Default LSP response timeout in milliseconds.
+    #[must_use]
+    pub const fn default_timeout_ms() -> u64 {
+        10_000
+    }
+}
+
+impl Default for LspServerConfig {
+    fn default() -> Self {
+        Self {
+            command: None,
+            args: Vec::new(),
+            env: HashMap::new(),
+            extensions: Vec::new(),
+            disabled: false,
+            timeout_ms: Self::default_timeout_ms(),
+        }
+    }
+}
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Flags for experimental features that are not yet stable.
 pub struct ExperimentalFlags {
     /// Enable OpenTelemetry trace export.
     #[serde(default)]
@@ -344,6 +408,9 @@ impl Config {
         }
         for (k, v) in overlay.mcp {
             base.mcp.insert(k, v);
+        }
+        for (k, v) in overlay.lsp {
+            base.lsp.insert(k, v);
         }
         // Permissions, instructions, and skill dirs append
         base.permission.extend(overlay.permission);
