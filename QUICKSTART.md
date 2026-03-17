@@ -5,6 +5,13 @@ configuration, and common workflows.
 
 ---
 
+## Highlights (0.1.0-alpha.16)
+
+- Image attachment support (Alt+V): paste images from clipboard or file URIs; pending attachments are displayed before sending.
+- Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
+- New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
+- Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
+
 ## Prerequisites
 
 - **Rust 1.85+** (edition 2024) — install via [rustup](https://rustup.rs)

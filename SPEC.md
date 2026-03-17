@@ -29,8 +29,7 @@ ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/ope
    - 3.16 [Snapshot & Undo](#316-snapshot--undo) ✅
    - 3.17 [Hooks](#317-hooks) ❌
    - 3.18 [Custom Agents](#318-custom-agents) ⚠️
-   - 3.19 [Skills](#319-skills) ❌
-   - 3.20 [Persistent Memory](#320-persistent-memory) ❌
+       - 3.19 [Skills](#319-skills) ✅   - 3.20 [Persistent Memory](#320-persistent-memory) ❌
    - 3.21 [Trusted Directories](#321-trusted-directories) ❌
    - 3.22 [Codebase Indexing & Semantic Search](#322-codebase-indexing--semantic-search) ❌
    - 3.23 [Post-Edit Diagnostics](#323-post-edit-diagnostics) ❌
@@ -56,6 +55,15 @@ ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/ope
 ---
 
 ### Implementation Status Summary
+
+## Highlights (0.1.0-alpha.16)
+
+- Image attachment support (Alt+V): paste images from clipboard or file URIs; pending attachments are displayed before sending.
+- Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
+- New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
+- Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
+
+
 
 | Status | Count | Sections |
 |--------|-------|----------|
