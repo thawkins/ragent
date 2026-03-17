@@ -51,7 +51,8 @@ fn build_task_rows<'a>(
         }
         let steps = event_bus.current_step(&task.child_session_id);
         let elapsed = format_elapsed(task.created_at);
-        let kind = if task.background { "background" } else { "foreground" };
+        let kind_tag = if task.background { "[bg]" } else { "[fg]" };
+        let agent_label = format!("{} {}", task.agent_name, kind_tag);
         let tid = short_id(&task.id);
         let (dot_color, name_color) = if task.background {
             (Color::Yellow, Color::Yellow)
@@ -69,8 +70,8 @@ fn build_task_rows<'a>(
                 Style::default().fg(name_color),
             ),
             Span::styled(
-                format!("{:<11}", kind),
-                Style::default().fg(Color::DarkGray),
+                format!("{:<15}", agent_label),
+                Style::default().fg(name_color),
             ),
             Span::styled(
                 format!(" {:>6}  ", elapsed),
@@ -104,7 +105,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
         ),
         Span::styled(
-            "type        ",
+            "agent           ",
             Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
         ),
         Span::styled(
@@ -126,7 +127,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("{:<11}", primary_name),
+            format!("{:<15}", primary_name),
             Style::default().fg(Color::Green),
         ),
         Span::styled(

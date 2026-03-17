@@ -26,7 +26,10 @@ pub mod office_common;
 pub mod office_info;
 pub mod office_read;
 pub mod office_write;
-pub mod patch;
+pub mod libreoffice_common;
+  pub mod libreoffice_read;
+  pub mod libreoffice_write;
+  pub mod patch;
 pub mod pdf_read;
 pub mod pdf_write;
 pub mod plan;
@@ -274,6 +277,9 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(office_read::OfficeReadTool));
     registry.register(Arc::new(office_write::OfficeWriteTool));
     registry.register(Arc::new(office_info::OfficeInfoTool));
+    // LibreOffice / OpenDocument tools
+    registry.register(Arc::new(libreoffice_read::LibreReadTool));
+    registry.register(Arc::new(libreoffice_write::LibreWriteTool));
     registry.register(Arc::new(pdf_read::PdfReadTool));
     registry.register(Arc::new(pdf_write::PdfWriteTool));
     registry.register(Arc::new(rm::RmTool));

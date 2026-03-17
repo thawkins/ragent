@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::file_ops::{apply_batch_edits, CommitResult};
+use super::edit::{FindError, find_replacement_range};
 
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
@@ -133,25 +133,23 @@ impl Tool for MultiEditTool {
                 .get_mut(&op.path)
                 .expect("file content must exist");
 
-            let count = content.matches(&op.old_str).count();
-            if count == 0 {
-                bail!(
+            let (start, end) = match find_replacement_range(content, &op.old_str) {
+                Ok(range) => range,
+                Err(FindError::NotFound) => bail!(
                     "Edit {}: old_str not found in {}. Make sure it matches exactly.",
                     i,
                     op.path.display()
-                );
-            }
-            if count > 1 {
-                bail!(
+                ),
+                Err(FindError::MultipleMatches(n)) => bail!(
                     "Edit {}: old_str found {} times in {}. It must match exactly once. \
                      Add more context to make it unique.",
                     i,
-                    count,
+                    n,
                     op.path.display()
-                );
-            }
+                ),
+            };
 
-            *content = content.replacen(&op.old_str, &op.new_str, 1);
+            *content = format!("{}{}{}", &content[..start], op.new_str, &content[end..]);
             *files_modified.entry(op.path.clone()).or_insert(0) += 1;
             total_edits += 1;
             total_lines_changed += op.new_str.lines().count();
