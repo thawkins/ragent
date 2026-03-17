@@ -32,4 +32,5 @@ pub mod snapshot;
 pub mod storage;
 /// Sub-agent task management for spawning and tracking sub-agents.
 pub mod task;
+pub mod orchestrator;
 pub mod tool;
