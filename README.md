@@ -17,6 +17,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
   listing, and interactive questions
 - **15 extended tools** — multiedit, patch, webfetch, websearch, plan delegation,
   todo management, office document read/write/info, PDF read/write, and file deletion (rm)
+- **3 sub-agent tools** — new_task, cancel_task, list_tasks for spawning and managing
+  background agents
 - **Terminal UI** — full-screen ratatui interface with home screen, provider setup
   dialog, slash-command autocomplete, agent cycling, streaming chat, step-numbered
   tool calls with pretty-printed JSON in the log panel
@@ -32,6 +34,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
   via external servers (stub, in progress)
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back
 - **Event bus** — internal pub/sub for real-time UI updates
+- **Background agents** — spawn and run multiple sub-agents concurrently for parallel
+  task execution, with REST API and TUI monitoring
 
 ## Installation
 

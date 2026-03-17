@@ -771,6 +771,27 @@ All memory features are not implemented:
 
 ---
 
+### 3.35 Sub-agents & Background Agents ✅ (F13 & F14)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| TaskManager | ✅ | Central registry for spawning and tracking sub-agent tasks |
+| `new_task` tool | ✅ | Agent-invocable tool for spawning sub-agents (sync and background) |
+| `cancel_task` tool | ✅ | Tool for cancelling running background tasks |
+| `list_tasks` tool | ✅ | Tool for querying task status and results |
+| Background execution | ✅ | Async spawning via tokio, non-blocking parent loop |
+| Result injection | ✅ | Background task results injected as system messages into parent session |
+| Task events | ✅ | SubagentStart, SubagentComplete, SubagentCancelled events published |
+| Concurrency limits | ✅ | Configurable max_background_agents (default: 4) and timeout (default: 3600s) |
+| TUI status bar | ✅ | Shows running task count in status bar |
+| `/tasks` command | ✅ | Lists all active and completed tasks with details |
+| `/cancel` command | ✅ | Cancels tasks by ID prefix |
+| REST API endpoints | ✅ | POST/GET/DELETE /sessions/{id}/tasks endpoints |
+| Task ownership | ✅ | Tasks scoped to parent session (403 Forbidden on violation) |
+| SSE streaming | ✅ | Task lifecycle events streamed via /events endpoint |
+
+---
+
 ## Tools Implementation Status
 
 Total built-in tools: **26 implemented**, **4 planned**
@@ -849,27 +870,27 @@ Total built-in tools: **26 implemented**, **4 planned**
 
 ### Implementation Coverage
 
-- **Total Sections in SPEC.md**: 34 core modules/sections
-- **Fully Implemented**: 14 (41%)
-- **Partially Implemented**: 8 (24%)
-- **Planned/Not Started**: 12 (35%)
+- **Total Sections in SPEC.md**: 35 core modules/sections
+- **Fully Implemented**: 15 (43%)
+- **Partially Implemented**: 8 (23%)
+- **Planned/Not Started**: 12 (34%)
 
 ### By Category
 
 | Category | Implemented | Partial | Not Started | Total |
 |----------|------------|---------|-------------|-------|
-| Core Systems | 6 | 1 | 0 | 7 |
+| Core Systems | 7 | 1 | 0 | 8 |
 | Agent System | 8 | 2 | 2 | 12 |
 | Tools | 26 | 0 | 4 | 30 |
 | Providers | 4 | 0 | 8 | 12 |
 | Features | 14 | 5 | 12 | 31 |
-| **TOTAL** | **58** | **8** | **26** | **92** |
+| **TOTAL** | **59** | **8** | **26** | **93** |
 
 ### Key Strengths
 
 ✅ **Production-Ready Features:**
 - Core session management and conversation persistence
-- 26 fully-working tools
+- 26 fully-working tools (including sub-agent management tools)
 - 4 LLM providers (Anthropic, OpenAI, Copilot, Ollama)
 - Full TUI with all essential commands and keybindings
 - Permission system with interactive approval flow
@@ -878,6 +899,7 @@ Total built-in tools: **26 implemented**, **4 planned**
 - Extended thinking / reasoning support
 - Todo list management
 - Context auto-compaction
+- Sub-agent spawning and background task execution (F13, F14)
 
 ### Key Gaps
 

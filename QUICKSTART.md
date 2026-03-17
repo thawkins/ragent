@@ -421,6 +421,78 @@ ragent run --agent build "Fix the failing tests"
 
 ---
 
+## 8b. Background Agents (F13 & F14)
+
+Ragent supports spawning multiple sub-agents concurrently for parallel task execution.
+Use the `new_task` tool to spawn a background agent while the parent continues processing.
+
+### Spawning Background Tasks
+
+**Via Agent Tool (in chat):**
+
+The agent can spawn background tasks automatically:
+```
+User: Analyze the codebase in parallel — run explore to find patterns,
+      and build to check for compilation errors.
+
+Agent uses:
+  /new_task agent="explore" task="Find common patterns in src/ and list them"
+  /new_task agent="build" task="Run cargo check and list any errors" background=true
+```
+
+**Via TUI Commands:**
+
+```
+/tasks              # Show all running and completed tasks
+/tasks cancel abc1  # Cancel a task by ID prefix
+```
+
+**Via REST API:**
+
+```bash
+# Spawn a background task
+curl -X POST http://localhost:9100/sessions/{sid}/tasks \
+  -H "Authorization: Bearer token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": "explore",
+    "task": "Analyze the authentication module",
+    "background": true
+  }'
+
+# List tasks for a session
+curl http://localhost:9100/sessions/{sid}/tasks \
+  -H "Authorization: Bearer token"
+
+# Get task details
+curl http://localhost:9100/sessions/{sid}/tasks/{task_id} \
+  -H "Authorization: Bearer token"
+
+# Cancel a task
+curl -X DELETE http://localhost:9100/sessions/{sid}/tasks/{task_id} \
+  -H "Authorization: Bearer token"
+```
+
+### Configuration
+
+Control background agent limits in `ragent.json`:
+
+```jsonc
+{
+  "experimental": {
+    "maxBackgroundAgents": 4,        // Max concurrent background tasks (default: 4)
+    "backgroundAgentTimeout": 3600   // Timeout in seconds (default: 1 hour)
+  }
+}
+```
+
+### Result Injection
+
+When a background task completes, the result is automatically injected into the parent
+session as a system message, allowing the agent to act on it in the next iteration.
+
+---
+
 ## 9. Sessions
 
 Ragent persists conversations in sessions stored in SQLite.
