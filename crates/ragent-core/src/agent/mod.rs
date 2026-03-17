@@ -518,31 +518,82 @@ pub fn build_system_prompt(
         }
     }
 
-    // Sub-agent spawning guidance (new_task tool)
+    // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
+    // Agent list is generated dynamically from builtins so it stays in sync.
     if agent.mode == AgentMode::Primary {
-        prompt.push_str(
+        let builtins = create_builtin_agents();
+        let spawnable: Vec<&AgentInfo> = builtins
+            .iter()
+            .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
+            .collect();
+
+        let mut section = String::from(
             "## Sub-Agent Spawning\n\n\
-             You have access to the `new_task` tool to delegate work to specialised sub-agents.\n\
-             Use it when a task is clearly separable, time-consuming, or benefits from a focused agent.\n\n\
-             **Available agents:** `explore` (fast read-only codebase search), `build` (compile/test/fix),\n\
-             `plan` (analysis and planning), `general` (full-capability coding).\n\n\
+             Use the `new_task` tool to delegate work to a specialised sub-agent whenever a task is \
+             clearly separable, time-consuming, or benefits from isolation.\n\n\
+             **Available agents:**\n",
+        );
+
+        for sa in &spawnable {
+            // Derive key traits for the LLM to reason about
+            let model_tier = sa
+                .model
+                .as_ref()
+                .map(|m| {
+                    if m.model_id.contains("haiku") {
+                        "fast / low-cost"
+                    } else if m.model_id.contains("opus") {
+                        "powerful / higher-cost"
+                    } else {
+                        "standard"
+                    }
+                })
+                .unwrap_or("standard");
+
+            let can_write = sa.permission.iter().any(|r| {
+                r.permission == Permission::Edit && r.action == PermissionAction::Allow
+            });
+            let can_bash = sa.permission.iter().any(|r| {
+                r.permission == Permission::Bash && r.action == PermissionAction::Allow
+            });
+
+            let mut traits = Vec::new();
+            if !can_write { traits.push("read-only"); }
+            if can_bash   { traits.push("can run shell commands"); }
+            traits.push(model_tier);
+
+            section.push_str(&format!(
+                "- `{}` — {} [{}]\n",
+                sa.name,
+                sa.description,
+                traits.join(", "),
+            ));
+        }
+
+        section.push_str(
+            "\n**Choosing an agent:**\n\
+             - `explore` — fastest and cheapest; use for any codebase search, reading, or understanding.\n\
+               Cannot edit files. Ideal for parallel discovery tasks.\n\
+             - `build`   — use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
+             - `plan`    — use to produce a structured implementation plan without making any changes.\n\
+             - `general` — full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
              **Modes:**\n\
-             - `background: false` (default) — blocks until the sub-agent finishes; use its result directly.\n\
-             - `background: true` — returns immediately with a task_id; sub-agent runs concurrently.\n\
-               You will receive a SubagentComplete notification when it finishes.\n\n\
-             **When to spawn sub-agents:**\n\
-             - Run multiple independent explorations in parallel (background: true)\n\
-             - Delegate a long build/test cycle so you can continue other work\n\
-             - Isolate risky or speculative work in a focused sub-agent\n\
-             - Use `explore` to quickly search the codebase while you plan\n\n\
+             - `background: false` (default) — blocks until complete; result returned inline.\n\
+             - `background: true` — returns immediately with a `task_id`; agent runs concurrently.\n\
+               A SubagentComplete notification will arrive when it finishes.\n\n\
+             **When to spawn:**\n\
+             - Parallelize independent explorations (`explore`, background: true)\n\
+             - Offload a slow build/test cycle while you continue reasoning\n\
+             - Isolate risky or speculative work in a focused agent\n\n\
              **Example calls:**\n\
              ```json\n\
-             {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in the codebase\", \"background\": false}\n\
-             {\"agent\": \"build\",   \"task\": \"Run cargo test and fix any failing tests\",    \"background\": true}\n\
+             {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/\", \"background\": false}\n\
+             {\"agent\": \"build\",   \"task\": \"Run cargo test and fix failing tests\",  \"background\": true}\n\
              ```\n\n\
-             Use `list_tasks` to check the status of background tasks.\n\
-             Use `cancel_task` with a task_id to stop a running background task.\n\n",
+             Use `list_tasks` to check background task status. Use `cancel_task` to stop a task early.\n\n",
         );
+
+        prompt.push_str(&section);
     }
 
     // Tool usage guidelines
