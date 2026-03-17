@@ -1,6 +1,6 @@
 # Release
 
-## Current Version: 0.1.0-alpha.15
+## Current Version: 0.1.0-alpha.16
 
 ### Added (since 0.1.0-alpha.14)
 - **Image attachment support (Alt+V)** — paste images from clipboard or file URIs to include screenshots and visuals in conversations with the LLM
