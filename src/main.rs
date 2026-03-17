@@ -25,6 +25,32 @@ use ragent_core::{
     tool,
 };
 
+/// small CLI demo for orchestration
+async fn run_orchestration_example() -> anyhow::Result<()> {
+    tracing::info!("Running orchestration example");
+    let registry = ragent_core::orchestrator::AgentRegistry::new();
+
+    use ragent_core::orchestrator::{Responder, Coordinator, JobDescriptor};
+    use std::sync::Arc;
+    use futures::future::FutureExt;
+    use tokio::time::sleep;
+    use tokio::time::Duration;
+
+    let responder_a: Responder = Arc::new(|payload: String| async move { format!("demo-a: {}", payload) }.boxed());
+    let responder_b: Responder = Arc::new(|payload: String| async move { sleep(Duration::from_millis(30)).await; format!("demo-b: {}", payload) }.boxed());
+
+    registry.register("demo-a", vec!["demo".to_string()], Some(responder_a)).await;
+    registry.register("demo-b", vec!["demo".to_string()], Some(responder_b)).await;
+
+    let coord = Coordinator::new(registry.clone());
+    let desc = JobDescriptor { id: "demo-job".to_string(), required_capabilities: vec!["demo".to_string()], payload: "payload".to_string() };
+
+    let res = coord.start_job_sync(desc).await?;
+    println!("Orchestration sync result:\n{}", res);
+
+    Ok(())
+}
+
 /// Top-level CLI arguments parsed by clap.
 #[derive(Parser)]
 #[command(name = "ragent", about = "An Rust AI coding agent for the terminal")]
@@ -79,6 +105,8 @@ enum Commands {
         #[arg(long, default_value = "127.0.0.1:3000")]
         addr: String,
     },
+    /// Run a small orchestration example (demonstrates multi-agent coordinator)
+    Orchestrate,
     /// Manage sessions
     Session {
         #[command(subcommand)]
@@ -268,6 +296,9 @@ async fn main() -> Result<()> {
             };
             ragent_server::start_server(&addr, state).await?;
         }
+        Some(Commands::Orchestrate) => {
+            run_orchestration_example().await?;
+        }
         Some(Commands::Session { command }) => match command {
             SessionCommands::List => {
                 let sessions = storage.list_sessions()?;
@@ -343,17 +374,11 @@ async fn main() -> Result<()> {
             storage.set_provider_auth(&provider, &key)?;
             tracing::info!(provider = %provider, "Stored API key");
         }
-        Some(Commands::Models {
-            provider: filter,
-            ollama_url,
-        }) => {
+        Some(Commands::Models { provider: filter, ollama_url }) => {
             let mut stdout = std::io::stdout().lock();
 
-            // If Ollama discovery is requested (or provider filter is "ollama"),
-            // query the running Ollama server for available models.
             if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
-                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
-                {
+                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await {
                     Ok(models) if models.is_empty() => {
                         writeln!(
                             stdout,
@@ -374,7 +399,6 @@ async fn main() -> Result<()> {
                 if filter.as_deref() == Some("ollama") {
                     // Only showing Ollama, skip other providers
                 } else {
-                    // Also show other providers below
                     let providers = provider_registry.list();
                     for p in &providers {
                         if p.id == "ollama" {
@@ -406,8 +430,7 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Config) => {
             let config = config.read().await;
-            let json = serde_json::to_string_pretty(&*config)?;
-            writeln!(std::io::stdout(), "{json}")?;
+            println!("{:#?}", *config);
         }
     }
 
