@@ -228,6 +228,52 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "reason": reason,
             }),
         ),
+        Event::SubagentStart {
+            session_id,
+            task_id,
+            child_session_id,
+            agent,
+            task,
+            background,
+        } => (
+            "subagent_start",
+            serde_json::json!({
+                "session_id": session_id,
+                "task_id": task_id,
+                "child_session_id": child_session_id,
+                "agent": agent,
+                "task": task,
+                "background": background,
+            }),
+        ),
+        Event::SubagentComplete {
+            session_id,
+            task_id,
+            child_session_id,
+            summary,
+            success,
+            duration_ms,
+        } => (
+            "subagent_complete",
+            serde_json::json!({
+                "session_id": session_id,
+                "task_id": task_id,
+                "child_session_id": child_session_id,
+                "summary": summary,
+                "success": success,
+                "duration_ms": duration_ms,
+            }),
+        ),
+        Event::SubagentCancelled {
+            session_id,
+            task_id,
+        } => (
+            "subagent_cancelled",
+            serde_json::json!({
+                "session_id": session_id,
+                "task_id": task_id,
+            }),
+        ),
     };
 
     SseEvent::default().event(event_type).data(data.to_string())

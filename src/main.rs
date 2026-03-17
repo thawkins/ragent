@@ -180,6 +180,8 @@ async fn main() -> Result<()> {
         resolved_agent.max_steps = Some(max);
     }
 
+    let max_background_agents = config.experimental.max_background_agents;
+
     let config = Arc::new(tokio::sync::RwLock::new(config));
 
     // Create session manager and processor
@@ -190,7 +192,16 @@ async fn main() -> Result<()> {
         tool_registry: tool_registry.clone(),
         permission_checker,
         event_bus: event_bus.clone(),
+        task_manager: std::sync::OnceLock::new(),
     });
+
+    // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
+    let task_manager = Arc::new(ragent_core::task::TaskManager::new(
+        event_bus.clone(),
+        session_processor.clone(),
+        max_background_agents,
+    ));
+    let _ = session_processor.task_manager.set(task_manager);
 
     match cli.command {
         None => {

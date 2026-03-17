@@ -218,11 +218,35 @@ pub enum McpTransport {
 }
 
 /// Flags gating experimental features that may change or be removed.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExperimentalFlags {
     /// Enable OpenTelemetry trace export.
     #[serde(default)]
     pub open_telemetry: bool,
+    /// Maximum number of concurrent background sub-agent tasks (F14).
+    #[serde(default = "default_max_background_agents")]
+    pub max_background_agents: usize,
+    /// Timeout in seconds for background sub-agent tasks (F14).
+    #[serde(default = "default_background_agent_timeout")]
+    pub background_agent_timeout: u64,
+}
+
+impl Default for ExperimentalFlags {
+    fn default() -> Self {
+        Self {
+            open_telemetry: false,
+            max_background_agents: default_max_background_agents(),
+            background_agent_timeout: default_background_agent_timeout(),
+        }
+    }
+}
+
+fn default_max_background_agents() -> usize {
+    4
+}
+
+fn default_background_agent_timeout() -> u64 {
+    3600
 }
 
 impl Config {

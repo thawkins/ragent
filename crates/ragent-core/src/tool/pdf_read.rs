@@ -83,7 +83,7 @@ impl Tool for PdfReadTool {
 }
 
 /// Read a PDF file and extract content based on the requested format.
-fn read_pdf(
+pub(crate) fn read_pdf(
     path: &std::path::Path,
     start_page: Option<usize>,
     end_page: Option<usize>,

@@ -170,6 +170,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Clear message history for the current session",
     },
     SlashCommandDef {
+        trigger: "cancel",
+        description: "Cancel a background task (/cancel <task_id_prefix>)",
+    },
+    SlashCommandDef {
         trigger: "compact",
         description: "Summarise and compact the conversation history",
     },
@@ -213,6 +217,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "skills",
         description: "List all registered skills and their descriptions",
     },
+    SlashCommandDef {
+        trigger: "tasks",
+        description: "Show background task status and cancel tasks",
+    },
 ];
 
 /// A single entry in the slash-command autocomplete menu.
@@ -235,6 +243,28 @@ pub struct SlashMenuState {
     pub selected: usize,
     /// The filter text typed after `/` (e.g. `"mo"` for `/mo`).
     pub filter: String,
+}
+
+/// An entry in the `@` file reference autocomplete menu.
+#[derive(Debug, Clone)]
+pub struct FileMenuEntry {
+    /// Display string shown in the menu.
+    pub display: String,
+    /// Relative path to the file or directory.
+    pub path: std::path::PathBuf,
+    /// Whether this entry is a directory.
+    pub is_dir: bool,
+}
+
+/// State of the `@` file reference autocomplete menu.
+#[derive(Debug, Clone)]
+pub struct FileMenuState {
+    /// Entries that match the current query.
+    pub matches: Vec<FileMenuEntry>,
+    /// Currently highlighted index within `matches`.
+    pub selected: usize,
+    /// The query text typed after `@` (e.g. `"main"` for `@main`).
+    pub query: String,
 }
 
 /// Identifies which pane a scrollbar drag is acting on.
@@ -354,6 +384,10 @@ pub struct App {
     pub provider_health: Arc<AtomicU8>,
     /// Slash-command autocomplete menu, shown when the input starts with `/`.
     pub slash_menu: Option<SlashMenuState>,
+    /// File reference autocomplete menu, shown when `@` is typed.
+    pub file_menu: Option<FileMenuState>,
+    /// Cached project files for `@` autocomplete (lazily populated).
+    pub project_files_cache: Option<Vec<std::path::PathBuf>>,
     /// Previously submitted input lines (oldest first).
     pub input_history: Vec<String>,
     /// Current position when navigating history (`None` = new input).
@@ -410,6 +444,8 @@ pub struct App {
     pub tool_step_counter: u32,
     /// Maps tool call IDs to their step numbers for log/message correlation.
     pub tool_step_map: HashMap<String, u32>,
+    /// Active background sub-agent tasks (F14).
+    pub active_tasks: Vec<ragent_core::task::TaskEntry>,
 }
 
 impl App {
@@ -500,6 +536,8 @@ impl App {
             current_agent_index,
             provider_health: Arc::new(AtomicU8::new(0)),
             slash_menu: None,
+            file_menu: None,
+            project_files_cache: None,
             input_history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
@@ -526,6 +564,7 @@ impl App {
             agent_halted: false,
             tool_step_counter: 0,
             tool_step_map: HashMap::new(),
+            active_tasks: Vec::new(),
         }
     }
 
@@ -1018,6 +1057,94 @@ impl App {
         }
     }
 
+    /// Update the `@` file reference autocomplete menu based on current input.
+    ///
+    /// Detects the last `@` token in the input, extracts the query after it,
+    /// and populates `file_menu` with matching project files.
+    pub fn update_file_menu(&mut self) {
+        // Find the last '@' that's a valid reference trigger
+        let input = &self.input;
+        if let Some(at_pos) = input.rfind('@') {
+            // '@' must be at start or preceded by whitespace
+            if at_pos > 0 {
+                let prev_byte = input.as_bytes()[at_pos - 1];
+                if prev_byte.is_ascii_alphanumeric() || prev_byte == b'.' {
+                    self.file_menu = None;
+                    return;
+                }
+            }
+
+            let query = &input[at_pos + 1..];
+
+            // Close menu if query contains whitespace (user finished typing ref)
+            if query.contains(char::is_whitespace) {
+                self.file_menu = None;
+                return;
+            }
+
+            // Lazily populate the project file cache
+            if self.project_files_cache.is_none() {
+                let wd = std::env::current_dir().unwrap_or_default();
+                self.project_files_cache =
+                    Some(ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000));
+            }
+
+            if let Some(ref candidates) = self.project_files_cache {
+                let matches = ragent_core::reference::fuzzy::fuzzy_match(query, candidates);
+
+                let entries: Vec<FileMenuEntry> = matches
+                    .into_iter()
+                    .take(15)
+                    .map(|m| {
+                        let is_dir = m.path.to_string_lossy().ends_with('/');
+                        FileMenuEntry {
+                            display: m.path.to_string_lossy().to_string(),
+                            path: m.path,
+                            is_dir,
+                        }
+                    })
+                    .collect();
+
+                if entries.is_empty() {
+                    self.file_menu = None;
+                } else {
+                    let prev_selected =
+                        self.file_menu.as_ref().map(|m| m.selected).unwrap_or(0);
+                    self.file_menu = Some(FileMenuState {
+                        selected: prev_selected.min(entries.len().saturating_sub(1)),
+                        matches: entries,
+                        query: query.to_string(),
+                    });
+                }
+            } else {
+                self.file_menu = None;
+            }
+        } else {
+            self.file_menu = None;
+        }
+    }
+
+    /// Accept the currently selected file menu entry, replacing the `@query`
+    /// in the input with `@full/path`.
+    pub fn accept_file_menu_selection(&mut self) {
+        let path = if let Some(ref menu) = self.file_menu {
+            menu.matches
+                .get(menu.selected)
+                .map(|entry| entry.display.clone())
+        } else {
+            None
+        };
+
+        if let Some(path) = path {
+            // Replace @query with @path
+            if let Some(at_pos) = self.input.rfind('@') {
+                self.input.truncate(at_pos + 1);
+                self.input.push_str(&path);
+            }
+        }
+        self.file_menu = None;
+    }
+
     /// Execute a slash command by trigger name (e.g. `"/model"` or `"model"`).
     ///
     /// # Examples
@@ -1131,6 +1258,37 @@ impl App {
                 self.tool_step_map.clear();
                 self.status = "messages cleared".to_string();
                 self.push_log(LogLevel::Info, "Message history cleared".to_string());
+            }
+            "cancel" => {
+                if args.is_empty() {
+                    self.status = "⚠ Please provide a task ID prefix: /cancel <id>".to_string();
+                    self.push_log(LogLevel::Warn, "No task ID provided".to_string());
+                    return;
+                }
+
+                if let Some(task) = self
+                    .active_tasks
+                    .iter()
+                    .find(|t| t.id.starts_with(args))
+                {
+                    let task_id = task.id.clone();
+                    let agent = task.agent_name.clone();
+                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) {
+                        self.active_tasks.remove(idx);
+                    }
+                    self.status = format!("Cancelled task {} ({})", &task_id[..8.min(task_id.len())], agent);
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "Task cancelled: {}... ({})",
+                            &task_id[..8.min(task_id.len())],
+                            agent
+                        ),
+                    );
+                } else {
+                    self.status = format!("No task found with ID starting with '{}'", args);
+                    self.push_log(LogLevel::Warn, format!("Task not found: {}", args));
+                }
             }
             "compact" => {
                 if self.session_id.is_none() {
@@ -1500,6 +1658,56 @@ impl App {
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "skills".to_string();
+            }
+            "tasks" => {
+                if self.active_tasks.is_empty() {
+                    self.status = "No active background tasks".to_string();
+                    self.push_log(LogLevel::Info, "No active tasks".to_string());
+                    return;
+                }
+
+                let mut output = String::from("From: /tasks\nActive Background Tasks:\n\n");
+                output.push_str(&format!(
+                    "  {:<12}  {:<20}  {:<12}  Description\n",
+                    "Task ID", "Agent", "Status"
+                ));
+                output.push_str(&format!(
+                    "  {:-<12}  {:-<20}  {:-<12}  {:-<20}\n",
+                    "", "", "", ""
+                ));
+
+                for task in &self.active_tasks {
+                    let task_id = format!("{}...", &task.id[..8.min(task.id.len())]);
+                    let status_str = format!("{}", task.status);
+                    output.push_str(&format!(
+                        "  {:<12}  {:<20}  {:<12}  {}\n",
+                        task_id, task.agent_name, status_str,
+                        task.result
+                            .as_deref()
+                            .unwrap_or("(running)")
+                    ));
+                }
+
+                output.push_str(&format!(
+                    "\nTo cancel a task, use: /cancel <task_id_prefix>\n"
+                ));
+                output.push_str(&format!(
+                    "{} task(s) running, {} completed\n",
+                    self.active_tasks
+                        .iter()
+                        .filter(|t| t.status == ragent_core::task::TaskStatus::Running)
+                        .count(),
+                    self.active_tasks
+                        .iter()
+                        .filter(|t| t.status == ragent_core::task::TaskStatus::Completed)
+                        .count()
+                ));
+
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "tasks".to_string();
             }
             _ => {
                 // Check if this is a skill invocation before reporting unknown command.
@@ -1973,7 +2181,24 @@ impl App {
                     self.history_index = None;
                     self.history_draft.clear();
                     self.input.clear();
+                    self.file_menu = None;
                     self.status = "processing...".to_string();
+
+                    // Check for @ file references (parsing is sync, resolution
+                    // happens inside the spawned async task to avoid blocking
+                    // the tokio runtime).
+                    let has_refs =
+                        !ragent_core::reference::parse::parse_refs(&text).is_empty();
+                    if has_refs {
+                        let ref_names: Vec<String> = ragent_core::reference::parse::parse_refs(&text)
+                            .iter()
+                            .map(|r| r.raw.clone())
+                            .collect();
+                        self.push_log(
+                            LogLevel::Info,
+                            format!("resolving refs: {}", ref_names.join(", ")),
+                        );
+                    }
 
                     // Log the prompt
                     let truncated = if text.len() > 120 {
@@ -1998,15 +2223,31 @@ impl App {
                         }
                     }
 
-                    // Spawn async task to process the message
+                    // Spawn async task to resolve refs (if any) then process
                     let processor = self.session_processor.clone();
                     let flag = Arc::new(AtomicBool::new(false));
                     self.cancel_flag = Some(flag.clone());
                     tokio::spawn(async move {
-                        if let Err(e) = processor.process_message(&sid, &text, &agent, flag).await {
-                            // Error is already surfaced via Event::AgentError;
-                            // only trace at debug level to avoid duplicating
-                            // output below the TUI.
+                        let final_text = if has_refs {
+                            let wd = std::env::current_dir().unwrap_or_default();
+                            match ragent_core::reference::resolve::resolve_all_refs(
+                                &text, &wd,
+                            )
+                            .await
+                            {
+                                Ok((resolved, _)) => resolved,
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "ref resolution failed, using original text");
+                                    text.clone()
+                                }
+                            }
+                        } else {
+                            text.clone()
+                        };
+
+                        if let Err(e) =
+                            processor.process_message(&sid, &final_text, &agent, flag).await
+                        {
                             tracing::debug!(error = %e, "Failed to process message");
                         }
                     });
@@ -2526,6 +2767,62 @@ impl App {
                         .unwrap_or_default();
                     let icon = if success { "✓" } else { "✗" };
                     self.push_log(LogLevel::Tool, format!("{}← {} {} {}", step_tag, tool, icon, content));
+                }
+            }
+            Event::SubagentStart {
+                ref session_id,
+                ref task_id,
+                ref agent,
+                task: _,
+                background,
+                ..
+            } => {
+                if self.is_current_session(session_id) && background {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "⚙️ Background task started: {} ({})",
+                            &task_id[..8.min(task_id.len())],
+                            agent
+                        ),
+                    );
+                }
+            }
+            Event::SubagentComplete {
+                ref session_id,
+                ref task_id,
+                ref summary,
+                success,
+                ..
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                        self.active_tasks.remove(idx);
+                    }
+                    let icon = if success { "✅" } else { "❌" };
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "{} Task completed ({}): {}",
+                            icon,
+                            &task_id[..8.min(task_id.len())],
+                            summary
+                        ),
+                    );
+                }
+            }
+            Event::SubagentCancelled {
+                ref session_id,
+                ref task_id,
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                        self.active_tasks.remove(idx);
+                    }
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
+                    );
                 }
             }
             _ => {}

@@ -17,6 +17,7 @@ fn test_ctx() -> ToolContext {
         working_dir: std::env::temp_dir(),
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
+        task_manager: None,
     }
 }
 
@@ -284,5 +285,5 @@ async fn test_websearch_mock_auth_error() {
 async fn test_websearch_registered() {
     let registry = create_default_registry();
     assert!(registry.get("websearch").is_some());
-    assert_eq!(registry.list().len(), 23);
+    assert_eq!(registry.list().len(), 26);
 }

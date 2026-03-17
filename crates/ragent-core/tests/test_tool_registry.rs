@@ -12,12 +12,15 @@ fn test_default_registry_has_all_tools() {
 
     let expected = [
         "bash",
+        "cancel_task",
         "create",
         "edit",
         "glob",
         "grep",
         "list",
+        "list_tasks",
         "multiedit",
+        "new_task",
         "office_info",
         "office_read",
         "office_write",
@@ -94,7 +97,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 23);
+    assert_eq!(defs.len(), 26);
 
     for def in &defs {
         assert!(
@@ -208,6 +211,7 @@ async fn test_read_tool_execute() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool
@@ -237,6 +241,7 @@ async fn test_read_tool_line_range() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool
@@ -271,6 +276,7 @@ async fn test_read_tool_missing_file() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -294,6 +300,7 @@ async fn test_write_tool_execute() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool
@@ -330,6 +337,7 @@ async fn test_list_tool_execute() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -359,6 +367,7 @@ async fn test_glob_tool_execute() {
         working_dir: dir.clone(),
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
+        task_manager: None,
     };
 
     let result = tool

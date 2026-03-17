@@ -11,6 +11,7 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         working_dir: dir,
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
+        task_manager: None,
     }
 }
 

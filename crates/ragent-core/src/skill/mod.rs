@@ -19,13 +19,17 @@
 //!
 //! # Skill Scopes
 //!
-//! | Scope      | Path                                   | Applies To                    |
-//! |------------|----------------------------------------|-------------------------------|
-//! | Enterprise | Managed settings                       | All users in organization     |
-//! | Personal   | `~/.ragent/skills/<name>/SKILL.md`     | All projects for this user    |
-//! | Project    | `.ragent/skills/<name>/SKILL.md`        | This project only             |
+//! | Scope              | Path                                   | Applies To                    |
+//! |--------------------|----------------------------------------|-------------------------------|
+//! | Enterprise         | Managed settings                       | All users in organization     |
+//! | OpenSkills Global  | `~/.agent/skills/`, `~/.claude/skills/`| OpenSkills ecosystem (global) |
+//! | Personal           | `~/.ragent/skills/<name>/SKILL.md`     | All projects for this user    |
+//! | OpenSkills Project | `.agent/skills/`, `.claude/skills/`    | OpenSkills ecosystem (project)|
+//! | Project            | `.ragent/skills/<name>/SKILL.md`        | This project only             |
 //!
 //! Higher-priority scopes override lower ones when names conflict.
+//! Ragent-native paths always take precedence over OpenSkills paths at
+//! the same level (global or project).
 
 pub mod loader;
 pub mod args;
@@ -63,10 +67,14 @@ pub enum SkillScope {
     Bundled = 0,
     /// Enterprise-managed settings.
     Enterprise = 1,
+    /// OpenSkills global directories (`~/.agent/skills/`, `~/.claude/skills/`).
+    OpenSkillsGlobal = 2,
     /// User-level skill from `~/.ragent/skills/`.
-    Personal = 2,
+    Personal = 3,
+    /// OpenSkills project directories (`.agent/skills/`, `.claude/skills/`).
+    OpenSkillsProject = 4,
     /// Project-level skill from `.ragent/skills/`.
-    Project = 3,
+    Project = 5,
 }
 
 impl std::fmt::Display for SkillScope {
@@ -74,7 +82,9 @@ impl std::fmt::Display for SkillScope {
         match self {
             SkillScope::Bundled => write!(f, "bundled"),
             SkillScope::Enterprise => write!(f, "enterprise"),
+            SkillScope::OpenSkillsGlobal => write!(f, "openskills-global"),
             SkillScope::Personal => write!(f, "personal"),
+            SkillScope::OpenSkillsProject => write!(f, "openskills-project"),
             SkillScope::Project => write!(f, "project"),
         }
     }
@@ -108,6 +118,13 @@ pub struct SkillInfo {
     /// Hooks scoped to this skill's lifecycle. Stored as raw JSON until the
     /// hooks system (SPEC §3.17) is implemented.
     pub hooks: Option<serde_json::Value>,
+    /// License information (Anthropic Agent Skills spec).
+    pub license: Option<String>,
+    /// Environment compatibility notes (Anthropic Agent Skills spec).
+    pub compatibility: Option<String>,
+    /// Arbitrary key-value metadata (Anthropic Agent Skills spec).
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
     /// Absolute path to the `SKILL.md` file this skill was loaded from.
     #[serde(skip)]
     pub source_path: PathBuf,
@@ -150,6 +167,9 @@ impl SkillInfo {
             context: None,
             agent: None,
             hooks: None,
+            license: None,
+            compatibility: None,
+            metadata: HashMap::new(),
             source_path: PathBuf::new(),
             skill_dir: PathBuf::new(),
             scope: SkillScope::Project,

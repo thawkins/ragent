@@ -221,6 +221,46 @@ pub enum Event {
         /// Human-readable reason for the abort (e.g. `"user_requested"`).
         reason: String,
     },
+
+    // ── Sub-agent lifecycle events (F13/F14) ────────────────────
+
+    /// A sub-agent task has been spawned.
+    SubagentStart {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for this task.
+        task_id: String,
+        /// Session created for the sub-agent.
+        child_session_id: String,
+        /// Name of the agent running the task (e.g. `"explore"`).
+        agent: String,
+        /// The task prompt sent to the sub-agent.
+        task: String,
+        /// Whether the task runs in the background (`true`) or blocks (`false`).
+        background: bool,
+    },
+    /// A background sub-agent task has completed.
+    SubagentComplete {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for this task.
+        task_id: String,
+        /// Session used by the sub-agent.
+        child_session_id: String,
+        /// Brief summary of the sub-agent's result.
+        summary: String,
+        /// Whether the sub-agent succeeded.
+        success: bool,
+        /// Wall-clock duration in milliseconds.
+        duration_ms: u64,
+    },
+    /// A sub-agent task was cancelled.
+    SubagentCancelled {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for the cancelled task.
+        task_id: String,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.

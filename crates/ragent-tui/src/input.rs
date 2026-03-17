@@ -157,6 +157,60 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
     }
 
+    // If file menu is active, intercept navigation keys
+    if app.file_menu.is_some() {
+        match key.code {
+            KeyCode::Up => {
+                if let Some(ref mut menu) = app.file_menu {
+                    if !menu.matches.is_empty() {
+                        menu.selected = if menu.selected == 0 {
+                            menu.matches.len() - 1
+                        } else {
+                            menu.selected - 1
+                        };
+                    }
+                }
+                return None;
+            }
+            KeyCode::Down => {
+                if let Some(ref mut menu) = app.file_menu {
+                    if !menu.matches.is_empty() {
+                        menu.selected = (menu.selected + 1) % menu.matches.len();
+                    }
+                }
+                return None;
+            }
+            KeyCode::Tab => {
+                app.accept_file_menu_selection();
+                return None;
+            }
+            KeyCode::Enter => {
+                // Accept selection and submit the message
+                app.accept_file_menu_selection();
+                let text = app.input.clone();
+                if !text.is_empty() {
+                    return Some(InputAction::SendMessage(text));
+                }
+                return None;
+            }
+            KeyCode::Esc => {
+                app.file_menu = None;
+                return None;
+            }
+            KeyCode::Char(c) => {
+                app.input.push(c);
+                app.update_file_menu();
+                return None;
+            }
+            KeyCode::Backspace => {
+                app.input.pop();
+                app.update_file_menu();
+                return None;
+            }
+            _ => return None,
+        }
+    }
+
     match key.code {
         KeyCode::Enter => {
             let text = app.input.clone();
@@ -177,6 +231,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             if app.input.starts_with('/') {
                 app.update_slash_menu();
             }
+            // If input contains '@', show the file menu
+            if app.input.contains('@') {
+                app.update_file_menu();
+            }
             None
         }
         KeyCode::Backspace => {
@@ -186,6 +244,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 app.update_slash_menu();
             } else {
                 app.slash_menu = None;
+            }
+            // Update or close the file menu
+            if app.input.contains('@') {
+                app.update_file_menu();
+            } else {
+                app.file_menu = None;
             }
             None
         }

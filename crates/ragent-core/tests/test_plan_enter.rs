@@ -16,6 +16,7 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         working_dir: std::env::temp_dir(),
         event_bus: bus.clone(),
         storage: None,
+        task_manager: None,
     };
     (ctx, bus)
 }
@@ -192,5 +193,5 @@ async fn test_plan_enter_without_context() {
 fn test_plan_enter_registered() {
     let registry = create_default_registry();
     assert!(registry.get("plan_enter").is_some());
-    assert_eq!(registry.list().len(), 23);
+    assert_eq!(registry.list().len(), 26);
 }

@@ -262,6 +262,7 @@ pub fn format_forked_result(result: &ForkedSkillResult) -> String {
 mod tests {
     use super::*;
     use crate::skill::{SkillContext, SkillScope};
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn test_skill(name: &str, body: &str) -> SkillInfo {
@@ -276,6 +277,9 @@ mod tests {
             context: None,
             agent: None,
             hooks: None,
+            license: None,
+            compatibility: None,
+            metadata: HashMap::new(),
             source_path: PathBuf::from(format!("/skills/{name}/SKILL.md")),
             skill_dir: PathBuf::from(format!("/skills/{name}")),
             scope: SkillScope::Project,

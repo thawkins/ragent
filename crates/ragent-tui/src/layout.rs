@@ -125,6 +125,12 @@ fn render_home(frame: &mut Frame, app: &mut App) {
         render_slash_menu(frame, app, input_area);
     }
 
+    // File menu dropdown (above the input, if active)
+    if app.file_menu.is_some() {
+        let input_area = centered_horizontal(max_width, chunks[3]);
+        render_file_menu(frame, app, input_area);
+    }
+
     // Provider status
     render_provider_status(frame, app, chunks[4]);
 
@@ -682,6 +688,63 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
+/// Render the `@` file reference autocomplete popup above the input area.
+fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
+    let menu = match &app.file_menu {
+        Some(m) => m,
+        None => return,
+    };
+
+    if menu.matches.is_empty() {
+        return;
+    }
+
+    let item_count = menu.matches.len() as u16;
+    let height = (item_count + 2).min(input_area.y);
+    let width = input_area.width.min(60);
+
+    let popup = Rect::new(
+        input_area.x,
+        input_area.y.saturating_sub(height),
+        width,
+        height,
+    );
+
+    frame.render_widget(Clear, popup);
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+    for (i, entry) in menu.matches.iter().enumerate() {
+        let is_selected = i == menu.selected;
+        let (indicator, path_style) = if is_selected {
+            (
+                "▸ ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else if entry.is_dir {
+            ("  ", Style::default().fg(Color::Blue))
+        } else {
+            ("  ", Style::default().fg(Color::White))
+        };
+        let icon = if entry.is_dir { "📁 " } else { "📄 " };
+        lines.push(Line::from(vec![
+            Span::styled(indicator, path_style),
+            Span::raw(icon),
+            Span::styled(&entry.display, path_style),
+        ]));
+    }
+
+    let title = format!(" @{} ", menu.query);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, popup);
+}
+
 fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let version = format!("v{}", VERSION);
 
@@ -822,6 +885,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // Slash menu dropdown (above the chat input, if active)
     if app.slash_menu.is_some() {
         render_slash_menu(frame, app, chunks[2]);
+    }
+
+    // File menu dropdown (above the chat input, if active)
+    if app.file_menu.is_some() {
+        render_file_menu(frame, app, chunks[2]);
     }
 
     if app.permission_pending.is_some() {
@@ -992,6 +1060,23 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
         right_parts.push(Span::styled(label, bar_style));
+    }
+
+    // Add background task status
+    if !app.active_tasks.is_empty() {
+        let running = app
+            .active_tasks
+            .iter()
+            .filter(|t| t.status == ragent_core::task::TaskStatus::Running)
+            .count();
+        let task_status = format!("  ⚙️ {}/{}tasks", running, app.active_tasks.len());
+        right_parts.push(Span::styled(
+            task_status,
+            Style::default()
+                .fg(Color::Yellow)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
 
     right_parts.push(Span::styled("  ", Style::default().bg(Color::DarkGray)));

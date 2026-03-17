@@ -108,7 +108,7 @@ impl Tool for OfficeReadTool {
 /// # Returns
 ///
 /// The document content as a formatted string.
-fn read_docx(path: &Path, format: &str) -> Result<String> {
+pub(crate) fn read_docx(path: &Path, format: &str) -> Result<String> {
     let docx_file = docx_rust::DocxFile::from_file(path)
         .map_err(|e| anyhow::anyhow!("Failed to open docx: {e}"))?;
     let docx = docx_file
@@ -270,7 +270,7 @@ fn extract_table_markdown(table: &docx_rust::document::Table<'_>) -> String {
 /// # Returns
 ///
 /// The spreadsheet content as a formatted string.
-fn read_xlsx(
+pub(crate) fn read_xlsx(
     path: &Path,
     sheet: Option<&str>,
     range_str: Option<&str>,
@@ -490,7 +490,7 @@ fn parse_cell_ref(cell_ref: &str) -> Result<(usize, usize)> {
 /// # Returns
 ///
 /// The presentation content as a formatted string.
-fn read_pptx(path: &Path, slide_num: Option<usize>, format: &str) -> Result<String> {
+pub(crate) fn read_pptx(path: &Path, slide_num: Option<usize>, format: &str) -> Result<String> {
     use ooxmlsdk::parts::presentation_document::PresentationDocument;
 
     let doc = PresentationDocument::new_from_file(path)

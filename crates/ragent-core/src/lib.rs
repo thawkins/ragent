@@ -21,9 +21,13 @@ pub mod permission;
 pub mod provider;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
+/// @ file reference parsing, resolution, and fuzzy matching (SPEC §3.34).
+pub mod reference;
 pub mod session;
 /// Skill discovery, loading, argument substitution, and invocation.
 pub mod skill;
 pub mod snapshot;
 pub mod storage;
+/// Sub-agent task management for spawning and tracking sub-agents.
+pub mod task;
 pub mod tool;

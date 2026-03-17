@@ -39,6 +39,9 @@ pub struct SessionProcessor {
     pub permission_checker: Arc<tokio::sync::RwLock<PermissionChecker>>,
     /// Bus for broadcasting session and processing events.
     pub event_bus: Arc<EventBus>,
+    /// Optional task manager for sub-agent spawning (F13/F14).
+    /// Uses `OnceLock` to break the circular dependency with `TaskManager`.
+    pub task_manager: std::sync::OnceLock<Arc<crate::task::TaskManager>>,
 }
 
 impl SessionProcessor {
@@ -460,6 +463,7 @@ impl SessionProcessor {
                     working_dir: working_dir.clone(),
                     event_bus: self.event_bus.clone(),
                     storage: Some(self.session_manager.storage().clone()),
+                    task_manager: self.task_manager.get().cloned(),
                 };
 
                 let result = self
@@ -581,6 +585,37 @@ impl SessionProcessor {
                 role: "user".to_string(),
                 content: ChatContent::Parts(tool_result_parts),
             });
+
+            // Inject completed background task results (F14 result injection)
+            if let Some(tm) = self.task_manager.get() {
+                let completed = tm.drain_completed(session_id).await;
+                if !completed.is_empty() {
+                    let mut bg_parts: Vec<ContentPart> = Vec::new();
+                    for task in &completed {
+                        let status_label = match task.status {
+                            crate::task::TaskStatus::Completed => "completed",
+                            crate::task::TaskStatus::Failed => "failed",
+                            crate::task::TaskStatus::Cancelled => "cancelled",
+                            crate::task::TaskStatus::Running => "running", // shouldn't happen
+                        };
+                        let body = task
+                            .result
+                            .as_deref()
+                            .or(task.error.as_deref())
+                            .unwrap_or("(no output)");
+                        let text = format!(
+                            "[Background Task {status_label}: {} — {}]\n\n{body}",
+                            task.agent_name,
+                            &task.id[..8.min(task.id.len())]
+                        );
+                        bg_parts.push(ContentPart::Text { text });
+                    }
+                    chat_messages.push(ChatMessage {
+                        role: "user".to_string(),
+                        content: ChatContent::Parts(bg_parts),
+                    });
+                }
+            }
         }
 
         // 6. Store assistant message

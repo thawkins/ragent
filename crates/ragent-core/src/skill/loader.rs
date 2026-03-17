@@ -21,6 +21,7 @@
 //! ```
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::{SkillContext, SkillInfo, SkillScope};
@@ -28,6 +29,8 @@ use super::{SkillContext, SkillInfo, SkillScope};
 /// Intermediate representation of the YAML frontmatter in a `SKILL.md` file.
 ///
 /// Field names use kebab-case to match the SPEC-defined frontmatter format.
+/// Includes fields from the Anthropic Agent Skills specification for
+/// OpenSkills compatibility (license, compatibility, metadata).
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct SkillFrontmatter {
@@ -56,6 +59,13 @@ struct SkillFrontmatter {
     agent: Option<String>,
     /// Hooks scoped to this skill's lifecycle (raw YAML, stored as JSON).
     hooks: Option<serde_yaml::Value>,
+    /// License information (Anthropic Agent Skills spec).
+    license: Option<String>,
+    /// Environment compatibility notes (Anthropic Agent Skills spec).
+    compatibility: Option<String>,
+    /// Arbitrary key-value metadata (Anthropic Agent Skills spec).
+    #[serde(default)]
+    metadata: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -165,6 +175,9 @@ pub fn parse_skill_md(
         context: frontmatter.context,
         agent: frontmatter.agent,
         hooks: hooks_json,
+        license: frontmatter.license,
+        compatibility: frontmatter.compatibility,
+        metadata: frontmatter.metadata,
         source_path: source_path.to_path_buf(),
         skill_dir,
         scope,
@@ -256,16 +269,30 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 ///
 /// Scans in order (lowest → highest priority):
 ///
-/// 1. Personal: `~/.ragent/skills/*/SKILL.md`
-/// 2. Extra directories from config `skill_dirs` (treated as Personal scope)
-/// 3. Project: `{working_dir}/.ragent/skills/*/SKILL.md`
-/// 4. Monorepo: nested `.ragent/skills/` in subdirectories of `working_dir`
+/// 1. OpenSkills global: `~/.agent/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
+/// 2. Personal: `~/.ragent/skills/*/SKILL.md`
+/// 3. Extra directories from config `skill_dirs` (treated as Personal scope)
+/// 4. OpenSkills project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
+/// 5. Project: `{working_dir}/.ragent/skills/*/SKILL.md`
+/// 6. Monorepo: nested `.ragent/skills/` in subdirectories of `working_dir`
 ///
-/// Project-scope skills override personal-scope skills when names conflict.
+/// Higher-scope skills override lower-scope skills when names conflict.
+/// Ragent-native paths always take precedence over OpenSkills paths at the
+/// same level (global or project).
 ///
 /// Individual parse failures are logged as warnings and skipped.
 pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillInfo> {
     let mut skills = Vec::new();
+
+    // OpenSkills global: ~/.agent/skills/ and ~/.claude/skills/
+    if let Some(home) = dirs::home_dir() {
+        for dir_name in &[".agent", ".claude"] {
+            let openskills_dir = home.join(dir_name).join("skills");
+            if openskills_dir.is_dir() {
+                load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsGlobal, &mut skills);
+            }
+        }
+    }
 
     // Personal skills: ~/.ragent/skills/*/SKILL.md
     if let Some(home) = dirs::home_dir() {
@@ -283,6 +310,14 @@ pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillIn
             load_skills_from_dir(path, SkillScope::Personal, &mut skills);
         } else {
             tracing::warn!("Configured skill_dirs entry does not exist: {dir}");
+        }
+    }
+
+    // OpenSkills project: .agent/skills/ and .claude/skills/
+    for dir_name in &[".agent", ".claude"] {
+        let openskills_dir = working_dir.join(dir_name).join("skills");
+        if openskills_dir.is_dir() {
+            load_skills_from_dir(&openskills_dir, SkillScope::OpenSkillsProject, &mut skills);
         }
     }
 

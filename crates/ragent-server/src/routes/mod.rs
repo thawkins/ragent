@@ -529,6 +529,15 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         }
         | Event::SessionAborted {
             session_id: sid, ..
+        }
+        | Event::SubagentStart {
+            session_id: sid, ..
+        }
+        | Event::SubagentComplete {
+            session_id: sid, ..
+        }
+        | Event::SubagentCancelled {
+            session_id: sid, ..
         } => sid == session_id,
         Event::McpStatusChanged { .. } => false,
         Event::CopilotDeviceFlowComplete { .. } => false,

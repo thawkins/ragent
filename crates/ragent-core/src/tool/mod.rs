@@ -8,12 +8,15 @@
 //! provided via [`create_default_registry`].
 
 pub mod bash;
+pub mod cancel_task;
 pub mod create;
 pub mod edit;
 pub mod glob;
 pub mod grep;
 pub mod list;
+pub mod list_tasks;
 pub mod multiedit;
+pub mod new_task;
 pub mod office_common;
 pub mod office_info;
 pub mod office_read;
@@ -79,6 +82,7 @@ impl Default for ToolOutput {
 ///     working_dir: PathBuf::from("/tmp"),
 ///     event_bus: Arc::new(EventBus::new(128)),
 ///     storage: None,
+///     task_manager: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -92,6 +96,8 @@ pub struct ToolContext {
     pub event_bus: Arc<EventBus>,
     /// Optional storage handle for tools that need database access.
     pub storage: Option<Arc<crate::storage::Storage>>,
+    /// Optional task manager for spawning sub-agent tasks.
+    pub task_manager: Option<Arc<crate::task::TaskManager>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -227,7 +233,7 @@ impl Default for ToolRegistry {
 ///
 /// Included tools: `read`, `write`, `edit`, `bash`, `grep`, `glob`, `list`,
 /// `question`, `office_read`, `office_write`, `office_info`, `pdf_read`,
-/// `pdf_write`.
+/// `pdf_write`, `new_task`, `cancel_task`, `list_tasks`.
 ///
 /// # Examples
 ///
@@ -235,7 +241,7 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 23);
+/// assert_eq!(registry.list().len(), 26);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -262,5 +268,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(pdf_read::PdfReadTool));
     registry.register(Arc::new(pdf_write::PdfWriteTool));
     registry.register(Arc::new(rm::RmTool));
+    registry.register(Arc::new(new_task::NewTaskTool));
+    registry.register(Arc::new(cancel_task::CancelTaskTool));
+    registry.register(Arc::new(list_tasks::ListTasksTool));
     registry
 }
