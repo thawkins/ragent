@@ -518,6 +518,33 @@ pub fn build_system_prompt(
         }
     }
 
+    // Sub-agent spawning guidance (new_task tool)
+    if agent.mode == AgentMode::Primary {
+        prompt.push_str(
+            "## Sub-Agent Spawning\n\n\
+             You have access to the `new_task` tool to delegate work to specialised sub-agents.\n\
+             Use it when a task is clearly separable, time-consuming, or benefits from a focused agent.\n\n\
+             **Available agents:** `explore` (fast read-only codebase search), `build` (compile/test/fix),\n\
+             `plan` (analysis and planning), `general` (full-capability coding).\n\n\
+             **Modes:**\n\
+             - `background: false` (default) — blocks until the sub-agent finishes; use its result directly.\n\
+             - `background: true` — returns immediately with a task_id; sub-agent runs concurrently.\n\
+               You will receive a SubagentComplete notification when it finishes.\n\n\
+             **When to spawn sub-agents:**\n\
+             - Run multiple independent explorations in parallel (background: true)\n\
+             - Delegate a long build/test cycle so you can continue other work\n\
+             - Isolate risky or speculative work in a focused sub-agent\n\
+             - Use `explore` to quickly search the codebase while you plan\n\n\
+             **Example calls:**\n\
+             ```json\n\
+             {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in the codebase\", \"background\": false}\n\
+             {\"agent\": \"build\",   \"task\": \"Run cargo test and fix any failing tests\",    \"background\": true}\n\
+             ```\n\n\
+             Use `list_tasks` to check the status of background tasks.\n\
+             Use `cancel_task` with a task_id to stop a running background task.\n\n",
+        );
+    }
+
     // Tool usage guidelines
     prompt.push_str(
         "## Guidelines\n\

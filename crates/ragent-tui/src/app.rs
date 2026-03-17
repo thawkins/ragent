@@ -3660,16 +3660,41 @@ impl App {
             Event::SubagentStart {
                 ref session_id,
                 ref task_id,
+                ref child_session_id,
                 ref agent,
-                task: _,
+                ref task,
                 background,
                 ..
             } => {
-                if self.is_current_session(session_id) && background {
+                if self.is_current_session(session_id) {
+                    // Add to active_tasks so the agent panel shows it immediately.
+                    let entry = ragent_core::task::TaskEntry {
+                        id: task_id.clone(),
+                        parent_session_id: session_id.clone(),
+                        child_session_id: child_session_id.clone(),
+                        agent_name: agent.clone(),
+                        task_prompt: task.clone(),
+                        background,
+                        status: ragent_core::task::TaskStatus::Running,
+                        result: None,
+                        error: None,
+                        created_at: chrono::Utc::now(),
+                        completed_at: None,
+                        reported: false,
+                    };
+                    self.active_tasks.push(entry);
+
+                    let (icon, kind) = if background {
+                        ("⚙️", "Background")
+                    } else {
+                        ("🔄", "Foreground")
+                    };
                     self.push_log(
                         LogLevel::Info,
                         format!(
-                            "⚙️ Background task started: {} ({})",
+                            "{} {} task started: {} ({})",
+                            icon,
+                            kind,
                             &task_id[..8.min(task_id.len())],
                             agent
                         ),
