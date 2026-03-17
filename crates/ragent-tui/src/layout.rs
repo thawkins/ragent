@@ -21,7 +21,7 @@ use crate::app::{
 };
 use crate::logo;
 use crate::widgets::message_widget::{
-    capitalize_tool_name, tool_inline_diff, tool_input_summary,
+    capitalize_tool_name, read_line_range, tool_inline_diff, tool_input_summary,
     tool_result_summary,
 };
 
@@ -1187,6 +1187,17 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     } else {
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
                         spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
+                    }
+                    // Show line range for read tool in bold
+                    if tool == "read" {
+                        if let Some(range) = read_line_range(&state.output) {
+                            spans.push(Span::styled(
+                                format!(" {}", range),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD),
+                            ));
+                        }
                     }
                     if let Some((added, removed)) = inline_diff {
                         spans.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));

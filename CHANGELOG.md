@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.0-alpha.12] - 2026-03-17
+
+### Added
+- **OpenSkills support** — extended skill loader to support OpenSkills-format skill files
+- **Output file support for `/simplify` skill** — skill now accepts optional output path argument to save findings to a markdown file
+
+### Fixed
+- **Overly aggressive read function** — improved large file handling with section maps
+
 ## [0.1.0-alpha.11] - 2026-03-16
 
 ### Added

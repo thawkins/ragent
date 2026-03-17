@@ -5,11 +5,68 @@
 //! name.
 
 use super::{SkillInfo, SkillScope};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Creates a default `SkillInfo` struct with common bundled skill fields.
+///
+/// # Arguments
+///
+/// * `name` - The skill identifier (e.g., "simplify")
+/// * `description` - Human-readable description
+/// * `argument_hint` - Optional usage hint (e.g., "[output_path]")
+/// * `disable_model_invocation` - If true, model cannot invoke this skill
+/// * `allowed_tools` - Tools the skill may use
+/// * `body` - The instruction body
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::skill::bundled::make_bundled_skill;
+///
+/// let skill = make_bundled_skill(
+///     "test",
+///     "Test skill",
+///     None,
+///     false,
+///     vec!["read".to_string()],
+///     "Do something",
+/// );
+/// assert_eq!(skill.name, "test");
+/// ```
+pub fn make_bundled_skill(
+    name: &str,
+    description: &str,
+    argument_hint: Option<&str>,
+    disable_model_invocation: bool,
+    allowed_tools: Vec<String>,
+    body: &str,
+) -> SkillInfo {
+    SkillInfo {
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        argument_hint: argument_hint.map(|h| h.to_string()),
+        disable_model_invocation,
+        user_invocable: true,
+        allowed_tools,
+        model: None,
+        context: None,
+        agent: None,
+        hooks: None,
+        license: None,
+        compatibility: None,
+        metadata: HashMap::new(),
+        source_path: PathBuf::new(),
+        skill_dir: PathBuf::new(),
+        scope: SkillScope::Bundled,
+        body: body.to_string(),
+    }
+}
 
 /// Returns the set of skills bundled with ragent.
 ///
 /// Bundled skills include:
-/// - `/simplify` — Reviews recently changed files for quality improvements
+/// - `/simplify [output_path]` — Reviews recently changed files for quality improvements
 /// - `/batch` — Orchestrates large-scale parallel changes
 /// - `/debug` — Troubleshoots the current session via debug logs
 /// - `/loop` — Runs a prompt repeatedly on an interval
@@ -37,50 +94,35 @@ pub fn bundled_skills() -> Vec<SkillInfo> {
     ]
 }
 
-/// `/simplify` — Reviews recently changed files for code quality, reuse,
-/// and efficiency issues.
+/// `/simplify [output_path]` — Reviews recently changed files for code quality, reuse,
+/// and efficiency issues. Optionally saves summary to the specified file path.
 fn simplify_skill() -> SkillInfo {
-    SkillInfo {
-        name: "simplify".to_string(),
-        description: Some(
-            "Reviews recently changed files for code quality, reuse, and efficiency issues"
-                .to_string(),
-        ),
-        argument_hint: None,
-        disable_model_invocation: false,
-        user_invocable: true,
-        allowed_tools: vec![
+    make_bundled_skill(
+        "simplify",
+        "Reviews recently changed files for code quality, reuse, and efficiency issues",
+        Some("[output_path]"),
+        false,
+        vec![
             "bash".to_string(),
             "read".to_string(),
             "grep".to_string(),
             "glob".to_string(),
+            "create".to_string(),
+            "write".to_string(),
         ],
-        model: None,
-        context: None,
-        agent: None,
-        hooks: None,
-        license: None,
-        compatibility: None,
-        metadata: std::collections::HashMap::new(),
-        source_path: std::path::PathBuf::new(),
-        skill_dir: std::path::PathBuf::new(),
-        scope: SkillScope::Bundled,
-        body: SIMPLIFY_BODY.to_string(),
-    }
+        SIMPLIFY_BODY,
+    )
 }
 
 /// `/batch <instruction>` — Orchestrates large-scale parallel changes
 /// across a codebase.
 fn batch_skill() -> SkillInfo {
-    SkillInfo {
-        name: "batch".to_string(),
-        description: Some(
-            "Orchestrates large-scale parallel changes across a codebase".to_string(),
-        ),
-        argument_hint: Some("<instruction>".to_string()),
-        disable_model_invocation: true,
-        user_invocable: true,
-        allowed_tools: vec![
+    make_bundled_skill(
+        "batch",
+        "Orchestrates large-scale parallel changes across a codebase",
+        Some("<instruction>"),
+        true,
+        vec![
             "bash".to_string(),
             "read".to_string(),
             "edit".to_string(),
@@ -88,83 +130,49 @@ fn batch_skill() -> SkillInfo {
             "grep".to_string(),
             "glob".to_string(),
         ],
-        model: None,
-        context: None,
-        agent: None,
-        hooks: None,
-        license: None,
-        compatibility: None,
-        metadata: std::collections::HashMap::new(),
-        source_path: std::path::PathBuf::new(),
-        skill_dir: std::path::PathBuf::new(),
-        scope: SkillScope::Bundled,
-        body: BATCH_BODY.to_string(),
-    }
+        BATCH_BODY,
+    )
 }
 
 /// `/debug [description]` — Troubleshoots the current session by reading
 /// debug logs.
 fn debug_skill() -> SkillInfo {
-    SkillInfo {
-        name: "debug".to_string(),
-        description: Some(
-            "Troubleshoots current session by reading debug logs".to_string(),
-        ),
-        argument_hint: Some("[description]".to_string()),
-        disable_model_invocation: false,
-        user_invocable: true,
-        allowed_tools: vec![
+    make_bundled_skill(
+        "debug",
+        "Troubleshoots current session by reading debug logs",
+        Some("[description]"),
+        false,
+        vec![
             "bash".to_string(),
             "read".to_string(),
             "grep".to_string(),
         ],
-        model: None,
-        context: None,
-        agent: None,
-        hooks: None,
-        license: None,
-        compatibility: None,
-        metadata: std::collections::HashMap::new(),
-        source_path: std::path::PathBuf::new(),
-        skill_dir: std::path::PathBuf::new(),
-        scope: SkillScope::Bundled,
-        body: DEBUG_BODY.to_string(),
-    }
+        DEBUG_BODY,
+    )
 }
 
 /// `/loop [interval] <prompt>` — Runs a prompt repeatedly on an interval
 /// for scheduled tasks.
 fn loop_skill() -> SkillInfo {
-    SkillInfo {
-        name: "loop".to_string(),
-        description: Some(
-            "Runs a prompt repeatedly on an interval (scheduled tasks)".to_string(),
-        ),
-        argument_hint: Some("[interval] <prompt>".to_string()),
-        disable_model_invocation: true,
-        user_invocable: true,
-        allowed_tools: vec![
+    make_bundled_skill(
+        "loop",
+        "Runs a prompt repeatedly on an interval (scheduled tasks)",
+        Some("[interval] <prompt>"),
+        true,
+        vec![
             "bash".to_string(),
             "read".to_string(),
         ],
-        model: None,
-        context: None,
-        agent: None,
-        hooks: None,
-        license: None,
-        compatibility: None,
-        metadata: std::collections::HashMap::new(),
-        source_path: std::path::PathBuf::new(),
-        skill_dir: std::path::PathBuf::new(),
-        scope: SkillScope::Bundled,
-        body: LOOP_BODY.to_string(),
-    }
+        LOOP_BODY,
+    )
 }
 
 // ── Skill instruction bodies ────────────────────────────────────
 
 const SIMPLIFY_BODY: &str = "\
 Review recently changed files in this project for code quality improvements.
+
+**Output path (if provided): $ARGUMENTS**
 
 Steps:
 1. Run `git diff --name-only HEAD~3` to find recently changed files
@@ -178,7 +186,16 @@ Steps:
 4. For each issue found, explain the problem and suggest a concrete fix
 5. Apply the fixes if they are safe and straightforward
 
-Focus on substance over style — ignore formatting and naming preferences.";
+Focus on substance over style — ignore formatting and naming preferences.
+
+**IMPORTANT - Output file requirement:**
+Check the output path above. If it contains a file path (not empty/blank), you MUST:
+1. Create a markdown summary document with all your findings
+2. Use the `write` tool to save the summary to that EXACT path
+3. Confirm to the user that the file was saved
+
+Example: If output path shows 'docs/review.md', save findings to 'docs/review.md'.";
+
 
 const BATCH_BODY: &str = "\
 Apply the following instruction across all matching files in the codebase:
@@ -296,7 +313,7 @@ mod tests {
         assert_eq!(skill.name, "simplify");
         assert!(skill.body.contains("git diff"));
         assert!(!skill.disable_model_invocation);
-        assert!(skill.argument_hint.is_none());
+        assert_eq!(skill.argument_hint.as_deref(), Some("[output_path]"));
     }
 
     #[test]

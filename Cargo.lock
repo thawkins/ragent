@@ -2619,7 +2619,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ragent"
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 dependencies = [
  "anyhow",
  "clap",
@@ -2636,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-core"
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2674,7 +2674,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "0.1.0-alpha.11"
+version = "0.1.0-alpha.12"
 dependencies = [
  "anyhow",
  "arboard",

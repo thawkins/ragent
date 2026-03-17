@@ -285,6 +285,130 @@ async fn test_read_tool_missing_file() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[tokio::test]
+async fn test_read_tool_large_file_section_map() {
+    let dir = std::env::temp_dir().join("ragent_test_read_large");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Create a Rust file with >100 lines containing structs/fns
+    let mut content = String::new();
+    content.push_str("use std::io;\n\n");
+    content.push_str("pub struct Foo {\n    x: i32,\n}\n\n");
+    // Pad to exceed 100 lines
+    for i in 0..50 {
+        content.push_str(&format!("// comment line {}\n", i));
+    }
+    content.push_str("impl Foo {\n");
+    content.push_str("    pub fn new() -> Self {\n        Foo { x: 0 }\n    }\n}\n\n");
+    for i in 50..80 {
+        content.push_str(&format!("// comment line {}\n", i));
+    }
+    content.push_str("pub fn helper() -> i32 {\n    42\n}\n");
+    for i in 80..100 {
+        content.push_str(&format!("// filler {}\n", i));
+    }
+
+    let file_path = dir.join("big.rs");
+    std::fs::write(&file_path, &content).unwrap();
+
+    let total_lines = content.lines().count();
+    assert!(total_lines > 100, "test file must exceed 100 lines, got {}", total_lines);
+
+    let registry = create_default_registry();
+    let tool = registry.get("read").unwrap();
+
+    let ctx = ToolContext {
+        session_id: "s1".to_string(),
+        working_dir: dir.clone(),
+        event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
+        task_manager: None,
+    };
+
+    // Read without line range → should get summary, not the whole file
+    let result = tool.execute(json!({"path": "big.rs"}), &ctx).await.unwrap();
+
+    assert!(result.content.contains("Section Map"), "should contain section map");
+    assert!(result.content.contains("pub struct Foo"), "should detect struct Foo");
+    assert!(result.content.contains("impl Foo"), "should detect impl Foo");
+    assert!(result.content.contains("pub fn helper"), "should detect fn helper");
+
+    let meta = result.metadata.unwrap();
+    assert_eq!(meta["summarised"], true);
+    assert_eq!(meta["end_line"], 100);
+    assert!(meta["total_lines"].as_u64().unwrap() > 100);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn test_read_tool_large_file_with_range_returns_full() {
+    let dir = std::env::temp_dir().join("ragent_test_read_large_range");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Create a file with >100 lines
+    let content: String = (1..=150).map(|i| format!("line {}\n", i)).collect();
+    let file_path = dir.join("big.txt");
+    std::fs::write(&file_path, &content).unwrap();
+
+    let registry = create_default_registry();
+    let tool = registry.get("read").unwrap();
+
+    let ctx = ToolContext {
+        session_id: "s1".to_string(),
+        working_dir: dir.clone(),
+        event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
+        task_manager: None,
+    };
+
+    // Read WITH a line range → should return those exact lines, no summary
+    let result = tool
+        .execute(json!({"path": "big.txt", "start_line": 50, "end_line": 60}), &ctx)
+        .await
+        .unwrap();
+
+    assert!(result.content.contains("line 50"));
+    assert!(result.content.contains("line 60"));
+    assert!(!result.content.contains("Section Map"), "should not contain section map when range specified");
+
+    let meta = result.metadata.unwrap();
+    assert!(meta.get("summarised").is_none());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn test_read_tool_small_file_no_summary() {
+    let dir = std::env::temp_dir().join("ragent_test_read_small_no_sum");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // 5-line file — should return everything, no summary
+    let file_path = dir.join("small.rs");
+    std::fs::write(&file_path, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
+
+    let registry = create_default_registry();
+    let tool = registry.get("read").unwrap();
+
+    let ctx = ToolContext {
+        session_id: "s1".to_string(),
+        working_dir: dir.clone(),
+        event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
+        task_manager: None,
+    };
+
+    let result = tool.execute(json!({"path": "small.rs"}), &ctx).await.unwrap();
+
+    assert!(result.content.contains("fn main()"));
+    assert!(!result.content.contains("Section Map"));
+
+    let meta = result.metadata.unwrap();
+    assert!(meta.get("summarised").is_none());
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ── Tool execution: WriteTool ────────────────────────────────────
 
 #[tokio::test]

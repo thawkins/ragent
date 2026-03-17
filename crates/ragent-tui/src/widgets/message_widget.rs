@@ -13,6 +13,34 @@ use ratatui::{
 
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
+/// Helper to build a ternary for pluralization (e.g., "1 item" vs "2 items").
+fn pluralize(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("{} {}", count, singular)
+    } else {
+        format!("{} {}", count, plural)
+    }
+}
+
+/// Truncate a string to a maximum length, appending ellipsis if truncated.
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() > max_len {
+        format!("{}…", &s[..max_len])
+    } else {
+        s.to_string()
+    }
+}
+
+/// Extract a string value from a JSON object by key.
+fn get_json_str<'a>(json: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    json.get(key).and_then(|v| v.as_str())
+}
+
+/// Extract a u64 value from a JSON object by key.
+fn get_json_u64(json: &serde_json::Value, key: &str) -> Option<u64> {
+    json.get(key).and_then(|v| v.as_u64())
+}
+
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
 pub(crate) fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();
@@ -72,13 +100,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
         "webfetch" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|u| {
-                if u.len() > 60 {
-                    format!("{}…", &u[..60])
-                } else {
-                    u.to_string()
-                }
-            })
+            .map(|u| truncate_str(u, 60))
             .unwrap_or_default(),
         "websearch" => input
             .get("query")
@@ -91,11 +113,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            format!(
-                "{} edit{}",
-                count,
-                if count == 1 { "" } else { "s" }
-            )
+            pluralize(count, "edit", "edits")
         }
         "glob" => input
             .get("pattern")
@@ -121,11 +139,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .get("task")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let truncated = if task.len() > 60 {
-                format!("{}…", &task[..60])
-            } else {
-                task.to_string()
-            };
+            let truncated = truncate_str(task, 60);
             format!("→ plan: {}", truncated)
         }
         "plan_exit" => {
@@ -133,11 +147,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .get("summary")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let truncated = if summary.len() > 60 {
-                format!("{}…", &summary[..60])
-            } else {
-                summary.to_string()
-            };
+            let truncated = truncate_str(summary, 60);
             format!("← plan: {}", truncated)
         }
         "todo_read" => {
@@ -161,7 +171,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             match action {
-                "add" => format!("📋 +{}", if title.len() > 40 { &title[..40] } else { title }),
+                "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
                 "update" => format!("📋 ~{}", id),
                 "remove" => format!("📋 -{}", id),
                 "clear" => "📋 clear all".to_string(),
@@ -174,10 +184,12 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
 
 /// Return a line-range label for the read tool (e.g. "lines 5-10").
 ///
-/// Returns `None` when no `start_line` / `end_line` parameters are present.
-pub(crate) fn read_line_range(input: &serde_json::Value) -> Option<String> {
-    let start = input.get("start_line").and_then(|v| v.as_u64());
-    let end = input.get("end_line").and_then(|v| v.as_u64());
+/// Reads from the tool's output metadata which contains the actual lines read.
+/// Returns `None` when metadata is not available or tool did not complete.
+pub(crate) fn read_line_range(metadata: &Option<serde_json::Value>) -> Option<String> {
+    let meta = metadata.as_ref()?;
+    let start = meta.get("start_line").and_then(|v| v.as_u64());
+    let end = meta.get("end_line").and_then(|v| v.as_u64());
     match (start, end) {
         (Some(s), Some(e)) => Some(format!("lines {}-{}", s, e)),
         (Some(s), None) => Some(format!("from line {}", s)),
@@ -223,94 +235,66 @@ pub(crate) fn tool_result_summary(
     let out = output.as_ref()?;
     let line_count = out.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     match tool {
-        "read" => Some(format!(
-            "{} line{} read",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
+        "read" => {
+            let summarised = out.get("summarised").and_then(|v| v.as_bool()).unwrap_or(false);
+            let total = out.get("total_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if summarised && total > 0 {
+                Some(format!(
+                    "{} read (summarised, {} total)",
+                    pluralize(line_count, "line", "lines"),
+                    total
+                ))
+            } else {
+                Some(format!("{} read", pluralize(line_count, "line", "lines")))
+            }
+        }
         "write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!(
-                "{} line{} written to {}",
-                line_count,
-                if line_count == 1 { "" } else { "s" },
-                path
-            ))
+            Some(format!("{} written to {}", pluralize(line_count, "line", "lines"), path))
         }
         "create" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!(
-                "{} line{} created in {}",
-                line_count,
-                if line_count == 1 { "" } else { "s" },
-                path
-            ))
+            Some(format!("{} created in {}", pluralize(line_count, "line", "lines"), path))
         }
         "edit" => None,
         "multiedit" => {
-            let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0);
-            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
-                "{} edit{} across {} file{}",
-                edits,
-                if edits == 1 { "" } else { "s" },
-                files,
-                if files == 1 { "" } else { "s" }
+                "{} across {}",
+                pluralize(edits, "edit", "edits"),
+                pluralize(files, "file", "files")
             ))
         }
         "patch" => {
-            let hunks = out.get("hunks").and_then(|v| v.as_u64()).unwrap_or(0);
-            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0);
+            let hunks = out.get("hunks").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
-                "{} hunk{} applied across {} file{}",
-                hunks,
-                if hunks == 1 { "" } else { "s" },
-                files,
-                if files == 1 { "" } else { "s" }
+                "{} applied across {}",
+                pluralize(hunks, "hunk", "hunks"),
+                pluralize(files, "file", "files")
             ))
         }
-        "bash" => Some(format!(
-            "{} line{}...",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
-        "grep" => Some(format!(
-            "{} line{} matched",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
-        "glob" => Some(format!(
-            "{} file{} found",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
-        "list" => Some(format!(
-            "{} entr{}",
-            line_count,
-            if line_count == 1 { "y" } else { "ies" }
-        )),
+        "bash" => Some(format!("{}…", pluralize(line_count, "line", "lines"))),
+        "grep" => Some(format!("{} matched", pluralize(line_count, "line", "lines"))),
+        "glob" => Some(format!("{} found", pluralize(line_count, "file", "files"))),
+        "list" => {
+            let item_label = if line_count == 1 { "entry" } else { "entries" };
+            Some(format!("{} {}", line_count, item_label))
+        }
         "webfetch" => {
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!(
-                "{} line{} (HTTP {})",
-                line_count,
-                if line_count == 1 { "" } else { "s" },
-                status,
-            ))
+            Some(format!("{} (HTTP {})", pluralize(line_count, "line", "lines"), status))
         }
         "websearch" => {
-            let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!(
-                "{} result{} found",
-                results,
-                if results == 1 { "" } else { "s" },
-            ))
+            let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(results, "result", "results")))
         }
         "plan_enter" => {
             let task = out
@@ -330,8 +314,8 @@ pub(crate) fn tool_result_summary(
             let count = out
                 .get("count")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            Some(format!("{} item{}", count, if count == 1 { "" } else { "s" }))
+                .unwrap_or(0) as usize;
+            Some(pluralize(count, "item", "items"))
         }
         "todo_write" => {
             let action = out
@@ -344,28 +328,15 @@ pub(crate) fn tool_result_summary(
                 .unwrap_or(0);
             Some(format!("{} → {} remaining", action, count))
         }
-        "office_read" | "pdf_read" => Some(format!(
-            "{} line{} read",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
+        "office_read" | "pdf_read" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
         "office_write" | "pdf_write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!(
-                "{} line{} written to {}",
-                line_count,
-                if line_count == 1 { "" } else { "s" },
-                path
-            ))
+            Some(format!("{} written to {}", pluralize(line_count, "line", "lines"), path))
         }
-        "office_info" => Some(format!(
-            "{} line{} of metadata",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        )),
+        "office_info" => Some(format!("{} of metadata", pluralize(line_count, "line", "lines"))),
         "rm" => {
             let deleted = out.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
             if deleted {
@@ -505,7 +476,7 @@ impl<'a> MessageWidget<'a> {
                     }
                     // Show line range for read tool in bold
                     if tool == "read" {
-                        if let Some(range) = read_line_range(&state.input) {
+                        if let Some(range) = read_line_range(&state.output) {
                             spans.push(Span::styled(
                                 format!(" {}", range),
                                 Style::default()

@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use crate::permission::{PermissionAction, PermissionRule, PermissionRuleset};
+use crate::permission::{PermissionAction, PermissionRule, PermissionRuleset, Permission};
 
 /// Determines when an agent is available for use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -313,58 +313,35 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
     ]
 }
 
+/// Helper to create a permission rule with the given parameters.
+fn rule(
+    permission: Permission,
+    pattern: impl Into<String>,
+    action: PermissionAction,
+) -> PermissionRule {
+    PermissionRule {
+        permission,
+        pattern: pattern.into(),
+        action,
+    }
+}
+
 fn default_permissions() -> PermissionRuleset {
     vec![
-        PermissionRule {
-            permission: "file:read".into(),
-            pattern: "**".to_string(),
-            action: PermissionAction::Allow,
-        },
-        PermissionRule {
-            permission: "file:write".into(),
-            pattern: "**".to_string(),
-            action: PermissionAction::Ask,
-        },
-        PermissionRule {
-            permission: "bash:execute".into(),
-            pattern: "*".to_string(),
-            action: PermissionAction::Ask,
-        },
-        PermissionRule {
-            permission: "web".into(),
-            pattern: "*".to_string(),
-            action: PermissionAction::Ask,
-        },
-        PermissionRule {
-            permission: "plan".into(),
-            pattern: "*".to_string(),
-            action: PermissionAction::Ask,
-        },
-        PermissionRule {
-            permission: "todo".into(),
-            pattern: "*".to_string(),
-            action: PermissionAction::Allow,
-        },
+        rule(Permission::Read, "**", PermissionAction::Allow),
+        rule(Permission::Edit, "**", PermissionAction::Ask),
+        rule(Permission::Bash, "*", PermissionAction::Ask),
+        rule(Permission::Web, "*", PermissionAction::Ask),
+        rule(Permission::PlanEnter, "*", PermissionAction::Ask),
+        rule(Permission::Todo, "*", PermissionAction::Allow),
     ]
 }
 
 fn read_only_permissions() -> PermissionRuleset {
     vec![
-        PermissionRule {
-            permission: "file:read".into(),
-            pattern: "**".to_string(),
-            action: PermissionAction::Allow,
-        },
-        PermissionRule {
-            permission: "file:write".into(),
-            pattern: "**".to_string(),
-            action: PermissionAction::Deny,
-        },
-        PermissionRule {
-            permission: "bash:execute".into(),
-            pattern: "*".to_string(),
-            action: PermissionAction::Deny,
-        },
+        rule(Permission::Read, "**", PermissionAction::Allow),
+        rule(Permission::Edit, "**", PermissionAction::Deny),
+        rule(Permission::Bash, "*", PermissionAction::Deny),
     ]
 }
 
@@ -548,7 +525,26 @@ pub fn build_system_prompt(
          - Read files before editing them to understand context\n\
          - Make precise, targeted changes\n\
          - Test changes when possible using the bash tool\n\
-         - Explain what you're doing and why\n",
+         - Explain what you're doing and why\n\n",
+    );
+
+    // Specific guidance on using line ranges for file reads
+    prompt.push_str(
+        "## File Reading Best Practices\n\n\
+         When reading files with the `read` tool:\n\
+         - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
+           to read the file in focused sections rather than all at once\n\
+         - Example call (read lines 50-100 of src/main.rs):\n\
+           {\"path\": \"src/main.rs\", \"start_line\": 50, \"end_line\": 100}\n\
+         - Why this is required:\n\
+           * Reduces token usage and response latency significantly\n\
+           * Allows you to understand code structure piece-by-piece\n\
+           * Prevents context overflow from large file dumps\n\
+         - Strategy:\n\
+           1. First, check the file size with a grep or head command if needed\n\
+           2. Start by reading the first 50 lines to understand purpose\n\
+           3. Then read specific sections based on what you discover\n\
+           4. Never read an entire file >100 lines in a single call\n",
     );
 
     prompt

@@ -31,6 +31,7 @@ use ragent_core::{
     sanitize::redact_secrets,
     session::processor::SessionProcessor,
     storage::{SessionRow, Storage},
+    task::TaskManager,
 };
 
 use crate::sse::event_to_sse;
@@ -152,13 +153,10 @@ async fn get_config(State(state): State<AppState>) -> impl IntoResponse {
     Json(config.clone())
 }
 
-async fn get_providers(State(state): State<AppState>) -> impl IntoResponse {
+async fn get_providers(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     let config = state.config.read().await;
-    let provider_ids: Vec<&String> = config.provider.keys().collect();
-    Json(serde_json::to_value(provider_ids).unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "Failed to serialize provider list");
-        serde_json::json!([])
-    }))
+    let provider_ids: Vec<String> = config.provider.keys().cloned().collect();
+    serialize_response(provider_ids, "get_providers")
 }
 
 #[derive(Serialize)]
@@ -184,27 +182,13 @@ impl From<SessionRow> for SessionResponse {
     }
 }
 
-async fn list_sessions(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_sessions(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.list_sessions() {
         Ok(sessions) => {
             let resp: Vec<SessionResponse> = sessions.into_iter().map(Into::into).collect();
-            match serde_json::to_value(&resp) {
-                Ok(val) => (StatusCode::OK, Json(val)).into_response(),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to serialize session list");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({ "error": "serialization failed" })),
-                    )
-                        .into_response()
-                }
-            }
+            serialize_response(resp, "list_sessions")
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
@@ -256,67 +240,31 @@ async fn create_session(
     }
 }
 
-async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_session(&id) {
         Ok(Some(session)) => {
             let resp: SessionResponse = session.into();
-            match serde_json::to_value(&resp) {
-                Ok(val) => (StatusCode::OK, Json(val)).into_response(),
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to serialize session");
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({ "error": "serialization failed" })),
-                    )
-                        .into_response()
-                }
-            }
+            serialize_response(resp, "get_session")
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "session not found" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "session not found"),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
 async fn archive_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> impl IntoResponse {
+) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.archive_session(&id) {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
-async fn get_messages(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn get_messages(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_messages(&id) {
-        Ok(messages) => match serde_json::to_value(&messages) {
-            Ok(val) => (StatusCode::OK, Json(val)).into_response(),
-            Err(e) => {
-                tracing::warn!(error = %e, "Failed to serialize messages");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": "serialization failed" })),
-                )
-                    .into_response()
-            }
-        },
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(messages) => serialize_response(messages, "get_messages"),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
 }
 
@@ -388,21 +336,7 @@ async fn send_message(
         .into_response()
 }
 
-/// Abort a session, archiving it and publishing an abort event.
-///
-/// Verifies the session exists, marks it as archived in storage, and
-/// publishes a [`Event::SessionAborted`] event on the event bus.
-///
-/// # Path Parameters
-///
-/// * `id` — the session ID to abort
-///
-/// # Responses
-///
-/// * `200` — session successfully aborted
-/// * `404` — session not found
-/// * `500` — internal error during archive or lookup
-async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_session(&id) {
         Ok(Some(_)) => {
             if let Err(e) = state.storage.archive_session(&id) {
@@ -411,11 +345,10 @@ async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) ->
                     error = %e,
                     "Failed to archive session during abort"
                 );
-                return (
+                return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("Failed to archive session: {e}") })),
-                )
-                    .into_response();
+                    format!("Failed to archive session: {e}"),
+                );
             }
 
             state.event_bus.publish(Event::SessionAborted {
@@ -424,18 +357,13 @@ async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) ->
             });
 
             tracing::info!(session_id = %id, "Session aborted");
-            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
-        Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "Session not found" })),
-        )
-            .into_response(),
-        Err(e) => (
+        Ok(None) => error_response(StatusCode::NOT_FOUND, "Session not found"),
+        Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Failed to look up session: {e}") })),
-        )
-            .into_response(),
+            format!("Failed to look up session: {e}"),
+        ),
     }
 }
 
@@ -506,38 +434,21 @@ async fn spawn_task(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
     Json(body): Json<SpawnTaskRequest>,
-) -> impl IntoResponse {
+) -> Result<(StatusCode, Json<TaskResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Verify session exists and get its directory
     let session = match state.storage.get_session(&session_id) {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "session not found" })),
-            )
-                .into_response();
+            return Err(error_response(StatusCode::NOT_FOUND, "session not found"));
         }
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
+            return Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
         }
     };
 
     let working_dir = std::path::Path::new(&session.directory);
     let background = body.background.unwrap_or(false);
-    let task_manager = match state.session_processor.task_manager.get() {
-        Some(tm) => tm,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "task manager not initialized" })),
-            )
-                .into_response();
-        }
-    };
+    let task_manager = get_task_manager(&state)?;
 
     let result = if background {
         task_manager
@@ -564,173 +475,130 @@ async fn spawn_task(
 
     match result {
         Ok(entry) => {
-            let response = TaskResponse {
-                id: entry.id.clone(),
-                parent_session_id: entry.parent_session_id,
-                agent_name: entry.agent_name,
-                task_prompt: entry.task_prompt,
-                status: format!("{}", entry.status),
-                result: entry.result,
-                error: entry.error,
-                created_at: entry.created_at.to_rfc3339(),
-                completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
-                background,
-            };
-            (StatusCode::CREATED, Json(response)).into_response()
+            let response = task_entry_to_response(entry, background);
+            Ok((StatusCode::CREATED, Json(response)))
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
 async fn list_tasks(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
-) -> impl IntoResponse {
+) -> Result<(StatusCode, Json<Vec<TaskResponse>>), (StatusCode, Json<serde_json::Value>)> {
     // Verify session exists
-    match state.storage.get_session(&session_id) {
-        Ok(Some(_)) => {},
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "session not found" })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": e.to_string() })),
-            )
-                .into_response();
-        }
-    }
+    verify_session_exists(&state, &session_id).await?;
 
-    let task_manager = match state.session_processor.task_manager.get() {
-        Some(tm) => tm,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "task manager not initialized" })),
-            )
-                .into_response();
-        }
-    };
+    let task_manager = get_task_manager(&state)?;
 
     let entries = task_manager.list_tasks(&session_id).await;
     let tasks: Vec<TaskResponse> = entries
         .into_iter()
-        .map(|entry| TaskResponse {
-            id: entry.id.clone(),
-            parent_session_id: entry.parent_session_id,
-            agent_name: entry.agent_name,
-            task_prompt: entry.task_prompt,
-            status: format!("{}", entry.status),
-            result: entry.result,
-            error: entry.error,
-            created_at: entry.created_at.to_rfc3339(),
-            completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
-            background: entry.background,
-        })
+        .map(|entry| task_entry_to_response(entry, false))
         .collect();
-    (StatusCode::OK, Json(tasks)).into_response()
+    Ok((StatusCode::OK, Json(tasks)))
 }
 
 async fn get_task(
     State(state): State<AppState>,
     Path((session_id, task_id)): Path<(String, String)>,
-) -> impl IntoResponse {
-    let task_manager = match state.session_processor.task_manager.get() {
-        Some(tm) => tm,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "task manager not initialized" })),
-            )
-                .into_response();
-        }
-    };
+) -> Result<(StatusCode, Json<TaskResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let task_manager = get_task_manager(&state)?;
 
     match task_manager.get_task(&task_id).await {
         Some(entry) => {
             if entry.parent_session_id != session_id {
-                return (
+                return Err(error_response(
                     StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({ "error": "task does not belong to this session" })),
-                )
-                    .into_response();
+                    "task does not belong to this session",
+                ));
             }
-            let response = TaskResponse {
-                id: entry.id.clone(),
-                parent_session_id: entry.parent_session_id,
-                agent_name: entry.agent_name,
-                task_prompt: entry.task_prompt,
-                status: format!("{}", entry.status),
-                result: entry.result,
-                error: entry.error,
-                created_at: entry.created_at.to_rfc3339(),
-                completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
-                background: entry.background,
-            };
-            (StatusCode::OK, Json(response)).into_response()
+            let response = task_entry_to_response(entry, false);
+            Ok((StatusCode::OK, Json(response)))
         }
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({ "error": "task not found" })),
-        )
-            .into_response(),
+        None => Err(error_response(StatusCode::NOT_FOUND, "task not found")),
     }
 }
 
 async fn cancel_task(
     State(state): State<AppState>,
     Path((session_id, task_id)): Path<(String, String)>,
-) -> impl IntoResponse {
-    let task_manager = match state.session_processor.task_manager.get() {
-        Some(tm) => tm,
-        None => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "task manager not initialized" })),
-            )
-                .into_response();
-        }
-    };
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<serde_json::Value>)> {
+    let task_manager = get_task_manager(&state)?;
 
     // Verify task belongs to this session
     match task_manager.get_task(&task_id).await {
         Some(entry) => {
             if entry.parent_session_id != session_id {
-                return (
+                return Err(error_response(
                     StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({ "error": "task does not belong to this session" })),
-                )
-                    .into_response();
+                    "task does not belong to this session",
+                ));
             }
         }
         None => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "task not found" })),
-            )
-                .into_response();
+            return Err(error_response(StatusCode::NOT_FOUND, "task not found"));
         }
     }
 
     match task_manager.cancel_task(&task_id).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+        Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
+        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────
+/// Helper to build standardized error JSON response bodies.
+fn error_response(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+    (status, Json(serde_json::json!({ "error": message.into() })))
+}
+
+/// Helper to serialize a value to JSON and return a response, or an internal server error.
+fn serialize_response<T: serde::Serialize>(value: T, context: &str) -> (StatusCode, Json<serde_json::Value>) {
+    match serde_json::to_value(&value) {
+        Ok(val) => (StatusCode::OK, Json(val)),
+        Err(e) => {
+            tracing::warn!(error = %e, context, "Serialization failed");
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "serialization failed")
+        }
+    }
+}
+
+/// Helper to retrieve the task manager from session processor or return error response.
+fn get_task_manager(state: &AppState) -> Result<Arc<TaskManager>, (StatusCode, Json<serde_json::Value>)> {
+    state
+        .session_processor
+        .task_manager
+        .get()
+        .map(|tm| tm.clone())
+        .ok_or_else(|| {
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "task manager not initialized")
+        })
+}
+
+/// Helper to verify a session exists, returning an error response if it doesn't.
+async fn verify_session_exists(state: &AppState, session_id: &str) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    match state.storage.get_session(session_id) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(error_response(StatusCode::NOT_FOUND, "session not found")),
+        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+    }
+}
+
+/// Helper to convert a task entry to a TaskResponse.
+fn task_entry_to_response(entry: ragent_core::task::TaskEntry, background: bool) -> TaskResponse {
+    TaskResponse {
+        id: entry.id.clone(),
+        parent_session_id: entry.parent_session_id,
+        agent_name: entry.agent_name,
+        task_prompt: entry.task_prompt,
+        status: format!("{}", entry.status),
+        result: entry.result,
+        error: entry.error,
+        created_at: entry.created_at.to_rfc3339(),
+        completed_at: entry.completed_at.map(|d| d.to_rfc3339()),
+        background,
+    }
+}
 
 fn event_matches_session(event: &Event, session_id: &str) -> bool {
     match event {
