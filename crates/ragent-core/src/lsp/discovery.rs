@@ -227,12 +227,7 @@ async fn scan_vscode_extensions(ext_dir: &std::path::Path) -> Vec<DiscoveredServ
             "rust",
             &["rs"],
         ),
-        (
-            "ms-python.python",
-            "bundled/stubs",
-            "python",
-            &["py"],
-        ),
+        ("ms-python.python", "bundled/stubs", "python", &["py"]),
         (
             "ms-vscode.cpptools",
             "bin/cpptools",

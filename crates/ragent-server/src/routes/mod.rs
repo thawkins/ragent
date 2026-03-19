@@ -71,7 +71,7 @@ pub struct AppState {
 /// # }
 /// ```
 pub async fn start_server(addr: &str, state: AppState) -> anyhow::Result<()> {
-    tracing::info!("Server auth token: {}", state.auth_token);
+    tracing::info!("Server auth token configured");
     let app = router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("Server listening on {}", addr);
@@ -102,10 +102,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/sessions/{id}/abort", post(abort_session))
         .route("/sessions/{id}/permission/{req_id}", post(reply_permission))
-        .route(
-            "/sessions/{id}/tasks",
-            get(list_tasks).post(spawn_task),
-        )
+        .route("/sessions/{id}/tasks", get(list_tasks).post(spawn_task))
         .route(
             "/sessions/{id}/tasks/{tid}",
             get(get_task).delete(cancel_task),
@@ -132,19 +129,49 @@ async fn auth_middleware(
     request: Request,
     next: middleware::Next,
 ) -> Response {
-    let expected = format!("Bearer {}", state.auth_token);
+    // Local constant-time equality function to avoid timing attacks on token comparison.
+    fn constant_time_eq(a: &str, b: &str) -> bool {
+        if a.len() != b.len() {
+            return false;
+        }
+        let mut res: u8 = 0;
+        for (x, y) in a.as_bytes().iter().zip(b.as_bytes().iter()) {
+            res |= x ^ y;
+        }
+        res == 0
+    }
+
     let auth_header = request
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok());
 
     match auth_header {
-        Some(header) if header == expected => next.run(request).await,
+        Some(header) => {
+            if header.starts_with("Bearer ") {
+                let provided = &header["Bearer ".len()..];
+                if constant_time_eq(provided, &state.auth_token) {
+                    next.run(request).await
+                } else {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(serde_json::json!({ "error": "unauthorized" })),
+                    )
+                    .into_response()
+                }
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(serde_json::json!({ "error": "unauthorized" })),
+                )
+                .into_response()
+            }
+        }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": "unauthorized" })),
         )
-            .into_response(),
+        .into_response(),
     }
 }
 
@@ -246,7 +273,10 @@ async fn create_session(
     }
 }
 
-async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
+async fn get_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_session(&id) {
         Ok(Some(session)) => {
             let resp: SessionResponse = session.into();
@@ -267,7 +297,10 @@ async fn archive_session(
     }
 }
 
-async fn get_messages(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
+async fn get_messages(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_messages(&id) {
         Ok(messages) => serialize_response(messages, "get_messages"),
         Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
@@ -285,7 +318,12 @@ async fn send_message(
     Json(body): Json<SendMessageRequest>,
 ) -> Response {
     {
-        let mut limiter = state.rate_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        let mut limiter = match state.rate_limiter.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error: rate limiter lock poisoned").into_response();
+            }
+        };
         let now = Instant::now();
         let entry = limiter.entry(id.clone()).or_insert((0, now));
         if now.duration_since(entry.1).as_secs() >= 60 {
@@ -305,8 +343,8 @@ async fn send_message(
     let session_id = id.clone();
     let rx = state.event_bus.subscribe();
     let processor = state.session_processor.clone();
-    let content = body.content.clone();
-    let config = state.config.clone();
+    let content = body.content;
+    let config = state.config;
 
     tokio::spawn(async move {
         let cfg = config.read().await;
@@ -314,7 +352,12 @@ async fn send_message(
             .unwrap_or_else(|_| AgentInfo::new("general", "General-purpose agent"));
         drop(cfg);
         if let Err(e) = processor
-            .process_message(&session_id, &content, &agent, Arc::new(AtomicBool::new(false)))
+            .process_message(
+                &session_id,
+                &content,
+                &agent,
+                Arc::new(AtomicBool::new(false)),
+            )
             .await
         {
             tracing::error!(session_id = %session_id, error = %redact_secrets(&e.to_string()), "Failed to process message");
@@ -342,7 +385,10 @@ async fn send_message(
         .into_response()
 }
 
-async fn abort_session(State(state): State<AppState>, Path(id): Path<String>) -> (StatusCode, Json<serde_json::Value>) {
+async fn abort_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
     match state.storage.get_session(&id) {
         Ok(Some(_)) => {
             if let Err(e) = state.storage.archive_session(&id) {
@@ -428,9 +474,7 @@ struct OrchestrateRequest {
 }
 
 /// `GET /orchestrator/metrics` — return live counter snapshot.
-async fn orch_metrics(
-    State(state): State<AppState>,
-) -> (StatusCode, Json<serde_json::Value>) {
+async fn orch_metrics(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     match &state.coordinator {
         Some(c) => {
             let snap = c.metrics_snapshot();
@@ -539,7 +583,10 @@ async fn spawn_task(
             return Err(error_response(StatusCode::NOT_FOUND, "session not found"));
         }
         Err(e) => {
-            return Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e.to_string(),
+            ));
         }
     };
 
@@ -575,7 +622,10 @@ async fn spawn_task(
             let response = task_entry_to_response(entry, background);
             Ok((StatusCode::CREATED, Json(response)))
         }
-        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        )),
     }
 }
 
@@ -640,17 +690,26 @@ async fn cancel_task(
 
     match task_manager.cancel_task(&task_id).await {
         Ok(()) => Ok((StatusCode::OK, Json(serde_json::json!({ "ok": true })))),
-        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        )),
     }
 }
 
 /// Helper to build standardized error JSON response bodies.
-fn error_response(status: StatusCode, message: impl Into<String>) -> (StatusCode, Json<serde_json::Value>) {
+fn error_response(
+    status: StatusCode,
+    message: impl Into<String>,
+) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": message.into() })))
 }
 
 /// Helper to serialize a value to JSON and return a response, or an internal server error.
-fn serialize_response<T: serde::Serialize>(value: T, context: &str) -> (StatusCode, Json<serde_json::Value>) {
+fn serialize_response<T: serde::Serialize>(
+    value: T,
+    context: &str,
+) -> (StatusCode, Json<serde_json::Value>) {
     match serde_json::to_value(&value) {
         Ok(val) => (StatusCode::OK, Json(val)),
         Err(e) => {
@@ -661,27 +720,37 @@ fn serialize_response<T: serde::Serialize>(value: T, context: &str) -> (StatusCo
 }
 
 /// Helper to retrieve the task manager from session processor or return error response.
-fn get_task_manager(state: &AppState) -> Result<Arc<TaskManager>, (StatusCode, Json<serde_json::Value>)> {
+fn get_task_manager(
+    state: &AppState,
+) -> Result<Arc<TaskManager>, (StatusCode, Json<serde_json::Value>)> {
     state
         .session_processor
         .task_manager
-        .get()
-        .map(|tm| tm.clone())
+        .get().cloned()
         .ok_or_else(|| {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "task manager not initialized")
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task manager not initialized",
+            )
         })
 }
 
 /// Helper to verify a session exists, returning an error response if it doesn't.
-async fn verify_session_exists(state: &AppState, session_id: &str) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+async fn verify_session_exists(
+    state: &AppState,
+    session_id: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
     match state.storage.get_session(session_id) {
         Ok(Some(_)) => Ok(()),
         Ok(None) => Err(error_response(StatusCode::NOT_FOUND, "session not found")),
-        Err(e) => Err(error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            e.to_string(),
+        )),
     }
 }
 
-/// Helper to convert a task entry to a TaskResponse.
+/// Helper to convert a task entry to a `TaskResponse`.
 fn task_entry_to_response(entry: ragent_core::task::TaskEntry, background: bool) -> TaskResponse {
     TaskResponse {
         id: entry.id.clone(),
@@ -755,6 +824,9 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         | Event::SessionAborted {
             session_id: sid, ..
         }
+        | Event::QuotaUpdate {
+            session_id: sid, ..
+        }
         | Event::SubagentStart {
             session_id: sid, ..
         }
@@ -764,6 +836,12 @@ fn event_matches_session(event: &Event, session_id: &str) -> bool {
         | Event::SubagentCancelled {
             session_id: sid, ..
         } => sid == session_id,
+        Event::TeammateSpawned { session_id: sid, .. }
+        | Event::TeammateMessage { session_id: sid, .. }
+        | Event::TeammateIdle { session_id: sid, .. }
+        | Event::TeamTaskClaimed { session_id: sid, .. }
+        | Event::TeamTaskCompleted { session_id: sid, .. }
+        | Event::TeamCleanedUp { session_id: sid, .. } => sid == session_id,
         Event::McpStatusChanged { .. } => false,
         Event::CopilotDeviceFlowComplete { .. } => false,
         Event::LspStatusChanged { .. } => false,

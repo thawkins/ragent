@@ -11,10 +11,10 @@
 //! - [`resolve`] — Resolve references to actual file/directory/URL content.
 //! - [`fuzzy`] — Fuzzy file matching for bare `@filename` references.
 
+pub mod fuzzy;
 pub mod parse;
 pub mod resolve;
-pub mod fuzzy;
 
+pub use fuzzy::{FuzzyMatch, collect_project_files, fuzzy_match};
 pub use parse::{FileRef, ParsedRef, parse_refs};
-pub use resolve::{ResolvedRef, resolve_ref, resolve_all_refs};
-pub use fuzzy::{collect_project_files, fuzzy_match, FuzzyMatch};
+pub use resolve::{ResolvedRef, resolve_all_refs, resolve_ref};

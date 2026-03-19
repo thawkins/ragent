@@ -134,10 +134,7 @@ async fn resolve_url(url: &str, raw: &str) -> Result<ResolvedRef> {
         .with_context(|| format!("Failed to fetch '@{raw}'"))?;
 
     if !response.status().is_success() {
-        anyhow::bail!(
-            "HTTP {} fetching '@{raw}'",
-            response.status().as_u16()
-        );
+        anyhow::bail!("HTTP {} fetching '@{raw}'", response.status().as_u16());
     }
 
     let body = response
@@ -146,7 +143,8 @@ async fn resolve_url(url: &str, raw: &str) -> Result<ResolvedRef> {
         .with_context(|| format!("Failed to read response from '@{raw}'"))?;
 
     // Simple HTML detection and conversion
-    let processed = if body.trim_start().starts_with("<!") || body.trim_start().starts_with("<html") {
+    let processed = if body.trim_start().starts_with("<!") || body.trim_start().starts_with("<html")
+    {
         html2text::from_read(body.as_bytes(), 120).unwrap_or(body)
     } else {
         body
@@ -220,7 +218,7 @@ async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
         .map(|e| e.to_lowercase());
 
     match ext.as_deref() {
-        Some("docx") | Some("xlsx") | Some("pptx") => {
+        Some("docx" | "xlsx" | "pptx") => {
             let path = abs_path.to_path_buf();
             let ext_owned = ext.unwrap().to_string();
             let raw_owned = raw.to_string();
@@ -382,10 +380,7 @@ fn list_recursive(
                 continue;
             }
             lines.push(format!("{prefix}{connector}{name_str}/"));
-            let new_prefix = format!(
-                "{prefix}{}",
-                if is_last { "    " } else { "│   " }
-            );
+            let new_prefix = format!("{prefix}{}", if is_last { "    " } else { "│   " });
             list_recursive(&path, &new_prefix, depth + 1, max_depth, lines)?;
         } else {
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
@@ -493,9 +488,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve_all_refs_no_refs() {
         let tmp = std::env::temp_dir();
-        let (text, resolved) = resolve_all_refs("plain text", &tmp)
-            .await
-            .expect("resolve");
+        let (text, resolved) = resolve_all_refs("plain text", &tmp).await.expect("resolve");
         assert_eq!(text, "plain text");
         assert!(resolved.is_empty());
     }

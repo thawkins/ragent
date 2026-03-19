@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use futures::future::FutureExt;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
 
@@ -19,9 +19,8 @@ async fn main() -> anyhow::Result<()> {
     let registry = AgentRegistry::new();
 
     // Register agent-a: handles "search" + "analysis" requests.
-    let responder_a: Responder = Arc::new(|payload: String| {
-        async move { format!("agent-a received: {}", payload) }.boxed()
-    });
+    let responder_a: Responder =
+        Arc::new(|payload: String| async move { format!("agent-a received: {}", payload) }.boxed());
 
     // Register agent-b: handles "search" + "compile" requests (with a small delay).
     let responder_b: Responder = Arc::new(|payload: String| {

@@ -97,7 +97,10 @@ pub struct ConflictResolver {
 impl ConflictResolver {
     /// Create a resolver with the given policy and the default [`LoggingFallback`].
     pub fn new(policy: ConflictPolicy) -> Self {
-        Self { policy, fallback: Arc::new(LoggingFallback) }
+        Self {
+            policy,
+            fallback: Arc::new(LoggingFallback),
+        }
     }
 
     /// Create a resolver with a custom [`HumanFallback`] handler.
@@ -130,7 +133,10 @@ impl ConflictResolver {
                 }
                 // All were errors — return last as Err.
                 let (_, last) = responses.last().unwrap();
-                Err(anyhow::anyhow!("all agents returned errors; last: {}", last))
+                Err(anyhow::anyhow!(
+                    "all agents returned errors; last: {}",
+                    last
+                ))
             }
 
             ConflictPolicy::LastResponse => {
@@ -171,9 +177,7 @@ impl ConflictResolver {
                 }
             }
 
-            ConflictPolicy::HumanReview => {
-                Ok(self.fallback.on_conflict(job_id, responses))
-            }
+            ConflictPolicy::HumanReview => Ok(self.fallback.on_conflict(job_id, responses)),
         }
     }
 }
@@ -186,13 +190,18 @@ mod tests {
     use super::*;
 
     fn responses(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-        pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
     fn test_concat_joins_all() {
         let r = ConflictResolver::new(ConflictPolicy::Concat);
-        let res = r.resolve("j", &responses(&[("a", "hello"), ("b", "world")])).unwrap();
+        let res = r
+            .resolve("j", &responses(&[("a", "hello"), ("b", "world")]))
+            .unwrap();
         assert!(res.contains("hello"));
         assert!(res.contains("world"));
     }
@@ -218,7 +227,10 @@ mod tests {
     fn test_last_response_returns_last() {
         let r = ConflictResolver::new(ConflictPolicy::LastResponse);
         let res = r
-            .resolve("j", &responses(&[("a", "first"), ("b", "second"), ("c", "third")]))
+            .resolve(
+                "j",
+                &responses(&[("a", "first"), ("b", "second"), ("c", "third")]),
+            )
             .unwrap();
         assert!(res.contains("third"));
         assert!(!res.contains("first"));
@@ -231,7 +243,11 @@ mod tests {
         let res = r
             .resolve(
                 "j",
-                &responses(&[("a", "the answer is 42"), ("b", "the answer is 42"), ("c", "different")]),
+                &responses(&[
+                    ("a", "the answer is 42"),
+                    ("b", "the answer is 42"),
+                    ("c", "different"),
+                ]),
             )
             .unwrap();
         assert!(res.contains("consensus"));
@@ -250,7 +266,9 @@ mod tests {
     #[test]
     fn test_human_review_uses_fallback() {
         let r = ConflictResolver::new(ConflictPolicy::HumanReview);
-        let res = r.resolve("j", &responses(&[("a", "one"), ("b", "two")])).unwrap();
+        let res = r
+            .resolve("j", &responses(&[("a", "one"), ("b", "two")]))
+            .unwrap();
         assert!(res.contains("[human-review]"));
     }
 

@@ -17,6 +17,9 @@ fn test_default_registry_has_all_tools() {
         "edit",
         "glob",
         "grep",
+        "libre_info",
+        "libre_read",
+        "libre_write",
         "list",
         "list_tasks",
         "lsp_definition",
@@ -37,8 +40,26 @@ fn test_default_registry_has_all_tools() {
         "question",
         "read",
         "rm",
+        "team_approve_plan",
+        "team_assign_task",
+        "team_broadcast",
+        "team_cleanup",
+        "team_create",
+        "team_idle",
+        "team_message",
+        "team_read_messages",
+        "team_shutdown_ack",
+        "team_shutdown_teammate",
+        "team_spawn",
+        "team_status",
+        "team_submit_plan",
+        "team_task_claim",
+        "team_task_complete",
+        "team_task_create",
+        "team_task_list",
         "todo_read",
         "todo_write",
+        "wait_tasks",
         "webfetch",
         "websearch",
         "write",
@@ -102,7 +123,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 31);
+    assert_eq!(defs.len(), 52);
 
     for def in &defs {
         assert!(
@@ -217,8 +238,10 @@ async fn test_read_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool
@@ -249,8 +272,10 @@ async fn test_read_tool_line_range() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool
@@ -273,6 +298,46 @@ async fn test_read_tool_line_range() {
 }
 
 #[tokio::test]
+async fn test_read_tool_rejects_inverted_line_range() {
+    let dir = std::env::temp_dir().join("ragent_test_read_bad_range");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file_path = dir.join("test_range.txt");
+    std::fs::write(&file_path, "a\nb\nc\nd\ne\n").unwrap();
+
+    let registry = create_default_registry();
+    let tool = registry.get("read").unwrap();
+
+    let ctx = ToolContext {
+        session_id: "s1".to_string(),
+        working_dir: dir.clone(),
+        event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
+        storage: None,
+        task_manager: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
+    };
+
+    let result = tool
+        .execute(
+            json!({"path": "test_range.txt", "start_line": 10, "end_line": 3}),
+            &ctx,
+        )
+        .await;
+
+    assert!(result.is_err(), "inverted line range should fail");
+    let err = result.err().unwrap().to_string();
+    assert!(
+        err.contains("start_line") && err.contains("end_line"),
+        "unexpected error: {}",
+        err
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
 async fn test_read_tool_missing_file() {
     let dir = std::env::temp_dir().join("ragent_test_read_missing");
     std::fs::create_dir_all(&dir).unwrap();
@@ -286,8 +351,10 @@ async fn test_read_tool_missing_file() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -323,7 +390,11 @@ async fn test_read_tool_large_file_section_map() {
     std::fs::write(&file_path, &content).unwrap();
 
     let total_lines = content.lines().count();
-    assert!(total_lines > 100, "test file must exceed 100 lines, got {}", total_lines);
+    assert!(
+        total_lines > 100,
+        "test file must exceed 100 lines, got {}",
+        total_lines
+    );
 
     let registry = create_default_registry();
     let tool = registry.get("read").unwrap();
@@ -334,17 +405,31 @@ async fn test_read_tool_large_file_section_map() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     // Read without line range → should get summary, not the whole file
     let result = tool.execute(json!({"path": "big.rs"}), &ctx).await.unwrap();
 
-    assert!(result.content.contains("Section Map"), "should contain section map");
-    assert!(result.content.contains("pub struct Foo"), "should detect struct Foo");
-    assert!(result.content.contains("impl Foo"), "should detect impl Foo");
-    assert!(result.content.contains("pub fn helper"), "should detect fn helper");
+    assert!(
+        result.content.contains("Section Map"),
+        "should contain section map"
+    );
+    assert!(
+        result.content.contains("pub struct Foo"),
+        "should detect struct Foo"
+    );
+    assert!(
+        result.content.contains("impl Foo"),
+        "should detect impl Foo"
+    );
+    assert!(
+        result.content.contains("pub fn helper"),
+        "should detect fn helper"
+    );
 
     let meta = result.metadata.unwrap();
     assert_eq!(meta["summarised"], true);
@@ -373,19 +458,27 @@ async fn test_read_tool_large_file_with_range_returns_full() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     // Read WITH a line range → should return those exact lines, no summary
     let result = tool
-        .execute(json!({"path": "big.txt", "start_line": 50, "end_line": 60}), &ctx)
+        .execute(
+            json!({"path": "big.txt", "start_line": 50, "end_line": 60}),
+            &ctx,
+        )
         .await
         .unwrap();
 
     assert!(result.content.contains("line 50"));
     assert!(result.content.contains("line 60"));
-    assert!(!result.content.contains("Section Map"), "should not contain section map when range specified");
+    assert!(
+        !result.content.contains("Section Map"),
+        "should not contain section map when range specified"
+    );
 
     let meta = result.metadata.unwrap();
     assert!(meta.get("summarised").is_none());
@@ -411,11 +504,16 @@ async fn test_read_tool_small_file_no_summary() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
-    let result = tool.execute(json!({"path": "small.rs"}), &ctx).await.unwrap();
+    let result = tool
+        .execute(json!({"path": "small.rs"}), &ctx)
+        .await
+        .unwrap();
 
     assert!(result.content.contains("fn main()"));
     assert!(!result.content.contains("Section Map"));
@@ -442,8 +540,10 @@ async fn test_write_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool
@@ -481,8 +581,10 @@ async fn test_list_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -513,8 +615,10 @@ async fn test_glob_tool_execute() {
         event_bus: Arc::new(ragent_core::event::EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let result = tool

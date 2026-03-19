@@ -40,6 +40,10 @@ impl OllamaProvider {
     /// Checks `OLLAMA_HOST` environment variable first, then falls back to
     /// `http://localhost:11434`.
     ///
+    /// # Errors
+    ///
+    /// This function is infallible.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -47,6 +51,7 @@ impl OllamaProvider {
     ///
     /// let provider = OllamaProvider::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         let base_url = std::env::var("OLLAMA_HOST")
             .unwrap_or_else(|_| DEFAULT_OLLAMA_HOST.to_string())
@@ -414,10 +419,15 @@ impl LlmClient for OllamaClient {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut tool_call_names: HashMap<u64, String> = HashMap::new();
+            let mut stream_done = false;
 
             futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
+            while !stream_done {
+                let chunk_result = match stream.next().await {
+                    Some(r) => r,
+                    None => break,
+                };
                 let chunk = match chunk_result {
                     Ok(c) => c,
                     Err(e) => {
@@ -443,6 +453,7 @@ impl LlmClient for OllamaClient {
                     };
 
                     if data == "[DONE]" {
+                        stream_done = true;
                         break;
                     }
 

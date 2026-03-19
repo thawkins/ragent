@@ -185,7 +185,10 @@ mod tests {
     #[test]
     fn test_skip_email_addresses() {
         let refs = parse_refs("Contact user@example.com for help");
-        assert!(refs.is_empty(), "email addresses should not be parsed as refs");
+        assert!(
+            refs.is_empty(),
+            "email addresses should not be parsed as refs"
+        );
     }
 
     #[test]

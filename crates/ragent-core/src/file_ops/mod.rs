@@ -5,26 +5,27 @@
 //! intentionally small, focusing on design and wiring; the full feature set will
 //! be implemented in M2.
 
-use anyhow::{Result, Context};
-use std::path::{PathBuf, Path};
-use tokio::sync::Semaphore;
+use anyhow::{Context, Result};
+use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use sha2::{Sha256, Digest};
-use tokio::io::AsyncWriteExt;
-use tokio::fs::OpenOptions;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
-use std::fs as stdfs;
 
-pub mod wrapper;
 mod api;
+/// Wrapper utilities for file operations.
+pub mod wrapper;
 pub use api::apply_batch_edits;
-
 
 /// Result of reading a single file.
 pub struct FileReadResult {
+    /// Path to the file that was read.
     pub path: PathBuf,
+    /// File contents if successful, None if read failed.
     pub content: Option<String>,
+    /// Error if the read failed, None if successful.
     pub err: Option<anyhow::Error>,
+    /// Number of lines in the file if successful, None if read failed.
     pub lines: Option<usize>,
 }
 
@@ -36,6 +37,7 @@ pub struct ConcurrentFileReader {
 
 impl ConcurrentFileReader {
     /// Create a new reader with default concurrency (number of CPU threads).
+    #[must_use]
     pub fn new() -> Self {
         let n = num_cpus::get();
         Self { concurrency: n }
@@ -49,6 +51,12 @@ impl ConcurrentFileReader {
 
     /// Read multiple paths concurrently and return a vector of results in the
     /// same iteration order as the input.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Task spawn/join errors occur from tokio
+    /// - Any read task fails with context "task failed" or "join error"
     pub async fn read_paths<I>(&self, paths: I) -> Result<Vec<FileReadResult>>
     where
         I: IntoIterator<Item = PathBuf>,
@@ -56,7 +64,7 @@ impl ConcurrentFileReader {
         let sem = Arc::new(Semaphore::new(self.concurrency));
         let mut handles: Vec<tokio::task::JoinHandle<anyhow::Result<FileReadResult>>> = Vec::new();
 
-        for p in paths.into_iter() {
+        for p in paths {
             let sem = sem.clone();
             let permit = sem.acquire_owned().await.unwrap();
             let path = p.clone();
@@ -64,8 +72,18 @@ impl ConcurrentFileReader {
                 // permit dropped at the end of scope
                 let _permit = permit;
                 match tokio::fs::read_to_string(&path).await {
-                    Ok(s) => Ok(FileReadResult { path: path.clone(), content: Some(s.clone()), err: None, lines: Some(s.lines().count()) }),
-                    Err(e) => Ok(FileReadResult { path: path.clone(), content: None, err: Some(anyhow::Error::new(e)), lines: None }),
+                    Ok(s) => Ok(FileReadResult {
+                        path: path.clone(),
+                        content: Some(s.clone()),
+                        err: None,
+                        lines: Some(s.lines().count()),
+                    }),
+                    Err(e) => Ok(FileReadResult {
+                        path: path.clone(),
+                        content: None,
+                        err: Some(anyhow::Error::new(e)),
+                        lines: None,
+                    }),
                 }
             });
             handles.push(h);
@@ -86,19 +104,30 @@ impl ConcurrentFileReader {
 
 /// A single staged edit record (prototype).
 pub struct StagedEdit {
+    /// Path to the file being edited.
     pub path: PathBuf,
+    /// SHA-256 checksum of the original file content.
     pub original_checksum: String,
+    /// The new content to be written.
     pub proposed_content: String,
 }
 
+/// Result of committing staged edits.
 pub struct CommitResult {
+    /// Paths of files successfully applied.
     pub applied: Vec<PathBuf>,
+    /// Conflicts detected (path, error message).
     pub conflicts: Vec<(PathBuf, String)>,
+    /// Errors encountered during commit (path, error).
     pub errors: Vec<(PathBuf, anyhow::Error)>,
 }
 
 /// Alias for the result produced by each commit task.
-type CommitTaskResult = anyhow::Result<(PathBuf, Option<(PathBuf, String)>, Option<(PathBuf, anyhow::Error)>)>;
+type CommitTaskResult = anyhow::Result<(
+    PathBuf,
+    Option<(PathBuf, String)>,
+    Option<(PathBuf, anyhow::Error)>,
+)>;
 
 /// In-memory staging area for edits.
 pub struct EditStaging {
@@ -109,29 +138,59 @@ pub struct EditStaging {
 impl EditStaging {
     /// Create a new staging area.
     pub fn new(dry_run: bool) -> Self {
-        Self { edits: Vec::new(), dry_run }
+        Self {
+            edits: Vec::new(),
+            dry_run,
+        }
     }
 
     /// Stage an edit for the given path. This reads the current content and
     /// stores a checksum and proposed content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - File I/O errors occur when reading the original file
     pub async fn stage_edit<P: AsRef<Path>>(&mut self, path: P, new_content: String) -> Result<()> {
         let path = path.as_ref().to_path_buf();
-        let orig = tokio::fs::read_to_string(&path).await.context("reading original file")?;
+        let orig = tokio::fs::read_to_string(&path)
+            .await
+            .context("reading original file")?;
         let checksum = format!("sha256:{:x}", Sha256::digest(orig.as_bytes()));
-        self.edits.push(StagedEdit { path, original_checksum: checksum, proposed_content: new_content });
+        self.edits.push(StagedEdit {
+            path,
+            original_checksum: checksum,
+            proposed_content: new_content,
+        });
         Ok(())
     }
 
     /// Basic validation (no-op prototype).
-    pub fn validate(&self) -> Result<()> {
+    ///
+    /// # Errors
+    ///
+    /// Currently returns `Ok(())` in all cases. Reserved for future validation logic.
+    #[must_use]
+    pub const fn validate(&self) -> Result<()> {
         Ok(())
     }
 
     /// Commit all staged edits concurrently (prototype: simple write per file).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - File write failures occur
+    /// - Conflict detection fails (checksum mismatch)
+    /// - Task join errors occur
     pub async fn commit_all(&self, concurrency_limit: usize) -> Result<CommitResult> {
         if self.dry_run {
             tracing::info!("dry_run: not writing files");
-            return Ok(CommitResult { applied: self.edits.iter().map(|e| e.path.clone()).collect(), conflicts: Vec::new(), errors: Vec::new() });
+            return Ok(CommitResult {
+                applied: self.edits.iter().map(|e| e.path.clone()).collect(),
+                conflicts: Vec::new(),
+                errors: Vec::new(),
+            });
         }
 
         let sem = Arc::new(Semaphore::new(concurrency_limit));
@@ -156,13 +215,24 @@ impl EditStaging {
                         Ok(cur) => {
                             let cur_sum = format!("sha256:{:x}", Sha256::digest(cur.as_bytes()));
                             if cur_sum != original_checksum {
-                                return Ok((path.clone(), Some((path.clone(), "checksum mismatch: file changed since staging".to_string())), None));
+                                return Ok((
+                                    path.clone(),
+                                    Some((
+                                        path.clone(),
+                                        "checksum mismatch: file changed since staging".to_string(),
+                                    )),
+                                    None,
+                                ));
                             }
                             // write backup
                             tokio::fs::write(&backup, cur.as_bytes()).await?;
                         }
                         Err(e) => {
-                            return Ok((path.clone(), None, Some((path.clone(), anyhow::Error::new(e)))));
+                            return Ok((
+                                path.clone(),
+                                None,
+                                Some((path.clone(), anyhow::Error::new(e))),
+                            ));
                         }
                     }
                 }
@@ -230,6 +300,10 @@ impl EditStaging {
             applied.clear();
         }
 
-        Ok(CommitResult { applied, conflicts, errors })
+        Ok(CommitResult {
+            applied,
+            conflicts,
+            errors,
+        })
     }
 }

@@ -1,9 +1,10 @@
 //! External tests for `ragent_core::reference::resolve`.
 
+use docx_rust;
 use ragent_core::reference::parse::parse_refs;
 use ragent_core::reference::resolve::resolve_all_refs;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Create a temporary directory with a unique name for testing.
 fn make_temp_dir(suffix: &str) -> PathBuf {
@@ -16,6 +17,16 @@ fn make_temp_dir(suffix: &str) -> PathBuf {
 /// Clean up a test directory.
 fn cleanup(dir: &PathBuf) {
     let _ = fs::remove_dir_all(dir);
+}
+
+/// Create a minimal `.docx` file containing the provided text.
+fn create_docx(path: &Path, text: &str) {
+    let mut docx = docx_rust::Docx::default();
+    let mut para = docx_rust::document::Paragraph::default();
+    let run = docx_rust::document::Run::default().push_text(text);
+    para = para.push(run);
+    docx.document.push(para);
+    docx.write_file(path).expect("write docx file");
 }
 
 #[tokio::test]
@@ -32,7 +43,40 @@ async fn test_resolve_existing_file() {
         resolved.contains("<referenced_files>"),
         "should contain XML block"
     );
-    assert!(resolved.contains("hello world"), "should contain file content");
+    assert!(
+        resolved.contains("hello world"),
+        "should contain file content"
+    );
+    cleanup(&dir);
+}
+
+#[tokio::test]
+async fn test_resolve_docx_file_reads_content() {
+    let dir = make_temp_dir("docx");
+    let file_path = dir.join("test.docx");
+
+    create_docx(&file_path, "Hello Docx");
+
+    let input = format!("see @{}", file_path.display());
+    let (resolved, refs) = resolve_all_refs(&input, &dir).await.expect("resolve");
+
+    assert!(!refs.is_empty(), "should have resolved refs");
+    assert!(
+        resolved.contains("Hello Docx"),
+        "should contain docx content"
+    );
+    cleanup(&dir);
+}
+
+#[tokio::test]
+async fn test_resolve_invalid_docx_returns_error() {
+    let dir = make_temp_dir("invalid_docx");
+    let file_path = dir.join("bad.docx");
+    fs::write(&file_path, "not a docx").expect("write");
+
+    let input = format!("see @{}", file_path.display());
+    let result = resolve_all_refs(&input, &dir).await;
+    assert!(result.is_err(), "invalid docx should return an error");
     cleanup(&dir);
 }
 

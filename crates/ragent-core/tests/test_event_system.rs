@@ -108,6 +108,7 @@ fn test_event_serialization_roundtrip_all_variants() {
         Event::ModelResponse {
             session_id: "s1".into(),
             text: "Here is the answer".into(),
+            elapsed_ms: 1234,
         },
         Event::ToolCallArgs {
             session_id: "s1".into(),

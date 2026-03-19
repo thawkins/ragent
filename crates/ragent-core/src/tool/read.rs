@@ -35,6 +35,9 @@ impl Tool for ReadTool {
         "read"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Read file contents. For large files (>100 lines) called without a line range, \
          returns the first 100 lines plus a section map of the file's structure. \
@@ -62,12 +65,21 @@ impl Tool for ReadTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "file:read"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `path` parameter is missing, if the path points to
+    /// a directory, or if the file cannot be read.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
@@ -78,12 +90,33 @@ impl Tool for ReadTool {
             );
         }
 
-        let content = tokio::fs::read_to_string(&path)
-            .await
-            .with_context(|| format!("Cannot read file '{}': file may not exist or is not accessible", path.display()))?;
+        let content = tokio::fs::read_to_string(&path).await.with_context(|| {
+            format!(
+                "Cannot read file '{}': file may not exist or is not accessible",
+                path.display()
+            )
+        })?;
 
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
         let end_line = input["end_line"].as_u64().map(|n| n as usize);
+
+        if let Some(start) = start_line
+            && start == 0
+        {
+            anyhow::bail!("Invalid 'start_line': must be >= 1");
+        }
+        if let Some(end) = end_line
+            && end == 0
+        {
+            anyhow::bail!("Invalid 'end_line': must be >= 1");
+        }
+        if let (Some(start), Some(end)) = (start_line, end_line)
+            && start > end
+        {
+            anyhow::bail!(
+                "Invalid line range: start_line ({start}) must be less than or equal to end_line ({end})"
+            );
+        }
 
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();
@@ -257,7 +290,10 @@ fn detect_rust_sections(lines: &[&str]) -> Vec<(usize, String)> {
         {
             let label = extract_until(trimmed, '{').unwrap_or_else(|| trimmed.to_string());
             markers.push((i + 1, label));
-        } else if trimmed.starts_with("impl ") || trimmed.starts_with("pub trait ") || trimmed.starts_with("trait ") {
+        } else if trimmed.starts_with("impl ")
+            || trimmed.starts_with("pub trait ")
+            || trimmed.starts_with("trait ")
+        {
             let label = extract_until(trimmed, '{').unwrap_or_else(|| trimmed.to_string());
             markers.push((i + 1, label));
         } else if trimmed.starts_with("pub mod ") || trimmed.starts_with("mod ") {
@@ -402,7 +438,10 @@ fn detect_java_sections(lines: &[&str]) -> Vec<(usize, String)> {
         if trimmed.contains("class ") && trimmed.contains('{') && !trimmed.starts_with("//") {
             let label = extract_until(trimmed, '{').unwrap_or_else(|| trimmed.to_string());
             markers.push((i + 1, label.trim().to_string()));
-        } else if trimmed.contains("interface ") && trimmed.contains('{') && !trimmed.starts_with("//") {
+        } else if trimmed.contains("interface ")
+            && trimmed.contains('{')
+            && !trimmed.starts_with("//")
+        {
             let label = extract_until(trimmed, '{').unwrap_or_else(|| trimmed.to_string());
             markers.push((i + 1, label.trim().to_string()));
         } else if (trimmed.starts_with("public ")
@@ -439,7 +478,10 @@ fn detect_ruby_sections(lines: &[&str]) -> Vec<(usize, String)> {
     let mut markers = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if trimmed.starts_with("def ") || trimmed.starts_with("class ") || trimmed.starts_with("module ") {
+        if trimmed.starts_with("def ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("module ")
+        {
             markers.push((i + 1, trimmed.to_string()));
         }
     }

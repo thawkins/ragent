@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, ContextAction, PROVIDER_LIST, ProviderSetupStep};
+use crate::app::{App, ConfiguredProvider, ContextAction, ProviderSource, PROVIDER_LIST, ProviderSetupStep};
 
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
@@ -26,6 +26,16 @@ pub enum InputAction {
     HistoryUp,
     /// Recall the next entry from input history.
     HistoryDown,
+    /// Move the cursor left within the input line.
+    MoveCursorLeft,
+    /// Move the cursor right within the input line.
+    MoveCursorRight,
+    /// Move the cursor to the start of the input line.
+    MoveCursorHome,
+    /// Move the cursor to the end of the input line.
+    MoveCursorEnd,
+    /// Delete the character under the cursor.
+    Delete,
     /// Cycle to the next configured agent.
     SwitchAgent,
     /// Execute a `/`-prefixed command.
@@ -182,12 +192,20 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Char(c) => {
-                app.input.push(c);
+                // Keep cursor-aware editing behavior while slash menu is open.
+                let insert_pos = app.cursor_byte_pos();
+                app.input.insert(insert_pos, c);
+                app.cursor_move_right();
                 app.update_slash_menu();
                 return None;
             }
             KeyCode::Backspace => {
-                app.input.pop();
+                // Delete the character before the cursor (same as normal mode).
+                if app.input_cursor > 0 {
+                    let delete_pos = app.cursor_byte_pos_at_char_index(app.input_cursor - 1);
+                    app.input.remove(delete_pos);
+                    app.cursor_move_left();
+                }
                 app.update_slash_menu();
                 return None;
             }
@@ -219,19 +237,27 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Tab => {
-                app.accept_file_menu_selection();
-                return None;
-            }
-            KeyCode::Enter => {
-                // Accept selection and submit the message
-                app.accept_file_menu_selection();
-                let text = app.input.clone();
-                if !text.is_empty() {
-                    return Some(InputAction::SendMessage(text));
-                }
-                return None;
-            }
-            KeyCode::Esc => {
+                              // If the menu is showing a directory, Tab should navigate into
+                              // the selected directory rather than inserting a path.
+                              let closed = app.accept_file_menu_selection();
+                              if closed {
+                                  // A file was inserted and menu closed; nothing more to do.
+                                  return None;
+                              }
+                              // Menu remains open (navigated into directory)
+                              return None;
+                          }
+                          KeyCode::Enter => {
+                              // Accept selection. If a file was inserted, submit the message.
+                              let closed = app.accept_file_menu_selection();
+                              if closed {
+                                  let text = app.input.clone();
+                                  if !text.is_empty() {
+                                      return Some(InputAction::SendMessage(text));
+                                  }
+                              }
+                              return None;
+                          }            KeyCode::Esc => {
                 app.file_menu = None;
                 return None;
             }
@@ -274,7 +300,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             None
         }
         KeyCode::Char(c) => {
-            app.input.push(c);
+            // Insert at the cursor position rather than always appending.
+            let insert_pos = app.cursor_byte_pos();
+            app.input.insert(insert_pos, c);
+            app.cursor_move_right();
+
             // If the input now starts with '/', show the slash menu
             if app.input.starts_with('/') {
                 app.update_slash_menu();
@@ -286,7 +316,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             None
         }
         KeyCode::Backspace => {
-            app.input.pop();
+            // Backspace deletes the character before the cursor.
+            if app.input_cursor > 0 {
+                let delete_pos = app.cursor_byte_pos_at_char_index(app.input_cursor - 1);
+                app.input.remove(delete_pos);
+                app.cursor_move_left();
+            }
             // Update or close the slash menu
             if app.input.starts_with('/') {
                 app.update_slash_menu();
@@ -301,6 +336,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             None
         }
+        KeyCode::Left => Some(InputAction::MoveCursorLeft),
+        KeyCode::Right => Some(InputAction::MoveCursorRight),
+        KeyCode::Home => Some(InputAction::MoveCursorHome),
+        KeyCode::End => Some(InputAction::MoveCursorEnd),
+        KeyCode::Delete => Some(InputAction::Delete),
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => Some(InputAction::ScrollUp),
         KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
             Some(InputAction::ScrollDown)
@@ -565,7 +605,15 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 let model_name = if let Some((mid, mname)) = models.get(selected) {
                     let model_value = format!("{}/{}", provider_id, mid);
                     let _ = app.storage.set_setting("selected_model", &model_value);
+                    // Persist the user's explicit provider choice so it survives restarts.
+                    let _ = app.storage.set_setting("preferred_provider", &provider_id);
                     app.selected_model = Some(model_value);
+                    // Ensure the UI reflects the provider the user just chose.
+                    app.configured_provider = Some(ConfiguredProvider {
+                        id: provider_id.clone(),
+                        name: provider_name.clone(),
+                        source: ProviderSource::Database,
+                    });
                     Some(mname.clone())
                 } else {
                     None
@@ -615,7 +663,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
             KeyCode::Enter => {
-                if let Some((name, _desc)) = agents.get(selected) {
+                if let Some((name, _desc, _is_custom)) = agents.get(selected) {
                     if let Some(idx) = app.cycleable_agents.iter().position(|a| a.name == *name) {
                         app.current_agent_index = idx;
                         app.agent_info = app.cycleable_agents[idx].clone();

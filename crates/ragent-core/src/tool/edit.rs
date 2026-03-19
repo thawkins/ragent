@@ -39,11 +39,11 @@ impl Tool for EditTool {
         "edit"
     }
 
-    fn description(&self) -> &str {
-        "Replace an exact occurrence of old_str with new_str in a file. \
-         The old_str must match exactly one location in the file."
-    }
-
+        /// Returns a human-readable description of what the tool does.
+        fn description(&self) -> &str {
+            "Replace an exact occurrence of old_str with new_str in a file. \
+               The old_str must match exactly one location in the file."
+        }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -69,8 +69,20 @@ impl Tool for EditTool {
         "file:write"
     }
 
+    /// Performs a surgical text replacement in a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `path`, `old_str`, or `new_str` parameter is missing or invalid
+    /// - The file cannot be read (file not found, permission denied, not UTF-8)
+    /// - The `old_str` is not found in the file
+    /// - The `old_str` matches multiple locations (ambiguous edit)
+    /// - The file cannot be written after the edit
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let old_str = input["old_str"]
             .as_str()
             .context("Missing required 'old_str' parameter")?;
@@ -80,25 +92,37 @@ impl Tool for EditTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
-        let content = tokio::fs::read_to_string(&path)
-            .await
-            .with_context(|| format!("Cannot read file '{}': file may not exist or is not accessible", path.display()))?;
+        // Acquire file lock to serialize concurrent edits to the same file
+        let _lock = super::file_lock::lock_file(&path).await;
 
-        let (start, end, effective_new_str) = match find_replacement_range(&content, old_str, new_str) {
-            Ok(range) => range,
-            Err(FindError::NotFound) => bail!(
-                "old_str not found in {}. Make sure it matches exactly.",
+        let content = tokio::fs::read_to_string(&path).await.with_context(|| {
+            format!(
+                "Cannot read file '{}': file may not exist or is not accessible",
                 path.display()
-            ),
-            Err(FindError::MultipleMatches(n)) => bail!(
-                "old_str found {} times in {}. It must match exactly once. \
+            )
+        })?;
+
+        let (start, end, effective_new_str) =
+            match find_replacement_range(&content, old_str, new_str) {
+                Ok(range) => range,
+                Err(FindError::NotFound) => bail!(
+                    "old_str not found in {}. Make sure it matches exactly.",
+                    path.display()
+                ),
+                Err(FindError::MultipleMatches(n)) => bail!(
+                    "old_str found {} times in {}. It must match exactly once. \
                  Add more context to make it unique.",
-                n,
-                path.display()
-            ),
-        };
+                    n,
+                    path.display()
+                ),
+            };
 
-        let new_content = format!("{}{}{}", &content[..start], effective_new_str, &content[end..]);
+        let new_content = format!(
+            "{}{}{}",
+            &content[..start],
+            effective_new_str,
+            &content[end..]
+        );
         tokio::fs::write(&path, &new_content)
             .await
             .with_context(|| format!("Failed to write file: {}", path.display()))?;
@@ -168,13 +192,13 @@ pub(crate) fn find_replacement_range(
 
     // ── Pass 2: CRLF normalisation ───────────────────────────────────────────
     let norm_content = strip_cr(content);
-    let norm_needle  = strip_cr(needle);
-    let crlf_count   = norm_content.matches(norm_needle.as_str()).count();
+    let norm_needle = strip_cr(needle);
+    let crlf_count = norm_content.matches(norm_needle.as_str()).count();
     if crlf_count == 1 {
         let norm_start = norm_content.find(norm_needle.as_str()).unwrap();
-        let norm_end   = norm_start + norm_needle.len();
+        let norm_end = norm_start + norm_needle.len();
         let start = norm_to_orig_byte(content, norm_start);
-        let end   = norm_to_orig_byte(content, norm_end);
+        let end = norm_to_orig_byte(content, norm_end);
         return Ok((start, end, new_str.to_string()));
     }
     if crlf_count > 1 {
@@ -183,18 +207,21 @@ pub(crate) fn find_replacement_range(
 
     // ── Pass 3: trailing-whitespace stripping ────────────────────────────────
     let ws_content = strip_trailing_ws(&norm_content);
-    let ws_needle  = strip_trailing_ws(&norm_needle);
+    let ws_needle = strip_trailing_ws(&norm_needle);
     if ws_needle.is_empty() {
         return Err(FindError::NotFound);
     }
     let ws_count = ws_content.matches(ws_needle.as_str()).count();
     if ws_count == 1 {
         let ws_start = ws_content.find(ws_needle.as_str()).unwrap();
-        let start_line = ws_content[..ws_start].chars().filter(|&c| c == '\n').count();
+        let start_line = ws_content[..ws_start]
+            .chars()
+            .filter(|&c| c == '\n')
+            .count();
         let needle_line_count = ws_needle.lines().count();
         let end_line = start_line + needle_line_count;
         let orig_start = byte_offset_of_line(content, start_line);
-        let orig_end   = byte_offset_of_line(content, end_line);
+        let orig_end = byte_offset_of_line(content, end_line);
         return Ok((orig_start, orig_end, new_str.to_string()));
     }
     if ws_count > 1 {
@@ -226,7 +253,7 @@ pub(crate) fn find_replacement_range(
             1 => {
                 let start_idx = lws_matches[0];
                 let orig_start = byte_offset_of_line(content, start_idx);
-                let orig_end   = byte_offset_of_line(content, start_idx + n);
+                let orig_end = byte_offset_of_line(content, start_idx + n);
                 // Detect indentation from the first matched line in the original file.
                 let indent = leading_ws(content_lines[start_idx]);
                 let effective_new = if indent.is_empty() {
@@ -273,7 +300,7 @@ pub(crate) fn find_replacement_range(
             1 => {
                 let start_idx = cws_matches[0];
                 let orig_start = byte_offset_of_line(content, start_idx);
-                let orig_end   = byte_offset_of_line(content, start_idx + n5);
+                let orig_end = byte_offset_of_line(content, start_idx + n5);
                 let indent = leading_ws(content_lines[start_idx]);
                 let effective_new = if indent.is_empty() {
                     new_str.to_string()
@@ -449,9 +476,15 @@ mod tests {
         let new_str = "registry.register(A);\nregistry.register(C);\n"; // no leading spaces
         let (s, e, effective) = check_with_new(c, needle, new_str);
         // Should span both register lines including their indentation
-        assert_eq!(&c[s..e], "    registry.register(A);\n    registry.register(B);\n");
+        assert_eq!(
+            &c[s..e],
+            "    registry.register(A);\n    registry.register(B);\n"
+        );
         // new_str should have the 4-space indent re-applied to each line
-        assert_eq!(effective, "    registry.register(A);\n    registry.register(C);\n");
+        assert_eq!(
+            effective,
+            "    registry.register(A);\n    registry.register(C);\n"
+        );
     }
 
     #[test]
@@ -479,4 +512,3 @@ mod tests {
         assert_eq!(effective, "\tlet x = 1;\n\tlet y = 99;\n");
     }
 }
-

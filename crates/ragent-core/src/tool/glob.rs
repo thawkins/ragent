@@ -21,6 +21,7 @@ impl Tool for GlobTool {
         "glob"
     }
 
+    /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &str {
         "Find files matching a glob pattern. Recursively searches directories."
     }
@@ -46,6 +47,13 @@ impl Tool for GlobTool {
         "file:read"
     }
 
+    /// Finds files matching a glob pattern.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `pattern` parameter is missing or invalid
+    /// - The glob pattern is malformed or cannot be compiled
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let pattern = input["pattern"]
             .as_str()
@@ -61,31 +69,31 @@ impl Tool for GlobTool {
             .with_context(|| format!("Invalid glob pattern: {}", pattern))?;
         let matcher = glob.compile_matcher();
 
-        let mut matches = Vec::new();
+        let mut match_results = Vec::new();
         const MAX_MATCHES: usize = 1000;
 
-        collect_matches(&base_dir, &base_dir, &matcher, &mut matches, MAX_MATCHES)?;
+        collect_matches(&base_dir, &base_dir, &matcher, &mut match_results, MAX_MATCHES)?;
 
-        matches.sort();
+        match_results.sort();
 
-        if matches.is_empty() {
+        if match_results.is_empty() {
             Ok(ToolOutput {
                 content: format!("No files matching '{}' in {}", pattern, base_dir.display()),
                 metadata: None,
             })
         } else {
-            let truncated = matches.len() >= MAX_MATCHES;
-            let content = matches.join("\n");
+            let truncated = match_results.len() >= MAX_MATCHES;
+            let content = match_results.join("\n");
             Ok(ToolOutput {
                 content: format!(
                     "{} file{} found{}\n\n{}",
-                    matches.len(),
-                    if matches.len() == 1 { "" } else { "s" },
+                    match_results.len(),
+                    if match_results.len() == 1 { "" } else { "s" },
                     if truncated { " (truncated)" } else { "" },
                     content
                 ),
                 metadata: Some(json!({
-                    "count": matches.len(),
+                    "count": match_results.len(),
                     "truncated": truncated,
                 })),
             })
@@ -93,11 +101,17 @@ impl Tool for GlobTool {
     }
 }
 
+/// Recursively collects file paths matching a glob pattern.
+///
+/// # Errors
+///
+/// Returns an error if a directory cannot be read due to permission issues.
+/// IO errors on individual entries are silently skipped.
 fn collect_matches(
     root: &Path,
     dir: &Path,
     matcher: &globset::GlobMatcher,
-    matches: &mut Vec<String>,
+    results: &mut Vec<String>,
     max: usize,
 ) -> Result<()> {
     let entries = match std::fs::read_dir(dir) {
@@ -106,7 +120,7 @@ fn collect_matches(
     };
 
     for entry in entries {
-        if matches.len() >= max {
+        if results.len() >= max {
             break;
         }
         let entry = match entry {
@@ -127,24 +141,24 @@ fn collect_matches(
         if path.is_dir() {
             let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if matches!(
-                dir_name,
-                "node_modules" | "target" | "__pycache__" | "dist" | "build"
-            ) {
-                continue;
-            }
-            collect_matches(root, &path, matcher, matches, max)?;
-        } else {
-            // Match relative path against glob
-            if let Ok(rel) = path.strip_prefix(root)
-                && matcher.is_match(rel)
-            {
-                matches.push(rel.display().to_string());
-            }
-        }
-    }
-    Ok(())
-}
-
+                                  dir_name,
+                                  "node_modules" | "target" | "__pycache__" | "dist" | "build"
+                              ) {
+                                  continue;
+                              }
+                              collect_matches(root, &path, matcher, results, max)?;
+                          } else {
+                              // Match relative path against glob
+                              if let Ok(rel) = path.strip_prefix(root)
+                                  && matcher.is_match(rel)
+                              {
+                                  results.push(rel.display().to_string());
+                              }
+                          }
+                      }
+                      Ok(())
+                }
+/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {

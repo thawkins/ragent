@@ -22,7 +22,10 @@ fn parse(content: &str, name: &str) -> anyhow::Result<SkillInfo> {
 fn test_parse_unicode_description() {
     let content = "---\ndescription: \"Déployer l'application 🚀\"\n---\nBody\n";
     let skill = parse(content, "deploy-fr").expect("should parse unicode description");
-    assert_eq!(skill.description.as_deref(), Some("Déployer l'application 🚀"));
+    assert_eq!(
+        skill.description.as_deref(),
+        Some("Déployer l'application 🚀")
+    );
 }
 
 #[test]
@@ -37,11 +40,9 @@ fn test_parse_unicode_body() {
 fn test_parse_boolean_variations_true() {
     // YAML accepts various boolean representations
     for val in &["true", "True", "TRUE"] {
-        let content = format!(
-            "---\ndisable-model-invocation: {val}\n---\nBody\n"
-        );
-        let skill = parse(&content, "bool-test")
-            .unwrap_or_else(|_| panic!("should parse boolean {val}"));
+        let content = format!("---\ndisable-model-invocation: {val}\n---\nBody\n");
+        let skill =
+            parse(&content, "bool-test").unwrap_or_else(|_| panic!("should parse boolean {val}"));
         assert!(
             skill.disable_model_invocation,
             "disable-model-invocation should be true for '{val}'"
@@ -52,11 +53,9 @@ fn test_parse_boolean_variations_true() {
 #[test]
 fn test_parse_boolean_variations_false() {
     for val in &["false", "False", "FALSE"] {
-        let content = format!(
-            "---\ndisable-model-invocation: {val}\n---\nBody\n"
-        );
-        let skill = parse(&content, "bool-test")
-            .unwrap_or_else(|_| panic!("should parse boolean {val}"));
+        let content = format!("---\ndisable-model-invocation: {val}\n---\nBody\n");
+        let skill =
+            parse(&content, "bool-test").unwrap_or_else(|_| panic!("should parse boolean {val}"));
         assert!(
             !skill.disable_model_invocation,
             "disable-model-invocation should be false for '{val}'"
@@ -210,7 +209,10 @@ fn test_parse_name_validation_spaces() {
 fn test_parse_name_validation_special_chars() {
     let content = "---\nname: my_skill@v2\n---\nBody\n";
     let result = parse(content, "my-skill");
-    assert!(result.is_err(), "names with special chars should be rejected");
+    assert!(
+        result.is_err(),
+        "names with special chars should be rejected"
+    );
 }
 
 // ── Scope assignment ─────────────────────────────────────────────

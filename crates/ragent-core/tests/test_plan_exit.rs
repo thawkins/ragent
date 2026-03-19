@@ -17,8 +17,10 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         event_bus: bus.clone(),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
     (ctx, bus)
 }
@@ -87,10 +89,7 @@ async fn test_plan_exit_empty_summary() {
     let result = tool.execute(json!({"summary": "   "}), &ctx).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
-    assert!(
-        msg.contains("empty"),
-        "Expected 'empty' error, got: {msg}"
-    );
+    assert!(msg.contains("empty"), "Expected 'empty' error, got: {msg}");
 }
 
 // ── Success tests ────────────────────────────────────────────────
@@ -103,9 +102,7 @@ async fn test_plan_exit_success() {
     let registry = create_default_registry();
     let tool = registry.get("plan_exit").unwrap();
     let summary_text = "1. Refactor auth module\n2. Add tests\n3. Update docs";
-    let result = tool
-        .execute(json!({"summary": summary_text}), &ctx)
-        .await;
+    let result = tool.execute(json!({"summary": summary_text}), &ctx).await;
 
     assert!(result.is_ok());
     let output = result.unwrap();

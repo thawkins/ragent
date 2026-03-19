@@ -15,12 +15,19 @@ use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::{ModelInfo, Provider};
 
 /// Extract the MIME type from a `data:<mime>;base64,<data>` URI.
+///
+/// # Errors
+///
+/// This function does not return errors; it returns `None` if the URI is malformed.
 fn extract_mime_from_data_uri(uri: &str) -> Option<&str> {
-    uri.strip_prefix("data:")
-        .and_then(|s| s.split(';').next())
+    uri.strip_prefix("data:").and_then(|s| s.split(';').next())
 }
 
 /// Extract the raw base64 payload from a `data:<mime>;base64,<data>` URI.
+///
+/// # Errors
+///
+/// This function does not return errors; it returns `None` if the URI is malformed.
 fn extract_base64_from_data_uri(uri: &str) -> Option<&str> {
     uri.find(",base64,")
         .map(|i| &uri[i + 8..])
@@ -245,12 +252,17 @@ impl LlmClient for AnthropicClient {
             bail!("Anthropic API error ({}): {}", status, body);
         }
 
+        let rate_limit_event = parse_anthropic_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut current_event_type = String::new();
             let mut tool_call_args: HashMap<String, String> = HashMap::new();
+
+            if let Some(ev) = rate_limit_event {
+                yield ev;
+            }
 
             futures::pin_mut!(stream);
 
@@ -385,5 +397,50 @@ impl LlmClient for AnthropicClient {
         };
 
         Ok(Box::pin(event_stream))
+    }
+}
+
+/// Parses Anthropic rate-limit response headers into a `StreamEvent::RateLimit`.
+///
+/// Headers: `anthropic-ratelimit-requests-limit`, `anthropic-ratelimit-requests-remaining`,
+///          `anthropic-ratelimit-tokens-limit`, `anthropic-ratelimit-tokens-remaining`.
+fn parse_anthropic_rate_limit_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<crate::llm::StreamEvent> {
+    let header_u64 = |name: &str| -> Option<u64> {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+    };
+
+    let req_limit = header_u64("anthropic-ratelimit-requests-limit");
+    let req_remaining = header_u64("anthropic-ratelimit-requests-remaining");
+    let tok_limit = header_u64("anthropic-ratelimit-tokens-limit");
+    let tok_remaining = header_u64("anthropic-ratelimit-tokens-remaining");
+
+    let requests_used_pct = req_limit.zip(req_remaining).map(|(limit, remaining)| {
+        if limit == 0 {
+            0.0f32
+        } else {
+            ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
+        }
+    });
+
+    let tokens_used_pct = tok_limit.zip(tok_remaining).map(|(limit, remaining)| {
+        if limit == 0 {
+            0.0f32
+        } else {
+            ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
+        }
+    });
+
+    if requests_used_pct.is_some() || tokens_used_pct.is_some() {
+        Some(crate::llm::StreamEvent::RateLimit {
+            requests_used_pct,
+            tokens_used_pct,
+        })
+    } else {
+        None
     }
 }

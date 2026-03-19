@@ -4,6 +4,10 @@
 //! identity, model binding, permissions, and system prompt. It also provides
 //! [`create_builtin_agents`] for the default agent roster and
 //! [`resolve_agent`] for merging built-in definitions with user config.
+//!
+//! Custom agents defined using the OASF standard are loaded via
+//! [`load_all_agents`], which combines built-ins with agents discovered from
+//! `.ragent/agents/` directories.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +15,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
 
-use crate::permission::{PermissionAction, PermissionRule, PermissionRuleset, Permission};
+use crate::permission::{Permission, PermissionAction, PermissionRule, PermissionRuleset};
+
+pub mod custom;
+pub mod oasf;
+
+pub use custom::CustomAgentDef;
 
 /// Determines when an agent is available for use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,7 +205,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                     .to_string(),
             ),
             permission: default_permissions(),
-            max_steps: Some(30),
+            max_steps: Some(500),
             skills: Vec::new(),
             options: HashMap::new(),
         },
@@ -326,7 +335,9 @@ fn rule(
     }
 }
 
-fn default_permissions() -> PermissionRuleset {
+/// Returns the default permission ruleset applied when a custom agent does not
+/// specify its own `permissions` array.
+pub fn default_permissions() -> PermissionRuleset {
     vec![
         rule(Permission::Read, "**", PermissionAction::Allow),
         rule(Permission::Edit, "**", PermissionAction::Ask),
@@ -406,6 +417,81 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
     Ok(agent)
 }
 
+/// Like [`resolve_agent`] but also searches custom OASF agents loaded from
+/// `[PROJECT]/.ragent/agents/` and `~/.ragent/agents/`.
+///
+/// Lookup order:
+/// 1. Project-local custom agents (highest priority)
+/// 2. User-global custom agents
+/// 3. Built-in agents with config overrides
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use ragent_core::agent::resolve_agent_with_customs;
+/// use ragent_core::config::Config;
+///
+/// let config = Config::default();
+/// let agent = resolve_agent_with_customs("my-custom-agent", &config, Path::new(".")).unwrap();
+/// assert_eq!(agent.name, "my-custom-agent");
+/// ```
+pub fn resolve_agent_with_customs(
+    name: &str,
+    config: &crate::config::Config,
+    working_dir: &Path,
+) -> anyhow::Result<AgentInfo> {
+    let (custom_defs, _) = custom::load_custom_agents(working_dir);
+    if let Some(def) = custom_defs.into_iter().find(|d| d.agent_info.name == name) {
+        return Ok(def.agent_info);
+    }
+    resolve_agent(name, config)
+}
+
+/// Load every available agent: built-ins plus custom OASF-defined agents.
+///
+/// Custom agents are discovered from `~/.ragent/agents/` (user-global) and
+/// `[PROJECT]/.ragent/agents/` (project-local). Project-local definitions
+/// take precedence over user-global ones when names collide. If a custom
+/// agent name collides with a built-in, the custom agent is renamed to
+/// `custom:<name>` and a diagnostic warning is added.
+///
+/// Returns `(agents, diagnostics)`. Diagnostics are non-fatal strings
+/// suitable for display in the TUI log panel.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::Path;
+/// use ragent_core::agent::load_all_agents;
+///
+/// let (agents, warnings) = load_all_agents(Path::new("."));
+/// println!("{} agents loaded, {} warnings", agents.len(), warnings.len());
+/// ```
+pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
+    let builtins = create_builtin_agents();
+    let builtin_names: std::collections::HashSet<String> =
+        builtins.iter().map(|a| a.name.clone()).collect();
+
+    let (custom_defs, mut diagnostics) = custom::load_custom_agents(working_dir);
+
+    let mut all = builtins;
+
+    for mut def in custom_defs {
+        if builtin_names.contains(&def.agent_info.name) {
+            let new_name = format!("custom:{}", def.agent_info.name);
+            diagnostics.push(format!(
+                "custom agent '{}' collides with a built-in — loaded as '{}'",
+                def.agent_info.name, new_name
+            ));
+            def.agent_info.name = new_name;
+        }
+        all.push(def.agent_info);
+    }
+
+    (all, diagnostics)
+}
+
 /// Build the system prompt for an agent invocation.
 ///
 /// Assembles the system prompt in the order specified by the SPEC:
@@ -443,9 +529,44 @@ pub fn build_system_prompt(
 ) -> String {
     let mut prompt = String::new();
 
-    // Agent identity and role
+    // Read AGENTS.md once — used both for template substitution and appended
+    // as a section for built-in agents that don't embed the variable.
+    let agents_md_content = {
+        let agents_md_path = working_dir.join("AGENTS.md");
+        if agents_md_path.is_file() {
+            std::fs::read_to_string(&agents_md_path).unwrap_or_default()
+        } else {
+            String::new()
+        }
+    };
+
+    // Agent identity and role — substitute template variables used by custom agents.
     if let Some(ref agent_prompt) = agent.prompt {
-        prompt.push_str(agent_prompt);
+        let today = {
+            // Use a simple date string; chrono is available transitively.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let days = now / 86400;
+            // Approximate calendar date from Unix epoch (good enough for a hint).
+            let year = 1970 + days / 365;
+            format!("{}-{}", year, "xx-xx") // simple fallback; full chrono used below
+        };
+        // Use chrono if available (it is a workspace dep of ragent-core).
+        let date_str = {
+            let dt = chrono::Utc::now();
+            dt.format("%Y-%m-%d").to_string()
+        };
+
+        let expanded = agent_prompt
+            .replace("{{WORKING_DIR}}", &working_dir.display().to_string())
+            .replace("{{FILE_TREE}}", file_tree)
+            .replace("{{AGENTS_MD}}", &agents_md_content)
+            .replace("{{DATE}}", &date_str);
+        let _ = today; // suppress unused warning from the fallback path
+
+        prompt.push_str(&expanded);
         prompt.push_str("\n\n");
     }
 
@@ -456,29 +577,28 @@ pub fn build_system_prompt(
         return prompt;
     }
 
-    // Working directory context
-    prompt.push_str(&format!(
-        "## Working Directory\n\
-         You are operating in: {}\n\n",
-        working_dir.display()
-    ));
+    // Working directory context (skip if already embedded via template variable)
+    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{WORKING_DIR}}")) {
+        prompt.push_str(&format!(
+            "## Working Directory\n\
+             You are operating in: {}\n\n",
+            working_dir.display()
+        ));
+    }
 
-    // File tree context
-    if !file_tree.is_empty() {
+    // File tree context (skip if already embedded via template variable)
+    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{FILE_TREE}}")) && !file_tree.is_empty() {
         prompt.push_str("## Project Structure\n");
         prompt.push_str("```\n");
         prompt.push_str(file_tree);
         prompt.push_str("\n```\n\n");
     }
 
-    // Load AGENTS.md project guidelines if present
-    let agents_md = working_dir.join("AGENTS.md");
-    if agents_md.is_file() {
-        if let Ok(contents) = std::fs::read_to_string(&agents_md) {
-            prompt.push_str("## Project Guidelines (AGENTS.md)\n");
-            prompt.push_str(&contents);
-            prompt.push_str("\n\n");
-        }
+    // AGENTS.md project guidelines (skip if already embedded via template variable)
+    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{AGENTS_MD}}")) && !agents_md_content.is_empty() {
+        prompt.push_str("## Project Guidelines (AGENTS.md)\n");
+        prompt.push_str(&agents_md_content);
+        prompt.push_str("\n\n");
     }
 
     // Available skills (per SPEC §3.19 prompt assembly order)
@@ -503,10 +623,7 @@ pub fn build_system_prompt(
                  appropriate:\n\n",
             );
             for skill in &skill_list {
-                let desc = skill
-                    .description
-                    .as_deref()
-                    .unwrap_or("(no description)");
+                let desc = skill.description.as_deref().unwrap_or("(no description)");
                 let hint = skill
                     .argument_hint
                     .as_deref()
@@ -519,12 +636,23 @@ pub fn build_system_prompt(
     }
 
     // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
-    // Agent list is generated dynamically from builtins so it stays in sync.
+    // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
     if agent.mode == AgentMode::Primary {
         let builtins = create_builtin_agents();
         let spawnable: Vec<&AgentInfo> = builtins
             .iter()
             .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
+            .collect();
+
+        // Load custom agents and collect the spawnable ones
+        let (custom_defs, _) = custom::load_custom_agents(working_dir);
+        let spawnable_custom: Vec<AgentInfo> = custom_defs
+            .into_iter()
+            .filter(|d| {
+                (d.agent_info.mode == AgentMode::Subagent || d.agent_info.mode == AgentMode::All)
+                    && !d.agent_info.hidden
+            })
+            .map(|d| d.agent_info)
             .collect();
 
         let mut section = String::from(
@@ -552,16 +680,22 @@ pub fn build_system_prompt(
                 })
                 .unwrap_or("standard");
 
-            let can_write = sa.permission.iter().any(|r| {
-                r.permission == Permission::Edit && r.action == PermissionAction::Allow
-            });
-            let can_bash = sa.permission.iter().any(|r| {
-                r.permission == Permission::Bash && r.action == PermissionAction::Allow
-            });
+            let can_write = sa
+                .permission
+                .iter()
+                .any(|r| r.permission == Permission::Edit && r.action == PermissionAction::Allow);
+            let can_bash = sa
+                .permission
+                .iter()
+                .any(|r| r.permission == Permission::Bash && r.action == PermissionAction::Allow);
 
             let mut traits = Vec::new();
-            if !can_write { traits.push("read-only"); }
-            if can_bash   { traits.push("can run shell commands"); }
+            if !can_write {
+                traits.push("read-only");
+            }
+            if can_bash {
+                traits.push("can run shell commands");
+            }
             traits.push(model_tier);
 
             section.push_str(&format!(
@@ -570,6 +704,34 @@ pub fn build_system_prompt(
                 sa.description,
                 traits.join(", "),
             ));
+        }
+
+        // Append any project/global custom agents so the LLM knows they're available
+        if !spawnable_custom.is_empty() {
+            section.push_str("\n**Custom agents (project/user defined):**\n");
+            for ca in &spawnable_custom {
+                let can_write = ca
+                    .permission
+                    .iter()
+                    .any(|r| r.permission == Permission::Edit && r.action == PermissionAction::Allow);
+                let can_bash = ca
+                    .permission
+                    .iter()
+                    .any(|r| r.permission == Permission::Bash && r.action == PermissionAction::Allow);
+                let mut traits = vec!["custom"];
+                if !can_write {
+                    traits.push("read-only");
+                }
+                if can_bash {
+                    traits.push("can run shell commands");
+                }
+                section.push_str(&format!(
+                    "- `{}` — {} [{}]\n",
+                    ca.name,
+                    ca.description,
+                    traits.join(", "),
+                ));
+            }
         }
 
         section.push_str(

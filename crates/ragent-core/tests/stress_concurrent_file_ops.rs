@@ -33,7 +33,12 @@ async fn test_stress_many_files_commit() -> Result<()> {
     // Validate contents on disk
     for p in &paths {
         let got = tokio::fs::read_to_string(p).await?;
-        assert!(got.starts_with("modified"), "unexpected content for {:?}: {}", p, got);
+        assert!(
+            got.starts_with("modified"),
+            "unexpected content for {:?}: {}",
+            p,
+            got
+        );
     }
 
     Ok(())

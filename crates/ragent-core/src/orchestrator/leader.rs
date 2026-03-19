@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 use super::{Coordinator, JobDescriptor};
 
@@ -45,7 +45,7 @@ pub enum LeaderEvent {
 /// [`LeaderElector::subscribe`] to monitor leadership changes.
 #[derive(Clone)]
 pub struct LeaderElector {
-    votes: Arc<RwLock<HashMap<String, String>>>,  // voter_id → candidate_id
+    votes: Arc<RwLock<HashMap<String, String>>>, // voter_id → candidate_id
     leader: Arc<RwLock<Option<String>>>,
     tx: Arc<broadcast::Sender<LeaderEvent>>,
 }
@@ -65,7 +65,10 @@ impl LeaderElector {
     /// Cast a vote from `voter_id` for `candidate_id`, then recount votes.
     /// Returns the id of the newly elected leader (which may be unchanged).
     pub async fn nominate(&self, voter_id: &str, candidate_id: &str) -> String {
-        self.votes.write().await.insert(voter_id.to_string(), candidate_id.to_string());
+        self.votes
+            .write()
+            .await
+            .insert(voter_id.to_string(), candidate_id.to_string());
         self.recount().await
     }
 
@@ -76,7 +79,9 @@ impl LeaderElector {
         if self.votes.read().await.is_empty() {
             let mut l = self.leader.write().await;
             if let Some(former) = l.take() {
-                let _ = self.tx.send(LeaderEvent::LeaderStepped { former_id: former });
+                let _ = self
+                    .tx
+                    .send(LeaderEvent::LeaderStepped { former_id: former });
             }
             return None;
         }
@@ -116,7 +121,9 @@ impl LeaderElector {
         let mut current = self.leader.write().await;
         if current.as_deref() != Some(winner.as_str()) {
             *current = Some(winner.clone());
-            let _ = self.tx.send(LeaderEvent::LeaderElected { leader_id: winner.clone() });
+            let _ = self.tx.send(LeaderEvent::LeaderElected {
+                leader_id: winner.clone(),
+            });
         }
         winner
     }
@@ -201,6 +208,10 @@ impl CoordinatorCluster {
     }
 
     /// Start an asynchronous job on the leader coordinator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no coordinators are registered in the cluster or if the job fails to start.
     pub async fn start_job_async(&self, desc: JobDescriptor) -> Result<String> {
         let coord = self
             .leader_coordinator()

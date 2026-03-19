@@ -12,8 +12,10 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -27,11 +29,7 @@ fn tool() -> PatchTool {
 async fn test_patch_single_hunk() {
     let dir = std::env::temp_dir().join("ragent_patch_1");
     let _ = std::fs::create_dir_all(&dir);
-    std::fs::write(
-        dir.join("hello.txt"),
-        "line1\nline2\nline3\nline4\nline5\n",
-    )
-    .unwrap();
+    std::fs::write(dir.join("hello.txt"), "line1\nline2\nline3\nline4\nline5\n").unwrap();
 
     let patch = "\
 --- a/hello.txt
@@ -157,10 +155,7 @@ async fn test_patch_path_override() {
 
     let ctx = make_ctx(dir.clone());
     let result = tool()
-        .execute(
-            json!({ "patch": patch, "path": "target.txt" }),
-            &ctx,
-        )
+        .execute(json!({ "patch": patch, "path": "target.txt" }), &ctx)
         .await
         .unwrap();
 
@@ -292,7 +287,12 @@ async fn test_patch_empty_patch() {
         .execute(json!({ "patch": "just some text\n" }), &ctx)
         .await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("No valid diff hunks"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("No valid diff hunks")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -313,9 +313,7 @@ async fn test_patch_hunk_mismatch() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let result = tool()
-        .execute(json!({ "patch": patch }), &ctx)
-        .await;
+    let result = tool().execute(json!({ "patch": patch }), &ctx).await;
     assert!(result.is_err());
     // File should be unchanged
     assert_eq!(
@@ -341,9 +339,7 @@ async fn test_patch_nonexistent_file() {
 +new
 ";
 
-    let result = tool()
-        .execute(json!({ "patch": patch }), &ctx)
-        .await;
+    let result = tool().execute(json!({ "patch": patch }), &ctx).await;
     assert!(result.is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }

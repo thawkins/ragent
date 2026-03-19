@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::event::Event;
 use crate::task::TaskStatus;
@@ -29,6 +29,9 @@ impl Tool for WaitTasksTool {
         "wait_tasks"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Wait for one or more background sub-agent tasks to complete. \
          Returns full results for all awaited tasks. \
@@ -53,10 +56,17 @@ impl Tool for WaitTasksTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "agent:spawn"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the TaskManager is not initialized, if any requested task ID
+    /// does not exist or is not a background task, or if the wait operation times out.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task_manager = ctx
             .task_manager
@@ -120,8 +130,7 @@ impl Tool for WaitTasksTool {
 
         // Wait for any remaining tasks via event bus (no polling).
         if !waiting_for.is_empty() {
-            let deadline =
-                tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
 
             loop {
                 if waiting_for.is_empty() {
@@ -135,9 +144,7 @@ impl Tool for WaitTasksTool {
                         summary,
                         success,
                         ..
-                    })) if session_id == ctx.session_id
-                        && waiting_for.contains(&task_id) =>
-                    {
+                    })) if session_id == ctx.session_id && waiting_for.contains(&task_id) => {
                         waiting_for.remove(&task_id);
                         results.insert(task_id, (summary, success));
                     }
@@ -174,10 +181,7 @@ impl Tool for WaitTasksTool {
             ));
         }
 
-        output.push_str(&format!(
-            "{} task(s) completed:\n\n",
-            results.len()
-        ));
+        output.push_str(&format!("{} task(s) completed:\n\n", results.len()));
 
         // Fetch full task metadata for the completed entries.
         for (task_id, (text, success)) in &results {
@@ -195,13 +199,37 @@ impl Tool for WaitTasksTool {
             ));
         }
 
-        Ok(ToolOutput {
-            content: output,
-            metadata: Some(json!({
-                "completed": results.len(),
-                "timed_out": timed_out,
-                "still_running": waiting_for.len(),
-            })),
-        })
-    }
-}
+                                                            // Build metadata with task details for TUI display
+                                                            let mut task_details = Vec::new();
+                                                            for (task_id, (_, success)) in &results {
+                                                                let task = all_tasks.iter().find(|t| &t.id == task_id);
+                                                                if let Some(task) = task {
+                                                                    let elapsed_ms = if let Some(end) = task.completed_at {
+                                                                        (end.signed_duration_since(task.created_at)).num_milliseconds() as u64
+                                                                    } else {
+                                                                        0
+                                                                    };
+                                                                    
+                                                                    let output_lines = task.result.as_ref().map(|r| r.lines().count()).unwrap_or(0);
+                                                                    
+                                                                    task_details.push(json!({
+                                                                        "id": &task.id,
+                                                                        "agent": &task.agent_name,
+                                                                        "status": if *success { "completed" } else { "failed" },
+                                                                        "elapsed_ms": elapsed_ms,
+                                                                        "output_lines": output_lines,
+                                                                    }));
+                                                                }
+                                                            }
+                                                  
+                                                            Ok(ToolOutput {
+                                                                content: output,
+                                                                metadata: Some(json!({
+                                                                    "completed": results.len(),
+                                                                    "timed_out": timed_out,
+                                                                    "still_running": waiting_for.len(),
+                                                                    "tasks": task_details,
+                                                                })),
+                                                            })
+                                                        }
+                                                    }

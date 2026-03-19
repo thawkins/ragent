@@ -275,6 +275,121 @@ before processing your first message. Example `AGENTS.md` content:
 
 ---
 
+## 5b. Custom Agents
+
+You can define your own agents as `.json` files without writing any Rust code.
+They are loaded automatically at startup.
+
+### Where to put them
+
+| Directory | Scope |
+|-----------|-------|
+| `~/.ragent/agents/` | User-global — available in every project |
+| `.ragent/agents/` | Project-local — this project only (takes priority) |
+
+### Create a minimal custom agent
+
+```bash
+mkdir -p ~/.ragent/agents
+cat > ~/.ragent/agents/my-agent.json << 'EOF'
+{
+  "name": "my-agent",
+  "description": "My custom agent",
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "modules": [{
+    "type": "ragent/agent/v1",
+    "payload": {
+      "system_prompt": "You are a helpful AI agent.\nProject: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
+      "mode": "primary",
+      "max_steps": 50
+    }
+  }]
+}
+EOF
+```
+
+Start ragent and run `/agents` to confirm it loaded. Use `/agent` to switch
+to it — it will appear with a yellow `[custom]` badge in the picker.
+
+### Template variables
+
+Inside `system_prompt` you can use:
+
+| Variable | Value |
+|----------|-------|
+| `{{WORKING_DIR}}` | Absolute path of the working directory |
+| `{{FILE_TREE}}` | Two-level directory listing |
+| `{{AGENTS_MD}}` | Contents of `AGENTS.md` (if present) |
+| `{{DATE}}` | Current date (`YYYY-MM-DD`) |
+
+### Read-only reviewer example
+
+Copy from the bundled examples and install:
+
+```bash
+cp examples/agents/security-reviewer.json ~/.ragent/agents/
+```
+
+This gives you a security reviewer that can read all files but cannot edit or
+run shell commands.
+
+For the full schema reference and more examples see
+[docs/custom-agents.md](docs/custom-agents.md).
+
+---
+
+## 5c. Teams
+
+Use Teams when you want one lead session to orchestrate multiple teammate agents in parallel.
+
+### Start a team in the TUI
+
+```text
+/team create feature-squad
+```
+
+Check status any time:
+
+```text
+/team
+/team status
+/team tasks
+```
+
+### Spawn teammates (tool-driven)
+
+Use `team_spawn` with a role-specific prompt:
+
+```json
+{
+  "team_name": "feature-squad",
+  "teammate_name": "api-builder",
+  "agent_type": "general",
+  "prompt": "Implement backend/API changes for the feature."
+}
+```
+
+### Manage shared tasks
+
+- Lead adds tasks: `team_task_create`
+- Teammates claim tasks: `team_task_claim`
+- Teammates finish tasks: `team_task_complete`
+- Lead monitors: `team_task_list` or `/team tasks`
+
+### Communicate and close out
+
+- Lead message teammate: `/team message <name> <text>` or `team_message`
+- Teammate inbox: `team_read_messages`
+- Cleanup: `/team cleanup` or `team_cleanup`
+
+For full details and advanced workflows (plan approval, hooks, graceful shutdown), see:
+
+- [`docs/teams.md`](docs/teams.md)
+- [`examples/teams/`](examples/teams/)
+
+---
+
 ## 6. Available Tools
 
 The AI agent can use these tools during a session:

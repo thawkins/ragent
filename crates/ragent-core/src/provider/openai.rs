@@ -24,11 +24,19 @@ impl OpenAiProvider {
 #[async_trait::async_trait]
 impl Provider for OpenAiProvider {
     /// Returns `"openai"`.
+    ///
+    /// # Errors
+    ///
+    /// This function is infallible.
     fn id(&self) -> &str {
         "openai"
     }
 
     /// Returns `"OpenAI"`.
+    ///
+    /// # Errors
+    ///
+    /// This function is infallible.
     fn name(&self) -> &str {
         "OpenAI"
     }
@@ -104,6 +112,11 @@ pub struct OpenAiClient {
 }
 
 impl OpenAiClient {
+    /// Build the JSON request body for the OpenAI Chat Completions API.
+    ///
+    /// # Errors
+    ///
+    /// This function is infallible.
     fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
@@ -281,12 +294,17 @@ impl LlmClient for OpenAiClient {
             bail!("OpenAI API error ({}): {}", status, body);
         }
 
+        let rate_limit_event = parse_openai_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut tool_call_names: HashMap<u64, String> = HashMap::new();
+
+            if let Some(ev) = rate_limit_event {
+                yield ev;
+            }
 
             futures::pin_mut!(stream);
 
@@ -408,5 +426,51 @@ impl LlmClient for OpenAiClient {
         };
 
         Ok(Box::pin(event_stream))
+    }
+}
+
+/// Parses OpenAI-style rate-limit response headers into a `StreamEvent::RateLimit`.
+///
+/// Used by OpenAI and Copilot providers (both follow the same header convention).
+/// Headers: `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`,
+///          `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`.
+pub(crate) fn parse_openai_rate_limit_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Option<crate::llm::StreamEvent> {
+    let header_u64 = |name: &str| -> Option<u64> {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+    };
+
+    let req_limit = header_u64("x-ratelimit-limit-requests");
+    let req_remaining = header_u64("x-ratelimit-remaining-requests");
+    let tok_limit = header_u64("x-ratelimit-limit-tokens");
+    let tok_remaining = header_u64("x-ratelimit-remaining-tokens");
+
+    let requests_used_pct = req_limit.zip(req_remaining).map(|(limit, remaining)| {
+        if limit == 0 {
+            0.0f32
+        } else {
+            ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
+        }
+    });
+
+    let tokens_used_pct = tok_limit.zip(tok_remaining).map(|(limit, remaining)| {
+        if limit == 0 {
+            0.0f32
+        } else {
+            ((limit.saturating_sub(remaining)) as f32 / limit as f32 * 100.0).clamp(0.0, 100.0)
+        }
+    });
+
+    if requests_used_pct.is_some() || tokens_used_pct.is_some() {
+        Some(crate::llm::StreamEvent::RateLimit {
+            requests_used_pct,
+            tokens_used_pct,
+        })
+    } else {
+        None
     }
 }

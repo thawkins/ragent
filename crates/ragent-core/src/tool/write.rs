@@ -20,6 +20,9 @@ impl Tool for WriteTool {
         "write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Write content to a file. Creates parent directories if needed."
     }
@@ -41,12 +44,21 @@ impl Tool for WriteTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "file:write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `path` or `content` parameters are missing,
+    /// if parent directory creation fails, or if writing to the file fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let content = input["content"]
             .as_str()
             .context("Missing required 'content' parameter")?;

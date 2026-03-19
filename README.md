@@ -113,6 +113,41 @@ with OpenCode's `opencode.json`.
 }
 ```
 
+## Custom Agents
+
+You can define your own agents as JSON files using the
+[Open Agentic Schema Framework (OASF)](https://oasf.agntcy.org/) standard.
+Place them in:
+
+- `~/.ragent/agents/` — user-global (all projects)
+- `.ragent/agents/` — project-local (this project, higher priority)
+
+ragent loads them automatically at startup. Use `/agents` to list loaded agents
+and view diagnostics, or `/agent` to open the interactive picker (custom agents
+are marked with a yellow `[custom]` badge).
+
+See [docs/custom-agents.md](docs/custom-agents.md) for the full schema
+reference, template variables (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`,
+`{{DATE}}`), permission rules, and worked examples. Ready-to-use example files
+are in [`examples/agents/`](examples/agents/).
+
+## Teams
+
+Teams let one lead session coordinate multiple teammates with shared tasks and mailbox messaging.
+
+Quick flow:
+
+- Create a team: `/team create <name>` (or `team_create`)
+- Spawn teammates: `team_spawn`
+- Add/list/claim/complete tasks: `team_task_create`, `team_task_list`, `team_task_claim`, `team_task_complete`
+- Communicate: `/team message ...` or `team_message`, plus `team_read_messages`
+- Cleanup when finished: `/team cleanup` or `team_cleanup`
+
+Docs and examples:
+
+- Guide: [`docs/teams.md`](docs/teams.md)
+- Example bundles: [`examples/teams/`](examples/teams/)
+
 ## Architecture
 
 The project is a Cargo workspace with three crates:

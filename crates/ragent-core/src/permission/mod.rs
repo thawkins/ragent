@@ -22,6 +22,11 @@ pub enum PermissionAction {
 }
 
 impl fmt::Display for PermissionAction {
+    /// Format the permission action as a lowercase string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PermissionAction::Allow => write!(f, "allow"),
@@ -75,6 +80,11 @@ pub enum Permission {
 }
 
 impl From<&str> for Permission {
+    /// Convert a string slice to a [`Permission`] variant.
+    ///
+    /// # Errors
+    ///
+    /// This function is infallible; unknown strings become [`Permission::Custom`].
     fn from(s: &str) -> Self {
         match s {
             "read" => Permission::Read,
@@ -93,6 +103,11 @@ impl From<&str> for Permission {
 }
 
 impl fmt::Display for Permission {
+    /// Format the permission as a lowercase string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Permission::Read => write!(f, "read"),
@@ -111,12 +126,22 @@ impl fmt::Display for Permission {
 }
 
 impl Serialize for Permission {
+    /// Serialize the permission as a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())
     }
 }
 
 impl<'de> Deserialize<'de> for Permission {
+    /// Deserialize a permission from a string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the deserializer fails or the string type is invalid.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         Ok(Permission::from(s.as_str()))

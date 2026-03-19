@@ -1,17 +1,17 @@
 //! Active-agents subpanel — shown at the bottom of the log panel.
 //!
 //! Displays the primary agent and all spawned sub-agents in a tree, with
-//! each row showing: short session id, type (primary/background/foreground),
+//! each row showing: agent name, type (primary/background/foreground),
 //! elapsed active time, and step count.
 
 use chrono::Utc;
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
-use ratatui::Frame;
 
 use ragent_core::task::TaskEntry;
 
@@ -36,22 +36,46 @@ fn short_id(id: &str) -> &str {
 
 /// Recursively build agent row lines for tasks whose parent is `parent_sid`.
 /// `depth` controls indentation; sub-agents appear below their spawner.
+/// `last_stack` is a slice of booleans indicating whether each ancestor at that
+/// depth was the last sibling; this lets us draw vertical continuation lines.
+/// `custom_names` is the set of custom OASF agent names; matching entries get a `[C]` badge.
 fn build_task_rows<'a>(
     tasks: &'a [TaskEntry],
     parent_sid: &str,
     depth: usize,
+    last_stack: &[bool],
     event_bus: &ragent_core::event::EventBus,
+    custom_names: &std::collections::HashSet<String>,
+    teammate_ids: &std::collections::HashSet<String>,
     out: &mut Vec<Line<'a>>,
 ) {
-    let indent = "  ".repeat(depth);
-    let prefix = if depth == 0 { "○ " } else { "└ " };
-    for task in tasks {
-        if task.parent_session_id != parent_sid {
-            continue;
+    // Collect children of this parent so we can determine sibling positions
+    let children: Vec<&TaskEntry> = tasks
+        .iter()
+        .filter(|task| task.parent_session_id == parent_sid)
+        .collect();
+
+    for (idx, task) in children.iter().enumerate() {
+        let is_last = idx + 1 == children.len();
+
+        // Build indent using ancestor info: use '│ ' when ancestor was not last, else two spaces
+        let mut indent = String::new();
+        for &ancestor_was_last in last_stack {
+            if ancestor_was_last {
+                indent.push_str("  ");
+            } else {
+                indent.push_str("│ ");
+            }
         }
+
+        // Prefix: primary uses a green dot, intermediate nodes use '├─' or '└─'
+        let prefix = if depth == 0 { "○ " } else if is_last { "└─ " } else { "├─ " };
+
         let steps = event_bus.current_step(&task.child_session_id);
         let elapsed = format_elapsed(task.created_at);
         let kind_tag = if task.background { "[bg]" } else { "[fg]" };
+        let is_custom = custom_names.contains(&task.agent_name);
+        let is_teammate = teammate_ids.contains(&task.child_session_id);
         let agent_label = format!("{} {}", task.agent_name, kind_tag);
         let tid = short_id(&task.id);
         let (dot_color, name_color) = if task.background {
@@ -60,15 +84,9 @@ fn build_task_rows<'a>(
             (Color::Cyan, Color::Cyan)
         };
 
-        out.push(Line::from(vec![
-            Span::styled(
-                format!("{indent}{prefix}"),
-                Style::default().fg(dot_color),
-            ),
-            Span::styled(
-                format!("{:<10} ", tid),
-                Style::default().fg(name_color),
-            ),
+        let mut spans = vec![
+            Span::styled(format!("{indent}{prefix}"), Style::default().fg(dot_color)),
+            Span::styled(format!("{:<10} ", tid), Style::default().fg(name_color)),
             Span::styled(
                 format!("{:<15}", agent_label),
                 Style::default().fg(name_color),
@@ -81,10 +99,38 @@ fn build_task_rows<'a>(
                 format!("steps:{}", steps),
                 Style::default().fg(Color::DarkGray),
             ),
-        ]));
+        ];
+        if is_custom {
+            spans.push(Span::styled(
+                " [C]",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        if is_teammate {
+            spans.push(Span::styled(
+                " [T]",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        out.push(Line::from(spans));
 
         // Recurse for sub-agents spawned by this task's session
-        build_task_rows(tasks, &task.child_session_id.clone(), depth + 1, event_bus, out);
+        let mut new_stack = last_stack.to_vec();
+        new_stack.push(is_last);
+        build_task_rows(
+            tasks,
+            &task.child_session_id.clone(),
+            depth + 1,
+            &new_stack,
+            event_bus,
+            custom_names,
+            teammate_ids,
+            out,
+        );
     }
 }
 
@@ -96,52 +142,84 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     let tasks = app.active_tasks.clone();
     let primary_steps = app.event_bus.current_step(&primary_session);
 
+    // Build the set of custom agent names for badge lookup
+    let custom_names: std::collections::HashSet<String> = app
+        .custom_agent_defs
+        .iter()
+        .map(|d| d.agent_info.name.clone())
+        .collect();
+    // Build the set of teammate session IDs for [T] badge lookup.
+    let teammate_ids: std::collections::HashSet<String> = app
+        .team_members
+        .iter()
+        .filter_map(|m| m.session_id.clone())
+        .collect();
+    let primary_is_custom = custom_names.contains(&primary_name);
+
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── header ─────────────────────────────────────────────────────────────
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  id         ",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        ),
-        Span::styled(
-            "agent           ",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        ),
-        Span::styled(
-            " elapsed  ",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        ),
-        Span::styled(
-            "steps",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-        ),
-    ]));
+          // ── header ─────────────────────────────────────────────────────────────
+          lines.push(Line::from(vec![
+              Span::styled(
+                  "  agent       ",
+                  Style::default()
+                      .fg(Color::DarkGray)
+                      .add_modifier(Modifier::DIM),
+              ),
+              Span::styled(
+                  "type            ",
+                  Style::default()
+                      .fg(Color::DarkGray)
+                      .add_modifier(Modifier::DIM),
+              ),
+              Span::styled(
+                  " elapsed  ",
+                  Style::default()
+                      .fg(Color::DarkGray)
+                      .add_modifier(Modifier::DIM),
+              ),
+              Span::styled(
+                  "steps",
+                  Style::default()
+                      .fg(Color::DarkGray)
+                      .add_modifier(Modifier::DIM),
+              ),
+          ]));
+    
+          // ── primary agent ───────────────────────────────────────────────────────
+          let mut primary_spans = vec![
+              Span::styled("● ", Style::default().fg(Color::Green)),
+              Span::styled(
+                  format!("{:<12} ", primary_name),
+                  Style::default()
+                      .fg(Color::Green)
+                      .add_modifier(Modifier::BOLD),
+              ),
+              Span::styled(
+                  format!("{:<15}", "primary"),
+                  Style::default().fg(Color::Green),
+              ),
+              Span::styled(
+                  format!(" {:>6}  ", "-"),
+                  Style::default().fg(Color::DarkGray),
+              ),
+              Span::styled(
+                  format!("steps:{}", primary_steps),
+                  Style::default().fg(Color::DarkGray),
+              ),
+          ];
+          if primary_is_custom {
+              primary_spans.push(Span::styled(
+                  " [C]",
+                  Style::default()
+                      .fg(Color::Magenta)
+                      .add_modifier(Modifier::BOLD),
+              ));
+          }
+          lines.push(Line::from(primary_spans));
 
-    // ── primary agent ───────────────────────────────────────────────────────
-    let pid = short_id(&primary_session);
-    lines.push(Line::from(vec![
-        Span::styled("● ", Style::default().fg(Color::Green)),
-        Span::styled(
-            format!("{:<10} ", pid),
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{:<15}", primary_name),
-            Style::default().fg(Color::Green),
-        ),
-        Span::styled(
-            format!(" {:>6}  ", "-"),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("steps:{}", primary_steps),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
-
-    // ── sub-agents (depth 0 = direct children of primary) ──────────────────
-    build_task_rows(&tasks, &primary_session, 0, &app.event_bus, &mut lines);
+          // ── sub-agents (depth 0 = direct children of primary) ──────────────────
+          build_task_rows(&tasks, &primary_session, 0, &[], &app.event_bus, &custom_names, &teammate_ids, &mut lines);
 
     // ── draw block + scroll ─────────────────────────────────────────────────
     let block = Block::default()
@@ -156,7 +234,9 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     let block_inner = block.inner(area);
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false }).block(block);
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .block(block);
 
     let total_lines = paragraph.line_count(block_inner.width) as u16;
     let visible = block_inner.height;
@@ -173,4 +253,3 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         frame.render_stateful_widget(scrollbar, area, &mut sb_state);
     }
 }
-

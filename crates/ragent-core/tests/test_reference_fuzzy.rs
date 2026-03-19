@@ -32,10 +32,7 @@ fn test_fuzzy_match_exact_basename() {
 
 #[test]
 fn test_fuzzy_match_prefix() {
-    let candidates = vec![
-        PathBuf::from("src/config.rs"),
-        PathBuf::from("src/lib.rs"),
-    ];
+    let candidates = vec![PathBuf::from("src/config.rs"), PathBuf::from("src/lib.rs")];
     let matches = fuzzy_match("con", &candidates);
     assert!(!matches.is_empty());
     assert_eq!(matches[0].path, PathBuf::from("src/config.rs"));
@@ -43,10 +40,7 @@ fn test_fuzzy_match_prefix() {
 
 #[test]
 fn test_fuzzy_match_case_insensitive() {
-    let candidates = vec![
-        PathBuf::from("src/Config.rs"),
-        PathBuf::from("src/lib.rs"),
-    ];
+    let candidates = vec![PathBuf::from("src/Config.rs"), PathBuf::from("src/lib.rs")];
     let matches = fuzzy_match("config.rs", &candidates);
     assert!(!matches.is_empty());
     assert_eq!(matches[0].path, PathBuf::from("src/Config.rs"));
@@ -54,10 +48,7 @@ fn test_fuzzy_match_case_insensitive() {
 
 #[test]
 fn test_fuzzy_match_no_match() {
-    let candidates = vec![
-        PathBuf::from("src/main.rs"),
-        PathBuf::from("src/lib.rs"),
-    ];
+    let candidates = vec![PathBuf::from("src/main.rs"), PathBuf::from("src/lib.rs")];
     let matches = fuzzy_match("zzzznotafile", &candidates);
     assert!(matches.is_empty());
 }

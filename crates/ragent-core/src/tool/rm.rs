@@ -18,6 +18,7 @@ impl Tool for RmTool {
         "rm"
     }
 
+    /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &str {
         "Delete a single file. Wildcards are not allowed. Fails if the file does not exist."
     }
@@ -39,11 +40,26 @@ impl Tool for RmTool {
         "file:write"
     }
 
+    /// Deletes a single file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `path` parameter is missing or invalid
+    /// - The path contains wildcards or glob patterns (`*`, `?`, `[`)
+    /// - The file does not exist
+    /// - The path is a directory, not a file
+    /// - The file cannot be deleted due to permission issues
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
 
         if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
-            bail!("Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {}", path_str);
+            bail!(
+                "Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {}",
+                path_str
+            );
         }
 
         let path = resolve_path(&ctx.working_dir, path_str);
@@ -70,6 +86,7 @@ impl Tool for RmTool {
     }
 }
 
+/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {

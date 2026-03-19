@@ -1,7 +1,8 @@
 //! The `list_tasks` tool — lists sub-agent tasks for the current session.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::fmt::Write;
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -19,11 +20,11 @@ impl Tool for ListTasksTool {
         "list_tasks"
     }
 
-    fn description(&self) -> &str {
-        "List sub-agent tasks for the current session. Shows running and completed \
-         background tasks with their status, agent, and result summary."
-    }
-
+        /// Returns a human-readable description of what the tool does.
+        fn description(&self) -> &str {
+            "List sub-agent tasks for the current session. Shows running and completed \
+               background tasks with their status, agent, and result summary."
+        }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -45,16 +46,19 @@ impl Tool for ListTasksTool {
         "agent:spawn"
     }
 
+    /// Lists sub-agent tasks for the current session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - TaskManager is not available in the context
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let task_manager = ctx
-            .task_manager
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Sub-agent management is not available in this context. \
-                     TaskManager has not been initialised."
-                )
-            })?;
+        let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Sub-agent management is not available in this context. \
+                      TaskManager has not been initialised."
+            )
+        })?;
 
         // Single task detail mode
         if let Some(task_id) = input.get("task_id").and_then(|v| v.as_str()) {
@@ -116,11 +120,7 @@ impl Tool for ListTasksTool {
             .count();
 
         let mut output = String::new();
-        output.push_str(&format!(
-            "Sub-agent tasks ({} total, {} running):\n\n",
-            filtered.len(),
-            running_count
-        ));
+        let _ = write!(output, "Sub-agent tasks ({} total, {} running):\n\n", filtered.len(), running_count);
         output.push_str("| ID (short) | Agent | Status | Background | Duration | Summary |\n");
         output.push_str("|------------|-------|--------|------------|----------|---------|");
 
@@ -159,10 +159,7 @@ impl Tool for ListTasksTool {
 
             let bg = if task.background { "yes" } else { "no" };
 
-            output.push_str(&format!(
-                "\n| {short_id} | {} | {status} | {bg} | {duration} | {summary_short} |",
-                task.agent_name
-            ));
+            let _ = write!(output, "\n| {short_id} | {} | {status} | {bg} | {duration} | {summary_short} |", task.agent_name);
         }
 
         Ok(ToolOutput {
@@ -210,15 +207,15 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
     );
 
     if let Some(ref prompt) = Some(&task.task_prompt) {
-        detail.push_str(&format!("\n\nTask Prompt:\n{prompt}"));
+        let _ = write!(detail, "\n\nTask Prompt:\n{}", prompt);
     }
 
     if let Some(ref result) = task.result {
-        detail.push_str(&format!("\n\nResult:\n{result}"));
+        let _ = write!(detail, "\n\nResult:\n{}", result);
     }
 
     if let Some(ref error) = task.error {
-        detail.push_str(&format!("\n\nError:\n{error}"));
+        let _ = write!(detail, "\n\nError:\n{}", error);
     }
 
     detail

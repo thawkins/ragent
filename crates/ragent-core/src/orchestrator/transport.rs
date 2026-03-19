@@ -72,6 +72,7 @@ pub struct HttpRouter {
 
 impl HttpRouter {
     /// Create a new router with the given per-request timeout.
+    #[must_use]
     pub fn new(request_timeout: Duration) -> Self {
         Self {
             agents: Arc::new(RwLock::new(HashMap::new())),
@@ -102,7 +103,9 @@ impl HttpRouter {
             .await
             .values()
             .filter(|d| {
-                required.iter().all(|r| d.capabilities.iter().any(|c| c.contains(r.as_str())))
+                required
+                    .iter()
+                    .all(|r| d.capabilities.iter().any(|c| c.contains(r.as_str())))
             })
             .cloned()
             .collect()
@@ -120,7 +123,10 @@ impl Router for HttpRouter {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("remote agent '{}' not registered", agent_id))?;
 
-        let body = RemoteAgentRequest { job_id: msg.job_id, payload: msg.payload };
+        let body = RemoteAgentRequest {
+            job_id: msg.job_id,
+            payload: msg.payload,
+        };
 
         let resp = tokio::time::timeout(
             self.request_timeout,

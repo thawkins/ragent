@@ -193,7 +193,9 @@ impl LspManager {
         let server_id = self
             .servers
             .iter()
-            .find(|s| s.status == LspStatus::Connected && s.config.extensions.iter().any(|e| e == ext))?
+            .find(|s| {
+                s.status == LspStatus::Connected && s.config.extensions.iter().any(|e| e == ext)
+            })?
             .id
             .clone();
         self.clients.get(&server_id).cloned()

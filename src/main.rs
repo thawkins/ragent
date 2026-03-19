@@ -26,27 +26,46 @@ use ragent_core::{
 };
 
 /// small CLI demo for orchestration
+///
+/// # Errors
+///
+/// Returns an error if job execution fails.
 async fn run_orchestration_example() -> anyhow::Result<()> {
     tracing::info!("Running orchestration example");
     let registry = ragent_core::orchestrator::AgentRegistry::new();
 
-    use ragent_core::orchestrator::{Responder, Coordinator, JobDescriptor};
-    use std::sync::Arc;
     use futures::future::FutureExt;
-    use tokio::time::sleep;
+    use ragent_core::orchestrator::{Coordinator, JobDescriptor, Responder};
+    use std::sync::Arc;
     use tokio::time::Duration;
+    use tokio::time::sleep;
 
-    let responder_a: Responder = Arc::new(|payload: String| async move { format!("demo-a: {}", payload) }.boxed());
-    let responder_b: Responder = Arc::new(|payload: String| async move { sleep(Duration::from_millis(30)).await; format!("demo-b: {}", payload) }.boxed());
+    let responder_a: Responder =
+        Arc::new(|payload: String| async move { format!("demo-a: {payload}") }.boxed());
+    let responder_b: Responder = Arc::new(|payload: String| {
+        async move {
+            sleep(Duration::from_millis(30)).await;
+            format!("demo-b: {payload}")
+        }
+        .boxed()
+    });
 
-    registry.register("demo-a", vec!["demo".to_string()], Some(responder_a)).await;
-    registry.register("demo-b", vec!["demo".to_string()], Some(responder_b)).await;
+    registry
+        .register("demo-a", vec!["demo".to_string()], Some(responder_a))
+        .await;
+    registry
+        .register("demo-b", vec!["demo".to_string()], Some(responder_b))
+        .await;
 
     let coord = Coordinator::new(registry.clone());
-    let desc = JobDescriptor { id: "demo-job".to_string(), required_capabilities: vec!["demo".to_string()], payload: "payload".to_string() };
+    let desc = JobDescriptor {
+        id: "demo-job".to_string(),
+        required_capabilities: vec!["demo".to_string()],
+        payload: "payload".to_string(),
+    };
 
     let res = coord.start_job_sync(desc).await?;
-    println!("Orchestration sync result:\n{}", res);
+    println!("Orchestration sync result:\n{res}");
 
     Ok(())
 }
@@ -170,12 +189,37 @@ fn data_dir() -> PathBuf {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize tracing
+    // Initialize tracing.
+    //
+    // For TUI mode: install a channel-based layer so all tracing output is
+    // captured by the log panel rather than written directly to stdout (which
+    // would corrupt the alternate-screen rendering).
+    //
+    // For non-TUI modes (--no-tui, headless run, server, etc.): fall back to
+    // the normal fmt subscriber so logs appear in the terminal as usual.
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("warn"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .init();
+    let tui_will_run = !cli.no_tui
+        && matches!(
+            cli.command,
+            None | Some(Commands::Session {
+                command: SessionCommands::Resume { .. }
+            })
+        );
+    let tui_log_rx = if tui_will_run {
+        use tracing_subscriber::prelude::*;
+        let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(ragent_tui::tracing_layer::TuiTracingLayer::new(tx))
+            .init();
+        Some(rx)
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(false)
+            .init();
+        None
+    };
 
     // Load config
     let config = if let Some(ref path) = cli.config {
@@ -221,7 +265,8 @@ async fn main() -> Result<()> {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
-            lsp_manager: std::sync::OnceLock::new(),
+        lsp_manager: std::sync::OnceLock::new(),
+        team_manager: std::sync::OnceLock::new(),
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
@@ -236,11 +281,12 @@ async fn main() -> Result<()> {
         None => {
             // Default: run TUI
             if cli.no_tui {
+                use tokio::io::AsyncBufReadExt;
+                
                 tracing::info!("Starting ragent interactive mode (plain)");
                 let dir = std::fs::canonicalize(".")?;
                 let session = session_manager.create_session(dir)?;
                 let reader = tokio::io::BufReader::new(tokio::io::stdin());
-                use tokio::io::AsyncBufReadExt;
                 let mut lines = reader.lines();
                 let mut stdout = std::io::stdout().lock();
                 while let Some(line) = lines.next_line().await? {
@@ -248,7 +294,12 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     match session_processor
-                        .process_message(&session.id, &line, &resolved_agent, Arc::new(AtomicBool::new(false)))
+                        .process_message(
+                            &session.id,
+                            &line,
+                            &resolved_agent,
+                            Arc::new(AtomicBool::new(false)),
+                        )
                         .await
                     {
                         Ok(msg) => writeln!(stdout, "{}", msg.text_content())?,
@@ -264,6 +315,7 @@ async fn main() -> Result<()> {
                     resolved_agent.clone(),
                     cli.log,
                     None,
+                    tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                 )
                 .await?;
             }
@@ -272,7 +324,12 @@ async fn main() -> Result<()> {
             let dir = std::fs::canonicalize(".")?;
             let session = session_manager.create_session(dir)?;
             match session_processor
-                .process_message(&session.id, &prompt, &resolved_agent, Arc::new(AtomicBool::new(false)))
+                .process_message(
+                    &session.id,
+                    &prompt,
+                    &resolved_agent,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .await
             {
                 Ok(msg) => {
@@ -325,7 +382,7 @@ async fn main() -> Result<()> {
             SessionCommands::Resume { id } => {
                 // Verify session exists before launching TUI
                 if storage.get_session(&id)?.is_none() {
-                    anyhow::bail!("Session not found: {}", id);
+                    anyhow::bail!("Session not found: {id}");
                 }
                 tracing::info!(session_id = %id, "Resuming session");
                 ragent_tui::run_tui(
@@ -336,6 +393,7 @@ async fn main() -> Result<()> {
                     resolved_agent.clone(),
                     cli.log,
                     Some(id),
+                    tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
                 )
                 .await?;
             }
@@ -378,11 +436,15 @@ async fn main() -> Result<()> {
             storage.set_provider_auth(&provider, &key)?;
             tracing::info!(provider = %provider, "Stored API key");
         }
-        Some(Commands::Models { provider: filter, ollama_url }) => {
+        Some(Commands::Models {
+            provider: filter,
+            ollama_url,
+        }) => {
             let mut stdout = std::io::stdout().lock();
 
             if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
-                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await {
+                match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
+                {
                     Ok(models) if models.is_empty() => {
                         writeln!(
                             stdout,
@@ -435,6 +497,7 @@ async fn main() -> Result<()> {
         Some(Commands::Config) => {
             let config = config.read().await;
             println!("{:#?}", *config);
+            drop(config);
         }
     }
 

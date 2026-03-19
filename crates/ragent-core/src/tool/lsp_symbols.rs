@@ -5,7 +5,9 @@
 //! them as a structured list ordered by line number.
 
 use anyhow::{Context as _, Result};
-use lsp_types::{DocumentSymbolParams, DocumentSymbolResponse, PartialResultParams, WorkDoneProgressParams};
+use lsp_types::{
+    DocumentSymbolParams, DocumentSymbolResponse, PartialResultParams, WorkDoneProgressParams,
+};
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -19,6 +21,7 @@ pub struct LspSymbolsTool;
 
 #[async_trait::async_trait]
 impl Tool for LspSymbolsTool {
+    /// Returns the tool name.
     fn name(&self) -> &str {
         "lsp_symbols"
     }
@@ -42,28 +45,48 @@ impl Tool for LspSymbolsTool {
         })
     }
 
+    /// Returns the permission category.
     fn permission_category(&self) -> &str {
         "lsp:read"
     }
 
+    /// Executes the LSP symbols query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The required `path` parameter is missing
+    /// - The file path cannot be resolved or canonicalized
+    /// - No LSP manager is configured in the context
+    /// - No LSP server is available for the file's language/extension
+    /// - The document cannot be opened by the LSP server
+    /// - The LSP documentSymbol request fails
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = ctx.working_dir.join(path_str);
-        let path = path.canonicalize()
+        let path = path
+            .canonicalize()
             .with_context(|| format!("Cannot resolve path: {path_str}"))?;
 
         let client = {
-            let lsp = ctx.lsp_manager.as_ref()
+            let lsp = ctx
+                .lsp_manager
+                .as_ref()
                 .context("No LSP manager — add a server to ragent.json 'lsp' section")?;
             let guard = lsp.read().await;
-            guard.client_for_path(&path)
-                .with_context(|| format!(
+            guard.client_for_path(&path).with_context(|| {
+                format!(
                     "No LSP server for '{}' files — check your ragent.json 'lsp' configuration",
                     path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                ))?
+                )
+            })?
         };
 
-        client.open_document(&path).await
+        client
+            .open_document(&path)
+            .await
             .with_context(|| format!("LSP: failed to open {}", path.display()))?;
 
         let uri = client.text_document_id(&path)?;

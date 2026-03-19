@@ -13,18 +13,20 @@ pub mod agent;
 pub mod config;
 pub mod error;
 pub mod event;
+pub mod file_ops;
 pub mod id;
 pub mod llm;
 /// Language Server Protocol client for code-intelligence queries.
 pub mod lsp;
 pub mod mcp;
 pub mod message;
+pub mod orchestrator;
 pub mod permission;
 pub mod provider;
-/// Input sanitization and secret redaction utilities.
-pub mod sanitize;
 /// @ file reference parsing, resolution, and fuzzy matching (SPEC §3.34).
 pub mod reference;
+/// Input sanitization and secret redaction utilities.
+pub mod sanitize;
 pub mod session;
 /// Skill discovery, loading, argument substitution, and invocation.
 pub mod skill;
@@ -32,6 +34,6 @@ pub mod snapshot;
 pub mod storage;
 /// Sub-agent task management for spawning and tracking sub-agents.
 pub mod task;
-pub mod orchestrator;
+/// Agent team coordination — shared task list, mailboxes, and team config.
+pub mod team;
 pub mod tool;
-pub mod file_ops;

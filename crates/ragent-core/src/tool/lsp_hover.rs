@@ -19,6 +19,7 @@ pub struct LspHoverTool;
 
 #[async_trait::async_trait]
 impl Tool for LspHoverTool {
+    /// Returns the tool name.
     fn name(&self) -> &str {
         "lsp_hover"
     }
@@ -50,42 +51,69 @@ impl Tool for LspHoverTool {
         })
     }
 
+    /// Returns the permission category.
     fn permission_category(&self) -> &str {
         "lsp:read"
     }
 
+    /// Executes the LSP hover query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Required parameters (`path`, `line`, `column`) are missing or invalid
+    /// - The file path cannot be resolved or canonicalized
+    /// - No LSP manager is configured in the context
+    /// - No LSP server is available for the file's language/extension
+    /// - The document cannot be opened by the LSP server
+    /// - The LSP hover request fails
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
-        let line = input["line"].as_u64().context("Missing required 'line' parameter")? as u32;
-        let column = input["column"].as_u64().context("Missing required 'column' parameter")? as u32;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
+        let line = input["line"]
+            .as_u64()
+            .context("Missing required 'line' parameter")? as u32;
+        let column = input["column"]
+            .as_u64()
+            .context("Missing required 'column' parameter")? as u32;
 
         // LSP positions are 0-based; ragent exposes 1-based to the LLM.
         let lsp_line = line.saturating_sub(1);
         let lsp_char = column.saturating_sub(1);
 
         let path = ctx.working_dir.join(path_str);
-        let path = path.canonicalize()
+        let path = path
+            .canonicalize()
             .with_context(|| format!("Cannot resolve path: {path_str}"))?;
 
         let client = {
-            let lsp = ctx.lsp_manager.as_ref()
+            let lsp = ctx
+                .lsp_manager
+                .as_ref()
                 .context("No LSP manager — add a server to ragent.json 'lsp' section")?;
             let guard = lsp.read().await;
-            guard.client_for_path(&path)
-                .with_context(|| format!(
+            guard.client_for_path(&path).with_context(|| {
+                format!(
                     "No LSP server for '{}' files",
                     path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                ))?
+                )
+            })?
         };
 
-        client.open_document(&path).await
+        client
+            .open_document(&path)
+            .await
             .with_context(|| format!("LSP: failed to open {}", path.display()))?;
 
         let uri = client.text_document_id(&path)?;
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: uri,
-                position: Position { line: lsp_line, character: lsp_char },
+                position: Position {
+                    line: lsp_line,
+                    character: lsp_char,
+                },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
         };
@@ -96,7 +124,10 @@ impl Tool for LspHoverTool {
             .context("LSP hover request failed")?;
 
         let content = match result {
-            None => format!("No hover information available at {}:{}:{}", path_str, line, column),
+            None => format!(
+                "No hover information available at {}:{}:{}",
+                path_str, line, column
+            ),
             Some(hover) => {
                 let text = match &hover.contents {
                     lsp_types::HoverContents::Scalar(markup) => markup_to_text(markup),

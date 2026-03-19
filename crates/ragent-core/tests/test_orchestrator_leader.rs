@@ -1,11 +1,11 @@
 //! Tests for in-process leader election and CoordinatorCluster (Task 5.2).
 
-use std::sync::Arc;
 use futures::future::FutureExt;
-use tokio::time::{sleep, Duration};
+use std::sync::Arc;
+use tokio::time::{Duration, sleep};
 
-use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
 use ragent_core::orchestrator::leader::{CoordinatorCluster, LeaderElector, LeaderEvent};
+use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
 
 // ── LeaderElector ────────────────────────────────────────────────────────────
 
@@ -97,7 +97,9 @@ async fn make_coord_with_agent(tag: &'static str) -> Coordinator {
         let t = tag_s.clone();
         async move { format!("{}:{}", t, p) }.boxed()
     });
-    registry.register(format!("{}-agent", tag), vec!["work".to_string()], Some(r)).await;
+    registry
+        .register(format!("{}-agent", tag), vec!["work".to_string()], Some(r))
+        .await;
     Coordinator::new(registry)
 }
 
@@ -148,9 +150,10 @@ async fn test_cluster_start_job_routes_to_leader() {
 
     // Leader coordinator has an agent registered.
     let registry = AgentRegistry::new();
-    let r: Responder =
-        Arc::new(|p: String| async move { format!("leader-resp:{}", p) }.boxed());
-    registry.register("leader-ag", vec!["w".to_string()], Some(r)).await;
+    let r: Responder = Arc::new(|p: String| async move { format!("leader-resp:{}", p) }.boxed());
+    registry
+        .register("leader-ag", vec!["w".to_string()], Some(r))
+        .await;
     let leader_coord = Coordinator::new(registry);
 
     // Follower coordinator has no agents.
@@ -224,9 +227,10 @@ async fn test_cluster_start_job_async() {
     let cluster = CoordinatorCluster::new(elector);
 
     let registry = AgentRegistry::new();
-    let r: Responder =
-        Arc::new(|p: String| async move { format!("async:{}", p) }.boxed());
-    registry.register("async-ag", vec!["x".to_string()], Some(r)).await;
+    let r: Responder = Arc::new(|p: String| async move { format!("async:{}", p) }.boxed());
+    registry
+        .register("async-ag", vec!["x".to_string()], Some(r))
+        .await;
     cluster.add("only", Coordinator::new(registry)).await;
     cluster.elect("only").await;
 

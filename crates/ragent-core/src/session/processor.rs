@@ -14,16 +14,19 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use tracing::{debug, warn};
 
+/// Maximum number of tools that can execute in parallel
+const MAX_PARALLEL_TOOLS: usize = 5;
+
 use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
-use base64::Engine as _;
 use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
 use crate::tool::{ToolContext, ToolRegistry};
+use base64::Engine as _;
 
 /// Drives the agentic conversation loop for a single session.
 ///
@@ -47,6 +50,9 @@ pub struct SessionProcessor {
     /// Uses `OnceLock` so it can be set after the processor is constructed
     /// (the LspManager is created after the processor in `run_tui`).
     pub lsp_manager: std::sync::OnceLock<crate::lsp::SharedLspManager>,
+    /// Optional team manager for spawning and coordinating teammate sessions.
+    /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
+    pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
 }
 
 impl SessionProcessor {
@@ -87,7 +93,8 @@ impl SessionProcessor {
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
         let user_msg = Message::user_text(session_id, user_text);
-        self.process_user_message(session_id, user_msg, agent, cancel_flag).await
+        self.process_user_message(session_id, user_msg, agent, cancel_flag)
+            .await
     }
 
     /// Process a pre-built user [`Message`] (e.g. one containing image attachments).
@@ -95,6 +102,16 @@ impl SessionProcessor {
     /// Unlike [`process_message`] which always creates a plain-text user message,
     /// this method accepts any `Message` so the TUI can pass multipart messages
     /// that include [`MessagePart::Image`] parts alongside the text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The user message cannot be stored in the database
+    /// - The configured model or provider is missing
+    /// - The API key for the provider cannot be resolved
+    /// - An LLM API call fails
+    /// - Tool execution fails and no tool-result recovery is possible
+    /// - The processing is cancelled via the cancel flag
     pub async fn process_user_message(
         &self,
         session_id: &str,
@@ -196,7 +213,8 @@ impl SessionProcessor {
             .map(|c| c.skill_dirs)
             .unwrap_or_default();
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-        let system_prompt = build_system_prompt(agent, &working_dir, &file_tree, Some(&skill_registry));
+        let system_prompt =
+            build_system_prompt(agent, &working_dir, &file_tree, Some(&skill_registry));
 
         // 4. Build chat messages from history
         let history = self.session_manager.get_messages(session_id)?;
@@ -284,7 +302,8 @@ impl SessionProcessor {
         let mut agent_switch_requested = false;
 
         loop {
-            self.event_bus.set_step(session_id, self.event_bus.current_step(session_id) + 1);
+            self.event_bus
+                .set_step(session_id, self.event_bus.current_step(session_id) + 1);
             let step = self.event_bus.current_step(session_id) as usize;
             if step > max_steps {
                 warn!("Reached max steps ({}), stopping agent loop", max_steps);
@@ -299,8 +318,7 @@ impl SessionProcessor {
             if cancel_flag.load(Ordering::Relaxed) {
                 warn!("Agent loop cancelled by user at step {}", step);
                 // Save partial progress
-                let assistant_msg =
-                    Message::new(session_id, Role::Assistant, assistant_parts);
+                let assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
                 self.session_manager
                     .storage()
                     .create_message(&assistant_msg)?;
@@ -336,6 +354,7 @@ impl SessionProcessor {
             }
 
             // Call LLM
+            let llm_request_start = std::time::Instant::now();
             let mut stream = match client.chat(request).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -391,8 +410,17 @@ impl SessionProcessor {
                             tc.args_json.push_str(&args_json);
                         }
                     }
-                    StreamEvent::ToolCallEnd { id: _ } => {
-                        // Will be processed after stream ends
+                    StreamEvent::ToolCallEnd { id } => {
+                        // Publish args as soon as they finish streaming so the TUI
+                        // can display the command/path while other tools still stream.
+                        if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                            self.event_bus.publish(Event::ToolCallArgs {
+                                session_id: session_id.to_string(),
+                                call_id: tc.id.clone(),
+                                tool: tc.name.clone(),
+                                args: tc.args_json.clone(),
+                            });
+                        }
                     }
                     StreamEvent::Usage {
                         input_tokens,
@@ -410,6 +438,19 @@ impl SessionProcessor {
                             session_id: session_id.to_string(),
                             error: message,
                         });
+                    }
+                    StreamEvent::RateLimit {
+                        requests_used_pct,
+                        tokens_used_pct,
+                    } => {
+                        // Use requests % preferentially; fall back to tokens %.
+                        let percent = requests_used_pct.or(tokens_used_pct);
+                        if let Some(pct) = percent {
+                            self.event_bus.publish(Event::QuotaUpdate {
+                                session_id: session_id.to_string(),
+                                percent: pct,
+                            });
+                        }
                     }
                     StreamEvent::Finish { reason } => {
                         finish_reason = reason;
@@ -437,6 +478,7 @@ impl SessionProcessor {
                 self.event_bus.publish(Event::ModelResponse {
                     session_id: session_id.to_string(),
                     text: response_preview,
+                    elapsed_ms: llm_request_start.elapsed().as_millis() as u64,
                 });
                 assistant_parts.push(MessagePart::Text {
                     text: text_buffer.clone(),
@@ -456,140 +498,168 @@ impl SessionProcessor {
                 });
             }
 
-            // Execute tool calls
+            // Execute tool calls in parallel (max 5 concurrent)
             let mut tool_result_parts: Vec<ContentPart> = Vec::new();
-            for tc in &tool_calls {
-                let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
-                    warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
-                    json!({})
-                });
+            
+            // Process in chunks of MAX_PARALLEL_TOOLS
+            for chunk in tool_calls.chunks(MAX_PARALLEL_TOOLS) {
+                let mut futures = Vec::new();
+                
+                for tc in chunk {
+                    let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
+                        warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
+                        json!({})
+                    });
 
-                // Send full args to the TUI so it can parse input fields
-                // (path, command, etc.) even for tools with large content.
-                self.event_bus.publish(Event::ToolCallArgs {
-                    session_id: session_id.to_string(),
-                    call_id: tc.id.clone(),
-                    tool: tc.name.clone(),
-                    args: tc.args_json.clone(),
-                });
+                    assistant_content_parts.push(ContentPart::ToolUse {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        input: input.clone(),
+                    });
 
-                assistant_content_parts.push(ContentPart::ToolUse {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    input: input.clone(),
-                });
+                    let tool_ctx = ToolContext {
+                        session_id: session_id.to_string(),
+                        working_dir: working_dir.clone(),
+                        event_bus: self.event_bus.clone(),
+                        storage: Some(self.session_manager.storage().clone()),
+                        task_manager: self.task_manager.get().cloned(),
+                        lsp_manager: self.lsp_manager.get().cloned(),
+                        active_model: Some(model_ref.clone()),
+                        team_context: None,
+                        team_manager: self
+                            .team_manager
+                            .get()
+                            .cloned()
+                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                    };
 
-                let start = Instant::now();
-                let tool_ctx = ToolContext {
-                    session_id: session_id.to_string(),
-                    working_dir: working_dir.clone(),
-                    event_bus: self.event_bus.clone(),
-                    storage: Some(self.session_manager.storage().clone()),
-                    task_manager: self.task_manager.get().cloned(),
-                    lsp_manager: self.lsp_manager.get().cloned(),
-                    active_model: Some(model_ref.clone()),
-                };
+                    let tc_clone = tc.clone();
+                    let registry = self.tool_registry.clone();
+                    let event_bus = self.event_bus.clone();
+                    let session_id_str = session_id.to_string();
+                    
+                    // Spawn each tool execution as a future
+                    let fut = tokio::spawn(async move {
+                        let start = Instant::now();
+                        
+                        let result = registry
+                            .get(&tc_clone.name)
+                            .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
+                        let result = match result {
+                            Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
+                            Err(e) => Err(e),
+                        };
+                        let duration_ms = start.elapsed().as_millis() as u64;
 
-                let result = self
-                    .tool_registry
-                    .get(&tc.name)
-                    .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc.name));
-                let result = match result {
-                    Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
-                    Err(e) => Err(e),
-                };
-                let duration_ms = start.elapsed().as_millis() as u64;
+                        let (output_value, error) = match &result {
+                            Ok(output) => (Some(json!(output.content)), None),
+                            Err(e) => (None, Some(e.to_string())),
+                        };
 
-                let (output_value, error) = match &result {
-                    Ok(output) => (Some(json!(output.content)), None),
-                    Err(e) => (None, Some(e.to_string())),
-                };
+                        let status = if result.is_ok() {
+                            ToolCallStatus::Completed
+                        } else {
+                            ToolCallStatus::Error
+                        };
+                        let success = status == ToolCallStatus::Completed;
 
-                let status = if result.is_ok() {
-                    ToolCallStatus::Completed
-                } else {
-                    ToolCallStatus::Error
-                };
-                let success = status == ToolCallStatus::Completed;
+                        event_bus.publish(Event::ToolCallEnd {
+                            session_id: session_id_str.clone(),
+                            call_id: tc_clone.id.clone(),
+                            tool: tc_clone.name.clone(),
+                            error: error.clone(),
+                            duration_ms,
+                        });
 
-                self.event_bus.publish(Event::ToolCallEnd {
-                    session_id: session_id.to_string(),
-                    call_id: tc.id.clone(),
-                    tool: tc.name.clone(),
-                    error: error.clone(),
-                    duration_ms,
-                });
+                        let result_content = match &result {
+                            Ok(output) => output.content.clone(),
+                            Err(e) => format!("Error: {}", e),
+                        };
 
-                assistant_parts.push(MessagePart::ToolCall {
-                    tool: tc.name.clone(),
-                    call_id: tc.id.clone(),
-                    state: ToolCallState {
-                        status,
-                        input,
-                        output: output_value,
-                        error,
-                        duration_ms: Some(duration_ms),
-                    },
-                });
+                        // Use metadata "lines" field when available (e.g. write/edit
+                        // tools report the actual file line count there), otherwise
+                        // fall back to counting lines in the result content.
+                        let content_line_count = result
+                            .as_ref()
+                            .ok()
+                            .and_then(|o| o.metadata.as_ref())
+                            .and_then(|m| m.get("lines"))
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n as usize)
+                            .unwrap_or_else(|| result_content.lines().count());
 
-                let result_content = match &result {
-                    Ok(output) => output.content.clone(),
-                    Err(e) => format!("Error: {}", e),
-                };
+                        // Log the tool result (truncate at a char boundary)
+                        let result_preview = if result_content.len() > 200 {
+                            let end = result_content
+                                .char_indices()
+                                .map(|(i, _)| i)
+                                .take_while(|&i| i <= 200)
+                                .last()
+                                .unwrap_or(0);
+                            format!("{}…", &result_content[..end])
+                        } else {
+                            result_content.clone()
+                        };
+                        let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
 
-                // Use metadata "lines" field when available (e.g. write/edit
-                // tools report the actual file line count there), otherwise
-                // fall back to counting lines in the result content.
-                let content_line_count = result
-                    .as_ref()
-                    .ok()
-                    .and_then(|o| o.metadata.as_ref())
-                    .and_then(|m| m.get("lines"))
-                    .and_then(|v| v.as_u64())
-                    .map(|n| n as usize)
-                    .unwrap_or_else(|| result_content.lines().count());
+                        event_bus.publish(Event::ToolResult {
+                            session_id: session_id_str,
+                            call_id: tc_clone.id.clone(),
+                            tool: tc_clone.name.clone(),
+                            content: result_preview,
+                            content_line_count,
+                            metadata: tool_metadata.clone(),
+                            success,
+                        });
 
-                // Log the tool result (truncate at a char boundary)
-                let result_preview = if result_content.len() > 200 {
-                    let end = result_content
-                        .char_indices()
-                        .map(|(i, _)| i)
-                        .take_while(|&i| i <= 200)
-                        .last()
-                        .unwrap_or(0);
-                    format!("{}…", &result_content[..end])
-                } else {
-                    result_content.clone()
-                };
-                let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
+                        // Return all the info we need to reconstruct state
+                        (tc_clone, input, status, output_value, error, duration_ms, result_content, tool_metadata)
+                    });
+                    
+                    futures.push(fut);
+                }
 
-                self.event_bus.publish(Event::ToolResult {
-                    session_id: session_id.to_string(),
-                    call_id: tc.id.clone(),
-                    tool: tc.name.clone(),
-                    content: result_preview,
-                    content_line_count,
-                    metadata: tool_metadata,
-                    success,
-                });
+                // Wait for this chunk to complete
+                let results = futures::future::join_all(futures).await;
+                
+                // Process results in order
+                for result in results {
+                    match result {
+                        Ok((tc, input, status, output_value, error, duration_ms, result_content, tool_metadata)) => {
+                            assistant_parts.push(MessagePart::ToolCall {
+                                tool: tc.name.clone(),
+                                call_id: tc.id.clone(),
+                                state: ToolCallState {
+                                    status,
+                                    input,
+                                    output: output_value,
+                                    error,
+                                    duration_ms: Some(duration_ms),
+                                },
+                            });
 
-                tool_result_parts.push(ContentPart::ToolResult {
-                    tool_use_id: tc.id.clone(),
-                    content: result_content,
-                });
+                            tool_result_parts.push(ContentPart::ToolResult {
+                                tool_use_id: tc.id.clone(),
+                                content: result_content,
+                            });
 
-                // Check if a tool requested an agent switch or restore
-                if let Some(meta) = result
-                    .as_ref()
-                    .ok()
-                    .and_then(|o| o.metadata.as_ref())
-                {
-                    if meta.get("agent_switch").is_some()
-                        || meta.get("agent_restore").is_some()
-                    {
-                        agent_switch_requested = true;
-                        break;
+                            // Check if a tool requested an agent switch or restore
+                            if let Some(meta) = tool_metadata.as_ref() {
+                                if meta.get("agent_switch").is_some() || meta.get("agent_restore").is_some() {
+                                    agent_switch_requested = true;
+                                    break;
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            warn!(error = %e, "Tool execution task panicked");
+                        }
                     }
+                }
+                
+                // If agent switch was requested, stop processing further chunks
+                if agent_switch_requested {
+                    break;
                 }
             }
 
@@ -719,6 +789,7 @@ impl SessionProcessor {
     }
 }
 
+#[derive(Clone)]
 struct PendingToolCall {
     id: String,
     name: String,
@@ -758,9 +829,7 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 .parts
                 .iter()
                 .filter_map(|part| match part {
-                    MessagePart::ToolCall {
-                        call_id, state, ..
-                    } => {
+                    MessagePart::ToolCall { call_id, state, .. } => {
                         let result_text = state
                             .output
                             .as_ref()

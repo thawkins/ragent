@@ -4,7 +4,7 @@
 //! Background tasks publish [`Event::SubagentComplete`] when finished.
 
 use anyhow::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -24,6 +24,9 @@ impl Tool for NewTaskTool {
         "new_task"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Spawn a sub-agent to perform a focused task. Supports synchronous (blocking) \
          and background (non-blocking) modes. Use agent names like 'explore', 'build', \
@@ -59,6 +62,10 @@ impl Tool for NewTaskTool {
         "agent:spawn"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if required parameters `agent` or `task` are missing,
+    /// if the TaskManager has not been initialized, or if task spawning fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let agent = input
             .get("agent")
@@ -83,20 +90,17 @@ impl Tool for NewTaskTool {
                 // Inherit the parent session's provider/model when no explicit override
                 // is given. This prevents failures when the parent uses a provider
                 // (e.g. copilot) that differs from the sub-agent's hardcoded default.
-                ctx.active_model.as_ref().map(|m| {
-                    format!("{}/{}", m.provider_id, m.model_id)
-                })
+                ctx.active_model
+                    .as_ref()
+                    .map(|m| format!("{}/{}", m.provider_id, m.model_id))
             });
 
-        let task_manager = ctx
-            .task_manager
-            .as_ref()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Sub-agent spawning is not available in this context. \
+        let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Sub-agent spawning is not available in this context. \
                      TaskManager has not been initialised."
-                )
-            })?;
+            )
+        })?;
 
         if background {
             let entry = task_manager

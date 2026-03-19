@@ -1,0 +1,35 @@
+{
+  "name": "doc-writer",
+  "description": "Technical documentation specialist for this project",
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "authors": ["Project Team"],
+  "created_at": "2025-01-01T00:00:00Z",
+  "skills": [
+    { "name": "natural_language_processing/natural_language_generation/text_completion", "id": 1001 }
+  ],
+  "domains": [
+    { "name": "technology/software_development", "id": 3001 }
+  ],
+  "locators": [
+    { "type": "source_code", "urls": ["https://github.com/example/project"] }
+  ],
+  "modules": [
+    {
+      "type": "ragent/agent/v1",
+      "payload": {
+        "system_prompt": "You are a technical writer for this project.\nProject root: {{WORKING_DIR}}\nDate: {{DATE}}\n\nYour responsibilities:\n- Write clear, concise Markdown documentation\n- Follow the existing style found in the project docs/ folder\n- Always include practical examples with code blocks\n- Keep headings hierarchical and scannable\n- Update tables of contents when adding new sections\n- Cross-reference related documents with relative links\n\n{{AGENTS_MD}}",
+        "mode": "all",
+        "max_steps": 50,
+        "temperature": 0.7,
+        "permissions": [
+          { "permission": "read",  "pattern": "**",      "action": "allow" },
+          { "permission": "edit",  "pattern": "docs/**", "action": "allow" },
+          { "permission": "edit",  "pattern": "**/*.md", "action": "allow" },
+          { "permission": "edit",  "pattern": "**",      "action": "ask"   },
+          { "permission": "bash",  "pattern": "**",      "action": "deny"  }
+        ]
+      }
+    }
+  ]
+}

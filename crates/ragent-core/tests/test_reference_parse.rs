@@ -1,6 +1,6 @@
 //! External tests for `ragent_core::reference::parse`.
 
-use ragent_core::reference::parse::{parse_refs, FileRef};
+use ragent_core::reference::parse::{FileRef, parse_refs};
 
 #[test]
 fn test_parse_simple_file_ref() {
@@ -115,5 +115,8 @@ fn test_parse_empty_input() {
 #[test]
 fn test_parse_at_alone() {
     let refs = parse_refs("@ ");
-    assert!(refs.is_empty(), "bare @ with no text after should produce no refs");
+    assert!(
+        refs.is_empty(),
+        "bare @ with no text after should produce no refs"
+    );
 }

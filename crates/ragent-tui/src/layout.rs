@@ -47,6 +47,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ScreenMode::Home => render_home(frame, app),
         ScreenMode::Chat => render_chat(frame, app),
     }
+    // History picker overlay — rendered on top of everything.
+    if app.history_picker.is_some() {
+        render_history_picker(frame, app);
+    }
 }
 
 /// Apply a visual highlight to cells within the active text selection.
@@ -190,7 +194,8 @@ fn render_logo(frame: &mut Frame, area: Rect) {
     frame.render_widget(paragraph, centered);
 }
 
-const INPUT_PLACEHOLDER: &str = "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
+const INPUT_PLACEHOLDER: &str =
+    "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
 
 fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
     let max_width = 88u16.min(area.width.saturating_sub(4));
@@ -205,14 +210,20 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
         let names: Vec<String> = app
             .pending_attachments
             .iter()
-            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(|s| format!("📎{s}")))
+            .filter_map(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| format!("📎{s}"))
+            })
             .collect();
         format!(" Ask anything…  {} ", names.join("  "))
     };
     let title_style = if app.pending_attachments.is_empty() {
         Style::default().fg(Color::DarkGray)
     } else {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     };
 
     let block = Block::default()
@@ -398,7 +409,14 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     "*".repeat(char_count)
                 } else {
                     let first4: String = key_input.chars().take(4).collect();
-                    let last4: String = key_input.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+                    let last4: String = key_input
+                        .chars()
+                        .rev()
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
                     format!("{}…{}", first4, last4)
                 }
             };
@@ -505,7 +523,16 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     Style::default().fg(Color::DarkGray),
                 )));
             } else {
-                for (i, (_mid, mname)) in models.iter().enumerate() {
+                let max_visible = area.height.saturating_sub(6) as usize;
+                let visible = max_visible.max(1).min(models.len());
+                let start = if *selected >= visible {
+                    (*selected + 1).saturating_sub(visible)
+                } else {
+                    0
+                };
+                let end = (start + visible).min(models.len());
+
+                for (i, (_mid, mname)) in models.iter().enumerate().skip(start).take(end - start) {
                     let (indicator, style) = if i == *selected {
                         (
                             "▸ ",
@@ -520,6 +547,19 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                         Span::styled(indicator, style),
                         Span::styled(mname.as_str(), style),
                     ]));
+                }
+
+                if models.len() > visible {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        format!(
+                            "Showing {}-{} of {}",
+                            start + 1,
+                            end,
+                            models.len()
+                        ),
+                        Style::default().fg(Color::DarkGray),
+                    )));
                 }
             }
 
@@ -586,7 +626,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 Line::from(""),
             ];
 
-            for (i, (name, desc)) in agents.iter().enumerate() {
+            for (i, (name, desc, is_custom)) in agents.iter().enumerate() {
                 let is_current = i == app.current_agent_index;
                 let (indicator, style) = if i == *selected {
                     (
@@ -599,14 +639,21 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     ("  ", Style::default().fg(Color::White))
                 };
                 let current_marker = if is_current { " ●" } else { "" };
-                lines.push(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(indicator, style),
                     Span::styled(name.as_str(), style),
-                    Span::styled(
-                        format!("  {}{}", desc, current_marker),
-                        Style::default().fg(Color::DarkGray),
-                    ),
-                ]));
+                ];
+                if *is_custom {
+                    spans.push(Span::styled(
+                        " [custom]",
+                        Style::default().fg(Color::Yellow),
+                    ));
+                }
+                spans.push(Span::styled(
+                    format!("  {}{}", desc, current_marker),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                lines.push(Line::from(spans));
             }
 
             lines.push(Line::from(""));
@@ -749,11 +796,7 @@ fn render_slash_menu(frame: &mut Frame, app: &App, input_area: Rect) {
 
     // Scroll indicator in border title when list is scrolled.
     let title = if total > visible_rows {
-        format!(
-            " {}/{} ",
-            menu.selected + 1,
-            menu.matches.len()
-        )
+        format!(" {}/{} ", menu.selected + 1, menu.matches.len())
     } else {
         String::new()
     };
@@ -814,11 +857,15 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         ]));
     }
 
-    let title = format!(" @{} ", menu.query);
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+          let title = if let Some(ref dir) = menu.current_dir {
+              format!(" @{}/ ", dir.to_string_lossy())
+          } else {
+              format!(" @{} ", menu.query)
+          };
+          let block = Block::default()
+              .title(title)
+              .borders(Borders::ALL)
+              .border_style(Style::default().fg(Color::DarkGray));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup);
@@ -1002,70 +1049,121 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(
-            " Log ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
+      let block = Block::default()
+          .borders(Borders::ALL)
+          .border_style(Style::default().fg(Color::DarkGray))
+          .title(Span::styled(
+              " Log ",
+              Style::default()
+                  .fg(Color::Yellow)
+                  .add_modifier(Modifier::BOLD),
+          ));
 
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+      let inner = block.inner(area);
+      frame.render_widget(block, area);
 
-    // Reserve 8 rows at the bottom for the active-agents subpanel.
-    // The log content gets the remaining height above it.
-    const AGENT_PANEL_HEIGHT: u16 = 8;
-    let (log_inner, agent_area_opt) = if inner.height > AGENT_PANEL_HEIGHT + 1 {
-        let log_h = inner.height - AGENT_PANEL_HEIGHT;
-        (
-            Rect { height: log_h, ..inner },
-            Some(Rect { y: inner.y + log_h, height: AGENT_PANEL_HEIGHT, ..inner }),
-        )
-    } else {
-        (inner, None)
-    };
+      // Reserve rows at the bottom for subpanels (agents and/or teams).
+      const AGENT_PANEL_HEIGHT: u16 = 8;
+      const TEAMS_PANEL_HEIGHT: u16 = 8;
+      let show_agents = !app.active_tasks.is_empty();
+      let show_teams = app.active_team.is_some();
+      let subpanel_height = match (show_agents, show_teams) {
+          (true, true)  => AGENT_PANEL_HEIGHT + TEAMS_PANEL_HEIGHT,
+          (true, false) => AGENT_PANEL_HEIGHT,
+          (false, true) => TEAMS_PANEL_HEIGHT,
+          (false, false) => 0,
+      };
 
-    if app.log_entries.is_empty() {
-        app.log_max_scroll = 0;
-        let empty = Paragraph::new(Line::from(Span::styled(
-            "No log entries yet",
-            Style::default().fg(Color::DarkGray),
-        )));
-        frame.render_widget(empty, log_inner);
-        if let Some(agent_area) = agent_area_opt {
-            render_active_agents_subpanel(frame, app, agent_area);
-        }
-        return;
-    }
+      let (log_inner, subpanel_area_opt) = if subpanel_height > 0 && inner.height > subpanel_height + 1 {
+          let log_h = inner.height - subpanel_height;
+          (
+              Rect { height: log_h, ..inner },
+              Some(Rect { y: inner.y + log_h, height: subpanel_height, ..inner }),
+          )
+      } else {
+          (inner, None)
+      };
 
-    // Build lines from log entries
-    let lines: Vec<Line> = app
-        .log_entries
-        .iter()
-        .map(|entry| {
-            let ts = entry.timestamp.format("%H:%M:%S");
-            let (level_str, level_color) = match entry.level {
-                LogLevel::Info => ("INF", Color::Blue),
-                LogLevel::Tool => ("TUL", Color::Cyan),
-                LogLevel::Warn => ("WRN", Color::Yellow),
-                LogLevel::Error => ("ERR", Color::Red),
-            };
-            Line::from(vec![
-                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("{level_str} "),
-                    Style::default()
-                        .fg(level_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(&entry.message),
-            ])
-        })
-        .collect();
+      // Derive per-subpanel areas from the combined subpanel area.
+      let (agent_area_opt, teams_area_opt) = if let Some(sub) = subpanel_area_opt {
+          match (show_agents, show_teams) {
+              (true, true) => (
+                  Some(Rect { height: AGENT_PANEL_HEIGHT, ..sub }),
+                  Some(Rect { y: sub.y + AGENT_PANEL_HEIGHT, height: TEAMS_PANEL_HEIGHT, ..sub }),
+              ),
+              (true, false) => (Some(sub), None),
+              (false, true) => (None, Some(sub)),
+              (false, false) => (None, None),
+          }
+      } else {
+          (None, None)
+      };
 
+      // Determine which session to display logs for.
+      // If a specific agent is selected, show its logs; otherwise show primary session.
+      let display_session = app
+          .selected_agent_session_id
+          .clone()
+          .or_else(|| app.session_id.clone());
+
+      // Filter log entries to the selected agent's session.
+      let filtered_entries: Vec<_> = app
+          .log_entries
+          .iter()
+          .filter(|entry| {
+              // Show entries matching the display session, or entries with no session_id set.
+              entry.session_id.as_ref() == display_session.as_ref()
+                  || (entry.session_id.is_none() && display_session == app.session_id)
+          })
+          .collect();
+
+      if filtered_entries.is_empty() {
+          app.log_max_scroll = 0;
+          let empty = Paragraph::new(Line::from(Span::styled(
+              "No log entries yet",
+              Style::default().fg(Color::DarkGray),
+          )));
+          frame.render_widget(empty, log_inner);
+          if let Some(agent_area) = agent_area_opt {
+              render_active_agents_subpanel(frame, app, agent_area);
+          }
+          if let Some(teams_area) = teams_area_opt {
+              crate::layout_teams::render_teams_subpanel(frame, app, teams_area);
+          }
+          return;
+      }
+
+      // Build lines from filtered log entries
+      let lines: Vec<Line> = filtered_entries
+          .iter()
+          .map(|entry| {
+              let ts = entry.timestamp.format("%H:%M:%S");
+                              // If this is a compaction start/end/trigger message, render it in bright green
+                              let msg_lower = entry.message.to_lowercase();
+                              let is_compaction_highlight = msg_lower.contains("compaction") && (msg_lower.contains("started") || msg_lower.contains("completed") || msg_lower.contains("triggered"));
+              
+                                              let (level_str, level_color) = if is_compaction_highlight {
+                                                  ("CMP", Color::LightGreen)
+                                              } else {
+                                                  match entry.level {
+                                                      LogLevel::Info => ("INF", Color::Blue),
+                                                      LogLevel::Tool => ("TUL", Color::Cyan),
+                                                      LogLevel::Warn => ("WRN", Color::Yellow),
+                                                      LogLevel::Error => ("ERR", Color::Red),
+                                                  }
+                                              };
+              Line::from(vec![
+                  Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+                  Span::styled(
+                      format!("{level_str} "),
+                      Style::default()
+                          .fg(level_color)
+                          .add_modifier(Modifier::BOLD),
+                  ),
+                  Span::raw(&entry.message),
+              ])
+          })
+          .collect();
     // Cache plain-text content for text selection copy
     app.log_content_lines = lines
         .iter()
@@ -1077,8 +1175,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
 
     // Use the rendered (wrapped) line count so the scroll reaches the true
     // bottom. `line_count(width)` accounts for word-wrapping; `lines.len()`
@@ -1103,12 +1200,14 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
     }
 
-    // Render active-agents subpanel in the reserved bottom area
+    // Render subpanels in the reserved bottom area.
     if let Some(agent_area) = agent_area_opt {
         render_active_agents_subpanel(frame, app, agent_area);
     }
+    if let Some(teams_area) = teams_area_opt {
+        crate::layout_teams::render_teams_subpanel(frame, app, teams_area);
+    }
 }
-
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let session_display = app
@@ -1186,21 +1285,25 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     // Usage percentage / plan label (top-right of status bar).
     {
         let (usage_text, is_unknown) = app.usage_display();
-        let usage_style = if is_unknown {
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
+        // Colour-code by quota level: green < 80%, yellow < 95%, red >= 95%, grey if unknown.
+        let fg = if is_unknown {
+            Color::White
+        } else if let Some(q) = app.quota_percent {
+            if q >= 95.0 {
+                Color::Red
+            } else if q >= 80.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            }
         } else {
-            Style::default()
-                .fg(Color::Green)
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
+            Color::Green
         };
-        right_parts.push(Span::styled(
-            format!("  [{}]", usage_text),
-            usage_style,
-        ));
+        let usage_style = Style::default()
+            .fg(fg)
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD);
+        right_parts.push(Span::styled(format!("  [{}]", usage_text), usage_style));
     }
 
     if !app.active_tasks.is_empty() {
@@ -1265,10 +1368,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
-    let mut lines: Vec<Line<'_>> = Vec::new();
+      let mut lines: Vec<Line<'_>> = Vec::new();
 
-    for msg in &app.messages {
-        for part in &msg.parts {
+      // Determine which session to display messages for.
+      // If a specific agent is selected, show its messages; otherwise show primary session.
+      let _display_session = app
+          .selected_agent_session_id
+          .clone()
+          .or_else(|| app.session_id.clone());
+
+      // Filter messages to the selected agent's session.
+      // For now, messages are still stored globally, so we match by session_id if available.
+      // TODO: Implement proper multi-session message storage to filter by _display_session.
+      // This is a placeholder for future multi-session message handling.
+      let messages_to_show = &app.messages;
+
+      for msg in messages_to_show {        for part in &msg.parts {
             match part {
                 MessagePart::Text { text } => {
                     let (dot, dot_style, indent) = match msg.role {
@@ -1302,7 +1417,11 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                         }
                     }
                 }
-                MessagePart::ToolCall { tool, call_id, state } => {
+                MessagePart::ToolCall {
+                    tool,
+                    call_id,
+                    state,
+                } => {
                     let step_tag = app
                         .tool_step_map
                         .get(call_id)
@@ -1319,9 +1438,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                         ToolCallStatus::Error => (
                             "✗ ",
                             Style::default().fg(Color::Red),
-                            Style::default()
-                                .fg(Color::Red)
-                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Running | ToolCallStatus::Pending => (
                             "● ",
@@ -1412,10 +1529,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     }
                 }
                 MessagePart::Image { path, .. } => {
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("image");
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),
                         Style::default().fg(Color::Yellow),
@@ -1481,12 +1595,18 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         let names: Vec<String> = app
             .pending_attachments
             .iter()
-            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(|s| format!("📎{s}")))
+            .filter_map(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|s| format!("📎{s}"))
+            })
             .collect();
         format!(" Input  {} ", names.join("  "))
     };
 
-    let attachment_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let attachment_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(Span::styled(title, attachment_style));
@@ -1508,8 +1628,9 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
 
-        // Position cursor accounting for wrapped lines
-        let cursor_pos = app.input.len() + 2; // "> " prefix
+        // Position cursor accounting for wrapped lines.
+        // Use the character index (not byte length) so unicode content behaves.
+        let cursor_pos = app.input_cursor + 2; // "> " prefix
         let cursor_line = cursor_pos / inner_width;
         let cursor_col = cursor_pos % inner_width;
         let cursor_x = area.x + 1 + cursor_col as u16;
@@ -1521,25 +1642,28 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 /// All documented keybindings: (keys column, description column).
 const KEYBINDINGS: &[(&str, &str)] = &[
     // ── Typing ──────────────────────────────────────────────────────────
-    ("@",                    "Mention a file — opens file picker"),
-    ("/",                    "Slash command — opens command menu"),
-    ("?",                    "Show this keybindings help panel"),
-    ("Alt+V",                "Paste image from clipboard as attachment"),
+    ("@", "Mention a file — opens file picker"),
+    ("/", "Slash command — opens command menu"),
+    ("?", "Show this keybindings help panel"),
+    ("Left/Right", "Move cursor within the input line"),
+    ("Home/End", "Jump to start/end of input"),
+    ("Delete", "Delete character under cursor"),
+    ("Alt+V", "Paste image from clipboard as attachment"),
     // ── Sending ─────────────────────────────────────────────────────────
-    ("Enter",                "Send message / confirm"),
-    ("Ctrl+C",               "Quit application"),
+    ("Enter", "Send message / confirm"),
+    ("Ctrl+C", "Quit application"),
     // ── Navigation ──────────────────────────────────────────────────────
-    ("Shift+↑ / PageUp",     "Scroll messages up"),
-    ("Shift+↓ / PageDown",   "Scroll messages down"),
-    ("↑ / ↓",                "Browse input history"),
-    ("Ctrl+PageUp",          "Scroll log panel up"),
-    ("Ctrl+PageDown",        "Scroll log panel down"),
+    ("Shift+↑ / PageUp", "Scroll messages up"),
+    ("Shift+↓ / PageDown", "Scroll messages down"),
+    ("↑ / ↓", "Browse input history"),
+    ("Ctrl+PageUp", "Scroll log panel up"),
+    ("Ctrl+PageDown", "Scroll log panel down"),
     // ── Agent ────────────────────────────────────────────────────────────
-    ("Tab",                  "Cycle to next agent"),
-    ("Esc",                  "Cancel running agent (while processing)"),
+    ("Tab", "Cycle to next agent"),
+    ("Esc", "Cancel running agent (while processing)"),
     // ── Dialogs ──────────────────────────────────────────────────────────
-    ("Esc",                  "Close any open dialog or menu"),
-    ("y / a / n",            "Allow / Always / Deny permission request"),
+    ("Esc", "Close any open dialog or menu"),
+    ("y / a / n", "Allow / Always / Deny permission request"),
 ];
 
 fn render_shortcuts_panel(frame: &mut Frame) {
@@ -1622,7 +1746,12 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
     let x = menu.x.min(full.width.saturating_sub(w));
     let y = menu.y.min(full.height.saturating_sub(h));
 
-    let area = Rect { x, y, width: w, height: h };
+    let area = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
     frame.render_widget(Clear, area);
 
     let enabled_style = Style::default().fg(Color::White);
@@ -1632,21 +1761,26 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
         .bg(Color::White)
         .add_modifier(Modifier::BOLD);
 
-    let lines: Vec<Line<'_>> = menu.items.iter().enumerate().map(|(idx, &(action, enabled))| {
-        let label = match action {
-            ContextAction::Cut => "Cut",
-            ContextAction::Copy => "Copy",
-            ContextAction::Paste => "Paste",
-        };
-        let padded = format!(" {:<8}", label);
-        if idx == menu.selected && enabled {
-            Line::from(Span::styled(padded, selected_style))
-        } else if enabled {
-            Line::from(Span::styled(padded, enabled_style))
-        } else {
-            Line::from(Span::styled(padded, disabled_style))
-        }
-    }).collect();
+    let lines: Vec<Line<'_>> = menu
+        .items
+        .iter()
+        .enumerate()
+        .map(|(idx, &(action, enabled))| {
+            let label = match action {
+                ContextAction::Cut => "Cut",
+                ContextAction::Copy => "Copy",
+                ContextAction::Paste => "Paste",
+            };
+            let padded = format!(" {:<8}", label);
+            if idx == menu.selected && enabled {
+                Line::from(Span::styled(padded, selected_style))
+            } else if enabled {
+                Line::from(Span::styled(padded, enabled_style))
+            } else {
+                Line::from(Span::styled(padded, disabled_style))
+            }
+        })
+        .collect();
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1735,20 +1869,20 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         )));
     } else {
         // Load current config once so we can flag already-enabled servers.
-        let enabled_ids: std::collections::HashSet<String> =
-            ragent_core::config::Config::load()
-                .map(|c| c.lsp.into_keys().collect())
-                .unwrap_or_default();
+        let enabled_ids: std::collections::HashSet<String> = ragent_core::config::Config::load()
+            .map(|c| c.lsp.into_keys().collect())
+            .unwrap_or_default();
 
         // Column header
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {:<3}  {:<18}  {:<24}  {}", "#", "Name", "Extensions", "Executable"),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+        lines.push(Line::from(vec![Span::styled(
+            format!(
+                "  {:<3}  {:<18}  {:<24}  {}",
+                "#", "Name", "Extensions", "Executable"
             ),
-        ]));
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]));
         lines.push(Line::from(Span::styled(
             format!("  {}", "─".repeat(70)),
             Style::default().fg(Color::DarkGray),
@@ -1760,7 +1894,11 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
             let exts = srv.extensions.join(", ");
             let exe = {
                 let s = srv.executable.to_string_lossy();
-                if s.len() > 28 { format!("…{}", &s[s.len().saturating_sub(27)..]) } else { s.into_owned() }
+                if s.len() > 28 {
+                    format!("…{}", &s[s.len().saturating_sub(27)..])
+                } else {
+                    s.into_owned()
+                }
             };
             let (num_color, name_color, ext_color, exe_color) = if already_enabled {
                 // Yellow tones for already-configured servers
@@ -1778,14 +1916,8 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
                     format!("  {:<18}", format!("{}{}", srv.id, enabled_tag)),
                     Style::default().fg(name_color),
                 ),
-                Span::styled(
-                    format!("  {:<24}", exts),
-                    Style::default().fg(ext_color),
-                ),
-                Span::styled(
-                    format!("  {}", exe),
-                    Style::default().fg(exe_color),
-                ),
+                Span::styled(format!("  {:<24}", exts), Style::default().fg(ext_color)),
+                Span::styled(format!("  {}", exe), Style::default().fg(exe_color)),
             ]));
         }
 
@@ -1799,7 +1931,11 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
 
     // Feedback line (error or success)
     if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with('✓') { Color::Green } else { Color::Red };
+        let color = if msg.starts_with('✓') {
+            Color::Green
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(Span::styled(
             format!("  {msg}"),
             Style::default().fg(color),
@@ -1815,10 +1951,7 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         )));
     } else {
         lines.push(Line::from(vec![
-            Span::styled(
-                "  Enable server #: ",
-                Style::default().fg(Color::White),
-            ),
+            Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
             Span::styled(
                 state.number_input.as_str(),
                 Style::default()
@@ -1889,20 +2022,17 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         )));
     } else {
         // Load current config once so we can flag already-enabled servers.
-        let enabled_ids: std::collections::HashSet<String> =
-            ragent_core::config::Config::load()
-                .map(|c| c.mcp.into_keys().collect())
-                .unwrap_or_default();
+        let enabled_ids: std::collections::HashSet<String> = ragent_core::config::Config::load()
+            .map(|c| c.mcp.into_keys().collect())
+            .unwrap_or_default();
 
         // Column header
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {:<3}  {:<20}  {:<40}  {}", "#", "ID", "Name", "Source"),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {:<3}  {:<20}  {:<40}  {}", "#", "ID", "Name", "Source"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]));
         lines.push(Line::from(Span::styled(
             format!("  {}", "─".repeat(80)),
             Style::default().fg(Color::DarkGray),
@@ -1919,7 +2049,9 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
             let source = match &srv.source {
                 ragent_core::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
                 ragent_core::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),
-                ragent_core::mcp::McpDiscoverySource::McpRegistry { .. } => "MCP registry".to_string(),
+                ragent_core::mcp::McpDiscoverySource::McpRegistry { .. } => {
+                    "MCP registry".to_string()
+                }
             };
             let (num_color, id_color, name_color, source_color) = if already_enabled {
                 // Yellow tones for already-configured servers
@@ -1937,14 +2069,8 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
                     format!("  {:<20}", format!("{}{}", srv.id, enabled_tag)),
                     Style::default().fg(id_color),
                 ),
-                Span::styled(
-                    format!("  {:<40}", name),
-                    Style::default().fg(name_color),
-                ),
-                Span::styled(
-                    format!("  {}", source),
-                    Style::default().fg(source_color),
-                ),
+                Span::styled(format!("  {:<40}", name), Style::default().fg(name_color)),
+                Span::styled(format!("  {}", source), Style::default().fg(source_color)),
             ]));
         }
 
@@ -1958,7 +2084,11 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
 
     // Feedback line (error or success)
     if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with('✓') { Color::Green } else { Color::Red };
+        let color = if msg.starts_with('✓') {
+            Color::Green
+        } else {
+            Color::Red
+        };
         lines.push(Line::from(Span::styled(
             format!("  {msg}"),
             Style::default().fg(color),
@@ -1974,10 +2104,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         )));
     } else {
         lines.push(Line::from(vec![
-            Span::styled(
-                "  Enable server #: ",
-                Style::default().fg(Color::White),
-            ),
+            Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
             Span::styled(
                 state.number_input.as_str(),
                 Style::default()
@@ -2020,4 +2147,87 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Render the `/history` picker overlay.
+fn render_history_picker(frame: &mut Frame, app: &App) {
+    use ratatui::widgets::List;
+    use ratatui::widgets::ListItem;
+    use ratatui::widgets::ListState;
+
+    let picker = match &app.history_picker {
+        Some(p) => p,
+        None => return,
+    };
+
+    let area = frame.area();
+    let popup = centered_rect(80, 70, area);
+    frame.render_widget(Clear, popup);
+
+    let visible_height = (popup.height.saturating_sub(2)) as usize; // subtract border
+    let total = picker.entries.len();
+    // Clamp scroll_offset so selected is always visible
+    let scroll_offset = if picker.selected < picker.scroll_offset {
+        picker.selected
+    } else if picker.selected >= picker.scroll_offset + visible_height {
+        picker.selected + 1 - visible_height
+    } else {
+        picker.scroll_offset
+    };
+
+    let items: Vec<ListItem> = picker
+        .entries
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+        .map(|(i, entry)| {
+            let truncated = if entry.len() > (popup.width as usize).saturating_sub(4) {
+                format!("{}…", &entry[..entry
+                    .char_indices()
+                    .map(|(pos, _)| pos)
+                    .take_while(|&pos| pos < (popup.width as usize).saturating_sub(5))
+                    .last()
+                    .unwrap_or(0)])
+            } else {
+                entry.clone()
+            };
+            let style = if i == picker.selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(truncated).style(style)
+        })
+        .collect();
+
+    let title = format!(
+        " History ({} entries) — ↑/↓ navigate · Enter select · Esc close ",
+        total
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let list = List::new(items).block(block);
+    let mut list_state = ListState::default();
+    list_state.select(Some(picker.selected.saturating_sub(scroll_offset)));
+    frame.render_stateful_widget(list, popup, &mut list_state);
+
+    // Scrollbar
+    if total > visible_height {
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
+        let mut sb_state = ScrollbarState::new(total).position(scroll_offset);
+        let sb_area = Rect {
+            x: popup.right().saturating_sub(1),
+            y: popup.y + 1,
+            width: 1,
+            height: popup.height.saturating_sub(2),
+        };
+        frame.render_stateful_widget(scrollbar, sb_area, &mut sb_state);
+    }
 }

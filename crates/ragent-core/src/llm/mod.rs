@@ -60,6 +60,13 @@ pub enum StreamEvent {
         /// Number of tokens in the completion/output.
         output_tokens: u64,
     },
+    /// Rate-limit / quota information from response headers.
+    RateLimit {
+        /// Percentage of request quota consumed (0.0–100.0), if known.
+        requests_used_pct: Option<f32>,
+        /// Percentage of token quota consumed (0.0–100.0), if known.
+        tokens_used_pct: Option<f32>,
+    },
     /// An error reported by the provider.
     Error {
         /// Human-readable error description.

@@ -1,9 +1,15 @@
 # Changelog
 
-## [0.1.0-alpha.17] - 2026-03-17
+## [0.1.0-alpha.18] - 2026-03-19
 
 ### Changed
-- Version bump — no functional changes since 0.1.0-alpha.16
+- Version bump — no functional changes since 0.1.0-alpha.17
+
+### Added
+- 2 major changes highlighted by the user: 1. Custom Agents 2. Agent Teams
+  - Custom Agents: added support for user-defined agents via configuration and dynamic loading; new examples and tests included
+  - Agent Teams: team coordination APIs and TUI panels for managing multi-agent teams; task claiming and messaging tools implemented
+
 
 
 

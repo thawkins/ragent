@@ -40,10 +40,7 @@ pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Pat
     // Order matters: replace longer patterns first to avoid partial matches.
     // 1. ${RAGENT_SESSION_ID} and ${RAGENT_SKILL_DIR} (braced env vars)
     result = result.replace("${RAGENT_SESSION_ID}", session_id);
-    result = result.replace(
-        "${RAGENT_SKILL_DIR}",
-        &skill_dir.display().to_string(),
-    );
+    result = result.replace("${RAGENT_SKILL_DIR}", &skill_dir.display().to_string());
 
     // 2. $ARGUMENTS[N] — indexed argument access (must come before $ARGUMENTS)
     result = substitute_indexed_args(&result, &parsed_args);
@@ -64,6 +61,11 @@ pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Pat
 /// - Double-quoted strings: `"hello world" foo` → `["hello world", "foo"]`
 /// - Single-quoted strings: `'hello world' foo` → `["hello world", "foo"]`
 /// - Empty string returns an empty vec
+///
+/// # Errors
+///
+/// This function does not return errors. Malformed quotes (e.g., unclosed quotes)
+/// are handled by consuming characters until the end of the input.
 ///
 /// # Examples
 ///
@@ -218,10 +220,7 @@ mod tests {
 
     #[test]
     fn test_parse_single_quoted() {
-        assert_eq!(
-            parse_args("'hello world' foo"),
-            vec!["hello world", "foo"]
-        );
+        assert_eq!(parse_args("'hello world' foo"), vec!["hello world", "foo"]);
     }
 
     #[test]
@@ -296,12 +295,7 @@ mod tests {
 
     #[test]
     fn test_substitute_positional_out_of_bounds() {
-        let result = substitute_args(
-            "Missing: $3",
-            "a b",
-            "s1",
-            Path::new("/skills/deploy"),
-        );
+        let result = substitute_args("Missing: $3", "a b", "s1", Path::new("/skills/deploy"));
         assert_eq!(result, "Missing: ");
     }
 
@@ -376,12 +370,7 @@ mod tests {
 
     #[test]
     fn test_substitute_dollar_not_variable() {
-        let result = substitute_args(
-            "Price is $50 dollars",
-            "args",
-            "s1",
-            Path::new("/skills"),
-        );
+        let result = substitute_args("Price is $50 dollars", "args", "s1", Path::new("/skills"));
         // $5 matches positional $5 (out of bounds → empty), "0" stays
         // Actually $50 is parsed as index 50, which is out of bounds
         assert_eq!(result, "Price is  dollars");
@@ -407,12 +396,7 @@ mod tests {
     #[test]
     fn test_substitute_skill_dir_with_pathbuf() {
         let dir = PathBuf::from("/home/user/.ragent/skills/my-skill");
-        let result = substitute_args(
-            "Script: ${RAGENT_SKILL_DIR}/scripts/run.sh",
-            "",
-            "s1",
-            &dir,
-        );
+        let result = substitute_args("Script: ${RAGENT_SKILL_DIR}/scripts/run.sh", "", "s1", &dir);
         assert_eq!(
             result,
             "Script: /home/user/.ragent/skills/my-skill/scripts/run.sh"

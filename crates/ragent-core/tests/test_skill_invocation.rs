@@ -3,7 +3,7 @@
 //! Covers end-to-end invocation logic, forked skill metadata,
 //! model/tool overrides, and invocation control flags.
 
-use ragent_core::skill::invoke::{invoke_skill, SkillInvocation};
+use ragent_core::skill::invoke::{SkillInvocation, invoke_skill};
 use ragent_core::skill::{SkillContext, SkillInfo, SkillScope};
 use std::path::Path;
 
@@ -43,7 +43,9 @@ fn make_forked_skill(name: &str, body: &str) -> SkillInfo {
 #[tokio::test]
 async fn test_invoke_simple_body() {
     let skill = make_skill("greet", "Hello, welcome to the project!");
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert_eq!(result.content, "Hello, welcome to the project!");
     assert_eq!(result.skill_name, "greet");
     assert!(!result.forked);
@@ -70,7 +72,9 @@ async fn test_invoke_with_all_args() {
 #[tokio::test]
 async fn test_invoke_with_dynamic_context() {
     let skill = make_skill("info", "Version: !`echo v1.0.0`");
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert_eq!(result.content, "Version: v1.0.0");
 }
 
@@ -104,7 +108,9 @@ async fn test_invoke_empty_body() {
 #[tokio::test]
 async fn test_invoke_no_args_needed() {
     let skill = make_skill("static", "Always the same output");
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert_eq!(result.content, "Always the same output");
 }
 
@@ -126,7 +132,9 @@ async fn test_invoke_forked_metadata() {
 #[tokio::test]
 async fn test_invoke_non_forked_no_agent() {
     let skill = make_skill("normal", "Normal body");
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
 
     assert!(!result.forked);
     assert!(result.fork_agent.is_none());
@@ -138,9 +146,14 @@ async fn test_invoke_forked_default_agent() {
     skill.context = Some(SkillContext::Fork);
     // No agent specified — should use default
 
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert!(result.forked);
-    assert!(result.fork_agent.is_none(), "no agent field when not set on skill");
+    assert!(
+        result.fork_agent.is_none(),
+        "no agent field when not set on skill"
+    );
 }
 
 // ── Tool restrictions in invocation ──────────────────────────────
@@ -150,14 +163,18 @@ async fn test_invoke_with_allowed_tools() {
     let mut skill = make_skill("restricted", "Do stuff");
     skill.allowed_tools = vec!["bash".to_string(), "read".to_string()];
 
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert_eq!(result.allowed_tools, vec!["bash", "read"]);
 }
 
 #[tokio::test]
 async fn test_invoke_no_tool_restrictions() {
     let skill = make_skill("unrestricted", "Do anything");
-    let result = invoke_skill(&skill, "", "sess-1", wd()).await.expect("invoke");
+    let result = invoke_skill(&skill, "", "sess-1", wd())
+        .await
+        .expect("invoke");
     assert!(result.allowed_tools.is_empty());
 }
 

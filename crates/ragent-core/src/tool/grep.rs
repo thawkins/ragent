@@ -23,11 +23,11 @@ impl Tool for GrepTool {
         "grep"
     }
 
-    fn description(&self) -> &str {
-        "Search file contents for a pattern. Uses simple string matching. \
-         Returns matching lines with file path and line number."
-    }
-
+        /// Returns a human-readable description of what the tool does.
+        fn description(&self) -> &str {
+            "Search file contents for a pattern. Uses simple string matching. \
+               Returns matching lines with file path and line number."
+        }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -57,6 +57,13 @@ impl Tool for GrepTool {
         "file:read"
     }
 
+    /// Searches file contents for a text pattern.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `pattern` parameter is missing or invalid
+    /// - The search directory cannot be accessed or read
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let pattern = input["pattern"]
             .as_str()
@@ -132,6 +139,12 @@ impl Tool for GrepTool {
     }
 }
 
+/// Recursively searches a directory for files containing a pattern.
+///
+/// # Errors
+///
+/// Returns an error if a directory cannot be accessed due to permission issues.
+/// IO errors on individual files are silently skipped.
 fn search_directory(
     dir: &Path,
     pattern: &str,
@@ -227,6 +240,7 @@ fn search_directory(
     Ok(())
 }
 
+/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {

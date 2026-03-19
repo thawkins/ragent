@@ -9,9 +9,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::{Tool, ToolContext, ToolOutput};
 use super::edit::{FindError, find_replacement_range};
-
+use super::{Tool, ToolContext, ToolOutput};
 
 /// Applies multiple search-and-replace edits across one or more files atomically.
 ///
@@ -34,6 +33,9 @@ impl Tool for MultiEditTool {
         "multiedit"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `edits` array is missing, malformed, or empty.
     fn description(&self) -> &str {
         "Apply multiple edits to one or more files atomically. Each edit replaces \
          exactly one occurrence of old_str with new_str. All edits are validated \
@@ -108,21 +110,31 @@ impl Tool for MultiEditTool {
                 path: resolve_path(&ctx.working_dir, path_str),
                 old_str: old_str.to_string(),
                 new_str: new_str.to_string(),
-            });
-        }
-
-        // Phase 1: Read all target files and validate every edit
-        // Group edits by file path so we apply them sequentially to the same content.
-        let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
-        for op in &ops {
-            if !file_contents.contains_key(&op.path) {
-                let content = tokio::fs::read_to_string(&op.path)
-                    .await
-                    .with_context(|| format!("Failed to read file: {}", op.path.display()))?;
-                file_contents.insert(op.path.clone(), content);
-            }
-        }
-
+                          });
+                      }
+            
+                      // Collect unique paths and acquire locks in sorted order to prevent deadlocks
+                      let mut unique_paths: Vec<PathBuf> = ops.iter().map(|op| op.path.clone()).collect();
+                      unique_paths.sort();
+                      unique_paths.dedup();
+            
+                      // Acquire all file locks before reading/writing
+                      let mut _locks = Vec::new();
+                      for path in &unique_paths {
+                          _locks.push(super::file_lock::lock_file(path).await);
+                      }
+            
+                      // Phase 1: Read all target files and validate every edit
+                      // Group edits by file path so we apply them sequentially to the same content.
+                      let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
+                      for op in &ops {
+                          if !file_contents.contains_key(&op.path) {
+                              let content = tokio::fs::read_to_string(&op.path)
+                                  .await
+                                  .with_context(|| format!("Failed to read file: {}", op.path.display()))?;
+                              file_contents.insert(op.path.clone(), content);
+                          }
+                      }
         // Phase 2: Apply edits in order to in-memory content, validating each
         let mut files_modified: HashMap<PathBuf, usize> = HashMap::new();
         let mut total_edits = 0usize;
@@ -133,23 +145,29 @@ impl Tool for MultiEditTool {
                 .get_mut(&op.path)
                 .expect("file content must exist");
 
-            let (start, end, effective_new_str) = match find_replacement_range(content, &op.old_str, &op.new_str) {
-                Ok(range) => range,
-                Err(FindError::NotFound) => bail!(
-                    "Edit {}: old_str not found in {}. Make sure it matches exactly.",
-                    i,
-                    op.path.display()
-                ),
-                Err(FindError::MultipleMatches(n)) => bail!(
-                    "Edit {}: old_str found {} times in {}. It must match exactly once. \
+            let (start, end, effective_new_str) =
+                match find_replacement_range(content, &op.old_str, &op.new_str) {
+                    Ok(range) => range,
+                    Err(FindError::NotFound) => bail!(
+                        "Edit {}: old_str not found in {}. Make sure it matches exactly.",
+                        i,
+                        op.path.display()
+                    ),
+                    Err(FindError::MultipleMatches(n)) => bail!(
+                        "Edit {}: old_str found {} times in {}. It must match exactly once. \
                      Add more context to make it unique.",
-                    i,
-                    n,
-                    op.path.display()
-                ),
-            };
+                        i,
+                        n,
+                        op.path.display()
+                    ),
+                };
 
-            *content = format!("{}{}{}", &content[..start], effective_new_str, &content[end..]);
+            *content = format!(
+                "{}{}{}",
+                &content[..start],
+                effective_new_str,
+                &content[end..]
+            );
             *files_modified.entry(op.path.clone()).or_insert(0) += 1;
             total_edits += 1;
             total_lines_changed += effective_new_str.lines().count();

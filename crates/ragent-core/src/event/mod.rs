@@ -180,6 +180,8 @@ pub enum Event {
         session_id: String,
         /// The full or truncated text returned by the model.
         text: String,
+        /// Wall-clock time from request sent to stream complete, in milliseconds.
+        elapsed_ms: u64,
     },
     /// A tool call has been fully assembled with its arguments.
     ToolCallArgs {
@@ -216,6 +218,14 @@ pub enum Event {
         /// The plan-specific API base URL discovered during setup.
         api_base: String,
     },
+    /// Rate-limit / quota usage from a provider response.
+    QuotaUpdate {
+        /// Session this update belongs to.
+        session_id: String,
+        /// Quota consumed as a percentage (0.0–100.0).
+        /// Derived from rate-limit response headers where available.
+        percent: f32,
+    },
     /// A session was aborted by the user or the server.
     SessionAborted {
         /// Identifier of the aborted session.
@@ -225,7 +235,6 @@ pub enum Event {
     },
 
     // ── Sub-agent lifecycle events (F13/F14) ────────────────────
-
     /// A sub-agent task has been spawned.
     SubagentStart {
         /// Parent session that spawned the task.
@@ -264,8 +273,71 @@ pub enum Event {
         task_id: String,
     },
 
-    // ── LSP lifecycle events ─────────────────────────────────────────────
+    // ── Team lifecycle events ────────────────────────────────────────────
+    /// A new teammate session was spawned into a team.
+    TeammateSpawned {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Human-friendly name of the new teammate.
+        teammate_name: String,
+        /// Agent ID assigned to this teammate (e.g. `"tm-001"`).
+        agent_id: String,
+    },
+    /// A teammate sent a message that was delivered to the lead session.
+    TeammateMessage {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Sender's agent ID or `"lead"`.
+        from: String,
+        /// Recipient's agent ID or `"lead"`.
+        to: String,
+        /// First 200 chars of message content (preview).
+        preview: String,
+    },
+    /// A teammate reported idle state.
+    TeammateIdle {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the idle teammate.
+        agent_id: String,
+    },
+    /// A teammate claimed a task from the shared task list.
+    TeamTaskClaimed {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID that claimed the task.
+        agent_id: String,
+        /// ID of the claimed task.
+        task_id: String,
+    },
+    /// A teammate completed a task.
+    TeamTaskCompleted {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID that completed the task.
+        agent_id: String,
+        /// ID of the completed task.
+        task_id: String,
+    },
+    /// A team was cleaned up (all resources removed).
+    TeamCleanedUp {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team that was cleaned up.
+        team_name: String,
+    },
 
+    // ── LSP lifecycle events ─────────────────────────────────────────────
     /// An LSP server's connection status changed.
     LspStatusChanged {
         /// The server id as declared in `ragent.json` (e.g. `"rust"`).
@@ -315,9 +387,16 @@ impl Event {
             Self::ToolResult { .. } => "ToolResult",
             Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
             Self::SessionAborted { .. } => "SessionAborted",
+            Self::QuotaUpdate { .. } => "QuotaUpdate",
             Self::SubagentStart { .. } => "SubagentStart",
             Self::SubagentComplete { .. } => "SubagentComplete",
             Self::SubagentCancelled { .. } => "SubagentCancelled",
+            Self::TeammateSpawned { .. } => "TeammateSpawned",
+            Self::TeammateMessage { .. } => "TeammateMessage",
+            Self::TeammateIdle { .. } => "TeammateIdle",
+            Self::TeamTaskClaimed { .. } => "TeamTaskClaimed",
+            Self::TeamTaskCompleted { .. } => "TeamTaskCompleted",
+            Self::TeamCleanedUp { .. } => "TeamCleanedUp",
             Self::LspStatusChanged { .. } => "LspStatusChanged",
         }
     }
@@ -350,9 +429,16 @@ impl Event {
             | Self::ToolCallArgs { session_id, .. }
             | Self::ToolResult { session_id, .. }
             | Self::SessionAborted { session_id, .. }
+            | Self::QuotaUpdate { session_id, .. }
             | Self::SubagentStart { session_id, .. }
             | Self::SubagentComplete { session_id, .. }
-            | Self::SubagentCancelled { session_id, .. } => Some(session_id.as_str()),
+            | Self::SubagentCancelled { session_id, .. }
+            | Self::TeammateSpawned { session_id, .. }
+            | Self::TeammateMessage { session_id, .. }
+            | Self::TeammateIdle { session_id, .. }
+            | Self::TeamTaskClaimed { session_id, .. }
+            | Self::TeamTaskCompleted { session_id, .. }
+            | Self::TeamCleanedUp { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::LspStatusChanged { .. } => None,

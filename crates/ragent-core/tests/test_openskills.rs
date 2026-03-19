@@ -6,8 +6,8 @@
 //! - Anthropic-format SKILL.md parsing (license, compatibility, metadata)
 //! - Scope priority: ragent-native paths override OpenSkills paths
 
-use ragent_core::skill::{SkillRegistry, SkillScope};
 use ragent_core::skill::loader::parse_skill_md;
+use ragent_core::skill::{SkillRegistry, SkillScope};
 use std::path::PathBuf;
 
 /// Write a minimal SKILL.md file into a subdirectory.
@@ -34,8 +34,14 @@ fn test_openskills_scope_ordering() {
 
 #[test]
 fn test_openskills_scope_display() {
-    assert_eq!(format!("{}", SkillScope::OpenSkillsGlobal), "openskills-global");
-    assert_eq!(format!("{}", SkillScope::OpenSkillsProject), "openskills-project");
+    assert_eq!(
+        format!("{}", SkillScope::OpenSkillsGlobal),
+        "openskills-global"
+    );
+    assert_eq!(
+        format!("{}", SkillScope::OpenSkillsProject),
+        "openskills-project"
+    );
 }
 
 // ── OpenSkills project directory discovery ───────────────────────
@@ -71,7 +77,9 @@ fn test_discover_claude_skills_project_dir() {
 
     // 4 bundled + 1 OpenSkills project
     assert_eq!(registry.len(), 5);
-    let mcp = registry.get("mcp-builder").expect("should find mcp-builder");
+    let mcp = registry
+        .get("mcp-builder")
+        .expect("should find mcp-builder");
     assert_eq!(mcp.scope, SkillScope::OpenSkillsProject);
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -116,7 +124,11 @@ fn test_ragent_project_overrides_openskills_project() {
     let registry = SkillRegistry::load(&tmp, &[]);
 
     let deploy = registry.get("deploy").expect("should find deploy");
-    assert_eq!(deploy.scope, SkillScope::Project, "ragent Project should win");
+    assert_eq!(
+        deploy.scope,
+        SkillScope::Project,
+        "ragent Project should win"
+    );
     assert_eq!(deploy.description.as_deref(), Some("Ragent deploy"));
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -159,7 +171,10 @@ Extract text from the provided PDF file.
     .expect("should parse Anthropic format");
 
     assert_eq!(skill.name, "pdf-reader");
-    assert_eq!(skill.description.as_deref(), Some("Read and extract text from PDF files"));
+    assert_eq!(
+        skill.description.as_deref(),
+        Some("Read and extract text from PDF files")
+    );
     assert_eq!(skill.license.as_deref(), Some("MIT"));
     assert_eq!(skill.scope, SkillScope::OpenSkillsProject);
 }
@@ -182,7 +197,10 @@ Read the DOCX file.
     )
     .expect("should parse compatibility field");
 
-    assert_eq!(skill.compatibility.as_deref(), Some("Requires pandoc to be installed"));
+    assert_eq!(
+        skill.compatibility.as_deref(),
+        Some("Requires pandoc to be installed")
+    );
 }
 
 #[test]
@@ -206,9 +224,18 @@ Create a new skill.
     )
     .expect("should parse metadata field");
 
-    assert_eq!(skill.metadata.get("author").map(String::as_str), Some("anthropic"));
-    assert_eq!(skill.metadata.get("version").map(String::as_str), Some("1.0"));
-    assert_eq!(skill.metadata.get("category").map(String::as_str), Some("development"));
+    assert_eq!(
+        skill.metadata.get("author").map(String::as_str),
+        Some("anthropic")
+    );
+    assert_eq!(
+        skill.metadata.get("version").map(String::as_str),
+        Some("1.0")
+    );
+    assert_eq!(
+        skill.metadata.get("category").map(String::as_str),
+        Some("development")
+    );
 }
 
 #[test]
@@ -235,7 +262,10 @@ Build an MCP server that wraps the given API.
     .expect("should parse full Anthropic format");
 
     assert_eq!(skill.name, "mcp-builder");
-    assert_eq!(skill.description.as_deref(), Some("Build MCP servers for any API"));
+    assert_eq!(
+        skill.description.as_deref(),
+        Some("Build MCP servers for any API")
+    );
     assert_eq!(skill.license.as_deref(), Some("Apache-2.0"));
     assert_eq!(skill.compatibility.as_deref(), Some("Node.js 18+ required"));
     assert_eq!(skill.scope, SkillScope::OpenSkillsGlobal);
@@ -298,7 +328,10 @@ Hybrid instructions.
     // Anthropic fields
     assert_eq!(skill.license.as_deref(), Some("MIT"));
     assert_eq!(skill.compatibility.as_deref(), Some("Linux only"));
-    assert_eq!(skill.metadata.get("source").map(String::as_str), Some("custom"));
+    assert_eq!(
+        skill.metadata.get("source").map(String::as_str),
+        Some("custom")
+    );
 
     // Ragent-specific fields
     assert_eq!(skill.argument_hint.as_deref(), Some("[target]"));

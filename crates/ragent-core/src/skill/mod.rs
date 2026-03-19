@@ -31,11 +31,11 @@
 //! Ragent-native paths always take precedence over OpenSkills paths at
 //! the same level (global or project).
 
-pub mod loader;
 pub mod args;
+pub mod bundled;
 pub mod context;
 pub mod invoke;
-pub mod bundled;
+pub mod loader;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -145,6 +145,11 @@ fn default_true() -> bool {
 impl SkillInfo {
     /// Creates a new skill with the given name and body, using default values.
     ///
+    /// # Errors
+    ///
+    /// This function does not return errors. It always constructs a valid `SkillInfo`
+    /// with default values for all optional fields.
+    ///
     /// # Examples
     ///
     /// ```
@@ -178,16 +183,31 @@ impl SkillInfo {
     }
 
     /// Returns `true` if the user can invoke this skill via `/name`.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors. It returns a boolean based on the
+    /// `user_invocable` field value.
     pub fn is_user_invocable(&self) -> bool {
         self.user_invocable
     }
 
     /// Returns `true` if the agent can auto-invoke this skill.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors. It returns a boolean based on the
+    /// inverse of the `disable_model_invocation` field.
     pub fn is_agent_invocable(&self) -> bool {
         !self.disable_model_invocation
     }
 
     /// Returns `true` if this skill runs in a forked subagent context.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors. It returns `true` if the context
+    /// is set to `SkillContext::Fork`, `false` otherwise.
     pub fn is_forked(&self) -> bool {
         self.context.as_ref() == Some(&SkillContext::Fork)
     }
@@ -576,7 +596,8 @@ mod tests {
         let skills_dir = tmp.join(".ragent").join("skills");
         let bad_dir = skills_dir.join("bad");
         std::fs::create_dir_all(&bad_dir).expect("create bad dir");
-        std::fs::write(bad_dir.join("SKILL.md"), "No frontmatter here!").expect("write bad SKILL.md");
+        std::fs::write(bad_dir.join("SKILL.md"), "No frontmatter here!")
+            .expect("write bad SKILL.md");
 
         // Also add a good skill
         let good_dir = skills_dir.join("good");
@@ -703,7 +724,9 @@ mod tests {
 
         // 4 bundled + 1 extra
         assert_eq!(registry.len(), 5);
-        let shared = registry.get("shared-tool").expect("should find shared-tool");
+        let shared = registry
+            .get("shared-tool")
+            .expect("should find shared-tool");
         assert_eq!(shared.description.as_deref(), Some("Shared tool"));
 
         let _ = std::fs::remove_dir_all(&tmp);

@@ -187,6 +187,8 @@ const KNOWN_SERVERS: &[KnownMcpServer] = &[
 /// Checks `PATH` for each known executable. Also scans common npm global
 /// directories and MCP registry directories for installed servers.
 ///
+/// # Errors
+///
 /// This function never fails — missing servers are silently skipped.
 pub async fn discover() -> Vec<DiscoveredMcpServer> {
     let mut found = Vec::new();
@@ -324,7 +326,10 @@ async fn get_npm_prefix() -> Option<PathBuf> {
 }
 
 /// Scan @modelcontextprotocol scope for server packages.
-async fn scan_npm_mcp_scope(scope_dir: &std::path::Path, prefix: &PathBuf) -> Vec<DiscoveredMcpServer> {
+async fn scan_npm_mcp_scope(
+    scope_dir: &std::path::Path,
+    prefix: &PathBuf,
+) -> Vec<DiscoveredMcpServer> {
     let mut found = Vec::new();
 
     let mut entries = match tokio::fs::read_dir(scope_dir).await {
@@ -352,14 +357,20 @@ async fn scan_npm_mcp_scope(scope_dir: &std::path::Path, prefix: &PathBuf) -> Ve
 }
 
 /// Try to create a discovered server from an npm package directory.
-async fn try_npm_mcp_package(pkg_dir: &std::path::Path, prefix: &PathBuf) -> Option<DiscoveredMcpServer> {
+async fn try_npm_mcp_package(
+    pkg_dir: &std::path::Path,
+    prefix: &PathBuf,
+) -> Option<DiscoveredMcpServer> {
     // Read package.json to find the bin entry
     let pkg_json_path = pkg_dir.join("package.json");
     let content = tokio::fs::read_to_string(&pkg_json_path).await.ok()?;
     let pkg_json: serde_json::Value = serde_json::from_str(&content).ok()?;
 
     let pkg_name = pkg_json.get("name")?.as_str()?;
-    let description = pkg_json.get("description").and_then(|d| d.as_str()).unwrap_or(pkg_name);
+    let description = pkg_json
+        .get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or(pkg_name);
 
     // Find the bin entry
     let bin = pkg_json.get("bin")?;
@@ -434,7 +445,9 @@ async fn scan_mcp_registry(registry_dir: &std::path::Path) -> Vec<DiscoveredMcpS
         if path.is_dir() {
             let server_json = path.join("server.json");
             if server_json.exists() {
-                if let Some(server) = try_mcp_registry_entry(&path, &server_json, registry_dir).await {
+                if let Some(server) =
+                    try_mcp_registry_entry(&path, &server_json, registry_dir).await
+                {
                     found.push(server);
                 }
             }
@@ -460,12 +473,20 @@ async fn try_mcp_registry_entry(
 
     let command = config.get("command")?.as_str()?;
     let id = dir.file_name()?.to_string_lossy().to_string();
-    let name = config.get("name").and_then(|n| n.as_str()).unwrap_or(&id).to_string();
+    let name = config
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or(&id)
+        .to_string();
 
     let args: Vec<String> = config
         .get("args")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let env: HashMap<String, String> = config
@@ -499,16 +520,21 @@ async fn try_mcp_json_config(
     let config: serde_json::Value = serde_json::from_str(&content).ok()?;
 
     let command = config.get("command")?.as_str()?;
-    let id = config_path
-        .file_stem()?
-        .to_string_lossy()
+    let id = config_path.file_stem()?.to_string_lossy().to_string();
+    let name = config
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or(&id)
         .to_string();
-    let name = config.get("name").and_then(|n| n.as_str()).unwrap_or(&id).to_string();
 
     let args: Vec<String> = config
         .get("args")
         .and_then(|a| a.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let env: HashMap<String, String> = config

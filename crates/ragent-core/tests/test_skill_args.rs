@@ -38,7 +38,10 @@ fn test_parse_args_adjacent_quotes() {
 
 #[test]
 fn test_parse_args_many_args() {
-    let input = (0..20).map(|i| format!("arg{i}")).collect::<Vec<_>>().join(" ");
+    let input = (0..20)
+        .map(|i| format!("arg{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let args = parse_args(&input);
     assert_eq!(args.len(), 20);
     assert_eq!(args[0], "arg0");
@@ -80,19 +83,34 @@ fn test_substitute_arguments_empty() {
 
 #[test]
 fn test_substitute_indexed_zero() {
-    let result = substitute_args("File: $ARGUMENTS[0]", "main.rs lib.rs", "sess-1", Path::new("/sk"));
+    let result = substitute_args(
+        "File: $ARGUMENTS[0]",
+        "main.rs lib.rs",
+        "sess-1",
+        Path::new("/sk"),
+    );
     assert_eq!(result, "File: main.rs");
 }
 
 #[test]
 fn test_substitute_indexed_second() {
-    let result = substitute_args("Target: $ARGUMENTS[1]", "main.rs lib.rs", "sess-1", Path::new("/sk"));
+    let result = substitute_args(
+        "Target: $ARGUMENTS[1]",
+        "main.rs lib.rs",
+        "sess-1",
+        Path::new("/sk"),
+    );
     assert_eq!(result, "Target: lib.rs");
 }
 
 #[test]
 fn test_substitute_indexed_out_of_bounds_empty() {
-    let result = substitute_args("Missing: $ARGUMENTS[5]", "only-one", "sess-1", Path::new("/sk"));
+    let result = substitute_args(
+        "Missing: $ARGUMENTS[5]",
+        "only-one",
+        "sess-1",
+        Path::new("/sk"),
+    );
     assert_eq!(result, "Missing: ");
 }
 
@@ -119,7 +137,10 @@ fn test_substitute_positional_out_of_bounds() {
 
 #[test]
 fn test_substitute_positional_double_digit() {
-    let args_str = (0..12).map(|i| format!("a{i}")).collect::<Vec<_>>().join(" ");
+    let args_str = (0..12)
+        .map(|i| format!("a{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let result = substitute_args("Eleventh: $10", &args_str, "sess-1", Path::new("/sk"));
     assert_eq!(result, "Eleventh: a10");
 }
@@ -168,7 +189,12 @@ fn test_substitute_all_types_combined() {
 #[test]
 fn test_substitute_preserves_dollar_sign_without_digit() {
     // $N with digits is positional, but $X with non-digit is preserved
-    let result = substitute_args("Cost: $USD and $ARGUMENTS", "items", "sess-1", Path::new("/sk"));
+    let result = substitute_args(
+        "Cost: $USD and $ARGUMENTS",
+        "items",
+        "sess-1",
+        Path::new("/sk"),
+    );
     assert_eq!(result, "Cost: $USD and items");
 }
 
@@ -205,7 +231,12 @@ fn test_substitute_quoted_args_passed_through() {
 
 #[test]
 fn test_substitute_no_args_no_placeholders() {
-    let result = substitute_args("Static body with no variables", "", "sess-1", Path::new("/sk"));
+    let result = substitute_args(
+        "Static body with no variables",
+        "",
+        "sess-1",
+        Path::new("/sk"),
+    );
     assert_eq!(result, "Static body with no variables");
 }
 

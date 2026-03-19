@@ -18,8 +18,10 @@ fn test_ctx() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        team_context: None,
+        team_manager: None,
+        active_model: None,
     }
 }
 
@@ -175,10 +177,7 @@ async fn start_mock_tavily(response_json: &str) -> (String, tokio::task::JoinHan
 }
 
 /// Start a mock server that returns an error status.
-async fn start_mock_tavily_error(
-    status: u16,
-    body: &str,
-) -> (String, tokio::task::JoinHandle<()>) {
+async fn start_mock_tavily_error(status: u16, body: &str) -> (String, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let response_body = body.to_string();

@@ -145,15 +145,10 @@ pub fn parse_skill_md(
     let frontmatter: SkillFrontmatter = serde_yaml::from_str(frontmatter_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse SKILL.md frontmatter: {e}"))?;
 
-    let skill_dir = source_path
-        .parent()
-        .unwrap_or(Path::new(""))
-        .to_path_buf();
+    let skill_dir = source_path.parent().unwrap_or(Path::new("")).to_path_buf();
 
     // Name defaults to the directory name if not specified in frontmatter
-    let name = frontmatter
-        .name
-        .unwrap_or_else(|| dir_name.to_string());
+    let name = frontmatter.name.unwrap_or_else(|| dir_name.to_string());
 
     // Validate name: lowercase, hyphens, max 64 chars
     validate_skill_name(&name)?;
@@ -200,14 +195,13 @@ fn split_frontmatter(content: &str) -> anyhow::Result<(&str, &str)> {
 
     // Find the opening delimiter
     let after_first = &trimmed[3..];
-    let after_first = after_first.strip_prefix('\n').unwrap_or(
-        after_first.strip_prefix("\r\n").unwrap_or(after_first),
-    );
+    let after_first = after_first
+        .strip_prefix('\n')
+        .unwrap_or(after_first.strip_prefix("\r\n").unwrap_or(after_first));
 
     // Find the closing delimiter
-    let closing_pos = find_closing_delimiter(after_first).ok_or_else(|| {
-        anyhow::anyhow!("SKILL.md frontmatter is missing closing --- delimiter")
-    })?;
+    let closing_pos = find_closing_delimiter(after_first)
+        .ok_or_else(|| anyhow::anyhow!("SKILL.md frontmatter is missing closing --- delimiter"))?;
 
     let frontmatter = &after_first[..closing_pos];
     let rest = &after_first[closing_pos + 3..];
@@ -281,6 +275,12 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 /// same level (global or project).
 ///
 /// Individual parse failures are logged as warnings and skipped.
+///
+/// # Errors
+///
+/// This function does not return errors. File system errors and parse failures
+/// are logged as warnings and the corresponding skills are skipped. The function
+/// always returns a vector, which may be empty if no valid skills are found.
 pub fn discover_skills(working_dir: &Path, extra_dirs: &[String]) -> Vec<SkillInfo> {
     let mut skills = Vec::new();
 
@@ -351,23 +351,26 @@ fn load_skills_from_dir(skills_dir: &Path, scope: SkillScope, out: &mut Vec<Skil
     let entries = match std::fs::read_dir(skills_dir) {
         Ok(entries) => entries,
         Err(e) => {
-            tracing::warn!("Failed to read skills directory {}: {e}", skills_dir.display());
+            tracing::warn!(
+                "Failed to read skills directory {}: {e}",
+                skills_dir.display()
+            );
             return;
         }
     };
 
     for entry in entries.filter_map(Result::ok) {
-        let skill_dir = entry.path();
-        if !skill_dir.is_dir() {
+        let skill_path = entry.path();
+        if !skill_path.is_dir() {
             continue;
         }
 
-        let skill_md = skill_dir.join("SKILL.md");
+        let skill_md = skill_path.join("SKILL.md");
         if !skill_md.is_file() {
             continue;
         }
 
-        let dir_name = skill_dir
+        let dir_name = skill_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
@@ -384,17 +387,11 @@ fn load_skills_from_dir(skills_dir: &Path, scope: SkillScope, out: &mut Vec<Skil
                     out.push(skill);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to parse {}: {e}",
-                        skill_md.display()
-                    );
+                    tracing::warn!("Failed to parse {}: {e}", skill_md.display());
                 }
             },
             Err(e) => {
-                tracing::warn!(
-                    "Failed to read {}: {e}",
-                    skill_md.display()
-                );
+                tracing::warn!("Failed to read {}: {e}", skill_md.display());
             }
         }
     }
@@ -581,7 +578,12 @@ Deploy $ARGUMENTS to production:
         );
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("exceeds 64 characters"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds 64 characters")
+        );
     }
 
     #[test]
@@ -755,7 +757,11 @@ Body
         let _ = std::fs::remove_dir_all(&tmp);
 
         // Subdirectory with its own .ragent/skills/
-        let nested_dir = tmp.join("backend").join(".ragent").join("skills").join("api-test");
+        let nested_dir = tmp
+            .join("backend")
+            .join(".ragent")
+            .join("skills")
+            .join("api-test");
         std::fs::create_dir_all(&nested_dir).expect("create nested skill dir");
         std::fs::write(
             nested_dir.join("SKILL.md"),
@@ -807,14 +813,12 @@ Body
         std::fs::create_dir_all(&skills_dir).expect("create skills dir");
 
         // Create a regular file inside skills/ (not a directory)
-        std::fs::write(skills_dir.join("not-a-dir.md"), "---\n---\nBody\n")
-            .expect("write file");
+        std::fs::write(skills_dir.join("not-a-dir.md"), "---\n---\nBody\n").expect("write file");
 
         // Create a valid skill directory
         let valid_dir = skills_dir.join("valid");
         std::fs::create_dir_all(&valid_dir).expect("create valid dir");
-        std::fs::write(valid_dir.join("SKILL.md"), "---\n---\nBody\n")
-            .expect("write SKILL.md");
+        std::fs::write(valid_dir.join("SKILL.md"), "---\n---\nBody\n").expect("write SKILL.md");
 
         let skills = discover_skills(&tmp, &[]);
         assert_eq!(skills.len(), 1);

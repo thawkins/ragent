@@ -4,10 +4,10 @@
 //! Coordinator flow: capability matching, subtask assignment, result
 //! aggregation, timeout handling, and event subscription.
 
+use futures::future::FutureExt;
 use ragent_core::orchestrator::*;
 use std::sync::Arc;
-use futures::future::FutureExt;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 // ── First-success strategy ───────────────────────────────────────────────────
 
@@ -30,18 +30,27 @@ async fn test_first_success_with_retries() {
     });
 
     // Agent 3: quick success
-    let fast: Responder = Arc::new(|payload: String| {
-        async move { format!("fast success: {}", payload) }.boxed()
-    });
+    let fast: Responder =
+        Arc::new(|payload: String| async move { format!("fast success: {}", payload) }.boxed());
 
-    registry.register("agent-slow", vec!["search".to_string()], Some(slow)).await;
-    registry.register("agent-err", vec!["search".to_string()], Some(err)).await;
-    registry.register("agent-fast", vec!["search".to_string()], Some(fast)).await;
+    registry
+        .register("agent-slow", vec!["search".to_string()], Some(slow))
+        .await;
+    registry
+        .register("agent-err", vec!["search".to_string()], Some(err))
+        .await;
+    registry
+        .register("agent-fast", vec!["search".to_string()], Some(fast))
+        .await;
 
     // Create coordinator with short per-agent timeout so the slow agent times out.
     let coord = Coordinator::with_request_timeout(registry.clone(), Duration::from_millis(50));
 
-    let desc = JobDescriptor { id: "job-retry".to_string(), required_capabilities: vec!["search".to_string()], payload: "do work".to_string() };
+    let desc = JobDescriptor {
+        id: "job-retry".to_string(),
+        required_capabilities: vec!["search".to_string()],
+        payload: "do work".to_string(),
+    };
 
     // Should eventually return the fast agent's response (first-success strategy)
     let res = coord.start_job_first_success(desc).await.unwrap();
@@ -54,17 +63,33 @@ async fn test_first_success_all_fail() {
 
     // All agents sleep beyond timeout
     let slow1: Responder = Arc::new(|payload: String| {
-        async move { sleep(Duration::from_millis(200)).await; format!("s1: {}", payload) }.boxed()
+        async move {
+            sleep(Duration::from_millis(200)).await;
+            format!("s1: {}", payload)
+        }
+        .boxed()
     });
     let slow2: Responder = Arc::new(|payload: String| {
-        async move { sleep(Duration::from_millis(200)).await; format!("s2: {}", payload) }.boxed()
+        async move {
+            sleep(Duration::from_millis(200)).await;
+            format!("s2: {}", payload)
+        }
+        .boxed()
     });
 
-    registry.register("agent-s1", vec!["analysis".to_string()], Some(slow1)).await;
-    registry.register("agent-s2", vec!["analysis".to_string()], Some(slow2)).await;
+    registry
+        .register("agent-s1", vec!["analysis".to_string()], Some(slow1))
+        .await;
+    registry
+        .register("agent-s2", vec!["analysis".to_string()], Some(slow2))
+        .await;
 
     let coord = Coordinator::with_request_timeout(registry.clone(), Duration::from_millis(50));
-    let desc = JobDescriptor { id: "job-fail".to_string(), required_capabilities: vec!["analysis".to_string()], payload: "work".to_string() };
+    let desc = JobDescriptor {
+        id: "job-fail".to_string(),
+        required_capabilities: vec!["analysis".to_string()],
+        payload: "work".to_string(),
+    };
 
     let res = coord.start_job_first_success(desc).await;
     assert!(res.is_err());
@@ -77,7 +102,9 @@ async fn test_first_success_all_fail() {
 async fn test_async_job_lifecycle_poll_to_completion() {
     let registry = AgentRegistry::new();
     let r: Responder = Arc::new(|p: String| async move { format!("done:{}", p) }.boxed());
-    registry.register("worker", vec!["task".to_string()], Some(r)).await;
+    registry
+        .register("worker", vec!["task".to_string()], Some(r))
+        .await;
 
     let coord = Coordinator::new(registry);
     let desc = JobDescriptor {
@@ -120,9 +147,10 @@ async fn test_get_job_result_unknown_id_returns_none() {
 #[tokio::test]
 async fn test_event_subscription_receives_lifecycle_events() {
     let registry = AgentRegistry::new();
-    let r: Responder =
-        Arc::new(|p: String| async move { format!("resp:{}", p) }.boxed());
-    registry.register("ev-agent", vec!["ev".to_string()], Some(r)).await;
+    let r: Responder = Arc::new(|p: String| async move { format!("resp:{}", p) }.boxed());
+    registry
+        .register("ev-agent", vec!["ev".to_string()], Some(r))
+        .await;
 
     let coord = Coordinator::new(registry);
     let desc = JobDescriptor {
@@ -174,7 +202,9 @@ async fn test_subscribe_unknown_job_returns_error() {
 async fn test_concurrent_jobs_independent_results() {
     let registry = AgentRegistry::new();
     let r: Responder = Arc::new(|p: String| async move { format!("result-{}", p) }.boxed());
-    registry.register("shared-agent", vec!["work".to_string()], Some(r)).await;
+    registry
+        .register("shared-agent", vec!["work".to_string()], Some(r))
+        .await;
 
     let coord = Coordinator::new(registry);
 
@@ -193,7 +223,11 @@ async fn test_concurrent_jobs_independent_results() {
 
     for (i, res) in jobs.into_iter().enumerate() {
         let s = res.unwrap();
-        assert!(s.contains(&format!("item-{}", i)), "job {} result missing payload", i);
+        assert!(
+            s.contains(&format!("item-{}", i)),
+            "job {} result missing payload",
+            i
+        );
     }
 }
 
@@ -211,7 +245,9 @@ async fn test_sync_job_timeout_increments_metrics() {
         }
         .boxed()
     });
-    registry.register("slow-work", vec!["slowcap".to_string()], Some(slow)).await;
+    registry
+        .register("slow-work", vec!["slowcap".to_string()], Some(slow))
+        .await;
 
     let coord = Coordinator::with_request_timeout(registry, Duration::from_millis(30));
     let snap_before = coord.metrics_snapshot();
@@ -255,13 +291,15 @@ async fn test_async_job_no_agents_status_failed() {
 #[tokio::test]
 async fn test_multi_capability_only_full_match_selected() {
     let registry = AgentRegistry::new();
-    let full: Responder =
-        Arc::new(|p: String| async move { format!("full:{}", p) }.boxed());
-    let partial: Responder =
-        Arc::new(|p: String| async move { format!("partial:{}", p) }.boxed());
+    let full: Responder = Arc::new(|p: String| async move { format!("full:{}", p) }.boxed());
+    let partial: Responder = Arc::new(|p: String| async move { format!("partial:{}", p) }.boxed());
 
     registry
-        .register("full-agent", vec!["read".to_string(), "write".to_string()], Some(full))
+        .register(
+            "full-agent",
+            vec!["read".to_string(), "write".to_string()],
+            Some(full),
+        )
         .await;
     registry
         .register("partial-agent", vec!["read".to_string()], Some(partial))
@@ -275,10 +313,12 @@ async fn test_multi_capability_only_full_match_selected() {
     };
 
     let result = coord.start_job_sync(desc).await.unwrap();
-    assert!(result.contains("full:content"), "expected full-agent result");
+    assert!(
+        result.contains("full:content"),
+        "expected full-agent result"
+    );
     assert!(
         !result.contains("partial:content"),
         "partial-agent should not have been selected"
     );
 }
-

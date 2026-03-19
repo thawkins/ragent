@@ -64,6 +64,11 @@ pub struct SessionManager {
 impl SessionManager {
     /// Creates a new `SessionManager` with the given storage backend and event bus.
     ///
+    /// # Errors
+    ///
+    /// This constructor does not return errors. It simply wraps the provided
+    /// storage and event bus references.
+    ///
     /// # Examples
     ///
     /// ```
@@ -81,6 +86,11 @@ impl SessionManager {
     }
 
     /// Returns a reference to the underlying storage backend.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors. It returns an immutable reference
+    /// to the shared `Storage` instance.
     ///
     /// # Examples
     ///

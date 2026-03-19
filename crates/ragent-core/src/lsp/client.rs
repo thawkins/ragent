@@ -100,7 +100,9 @@ impl LspClient {
         pending.lock().await.insert(init_id, tx);
 
         let root_uri: lsp_types::Uri = Url::from_directory_path(root_path)
-            .map_err(|()| anyhow::anyhow!("Cannot convert root path to URI: {}", root_path.display()))?
+            .map_err(|()| {
+                anyhow::anyhow!("Cannot convert root path to URI: {}", root_path.display())
+            })?
             .as_str()
             .parse()
             .context("Root path URI parse failed")?;
@@ -130,18 +132,15 @@ impl LspClient {
         });
         write_framed(&writer, &request).await?;
 
-        let response = tokio::time::timeout(
-            Duration::from_millis(config.timeout_ms),
-            rx,
-        )
-        .await
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "LSP 'initialize' timed out after {}ms for '{command}'",
-                config.timeout_ms
-            )
-        })?
-        .map_err(|_| anyhow::anyhow!("LSP initialize channel closed for '{command}'"))?;
+        let response = tokio::time::timeout(Duration::from_millis(config.timeout_ms), rx)
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "LSP 'initialize' timed out after {}ms for '{command}'",
+                    config.timeout_ms
+                )
+            })?
+            .map_err(|_| anyhow::anyhow!("LSP initialize channel closed for '{command}'"))?;
 
         if let Some(err) = response.get("error") {
             anyhow::bail!("LSP 'initialize' error from '{command}': {err}");
@@ -198,7 +197,10 @@ impl LspClient {
         let response = tokio::time::timeout(Duration::from_millis(self.timeout_ms), rx)
             .await
             .map_err(|_| {
-                anyhow::anyhow!("LSP request '{method}' timed out after {}ms", self.timeout_ms)
+                anyhow::anyhow!(
+                    "LSP request '{method}' timed out after {}ms",
+                    self.timeout_ms
+                )
             })?
             .map_err(|_| anyhow::anyhow!("LSP response channel closed for '{method}'"))?;
 

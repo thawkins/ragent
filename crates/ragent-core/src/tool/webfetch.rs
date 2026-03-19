@@ -24,6 +24,9 @@ impl Tool for WebFetchTool {
         "webfetch"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Fetch the content of a URL via HTTP GET. HTML is automatically converted \
          to plain text unless format is set to 'raw'. Supports timeout and max \
@@ -56,10 +59,18 @@ impl Tool for WebFetchTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "web"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `url` parameter is missing or uses an unsupported
+    /// scheme, if the HTTP client build fails, if the request fails, if the response
+    /// status is not successful, or if content processing fails.
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let url = input["url"]
             .as_str()
@@ -67,7 +78,10 @@ impl Tool for WebFetchTool {
 
         // Validate URL scheme
         if !url.starts_with("http://") && !url.starts_with("https://") {
-            bail!("Only http:// and https:// URLs are supported. The provided URL '{}' uses an unsupported scheme.", url);
+            bail!(
+                "Only http:// and https:// URLs are supported. The provided URL '{}' uses an unsupported scheme.",
+                url
+            );
         }
 
         let format = input["format"].as_str().unwrap_or("text");
@@ -75,9 +89,7 @@ impl Tool for WebFetchTool {
             .as_u64()
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_MAX_LENGTH);
-        let timeout_secs = input["timeout"]
-            .as_u64()
-            .unwrap_or(DEFAULT_TIMEOUT_SECS);
+        let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(timeout_secs))
@@ -115,8 +127,8 @@ impl Tool for WebFetchTool {
             .await
             .with_context(|| format!("Failed to read response body from: {}", url))?;
 
-        let is_html = content_type.contains("text/html")
-            || content_type.contains("application/xhtml");
+        let is_html =
+            content_type.contains("text/html") || content_type.contains("application/xhtml");
 
         let processed = if is_html && format != "raw" {
             html_to_text(&body)

@@ -51,6 +51,11 @@ pub fn obfuscate_key(key: &str) -> String {
 ///
 /// Returns the original key, or an empty string if decoding fails.
 ///
+/// # Errors
+///
+/// This function does not return errors via `Result`. If base64 decoding fails
+/// or the decoded bytes are not valid UTF-8, it returns an empty string.
+///
 /// # Examples
 ///
 /// ```
@@ -684,7 +689,7 @@ impl Storage {
         let conn = lock_conn!(self)?;
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "INSERT INTO todos (id, session_id, title, status, description, created_at, updated_at)
+            "INSERT OR IGNORE INTO todos (id, session_id, title, status, description, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![id, session_id, title, status, description, &now, &now],
         )?;
@@ -694,11 +699,7 @@ impl Storage {
     /// Lists TODO items for a session, optionally filtered by status.
     ///
     /// Pass `Some("pending")` etc. to filter, or `None` / `Some("all")` for all.
-    pub fn get_todos(
-        &self,
-        session_id: &str,
-        status_filter: Option<&str>,
-    ) -> Result<Vec<TodoRow>> {
+    pub fn get_todos(&self, session_id: &str, status_filter: Option<&str>) -> Result<Vec<TodoRow>> {
         let conn = lock_conn!(self)?;
         let rows = match status_filter {
             Some(s) if s != "all" => {
@@ -756,11 +757,14 @@ impl Storage {
         let now = chrono::Utc::now().to_rfc3339();
         let mut sets = vec!["updated_at = ?1"];
         let mut idx = 2u32;
-        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> =
-            vec![Box::new(now.clone())];
+        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now.clone())];
 
         if let Some(t) = title {
-            sets.push(if idx == 2 { "title = ?2" } else { unreachable!() });
+            sets.push(if idx == 2 {
+                "title = ?2"
+            } else {
+                unreachable!()
+            });
             vals.push(Box::new(t.to_string()));
             idx += 1;
         }
@@ -798,8 +802,7 @@ impl Storage {
             id_ph,
             sid_ph
         );
-        let params: Vec<&dyn rusqlite::types::ToSql> =
-            vals.iter().map(|b| b.as_ref()).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
         let changed = conn.execute(&sql, params.as_slice())?;
         Ok(changed > 0)
     }

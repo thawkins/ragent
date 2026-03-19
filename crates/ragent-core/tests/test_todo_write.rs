@@ -1,14 +1,14 @@
 //! Tests for the `todo_write` tool.
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::json;
 
 use ragent_core::event::EventBus;
 use ragent_core::storage::Storage;
-use ragent_core::tool::{Tool, ToolContext};
 use ragent_core::tool::todo::TodoWriteTool;
+use ragent_core::tool::{Tool, ToolContext};
 
 fn make_ctx(storage: Arc<Storage>) -> ToolContext {
     ToolContext {
@@ -17,8 +17,10 @@ fn make_ctx(storage: Arc<Storage>) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -103,7 +105,10 @@ async fn test_add_with_custom_id() {
     let ctx = make_ctx(storage.clone());
 
     TodoWriteTool
-        .execute(json!({"action": "add", "title": "My task", "id": "my-custom-id"}), &ctx)
+        .execute(
+            json!({"action": "add", "title": "My task", "id": "my-custom-id"}),
+            &ctx,
+        )
         .await
         .unwrap();
 
@@ -141,7 +146,10 @@ async fn test_add_invalid_status() {
     let ctx = make_ctx(storage);
 
     let err = TodoWriteTool
-        .execute(json!({"action": "add", "title": "X", "status": "invalid"}), &ctx)
+        .execute(
+            json!({"action": "add", "title": "X", "status": "invalid"}),
+            &ctx,
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("Invalid status"));
@@ -152,11 +160,16 @@ async fn test_add_invalid_status() {
 #[tokio::test]
 async fn test_update_status() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "Task", "pending", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Task", "pending", "")
+        .unwrap();
     let ctx = make_ctx(storage.clone());
 
     let result = TodoWriteTool
-        .execute(json!({"action": "update", "id": "t1", "status": "done"}), &ctx)
+        .execute(
+            json!({"action": "update", "id": "t1", "status": "done"}),
+            &ctx,
+        )
         .await
         .unwrap();
 
@@ -168,7 +181,9 @@ async fn test_update_status() {
 #[tokio::test]
 async fn test_update_title_and_description() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "Old", "pending", "old desc").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Old", "pending", "old desc")
+        .unwrap();
     let ctx = make_ctx(storage.clone());
 
     TodoWriteTool
@@ -199,7 +214,9 @@ async fn test_update_missing_id() {
 #[tokio::test]
 async fn test_update_no_fields() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "Task", "pending", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Task", "pending", "")
+        .unwrap();
     let ctx = make_ctx(storage);
 
     let err = TodoWriteTool
@@ -215,7 +232,10 @@ async fn test_update_nonexistent() {
     let ctx = make_ctx(storage);
 
     let err = TodoWriteTool
-        .execute(json!({"action": "update", "id": "nope", "status": "done"}), &ctx)
+        .execute(
+            json!({"action": "update", "id": "nope", "status": "done"}),
+            &ctx,
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("not found"));
@@ -224,11 +244,16 @@ async fn test_update_nonexistent() {
 #[tokio::test]
 async fn test_update_invalid_status() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "Task", "pending", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Task", "pending", "")
+        .unwrap();
     let ctx = make_ctx(storage);
 
     let err = TodoWriteTool
-        .execute(json!({"action": "update", "id": "t1", "status": "all"}), &ctx)
+        .execute(
+            json!({"action": "update", "id": "t1", "status": "all"}),
+            &ctx,
+        )
         .await
         .unwrap_err();
     assert!(err.to_string().contains("Invalid status"));
@@ -239,7 +264,9 @@ async fn test_update_invalid_status() {
 #[tokio::test]
 async fn test_remove() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "Task", "pending", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Task", "pending", "")
+        .unwrap();
     let ctx = make_ctx(storage.clone());
 
     let result = TodoWriteTool
@@ -281,8 +308,12 @@ async fn test_remove_nonexistent() {
 #[tokio::test]
 async fn test_clear() {
     let storage = setup();
-    storage.create_todo("t1", "test-session", "A", "pending", "").unwrap();
-    storage.create_todo("t2", "test-session", "B", "done", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "A", "pending", "")
+        .unwrap();
+    storage
+        .create_todo("t2", "test-session", "B", "done", "")
+        .unwrap();
     let ctx = make_ctx(storage.clone());
 
     let result = TodoWriteTool
@@ -312,8 +343,12 @@ async fn test_clear_empty() {
 async fn test_clear_session_isolation() {
     let storage = setup();
     storage.create_session("other", "/tmp").unwrap();
-    storage.create_todo("t1", "test-session", "Mine", "pending", "").unwrap();
-    storage.create_todo("t2", "other", "Theirs", "pending", "").unwrap();
+    storage
+        .create_todo("t1", "test-session", "Mine", "pending", "")
+        .unwrap();
+    storage
+        .create_todo("t2", "other", "Theirs", "pending", "")
+        .unwrap();
     let ctx = make_ctx(storage.clone());
 
     TodoWriteTool
@@ -333,10 +368,7 @@ async fn test_missing_action() {
     let storage = setup();
     let ctx = make_ctx(storage);
 
-    let err = TodoWriteTool
-        .execute(json!({}), &ctx)
-        .await
-        .unwrap_err();
+    let err = TodoWriteTool.execute(json!({}), &ctx).await.unwrap_err();
     assert!(err.to_string().contains("action"));
 }
 
@@ -360,8 +392,10 @@ async fn test_no_storage() {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
 
     let err = TodoWriteTool

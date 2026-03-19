@@ -32,6 +32,12 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// * `body` — The skill body text potentially containing `` !`command` `` patterns.
 /// * `working_dir` — The directory in which to execute commands.
 ///
+/// # Errors
+///
+/// Returns an error only if an internal string manipulation fails (which should
+/// not occur in normal operation). Command execution errors are captured and
+/// inserted into the result as error messages rather than propagating.
+///
 /// # Examples
 ///
 /// ```no_run
@@ -268,43 +274,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_inject_echo_command() {
-        let result =
-            inject_dynamic_context("Output: !`echo hello`", Path::new("/tmp"))
-                .await
-                .expect("should succeed");
+        let result = inject_dynamic_context("Output: !`echo hello`", Path::new("/tmp"))
+            .await
+            .expect("should succeed");
         assert_eq!(result, "Output: hello");
     }
 
     #[tokio::test]
     async fn test_inject_multiple_commands() {
-        let result = inject_dynamic_context(
-            "A: !`echo alpha` B: !`echo beta`",
-            Path::new("/tmp"),
-        )
-        .await
-        .expect("should succeed");
+        let result = inject_dynamic_context("A: !`echo alpha` B: !`echo beta`", Path::new("/tmp"))
+            .await
+            .expect("should succeed");
         assert_eq!(result, "A: alpha B: beta");
     }
 
     #[tokio::test]
     async fn test_inject_failing_command() {
-        let result = inject_dynamic_context(
-            "Result: !`sh -c 'exit 1'`",
-            Path::new("/tmp"),
-        )
-        .await
-        .expect("should succeed even with failed command");
+        let result = inject_dynamic_context("Result: !`sh -c 'exit 1'`", Path::new("/tmp"))
+            .await
+            .expect("should succeed even with failed command");
         assert!(result.starts_with("Result: [command failed:"));
     }
 
     #[tokio::test]
     async fn test_inject_preserves_surrounding_text() {
-        let result = inject_dynamic_context(
-            "Before\n!`echo injected`\nAfter",
-            Path::new("/tmp"),
-        )
-        .await
-        .expect("should succeed");
+        let result = inject_dynamic_context("Before\n!`echo injected`\nAfter", Path::new("/tmp"))
+            .await
+            .expect("should succeed");
         assert_eq!(result, "Before\ninjected\nAfter");
     }
 
@@ -315,10 +311,9 @@ mod tests {
         std::fs::create_dir_all(&tmp).expect("create temp dir");
         std::fs::write(tmp.join("marker.txt"), "found").expect("write marker");
 
-        let result =
-            inject_dynamic_context("Content: !`cat marker.txt`", &tmp)
-                .await
-                .expect("should succeed");
+        let result = inject_dynamic_context("Content: !`cat marker.txt`", &tmp)
+            .await
+            .expect("should succeed");
         assert_eq!(result, "Content: found");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -350,12 +345,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_inject_nonexistent_command() {
-        let result = inject_dynamic_context(
-            "!`ragent_nonexistent_cmd_12345`",
-            Path::new("/tmp"),
-        )
-        .await
-        .expect("should succeed with error placeholder");
+        let result = inject_dynamic_context("!`ragent_nonexistent_cmd_12345`", Path::new("/tmp"))
+            .await
+            .expect("should succeed with error placeholder");
         assert!(
             result.contains("[command failed:") || result.contains("[command error:"),
             "Expected error placeholder, got: {result}"

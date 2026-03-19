@@ -25,6 +25,9 @@ impl Tool for WebSearchTool {
         "websearch"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Search the web and return results with titles, URLs, and snippets. \
          Requires a TAVILY_API_KEY environment variable to be set."
@@ -47,10 +50,18 @@ impl Tool for WebSearchTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "web"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `query` parameter is missing or empty,
+    /// if the TAVILY_API_KEY environment variable is not set, or if the
+    /// search request fails.
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
@@ -134,11 +145,7 @@ struct SearchResult {
     snippet: String,
 }
 
-async fn tavily_search(
-    api_key: &str,
-    query: &str,
-    max_results: u64,
-) -> Result<Vec<SearchResult>> {
+async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<Vec<SearchResult>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .user_agent(USER_AGENT)

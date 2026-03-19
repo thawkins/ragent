@@ -78,7 +78,9 @@ fn test_extra_dirs_skills_discovered() {
 
     // 4 bundled + 1 shared
     assert_eq!(registry.len(), 5);
-    let lint = registry.get("shared-lint").expect("should find shared-lint");
+    let lint = registry
+        .get("shared-lint")
+        .expect("should find shared-lint");
     assert_eq!(lint.scope, SkillScope::Personal);
 
     let _ = std::fs::remove_dir_all(&tmp);
@@ -100,7 +102,11 @@ fn test_project_overrides_extra_dir_skill() {
     let registry = SkillRegistry::load(&work_dir, &extra_dirs);
 
     let deploy = registry.get("deploy").expect("should find deploy");
-    assert_eq!(deploy.scope, SkillScope::Project, "project should override extra dir");
+    assert_eq!(
+        deploy.scope,
+        SkillScope::Project,
+        "project should override extra dir"
+    );
     assert_eq!(deploy.description.as_deref(), Some("Project deploy"));
 
     let _ = std::fs::remove_dir_all(&tmp);

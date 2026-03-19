@@ -22,8 +22,11 @@ pub struct LibreReadTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreReadTool {
-    fn name(&self) -> &str { "libre_read" }
+    fn name(&self) -> &str {
+        "libre_read"
+    }
 
+    /// Returns the tool description.
     fn description(&self) -> &str {
         "Read content from OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
          ODS uses calamine for full spreadsheet fidelity; ODT/ODP use XML extraction."
@@ -59,10 +62,25 @@ impl Tool for LibreReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str { "file:read" }
+    fn permission_category(&self) -> &str {
+        "file:read"
+    }
 
+    /// Executes the LibreOffice read operation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The required `path` parameter is missing
+    /// - The file format cannot be detected from the extension
+    /// - The background task panics or fails to read the document
+    /// - The document cannot be opened or parsed
+    /// - For ODS: the sheet name/index is invalid or the range syntax is incorrect
+    /// - For ODP: the slide number is out of bounds
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let fmt = input["format"].as_str().unwrap_or("markdown").to_string();
         let libre_format = detect_format(&path)?;
@@ -112,19 +130,22 @@ fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) ->
             if sheet_names.iter().any(|n| n == name) {
                 name.to_string()
             } else if let Ok(idx) = name.parse::<usize>() {
-                sheet_names.get(idx)
+                sheet_names
+                    .get(idx)
                     .ok_or_else(|| anyhow::anyhow!("Sheet index {} out of range", idx))?
                     .clone()
             } else {
                 anyhow::bail!("Sheet '{}' not found", name);
             }
         }
-        None => sheet_names.first()
+        None => sheet_names
+            .first()
             .ok_or_else(|| anyhow::anyhow!("Workbook has no sheets"))?
             .clone(),
     };
 
-    let data = wb.worksheet_range(&target)
+    let data = wb
+        .worksheet_range(&target)
         .with_context(|| format!("Failed to read sheet '{target}'"))?;
 
     let rows: Vec<Vec<String>> = if let Some(range_str) = range {
@@ -191,9 +212,9 @@ fn cell_ref(s: &str) -> Result<(usize, usize)> {
     let col_end = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
     let col_str = &s[..col_end];
     let row_str = &s[col_end..];
-    let col = col_str.chars().fold(0usize, |acc, c| {
-        acc * 26 + (c as usize - 'A' as usize + 1)
-    });
+    let col = col_str
+        .chars()
+        .fold(0usize, |acc, c| acc * 26 + (c as usize - 'A' as usize + 1));
     let row: usize = row_str.parse().context("Invalid row number in range")?;
     Ok((row.saturating_sub(1), col.saturating_sub(1)))
 }
@@ -221,7 +242,9 @@ fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> 
                     current = Some(String::new());
                 } else if matches!(name, "p" | "span") {
                     if let Some(ref mut s) = current {
-                        if !s.is_empty() && !s.ends_with('\n') { s.push('\n'); }
+                        if !s.is_empty() && !s.ends_with('\n') {
+                            s.push('\n');
+                        }
                     }
                 }
             }
@@ -254,19 +277,29 @@ fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> 
     let selection: Vec<(usize, String)> = match slide_num {
         Some(n) => {
             let idx = n.saturating_sub(1);
-            slides.get(idx)
+            slides
+                .get(idx)
                 .map(|s| vec![(idx + 1, s.clone())])
                 .unwrap_or_default()
         }
-        None => slides.iter().enumerate().map(|(i, s)| (i + 1, s.clone())).collect(),
+        None => slides
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (i + 1, s.clone()))
+            .collect(),
     };
 
     match fmt {
         "json" => Ok(serde_json::to_string_pretty(&json!({
             "slides": selection.iter().map(|(i, s)| json!({ "slide": i, "text": s })).collect::<Vec<_>>()
         }))?),
-        "text" => Ok(selection.iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join("\n\n")),
-        _ => Ok(selection.iter()
+        "text" => Ok(selection
+            .iter()
+            .map(|(_, s)| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n")),
+        _ => Ok(selection
+            .iter()
             .map(|(i, s)| format!("### Slide {}\n\n{}", i, s))
             .collect::<Vec<_>>()
             .join("\n\n")),

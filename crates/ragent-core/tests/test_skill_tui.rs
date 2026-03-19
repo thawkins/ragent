@@ -65,7 +65,10 @@ fn test_skill_argument_hint_for_autocomplete() {
     reg.register(skill);
 
     let skills = reg.list_user_invocable();
-    let deploy = skills.iter().find(|s| s.name == "deploy").expect("find deploy");
+    let deploy = skills
+        .iter()
+        .find(|s| s.name == "deploy")
+        .expect("find deploy");
     assert_eq!(deploy.argument_hint.as_deref(), Some("<environment>"));
 }
 
@@ -77,7 +80,10 @@ fn test_skill_without_argument_hint() {
     reg.register(skill);
 
     let skills = reg.list_user_invocable();
-    let simple = skills.iter().find(|s| s.name == "simple").expect("find simple");
+    let simple = skills
+        .iter()
+        .find(|s| s.name == "simple")
+        .expect("find simple");
     assert!(simple.argument_hint.is_none());
 }
 
@@ -86,7 +92,10 @@ fn test_skill_without_argument_hint() {
 #[test]
 fn test_bundled_batch_is_user_only() {
     let bundled = ragent_core::skill::bundled::bundled_skills();
-    let batch = bundled.iter().find(|s| s.name == "batch").expect("find batch");
+    let batch = bundled
+        .iter()
+        .find(|s| s.name == "batch")
+        .expect("find batch");
     assert!(batch.user_invocable);
     assert!(batch.disable_model_invocation);
 }
@@ -94,7 +103,10 @@ fn test_bundled_batch_is_user_only() {
 #[test]
 fn test_bundled_loop_is_user_only() {
     let bundled = ragent_core::skill::bundled::bundled_skills();
-    let loopsk = bundled.iter().find(|s| s.name == "loop").expect("find loop");
+    let loopsk = bundled
+        .iter()
+        .find(|s| s.name == "loop")
+        .expect("find loop");
     assert!(loopsk.user_invocable);
     assert!(loopsk.disable_model_invocation);
 }
@@ -102,7 +114,10 @@ fn test_bundled_loop_is_user_only() {
 #[test]
 fn test_bundled_simplify_is_both() {
     let bundled = ragent_core::skill::bundled::bundled_skills();
-    let simplify = bundled.iter().find(|s| s.name == "simplify").expect("find simplify");
+    let simplify = bundled
+        .iter()
+        .find(|s| s.name == "simplify")
+        .expect("find simplify");
     assert!(simplify.user_invocable);
     assert!(!simplify.disable_model_invocation);
 }
@@ -110,7 +125,10 @@ fn test_bundled_simplify_is_both() {
 #[test]
 fn test_bundled_debug_is_both() {
     let bundled = ragent_core::skill::bundled::bundled_skills();
-    let debug = bundled.iter().find(|s| s.name == "debug").expect("find debug");
+    let debug = bundled
+        .iter()
+        .find(|s| s.name == "debug")
+        .expect("find debug");
     assert!(debug.user_invocable);
     assert!(!debug.disable_model_invocation);
 }
@@ -229,7 +247,11 @@ fn test_lower_scope_cannot_override_higher() {
     reg.register(personal); // Should NOT override
 
     let skill = reg.get("test-skill").expect("find skill");
-    assert_eq!(skill.scope, SkillScope::Project, "lower scope should not override higher");
+    assert_eq!(
+        skill.scope,
+        SkillScope::Project,
+        "lower scope should not override higher"
+    );
 }
 
 // ── Skill forked detection ───────────────────────────────────────

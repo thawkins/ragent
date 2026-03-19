@@ -4,12 +4,12 @@
 //! content. Supports text paragraphs with headings, tables, and embedded
 //! images.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use printpdf::{
     BuiltinFont, Color, Greyscale, Line, LinePoint, Mm, Op, PdfDocument, PdfFontHandle, PdfPage,
     PdfSaveOptions, PdfWarnMsg, Point, Pt, RawImage, TextItem, XObjectTransform,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
 
@@ -43,6 +43,9 @@ impl Tool for PdfWriteTool {
         "pdf_write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Create a PDF file from structured content. Supports text paragraphs with headings, tables, and embedded images."
     }
@@ -123,8 +126,14 @@ impl Tool for PdfWriteTool {
         "file:write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `path` or `content` parameters are missing,
+    /// if PDF creation fails, or if the background task exits unexpectedly.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let content = input
             .get("content")
@@ -134,18 +143,13 @@ impl Tool for PdfWriteTool {
         let working_dir = ctx.working_dir.clone();
         let path_clone = path.clone();
 
-        let bytes_written = tokio::task::spawn_blocking(move || {
-            write_pdf(&path_clone, &content, &working_dir)
-        })
-        .await
-        .context("Failed to write PDF: the background task exited unexpectedly")??;
+        let bytes_written =
+            tokio::task::spawn_blocking(move || write_pdf(&path_clone, &content, &working_dir))
+                .await
+                .context("Failed to write PDF: the background task exited unexpectedly")??;
 
         Ok(ToolOutput {
-            content: format!(
-                "Wrote PDF ({} bytes) to {}",
-                bytes_written,
-                path.display()
-            ),
+            content: format!("Wrote PDF ({} bytes) to {}", bytes_written, path.display()),
             metadata: Some(json!({
                 "path": path.display().to_string(),
                 "bytes": bytes_written,
@@ -233,14 +237,8 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
 
         match el_type {
             "heading" => {
-                let text = element
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let level = element
-                    .get("level")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(1) as usize;
+                let text = element.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let level = element.get("level").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
                 let font_size = match level {
                     1 => H1_FONT_SIZE,
@@ -259,21 +257,11 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                 }
 
                 cursor.advance(spacing_before);
-                emit_text(
-                    &mut ops,
-                    text,
-                    font_size,
-                    &font_bold,
-                    MARGIN_LEFT,
-                    cursor.y,
-                );
+                emit_text(&mut ops, text, font_size, &font_bold, MARGIN_LEFT, cursor.y);
                 cursor.advance(line_height_mm + 2.0);
             }
             "paragraph" => {
-                let text = element
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let text = element.get("text").and_then(|v| v.as_str()).unwrap_or("");
 
                 let line_height_mm = BODY_FONT_SIZE * LINE_SPACING * 0.3528;
                 let chars_per_line = (CONTENT_WIDTH / (BODY_FONT_SIZE * 0.2116)) as usize;
@@ -418,15 +406,15 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                 let raw_image = RawImage::decode_from_bytes(&image_bytes, &mut warnings)
                     .map_err(|e| anyhow::anyhow!("Failed to decode image: {}", e))?;
 
-                let img_w_px = raw_image.width as f32;
-                let img_h_px = raw_image.height as f32;
+                let img_width_px = raw_image.width as f32;
+                let img_height_px = raw_image.height as f32;
 
                 let max_width = element
                     .get("width_mm")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(CONTENT_WIDTH as f64) as f32;
                 let display_width = max_width.min(CONTENT_WIDTH);
-                let aspect = img_h_px / img_w_px;
+                let aspect = img_height_px / img_width_px;
                 let display_height = display_width * aspect;
 
                 let total_needed = display_height + 8.0;
@@ -450,8 +438,8 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                     transform: XObjectTransform {
                         translate_x: Some(Mm(MARGIN_LEFT).into()),
                         translate_y: Some(Mm(image_y).into()),
-                        scale_x: Some(final_w / img_w_px),
-                        scale_y: Some(final_h / img_h_px),
+                        scale_x: Some(final_w / img_width_px),
+                        scale_y: Some(final_h / img_height_px),
                         ..Default::default()
                     },
                 });
@@ -494,21 +482,13 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
     let opts = PdfSaveOptions::default();
     let bytes = doc.save(&opts, &mut warnings);
 
-    fs::write(path, &bytes)
-        .with_context(|| format!("Failed to write PDF: {}", path.display()))?;
+    fs::write(path, &bytes).with_context(|| format!("Failed to write PDF: {}", path.display()))?;
 
     Ok(bytes.len())
 }
 
 /// Emit a text string at given position (mm coordinates).
-fn emit_text(
-    ops: &mut Vec<Op>,
-    text: &str,
-    font_size: f32,
-    font: &PdfFontHandle,
-    x: f32,
-    y: f32,
-) {
+fn emit_text(ops: &mut Vec<Op>, text: &str, font_size: f32, font: &PdfFontHandle, x: f32, y: f32) {
     ops.push(Op::StartTextSection);
     ops.push(Op::SetFont {
         font: font.clone(),

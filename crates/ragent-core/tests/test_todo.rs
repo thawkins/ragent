@@ -3,15 +3,15 @@
 //! Validates that TODO items can be listed from storage, with optional
 //! status filtering, correct markdown formatting, and error handling.
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde_json::json;
 
 use ragent_core::event::EventBus;
 use ragent_core::storage::Storage;
-use ragent_core::tool::{Tool, ToolContext};
 use ragent_core::tool::todo::TodoReadTool;
+use ragent_core::tool::{Tool, ToolContext};
 
 fn make_ctx_with_storage(storage: Arc<Storage>) -> ToolContext {
     ToolContext {
@@ -20,8 +20,10 @@ fn make_ctx_with_storage(storage: Arc<Storage>) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -32,8 +34,10 @@ fn make_ctx_no_storage() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -128,7 +132,10 @@ async fn test_todo_read_filter_pending() {
     assert!(result.content.contains("1 items"));
     assert!(result.content.contains("Fix bug"));
     assert!(!result.content.contains("Write tests"));
-    assert_eq!(result.metadata.as_ref().unwrap()["status_filter"], "pending");
+    assert_eq!(
+        result.metadata.as_ref().unwrap()["status_filter"],
+        "pending"
+    );
 }
 
 #[tokio::test]
@@ -144,10 +151,7 @@ async fn test_todo_read_filter_done() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool
-        .execute(json!({"status": "done"}), &ctx)
-        .await
-        .unwrap();
+    let result = tool.execute(json!({"status": "done"}), &ctx).await.unwrap();
     assert!(result.content.contains("1 items"));
     assert!(result.content.contains("Write tests"));
     assert!(!result.content.contains("Fix bug"));
@@ -166,10 +170,7 @@ async fn test_todo_read_filter_all() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool
-        .execute(json!({"status": "all"}), &ctx)
-        .await
-        .unwrap();
+    let result = tool.execute(json!({"status": "all"}), &ctx).await.unwrap();
     assert!(result.content.contains("2 items"));
 }
 
@@ -179,11 +180,14 @@ async fn test_todo_read_invalid_status() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool
-        .execute(json!({"status": "invalid"}), &ctx)
-        .await;
+    let result = tool.execute(json!({"status": "invalid"}), &ctx).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Invalid status filter"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid status filter")
+    );
 }
 
 #[tokio::test]
@@ -193,15 +197,18 @@ async fn test_todo_read_no_storage() {
 
     let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("Storage is not available"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Storage is not available")
+    );
 }
 
 #[tokio::test]
 async fn test_todo_read_session_isolation() {
     let storage = setup_storage();
-    storage
-        .create_session("other-session", "/tmp")
-        .unwrap();
+    storage.create_session("other-session", "/tmp").unwrap();
     storage
         .create_todo("t1", "test-session", "My task", "pending", "")
         .unwrap();
@@ -222,7 +229,13 @@ async fn test_todo_read_session_isolation() {
 async fn test_todo_read_description_displayed() {
     let storage = setup_storage();
     storage
-        .create_todo("t1", "test-session", "Fix bug", "pending", "This is a detailed description")
+        .create_todo(
+            "t1",
+            "test-session",
+            "Fix bug",
+            "pending",
+            "This is a detailed description",
+        )
         .unwrap();
 
     let ctx = make_ctx_with_storage(storage);
@@ -246,7 +259,11 @@ async fn test_todo_read_empty_filter_message() {
         .execute(json!({"status": "pending"}), &ctx)
         .await
         .unwrap();
-    assert!(result.content.contains("No TODO items found with status 'pending'"));
+    assert!(
+        result
+            .content
+            .contains("No TODO items found with status 'pending'")
+    );
 }
 
 // ── Registry integration ────────────────────────────────────────────

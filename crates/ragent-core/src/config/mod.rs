@@ -280,7 +280,6 @@ impl Default for LspServerConfig {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Flags for experimental features that are not yet stable.
 pub struct ExperimentalFlags {

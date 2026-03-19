@@ -35,6 +35,11 @@ pub struct FuzzyMatch {
 ///
 /// Skips hidden files/directories and well-known generated directories.
 /// Returns at most `MAX_PROJECT_FILES` relative paths.
+///
+/// # Errors
+///
+/// This function does not return errors. File system errors during directory
+/// traversal are silently ignored and traversal continues with remaining entries.
 pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     let limit = max.min(MAX_PROJECT_FILES);
     let mut files = Vec::new();
@@ -96,6 +101,11 @@ fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {
 /// 4. Path component substring match (score 25)
 ///
 /// Case-insensitive matching is used throughout.
+///
+/// # Errors
+///
+/// This function does not return errors. Empty queries and empty candidate lists
+/// both return an empty vector.
 pub fn fuzzy_match(query: &str, candidates: &[PathBuf]) -> Vec<FuzzyMatch> {
     if query.is_empty() {
         // Return all candidates with equal score for initial menu
@@ -117,11 +127,7 @@ pub fn fuzzy_match(query: &str, candidates: &[PathBuf]) -> Vec<FuzzyMatch> {
         // For directories (trailing '/'), use the directory name for basename matching
         let basename = if path_str.ends_with('/') {
             let trimmed = path_str.trim_end_matches('/');
-            trimmed
-                .rsplit('/')
-                .next()
-                .unwrap_or(trimmed)
-                .to_string()
+            trimmed.rsplit('/').next().unwrap_or(trimmed).to_string()
         } else {
             candidate
                 .file_name()
@@ -153,9 +159,12 @@ pub fn fuzzy_match(query: &str, candidates: &[PathBuf]) -> Vec<FuzzyMatch> {
 
     // Sort by score descending, then by path length ascending (prefer shorter paths)
     matches.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.path.to_string_lossy().len().cmp(&b.path.to_string_lossy().len()))
+        b.score.cmp(&a.score).then_with(|| {
+            a.path
+                .to_string_lossy()
+                .len()
+                .cmp(&b.path.to_string_lossy().len())
+        })
     });
 
     matches
@@ -198,16 +207,22 @@ mod tests {
     fn test_substring_match() {
         let results = fuzzy_match("lib", &candidates());
         assert!(!results.is_empty());
-        assert!(results.iter().any(|m| m.path == PathBuf::from("src/lib.rs")));
+        assert!(
+            results
+                .iter()
+                .any(|m| m.path == PathBuf::from("src/lib.rs"))
+        );
     }
 
     #[test]
     fn test_path_match() {
         let results = fuzzy_match("reference", &candidates());
         assert!(!results.is_empty());
-        assert!(results
-            .iter()
-            .any(|m| m.path == PathBuf::from("src/reference/mod.rs")));
+        assert!(
+            results
+                .iter()
+                .any(|m| m.path == PathBuf::from("src/reference/mod.rs"))
+        );
     }
 
     #[test]
@@ -259,9 +274,9 @@ mod tests {
     #[test]
     fn test_score_ordering() {
         let candidates = vec![
-            PathBuf::from("src/lib/main.rs"),      // path match for "main"
-            PathBuf::from("src/main_helper.rs"),    // prefix match
-            PathBuf::from("src/main.rs"),           // exact basename match
+            PathBuf::from("src/lib/main.rs"),    // path match for "main"
+            PathBuf::from("src/main_helper.rs"), // prefix match
+            PathBuf::from("src/main.rs"),        // exact basename match
         ];
         let results = fuzzy_match("main.rs", &candidates);
         assert_eq!(results[0].path, PathBuf::from("src/main.rs"));

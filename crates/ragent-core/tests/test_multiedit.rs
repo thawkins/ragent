@@ -12,8 +12,10 @@ fn make_ctx(dir: PathBuf) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -132,8 +134,14 @@ async fn test_multiedit_atomic_rollback_on_missing_match() {
 
     assert!(result.is_err());
     // Both files should be unchanged
-    assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "original\n");
-    assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "keep\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+        "original\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("b.txt")).unwrap(),
+        "keep\n"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -158,7 +166,10 @@ async fn test_multiedit_atomic_rollback_on_duplicate_match() {
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("3 times"));
     // File unchanged
-    assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "foo foo foo\n");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("a.txt")).unwrap(),
+        "foo foo foo\n"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

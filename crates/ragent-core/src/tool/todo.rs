@@ -19,6 +19,9 @@ impl Tool for TodoReadTool {
         "todo_read"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "List TODO items for the current session, optionally filtered by status"
     }
@@ -41,10 +44,11 @@ impl Tool for TodoReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let storage = ctx
-            .storage
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Storage is not available. Cannot read TODO items without a storage backend."))?;
+        let storage = ctx.storage.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Storage is not available. Cannot read TODO items without a storage backend."
+            )
+        })?;
 
         let status_filter = input["status"].as_str().unwrap_or("all");
 
@@ -85,10 +89,16 @@ pub struct TodoWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for TodoWriteTool {
+    /// # Errors
+    ///
+    /// Returns an error if the name string cannot be converted or returned.
     fn name(&self) -> &str {
         "todo_write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Add, update, remove, or clear TODO items for the current session"
     }
@@ -129,14 +139,17 @@ impl Tool for TodoWriteTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let storage = ctx
-            .storage
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Storage is not available. Cannot manage TODO items without a storage backend."))?;
+        let storage = ctx.storage.as_ref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Storage is not available. Cannot manage TODO items without a storage backend."
+            )
+        })?;
 
-        let action = input["action"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing required 'action' parameter. Must be one of: add, update, remove, clear"))?;
+        let action = input["action"].as_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Missing required 'action' parameter. Must be one of: add, update, remove, clear"
+            )
+        })?;
 
         let (summary, action_label) = match action {
             "add" => {
@@ -164,7 +177,10 @@ impl Tool for TodoWriteTool {
                     .create_todo(&id, &ctx.session_id, title, status, description)
                     .map_err(|e| anyhow::anyhow!("Failed to add todo: {e}"))?;
 
-                (format!("Added todo '{}' with status '{}'", id, status), "add")
+                (
+                    format!("Added todo '{}' with status '{}'", id, status),
+                    "add",
+                )
             }
             "update" => {
                 let id = input["id"]
@@ -185,7 +201,9 @@ impl Tool for TodoWriteTool {
                 }
 
                 if title.is_none() && status.is_none() && description.is_none() {
-                    bail!("At least one of title, status, or description must be provided for update");
+                    bail!(
+                        "At least one of title, status, or description must be provided for update"
+                    );
                 }
 
                 let updated = storage
@@ -218,7 +236,14 @@ impl Tool for TodoWriteTool {
                     .clear_todos(&ctx.session_id)
                     .map_err(|e| anyhow::anyhow!("Failed to clear todos: {e}"))?;
 
-                (format!("Cleared {} todo item{}", count, if count == 1 { "" } else { "s" }), "clear")
+                (
+                    format!(
+                        "Cleared {} todo item{}",
+                        count,
+                        if count == 1 { "" } else { "s" }
+                    ),
+                    "clear",
+                )
             }
             _ => bail!(
                 "Invalid action '{}'. Must be one of: add, update, remove, clear",
@@ -277,12 +302,7 @@ fn format_todo_list(todos: &[crate::storage::TodoRow], status_filter: &str) -> S
     output
 }
 
-/// Generates a short unique ID for a TODO item.
+/// Generates a unique ID for a TODO item.
 fn generate_todo_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-    format!("todo-{}", ts % 1_000_000)
+    format!("todo-{}", uuid::Uuid::new_v4().simple())
 }

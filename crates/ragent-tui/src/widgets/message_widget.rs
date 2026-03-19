@@ -74,15 +74,13 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             .and_then(|s| s.lines().next())
             .map(|s| format!("$ {}", s))
             .unwrap_or_default(),
-        "read" => {
-            input
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default()
-        }
-        "write" | "create" | "edit" | "patch" | "list" | "rm" | "office_read"
-        | "office_write" | "office_info" | "pdf_read" | "pdf_write" => input
+        "read" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
+        "write" | "create" | "edit" | "patch" | "list" | "rm" | "office_read" | "office_write"
+        | "office_info" | "pdf_read" | "pdf_write" => input
             .get("path")
             .and_then(|v| v.as_str())
             .map(|p| make_relative_path(p, cwd))
@@ -111,10 +109,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             .unwrap_or("")
             .to_string(),
         "grep" => {
-            let pattern = input
-                .get("pattern")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
             let path = input
                 .get("path")
                 .and_then(|v| v.as_str())
@@ -125,18 +120,12 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             }
         }
         "plan_enter" => {
-            let task = input
-                .get("task")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
             let truncated = truncate_str(task, 60);
             format!("→ plan: {}", truncated)
         }
         "plan_exit" => {
-            let summary = input
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let summary = input.get("summary").and_then(|v| v.as_str()).unwrap_or("");
             let truncated = truncate_str(summary, 60);
             format!("← plan: {}", truncated)
         }
@@ -147,28 +136,62 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .unwrap_or("all");
             format!("📋 filter: {}", status)
         }
-        "todo_write" => {
-            let action = input
-                .get("action")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let id = input
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let title = input
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            match action {
-                "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
-                "update" => format!("📋 ~{}", id),
-                "remove" => format!("📋 -{}", id),
-                "clear" => "📋 clear all".to_string(),
-                _ => format!("📋 {}", action),
-            }
-        }
-        _ => String::new(),
+                  "todo_write" => {
+                      let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+                      let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                      let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                      match action {
+                          "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
+                          "update" => format!("📋 ~{}", id),
+                          "remove" => format!("📋 -{}", id),
+                          "clear" => "📋 clear all".to_string(),
+                          _ => format!("📋 {}", action),
+                      }
+                  }
+                  "new_task" => {
+                      let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
+                      let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
+                      let truncated = truncate_str(task, 50);
+                      format!("{} → {}", agent, truncated)
+                  }
+                  "cancel_task" => {
+                      let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                      format!("cancel task: {}", &task_id[..8.min(task_id.len())])
+                  }
+                  "list_tasks" => {
+                      let status = input
+                          .get("status")
+                          .and_then(|v| v.as_str())
+                          .unwrap_or("all");
+                      format!("filter: {}", status)
+                  }
+                  "wait_tasks" => {
+                      let task_ids = input
+                          .get("task_ids")
+                          .and_then(|v| v.as_array())
+                          .map(|a| a.len())
+                          .unwrap_or(0);
+                      if task_ids > 0 {
+                          format!("wait on {} task(s)", task_ids)
+                      } else {
+                          "wait on all tasks".to_string()
+                      }
+                  }
+                  "lsp_definition" => {
+                      let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+                      let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                      format!("line {}, col {}", line, column)
+                  }
+                  "lsp_hover" => {
+                      let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+                      let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+                      format!("line {}, col {}", line, column)
+                  }
+                  "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
+                      .get("path")
+                      .and_then(|v| v.as_str())
+                      .map(|p| make_relative_path(p, cwd))
+                      .unwrap_or_default(),        _ => String::new(),
     }
 }
 
@@ -204,7 +227,10 @@ pub(crate) fn tool_inline_diff(
         }
         "multiedit" | "patch" => {
             let added = out.get("lines_added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let removed = out.get("lines_removed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let removed = out
+                .get("lines_removed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
             if added > 0 || removed > 0 {
                 Some((added, removed))
             } else {
@@ -226,7 +252,10 @@ pub(crate) fn tool_result_summary(
     let line_count = out.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     match tool {
         "read" => {
-            let summarised = out.get("summarised").and_then(|v| v.as_bool()).unwrap_or(false);
+            let summarised = out
+                .get("summarised")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let total = out.get("total_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             if summarised && total > 0 {
                 Some(format!(
@@ -243,14 +272,22 @@ pub(crate) fn tool_result_summary(
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!("{} written to {}", pluralize(line_count, "line", "lines"), path))
+            Some(format!(
+                "{} written to {}",
+                pluralize(line_count, "line", "lines"),
+                path
+            ))
         }
         "create" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!("{} created in {}", pluralize(line_count, "line", "lines"), path))
+            Some(format!(
+                "{} created in {}",
+                pluralize(line_count, "line", "lines"),
+                path
+            ))
         }
         "edit" => None,
         "multiedit" => {
@@ -272,7 +309,10 @@ pub(crate) fn tool_result_summary(
             ))
         }
         "bash" => Some(format!("{}…", pluralize(line_count, "line", "lines"))),
-        "grep" => Some(format!("{} matched", pluralize(line_count, "line", "lines"))),
+        "grep" => Some(format!(
+            "{} matched",
+            pluralize(line_count, "line", "lines")
+        )),
         "glob" => Some(format!("{} found", pluralize(line_count, "file", "files"))),
         "list" => {
             let item_label = if line_count == 1 { "entry" } else { "entries" };
@@ -280,17 +320,18 @@ pub(crate) fn tool_result_summary(
         }
         "webfetch" => {
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("{} (HTTP {})", pluralize(line_count, "line", "lines"), status))
+            Some(format!(
+                "{} (HTTP {})",
+                pluralize(line_count, "line", "lines"),
+                status
+            ))
         }
         "websearch" => {
             let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!("{} found", pluralize(results, "result", "results")))
         }
         "plan_enter" => {
-            let task = out
-                .get("task")
-                .and_then(|v| v.as_str())
-                .unwrap_or("plan");
+            let task = out.get("task").and_then(|v| v.as_str()).unwrap_or("plan");
             Some(format!("delegated → plan: {}", task))
         }
         "plan_exit" => {
@@ -301,39 +342,96 @@ pub(crate) fn tool_result_summary(
             Some(format!("returned ({} chars)", len))
         }
         "todo_read" => {
-            let count = out
-                .get("count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(pluralize(count, "item", "items"))
         }
         "todo_write" => {
-            let action = out
-                .get("action")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let count = out
-                .get("count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(format!("{} → {} remaining", action, count))
         }
-        "office_read" | "pdf_read" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
+        "office_read" | "pdf_read" => {
+            Some(format!("{} read", pluralize(line_count, "line", "lines")))
+        }
         "office_write" | "pdf_write" => {
             let path = input["path"]
                 .as_str()
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!("{} written to {}", pluralize(line_count, "line", "lines"), path))
+            Some(format!(
+                "{} written to {}",
+                pluralize(line_count, "line", "lines"),
+                path
+            ))
         }
-        "office_info" => Some(format!("{} of metadata", pluralize(line_count, "line", "lines"))),
+        "office_info" => Some(format!(
+            "{} of metadata",
+            pluralize(line_count, "line", "lines")
+        )),
         "rm" => {
-            let deleted = out.get("deleted").and_then(|v| v.as_bool()).unwrap_or(false);
+            let deleted = out
+                .get("deleted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if deleted {
                 Some("deleted".to_string())
             } else {
                 Some("failed".to_string())
             }
+        }
+        "new_task" => {
+            let agent = out.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
+            let background = out
+                .get("background")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let status = out
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let task_id = out
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .map(|id| format!(" ({})", &id[..8.min(id.len())]))
+                .unwrap_or_default();
+            if background {
+                Some(format!("spawned {} agent{}", agent, task_id))
+            } else {
+                Some(format!("{} agent {} → {}{}", status, agent, status, task_id))
+            }
+        }
+        "cancel_task" => {
+            let cancelled = out
+                .get("cancelled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if cancelled {
+                Some("task cancelled".to_string())
+            } else {
+                Some("already completed".to_string())
+            }
+        }
+        "list_tasks" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(pluralize(count, "task", "tasks"))
+        }
+        "wait_tasks" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let success = out
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if success {
+                Some(format!("waited on {} task(s)", count))
+            } else {
+                Some(format!("timeout waiting for {} task(s)", count))
+            }
+        }
+        "lsp_definition" | "lsp_hover" | "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => {
+            Some(format!(
+                "{} results",
+                pluralize(line_count, "result", "results")
+            ))
         }
         _ => None,
     }
@@ -370,8 +468,16 @@ impl<'a> MessageWidget<'a> {
     /// let map = HashMap::new();
     /// let widget = MessageWidget::new(&msg, "/home/user/project", &map);
     /// ```
-    pub fn new(message: &'a Message, cwd: &'a str, tool_step_map: &'a std::collections::HashMap<String, (String, u32)>) -> Self {
-        Self { message, cwd, tool_step_map }
+    pub fn new(
+        message: &'a Message,
+        cwd: &'a str,
+        tool_step_map: &'a std::collections::HashMap<String, (String, u32)>,
+    ) -> Self {
+        Self {
+            message,
+            cwd,
+            tool_step_map,
+        }
     }
 
     fn to_lines(&self) -> Vec<Line<'a>> {
@@ -411,7 +517,11 @@ impl<'a> MessageWidget<'a> {
                         }
                     }
                 }
-                MessagePart::ToolCall { tool, call_id, state } => {
+                MessagePart::ToolCall {
+                    tool,
+                    call_id,
+                    state,
+                } => {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
@@ -428,9 +538,7 @@ impl<'a> MessageWidget<'a> {
                         ToolCallStatus::Error => (
                             "✗ ",
                             Style::default().fg(Color::Red),
-                            Style::default()
-                                .fg(Color::Red)
-                                .add_modifier(Modifier::BOLD),
+                            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                         ),
                         ToolCallStatus::Running | ToolCallStatus::Pending => (
                             "● ",
@@ -490,17 +598,73 @@ impl<'a> MessageWidget<'a> {
                     }
                     lines.push(Line::from(spans));
 
-                    if state.status == ToolCallStatus::Completed {
-                        if let Some(result) =
-                            tool_result_summary(tool, &state.output, &state.input, self.cwd)
-                        {
-                            lines.push(Line::from(Span::styled(
-                                format!("  └ {}", result),
-                                Style::default().fg(Color::DarkGray),
-                            )));
-                        }
-                    }
-
+                                          if state.status == ToolCallStatus::Completed {
+                                              if tool == "wait_tasks" {
+                                                  // Special handling for wait_tasks: show indented list of tasks
+                                                  if let Some(tasks_array) = state
+                                                      .output
+                                                      .as_ref()
+                                                      .and_then(|out| out.get("tasks"))
+                                                      .and_then(|t| t.as_array())
+                                                  {
+                                                      for task in tasks_array {
+                                                          let agent = task
+                                                              .get("agent")
+                                                              .and_then(|a| a.as_str())
+                                                              .unwrap_or("unknown");
+                                                          let task_id = task
+                                                              .get("id")
+                                                              .and_then(|id| id.as_str())
+                                                              .map(|id| &id[..8.min(id.len())])
+                                                              .unwrap_or("unknown");
+                                                          let elapsed_ms = task
+                                                              .get("elapsed_ms")
+                                                              .and_then(|e| e.as_u64())
+                                                              .unwrap_or(0);
+                                                          let output_lines = task
+                                                              .get("output_lines")
+                                                              .and_then(|l| l.as_u64())
+                                                              .unwrap_or(0) as usize;
+                                                          let task_status = task
+                                                              .get("status")
+                                                              .and_then(|s| s.as_str())
+                                                              .unwrap_or("unknown");
+                    
+                                                          let status_icon = if task_status == "completed" {
+                                                              "✓"
+                                                          } else {
+                                                              "✗"
+                                                          };
+                    
+                                                          let elapsed_sec = elapsed_ms as f64 / 1000.0;
+                                                          let task_line = format!(
+                                                              "  {} {} ({}): {}s, {} line(s)",
+                                                              status_icon,
+                                                              agent,
+                                                              task_id,
+                                                              elapsed_sec,
+                                                              output_lines
+                                                          );
+                    
+                                                          lines.push(Line::from(Span::styled(
+                                                              task_line,
+                                                              if task_status == "completed" {
+                                                                  Style::default().fg(Color::Green)
+                                                              } else {
+                                                                  Style::default().fg(Color::Red)
+                                                              },
+                                                          )));
+                                                      }
+                                                  }
+                                              } else if let Some(result) =
+                                                  tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                                              {
+                                                  lines.push(Line::from(Span::styled(
+                                                      format!("  └ {}", result),
+                                                      Style::default().fg(Color::DarkGray),
+                                                  )));
+                                              }
+                                          }
                     if state.status == ToolCallStatus::Error {
                         let err_msg = state
                             .error
@@ -523,10 +687,7 @@ impl<'a> MessageWidget<'a> {
                     }
                 }
                 MessagePart::Image { path, .. } => {
-                    let name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("image");
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),
                         Style::default().fg(Color::Yellow),

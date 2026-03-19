@@ -23,14 +23,18 @@ async fn test_inject_simple_echo() {
 #[tokio::test]
 async fn test_inject_preserves_text_without_patterns() {
     let input = "No dynamic context here. Just plain text.";
-    let result = inject_dynamic_context(input, wd()).await.expect("should succeed");
+    let result = inject_dynamic_context(input, wd())
+        .await
+        .expect("should succeed");
     assert_eq!(result, input);
 }
 
 #[tokio::test]
 async fn test_inject_multiple_commands() {
     let input = "A: !`echo one` B: !`echo two`";
-    let result = inject_dynamic_context(input, wd()).await.expect("should succeed");
+    let result = inject_dynamic_context(input, wd())
+        .await
+        .expect("should succeed");
     assert_eq!(result, "A: one B: two");
 }
 
@@ -70,10 +74,9 @@ async fn test_inject_failing_command_shows_error() {
 
 #[tokio::test]
 async fn test_inject_nonexistent_command() {
-    let result =
-        inject_dynamic_context("Out: !`__nonexistent_command_12345__`", wd())
-            .await
-            .expect("should succeed");
+    let result = inject_dynamic_context("Out: !`__nonexistent_command_12345__`", wd())
+        .await
+        .expect("should succeed");
     assert!(
         result.contains("[error") || result.contains("Out:"),
         "Should handle nonexistent command: {result}"
@@ -91,21 +94,27 @@ async fn test_inject_multiline_output() {
 #[tokio::test]
 async fn test_inject_regular_backticks_preserved() {
     let input = "Code: `let x = 42;` and more";
-    let result = inject_dynamic_context(input, wd()).await.expect("should succeed");
+    let result = inject_dynamic_context(input, wd())
+        .await
+        .expect("should succeed");
     assert_eq!(result, input, "Regular backticks should not be processed");
 }
 
 #[tokio::test]
 async fn test_inject_exclamation_without_backtick_preserved() {
     let input = "Hey! This is great! And `code` too!";
-    let result = inject_dynamic_context(input, wd()).await.expect("should succeed");
+    let result = inject_dynamic_context(input, wd())
+        .await
+        .expect("should succeed");
     assert_eq!(result, input);
 }
 
 #[tokio::test]
 async fn test_inject_empty_command_ignored() {
     let input = "Empty: !`` stuff";
-    let result = inject_dynamic_context(input, wd()).await.expect("should succeed");
+    let result = inject_dynamic_context(input, wd())
+        .await
+        .expect("should succeed");
     assert_eq!(result, input, "Empty commands should be ignored");
 }
 
@@ -120,12 +129,9 @@ async fn test_inject_command_output_trimmed() {
 
 #[tokio::test]
 async fn test_inject_command_with_special_chars_in_output() {
-    let result = inject_dynamic_context(
-        r#"Out: !`echo "hello <world> & stuff"`"#,
-        wd(),
-    )
-    .await
-    .expect("should succeed");
+    let result = inject_dynamic_context(r#"Out: !`echo "hello <world> & stuff"`"#, wd())
+        .await
+        .expect("should succeed");
     assert!(result.starts_with("Out:"));
 }
 

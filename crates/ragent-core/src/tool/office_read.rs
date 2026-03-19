@@ -65,7 +65,9 @@ impl Tool for OfficeReadTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let format = input["format"].as_str().unwrap_or("markdown").to_string();
 

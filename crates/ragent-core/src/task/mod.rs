@@ -19,8 +19,8 @@
 //! ```
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
@@ -188,7 +188,14 @@ impl TaskManager {
 
         // Resolve agent
         let result = self
-            .run_subagent(&child_sid, agent_name, task_prompt, model_override, cancel_flag)
+            .run_subagent(
+                &child_sid,
+                agent_name,
+                task_prompt,
+                model_override,
+                cancel_flag,
+                working_dir,
+            )
             .await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -332,12 +339,13 @@ impl TaskManager {
         let processor = self.processor.clone();
         let tid = task_id.clone();
         let csid = child_sid.clone();
+        let working_dir_buf = working_dir.to_path_buf();
 
         tokio::spawn(async move {
             let start = Instant::now();
 
             let config = crate::config::Config::default();
-            let mut agent_info = match crate::agent::resolve_agent(&agent, &config) {
+            let mut agent_info = match crate::agent::resolve_agent_with_customs(&agent, &config, &working_dir_buf) {
                 Ok(a) => a,
                 Err(e) => {
                     let error_msg = e.to_string();
@@ -485,9 +493,7 @@ impl TaskManager {
         let flags = self.cancel_flags.read().await;
         let tasks = self.tasks.read().await;
         for (tid, entry) in tasks.iter() {
-            if entry.parent_session_id == parent_session_id
-                && entry.status == TaskStatus::Running
-            {
+            if entry.parent_session_id == parent_session_id && entry.status == TaskStatus::Running {
                 if let Some(flag) = flags.get(tid) {
                     flag.store(true, Ordering::Relaxed);
                     tracing::info!(task_id = tid, "Cancelling sub-agent task (session cleanup)");
@@ -525,9 +531,10 @@ impl TaskManager {
         task_prompt: &str,
         model_override: Option<&str>,
         cancel_flag: Arc<AtomicBool>,
+        working_dir: &std::path::Path,
     ) -> anyhow::Result<String> {
         let config = crate::config::Config::default();
-        let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
+        let mut agent = crate::agent::resolve_agent_with_customs(agent_name, &config, working_dir)?;
         agent.mode = AgentMode::Subagent;
 
         // Apply model override

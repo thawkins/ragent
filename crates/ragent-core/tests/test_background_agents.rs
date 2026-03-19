@@ -72,7 +72,10 @@ fn test_task_entry_reported_field_default() {
         "completed_at": null
     }"#;
     let entry: TaskEntry = serde_json::from_str(json).unwrap();
-    assert!(!entry.reported, "reported should default to false when missing");
+    assert!(
+        !entry.reported,
+        "reported should default to false when missing"
+    );
 }
 
 #[test]
@@ -113,7 +116,7 @@ fn test_registry_has_list_tasks() {
 #[test]
 fn test_registry_total_tool_count() {
     let registry = create_default_registry();
-    assert_eq!(registry.list().len(), 31);
+    assert_eq!(registry.list().len(), 52);
 }
 
 // ── cancel_task tool ───────────────────────────────────────────
@@ -125,8 +128,10 @@ fn make_ctx() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     }
 }
 
@@ -136,10 +141,12 @@ async fn test_cancel_task_no_task_manager() {
     let ctx = make_ctx();
     let result = tool.execute(json!({"task_id": "abc123"}), &ctx).await;
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("TaskManager has not been initialised"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("TaskManager has not been initialised")
+    );
 }
 
 #[tokio::test]
@@ -148,10 +155,12 @@ async fn test_cancel_task_missing_task_id() {
     let ctx = make_ctx();
     let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("Missing required parameter: task_id"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing required parameter: task_id")
+    );
 }
 
 // ── list_tasks tool ────────────────────────────────────────────
@@ -162,10 +171,12 @@ async fn test_list_tasks_no_task_manager() {
     let ctx = make_ctx();
     let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("TaskManager has not been initialised"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("TaskManager has not been initialised")
+    );
 }
 
 #[tokio::test]

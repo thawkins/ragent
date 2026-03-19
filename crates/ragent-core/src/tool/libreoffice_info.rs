@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use std::path::Path;
 
 use super::libreoffice_common::{
-    LibreFormat, detect_format, read_zip_entry, read_meta_field, resolve_path,
+    LibreFormat, detect_format, read_meta_field, read_zip_entry, resolve_path,
 };
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -22,8 +22,11 @@ pub struct LibreInfoTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreInfoTool {
-    fn name(&self) -> &str { "libre_info" }
+    fn name(&self) -> &str {
+        "libre_info"
+    }
 
+    /// Returns the tool description.
     fn description(&self) -> &str {
         "Get metadata and structural info about an OpenDocument file: sheet list and dimensions \
          for ODS, word/paragraph counts for ODT, slide count for ODP. Returns JSON."
@@ -42,10 +45,24 @@ impl Tool for LibreInfoTool {
         })
     }
 
-    fn permission_category(&self) -> &str { "file:read" }
+    fn permission_category(&self) -> &str {
+        "file:read"
+    }
 
+    /// Executes the LibreOffice info query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The required `path` parameter is missing
+    /// - The file format cannot be detected from the extension
+    /// - The background task panics or fails to read the document
+    /// - The document cannot be opened or parsed (e.g., corrupt ZIP, invalid ODF structure)
+    /// - JSON serialization fails
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
         let libre_format = detect_format(&path)?;
         let path_d = path_str.to_string();
@@ -69,6 +86,13 @@ impl Tool for LibreInfoTool {
 
 // ── ODS ──────────────────────────────────────────────────────────────────────
 
+/// Extracts ODS metadata and structure.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file cannot be opened by calamine
+/// - The workbook format is invalid
 fn info_ods(path: &Path) -> Result<Value> {
     let mut wb: Sheets<_> = open_workbook_auto(path)
         .with_context(|| format!("calamine failed to open {}", path.display()))?;
@@ -86,7 +110,7 @@ fn info_ods(path: &Path) -> Result<Value> {
         }
     }
 
-    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let title = read_meta_field(path, "title").unwrap_or_default();
     let creator = read_meta_field(path, "creator").unwrap_or_default();
     let created = read_meta_field(path, "creation-date").unwrap_or_default();
 
@@ -107,7 +131,7 @@ fn info_odt(path: &Path) -> Result<Value> {
     use quick_xml::events::Event;
     use quick_xml::reader::Reader;
 
-    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let title = read_meta_field(path, "title").unwrap_or_default();
     let creator = read_meta_field(path, "creator").unwrap_or_default();
     let created = read_meta_field(path, "creation-date").unwrap_or_default();
 
@@ -159,7 +183,7 @@ fn info_odp(path: &Path) -> Result<Value> {
     use quick_xml::events::Event;
     use quick_xml::reader::Reader;
 
-    let title   = read_meta_field(path, "title").unwrap_or_default();
+    let title = read_meta_field(path, "title").unwrap_or_default();
     let creator = read_meta_field(path, "creator").unwrap_or_default();
     let created = read_meta_field(path, "creation-date").unwrap_or_default();
 
@@ -173,11 +197,12 @@ fn info_odp(path: &Path) -> Result<Value> {
 
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
                 let local = e.local_name();
                 if std::str::from_utf8(local.as_ref()).unwrap_or("") == "page" {
                     slide_count += 1;
-                    let name = e.attributes()
+                    let name = e
+                        .attributes()
                         .flatten()
                         .find(|a| {
                             std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == "name"

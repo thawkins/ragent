@@ -269,6 +269,25 @@ struct CopilotClient {
 }
 
 impl CopilotClient {
+    /// Extract a valid Copilot reasoning effort from request options.
+    ///
+    /// Supported values are: `low`, `medium`, `high`, and `none`.
+    /// Accepts either `reasoning_effort` (preferred) or `reasoning_level`.
+    fn reasoning_effort_from_options(options: &HashMap<String, Value>) -> Option<&'static str> {
+        let raw = options
+            .get("reasoning_effort")
+            .or_else(|| options.get("reasoning_level"))
+            .and_then(Value::as_str)?;
+
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "low" => Some("low"),
+            "medium" => Some("medium"),
+            "high" => Some("high"),
+            "none" => Some("none"),
+            _ => None,
+        }
+    }
+
     /// Builds the JSON request body in OpenAI chat completions format.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
@@ -298,7 +317,9 @@ impl CopilotClient {
                             ContentPart::ToolResult { .. } | ContentPart::ToolUse { .. } => None,
                         })
                         .collect();
-                    if content_parts.len() == 1 && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text") {
+                    if content_parts.len() == 1
+                        && content_parts[0].get("type").and_then(|t| t.as_str()) == Some("text")
+                    {
                         // Single plain-text part — collapse to a bare string for compatibility.
                         content_parts[0]["text"].clone()
                     } else {
@@ -399,9 +420,15 @@ impl CopilotClient {
             body["tools"] = json!(tool_defs);
         }
 
-        // Reasoning / thinking control via agent options
+        // Reasoning / thinking control via agent options.
+        // Explicit reasoning effort/level takes precedence.
+        if let Some(level) = Self::reasoning_effort_from_options(&request.options) {
+            body["reasoning_effort"] = json!(level);
+        }
+
+        // Backward-compatible toggle.
         if let Some(thinking_val) = request.options.get("thinking") {
-            if thinking_val.as_str() == Some("disabled") {
+            if thinking_val.as_str() == Some("disabled") && body["reasoning_effort"].is_null() {
                 body["reasoning_effort"] = json!("none");
             }
         }
@@ -452,12 +479,18 @@ impl LlmClient for CopilotClient {
             bail!("{clean_msg}");
         }
 
+        let rate_limit_event =
+            crate::provider::openai::parse_openai_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {
             let mut buffer = String::new();
             let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
             let mut tool_call_names: HashMap<u64, String> = HashMap::new();
+
+            if let Some(ev) = rate_limit_event {
+                yield ev;
+            }
 
             futures::pin_mut!(stream);
 
@@ -829,6 +862,14 @@ pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The device code has expired
+/// - Authorization was denied by the user
+/// - Network request fails
+/// - Response parsing fails
 pub async fn poll_copilot_device_flow(device_code: &str) -> Result<Option<String>> {
     let http = reqwest::Client::new();
     let resp = http
@@ -1117,7 +1158,100 @@ struct CopilotModelEntry {
     model_picker_enabled: bool,
     vendor: Option<String>,
     #[serde(default)]
+    pricing: Option<CopilotModelPricing>,
+    #[serde(default)]
+    request_cost: Option<f64>,
+    #[serde(default)]
+    request_cost_multiplier: Option<f64>,
+    #[serde(default)]
+    premium_request_multiplier: Option<f64>,
+    #[serde(default)]
+    multiplier: Option<f64>,
+    #[serde(default)]
+    supported_endpoints: Option<Vec<String>>,
+    #[serde(default)]
+    api: Option<Vec<String>>,
+    #[serde(default)]
     capabilities: Option<CopilotModelCapabilities>,
+}
+
+impl CopilotModelEntry {
+    /// Returns the best available request cost multiplier for display.
+    fn request_multiplier(&self) -> Option<f64> {
+        let candidate = self
+            .pricing
+            .as_ref()
+            .and_then(CopilotModelPricing::request_multiplier)
+            .or(self.request_cost_multiplier)
+            .or(self.premium_request_multiplier)
+            .or(self.request_cost)
+            .or(self.multiplier)?;
+
+        if candidate.is_finite() && candidate > 0.0 {
+            Some(candidate)
+        } else {
+            None
+        }
+    }
+
+    /// Returns true when the model is likely usable via `/chat/completions`.
+    ///
+    /// If endpoint metadata is present, this is derived from that metadata.
+    /// Otherwise falls back to a conservative heuristic that excludes known
+    /// Responses-only Codex IDs.
+    fn supports_chat_completions(&self) -> bool {
+        let endpoint_matches = |raw: &str| {
+            let e = raw.trim().to_ascii_lowercase();
+            e.contains("chat/completions")
+                || e.contains("chat_completions")
+                || e.contains("chat.completions")
+        };
+
+        if let Some(endpoints) = self
+            .supported_endpoints
+            .as_ref()
+            .or(self.api.as_ref())
+            && !endpoints.is_empty()
+        {
+            return endpoints.iter().any(|e| endpoint_matches(e));
+        }
+
+        !self.id.to_ascii_lowercase().contains("codex")
+    }
+}
+
+/// Optional pricing metadata for a Copilot model.
+#[derive(Debug, Deserialize)]
+struct CopilotModelPricing {
+    #[serde(
+        default,
+        alias = "request_cost",
+        alias = "requestCost",
+        alias = "request_cost_multiplier",
+        alias = "requestCostMultiplier",
+        alias = "premium_request_multiplier",
+        alias = "premiumRequestMultiplier",
+        alias = "multiplier"
+    )]
+    request_cost: Option<f64>,
+}
+
+impl CopilotModelPricing {
+    fn request_multiplier(&self) -> Option<f64> {
+        self.request_cost
+            .filter(|value| value.is_finite() && *value > 0.0)
+    }
+}
+
+fn format_request_multiplier(multiplier: f64) -> String {
+    let mut s = format!("{multiplier:.2}");
+    while s.ends_with('0') {
+        s.pop();
+    }
+    if s.ends_with('.') {
+        s.pop();
+    }
+    s
 }
 
 /// Capability metadata for a Copilot model.
@@ -1308,7 +1442,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 .as_ref()
                 .and_then(|c| c.model_type.as_deref())
                 .map_or(false, |t| t == "chat");
-            is_chat && entry.model_picker_enabled
+            is_chat && entry.model_picker_enabled && entry.supports_chat_completions()
         })
         .map(|entry| {
             let caps = entry.capabilities.as_ref();
@@ -1329,6 +1463,10 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 .map_or(false, |efforts| !efforts.is_empty());
 
             let display_name = entry.name.clone().unwrap_or_else(|| entry.id.clone());
+            let multiplier_suffix = entry
+                .request_multiplier()
+                .map(|m| format!(" [req {}x]", format_request_multiplier(m)))
+                .unwrap_or_default();
 
             let vendor_suffix = entry
                 .vendor
@@ -1339,7 +1477,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
             ModelInfo {
                 id: entry.id,
                 provider_id: "copilot".to_string(),
-                name: format!("{display_name}{vendor_suffix}"),
+                name: format!("{display_name}{vendor_suffix}{multiplier_suffix}"),
                 cost: Cost {
                     input: 0.0,
                     output: 0.0,
@@ -1372,6 +1510,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::{ChatContent, ChatMessage, ChatRequest};
 
     #[test]
     fn test_provider_defaults() {
@@ -1397,5 +1536,207 @@ mod tests {
             assert_eq!(m.cost.input, 0.0);
             assert_eq!(m.cost.output, 0.0);
         }
+    }
+
+    #[test]
+    fn test_format_request_multiplier_trims_trailing_zeroes() {
+        assert_eq!(format_request_multiplier(1.0), "1");
+        assert_eq!(format_request_multiplier(1.5), "1.5");
+        assert_eq!(format_request_multiplier(0.25), "0.25");
+    }
+
+    #[test]
+    fn test_request_multiplier_prefers_pricing_block() {
+        let entry = CopilotModelEntry {
+            id: "x".to_string(),
+            name: None,
+            model_picker_enabled: true,
+            vendor: None,
+            pricing: Some(CopilotModelPricing {
+                request_cost: Some(2.0),
+            }),
+            request_cost: Some(1.0),
+            request_cost_multiplier: None,
+            premium_request_multiplier: None,
+            multiplier: None,
+            supported_endpoints: None,
+            api: None,
+            capabilities: None,
+        };
+        assert_eq!(entry.request_multiplier(), Some(2.0));
+    }
+
+    #[test]
+    fn test_request_multiplier_ignores_invalid_values() {
+        let entry = CopilotModelEntry {
+            id: "x".to_string(),
+            name: None,
+            model_picker_enabled: true,
+            vendor: None,
+            pricing: None,
+            request_cost: Some(0.0),
+            request_cost_multiplier: Some(f64::NAN),
+            premium_request_multiplier: Some(-1.0),
+            multiplier: None,
+            supported_endpoints: None,
+            api: None,
+            capabilities: None,
+        };
+        assert_eq!(entry.request_multiplier(), None);
+    }
+
+    #[test]
+    fn test_supports_chat_completions_uses_endpoint_metadata() {
+        let entry = CopilotModelEntry {
+            id: "gpt-5.3-codex".to_string(),
+            name: None,
+            model_picker_enabled: true,
+            vendor: None,
+            pricing: None,
+            request_cost: None,
+            request_cost_multiplier: None,
+            premium_request_multiplier: None,
+            multiplier: None,
+            supported_endpoints: Some(vec!["/chat/completions".to_string()]),
+            api: None,
+            capabilities: None,
+        };
+        assert!(entry.supports_chat_completions());
+    }
+
+    #[test]
+    fn test_supports_chat_completions_filters_codex_without_metadata() {
+        let entry = CopilotModelEntry {
+            id: "gpt-5.3-codex".to_string(),
+            name: None,
+            model_picker_enabled: true,
+            vendor: None,
+            pricing: None,
+            request_cost: None,
+            request_cost_multiplier: None,
+            premium_request_multiplier: None,
+            multiplier: None,
+            supported_endpoints: None,
+            api: None,
+            capabilities: None,
+        };
+        assert!(!entry.supports_chat_completions());
+    }
+
+    #[test]
+    fn test_reasoning_effort_from_options_accepts_levels() {
+        let mk = |v: &str| {
+            let mut m = HashMap::new();
+            m.insert("reasoning_effort".to_string(), json!(v));
+            m
+        };
+        assert_eq!(
+            CopilotClient::reasoning_effort_from_options(&mk("low")),
+            Some("low")
+        );
+        assert_eq!(
+            CopilotClient::reasoning_effort_from_options(&mk("medium")),
+            Some("medium")
+        );
+        assert_eq!(
+            CopilotClient::reasoning_effort_from_options(&mk("high")),
+            Some("high")
+        );
+    }
+
+    #[test]
+    fn test_reasoning_effort_from_options_alias_and_invalid() {
+        let mut alias = HashMap::new();
+        alias.insert("reasoning_level".to_string(), json!("HIGH"));
+        assert_eq!(
+            CopilotClient::reasoning_effort_from_options(&alias),
+            Some("high")
+        );
+
+        let mut invalid = HashMap::new();
+        invalid.insert("reasoning_effort".to_string(), json!("turbo"));
+        assert_eq!(CopilotClient::reasoning_effort_from_options(&invalid), None);
+    }
+
+    #[test]
+    fn test_build_request_body_applies_reasoning_effort() {
+        let client = CopilotClient {
+            token: "x".to_string(),
+            base_url: "https://api.githubcopilot.com".to_string(),
+            http: reqwest::Client::new(),
+        };
+        let mut options = HashMap::new();
+        options.insert("reasoning_effort".to_string(), json!("medium"));
+        let req = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options,
+        };
+
+        let body = client.build_request_body(&req, &[]);
+        assert_eq!(body["reasoning_effort"], json!("medium"));
+    }
+
+    #[test]
+    fn test_build_request_body_thinking_disabled_fallback() {
+        let client = CopilotClient {
+            token: "x".to_string(),
+            base_url: "https://api.githubcopilot.com".to_string(),
+            http: reqwest::Client::new(),
+        };
+        let mut options = HashMap::new();
+        options.insert("thinking".to_string(), json!("disabled"));
+        let req = ChatRequest {
+            model: "gpt-4o".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options,
+        };
+
+        let body = client.build_request_body(&req, &[]);
+        assert_eq!(body["reasoning_effort"], json!("none"));
+    }
+
+    #[test]
+    fn test_build_request_body_reasoning_effort_overrides_thinking_toggle() {
+        let client = CopilotClient {
+            token: "x".to_string(),
+            base_url: "https://api.githubcopilot.com".to_string(),
+            http: reqwest::Client::new(),
+        };
+        let mut options = HashMap::new();
+        options.insert("reasoning_effort".to_string(), json!("high"));
+        options.insert("thinking".to_string(), json!("disabled"));
+        let req = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options,
+        };
+
+        let body = client.build_request_body(&req, &[]);
+        assert_eq!(body["reasoning_effort"], json!("high"));
     }
 }

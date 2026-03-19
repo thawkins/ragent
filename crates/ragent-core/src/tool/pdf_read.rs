@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
-use super::office_common::{resolve_path, truncate_output, MAX_OUTPUT_BYTES};
+use super::office_common::{MAX_OUTPUT_BYTES, resolve_path, truncate_output};
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Reads a PDF file and extracts its text content and metadata.
@@ -21,6 +21,9 @@ impl Tool for PdfReadTool {
         "pdf_read"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Read text content and metadata from a PDF file. Supports page range selection."
     }
@@ -55,8 +58,14 @@ impl Tool for PdfReadTool {
         "file:read"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `path` parameter is missing, if the file cannot be read,
+    /// if the PDF parsing fails, or if the background task exits unexpectedly.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let path = resolve_path(&ctx.working_dir, path_str);
 
         let format = input["format"].as_str().unwrap_or("text");
@@ -176,11 +185,7 @@ fn extract_pages_text(
     let end = end_page.unwrap_or(total_pages).min(total_pages);
 
     if start > total_pages {
-        anyhow::bail!(
-            "start_page {} exceeds total pages ({})",
-            start,
-            total_pages
-        );
+        anyhow::bail!("start_page {} exceeds total pages ({})", start, total_pages);
     }
 
     // pdf-extract works on the whole document; extract all then filter

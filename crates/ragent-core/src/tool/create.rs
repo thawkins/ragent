@@ -22,6 +22,7 @@ impl Tool for CreateTool {
         "create"
     }
 
+    /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &str {
         "Create a new file with content. Truncates the file if it already exists. Creates parent directories if needed."
     }
@@ -47,8 +48,18 @@ impl Tool for CreateTool {
         "file:write"
     }
 
+    /// Creates a new file with the specified content.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `path` or `content` parameter is missing or invalid
+    /// - Parent directories cannot be created due to permission issues
+    /// - The file cannot be written due to permission issues or disk errors
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
         let content = input["content"]
             .as_str()
             .context("Missing required 'content' parameter")?;
@@ -89,6 +100,7 @@ impl Tool for CreateTool {
     }
 }
 
+/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {

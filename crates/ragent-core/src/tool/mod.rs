@@ -7,12 +7,25 @@
 //! Built-in tools (file I/O, shell execution, search, and user interaction) are
 //! provided via [`create_default_registry`].
 
+/// Shell command execution tool.
 pub mod bash;
+/// Task cancellation tool.
 pub mod cancel_task;
+/// File creation tool.
 pub mod create;
+/// File editing tool.
 pub mod edit;
+/// Per-file locking for concurrent edit operations.
+mod file_lock;
+/// Concurrent file operations tool (batch read/write).
+pub mod file_ops_tool;
+/// File globbing tool.
 pub mod glob;
 pub mod grep;
+pub mod libreoffice_common;
+pub mod libreoffice_info;
+pub mod libreoffice_read;
+pub mod libreoffice_write;
 pub mod list;
 pub mod list_tasks;
 pub mod lsp_definition;
@@ -22,15 +35,10 @@ pub mod lsp_references;
 pub mod lsp_symbols;
 pub mod multiedit;
 pub mod new_task;
-pub mod wait_tasks;
 pub mod office_common;
 pub mod office_info;
 pub mod office_read;
 pub mod office_write;
-pub mod libreoffice_common;
-pub mod libreoffice_info;
-pub mod libreoffice_read;
-pub mod libreoffice_write;
 pub mod patch;
 pub mod pdf_read;
 pub mod pdf_write;
@@ -39,10 +47,28 @@ pub mod question;
 pub mod read;
 pub mod rm;
 pub mod todo;
+/// Team coordination tools (create, spawn, message, tasks, etc.).
+pub mod team_approve_plan;
+pub mod team_assign_task;
+pub mod team_broadcast;
+pub mod team_cleanup;
+pub mod team_create;
+pub mod team_idle;
+pub mod team_message;
+pub mod team_read_messages;
+pub mod team_shutdown_ack;
+pub mod team_shutdown_teammate;
+pub mod team_spawn;
+pub mod team_status;
+pub mod team_submit_plan;
+pub mod team_task_claim;
+pub mod team_task_complete;
+pub mod team_task_create;
+pub mod team_task_list;
+pub mod wait_tasks;
 pub mod webfetch;
 pub mod websearch;
 pub mod write;
-pub mod file_ops_tool;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -63,6 +89,37 @@ pub struct ToolOutput {
     // TODO: Replace `Value` with a typed `ToolMetadata` struct once the set of metadata
     // fields stabilises across tools.
     pub metadata: Option<Value>,
+}
+
+/// Identity and working context for a team session (lead or teammate).
+///
+/// Injected into [`ToolContext`] when a session is participating in a team.
+/// Team tools use this to determine the caller's role and agent ID.
+#[derive(Debug, Clone)]
+pub struct TeamContext {
+    /// Name of the team this session belongs to.
+    pub team_name: String,
+    /// Agent ID for the current session: `"lead"` or `"tm-NNN"`.
+    pub agent_id: String,
+    /// `true` if this session is the team lead.
+    pub is_lead: bool,
+}
+
+/// Async interface for spawning teammate sessions.
+///
+/// Implemented by `TeamManager` (M3). During M2, the tool registry holds
+/// `Option<Arc<dyn TeamManagerInterface>>` which is `None` until M3 is wired in.
+#[async_trait::async_trait]
+pub trait TeamManagerInterface: Send + Sync {
+    /// Spawn a new teammate session and return its agent ID.
+    async fn spawn_teammate(
+        &self,
+        team_name: &str,
+        teammate_name: &str,
+        agent_type: &str,
+        prompt: &str,
+        working_dir: &std::path::Path,
+    ) -> anyhow::Result<String>;
 }
 
 /// Execution context passed to each tool invocation.
@@ -96,6 +153,8 @@ impl Default for ToolOutput {
 ///     task_manager: None,
 ///     lsp_manager: None,
 ///     active_model: None,
+///     team_context: None,
+///     team_manager: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -117,6 +176,12 @@ pub struct ToolContext {
     /// Sub-agent tools use this to inherit the parent's provider when no
     /// explicit model override is specified in the tool call.
     pub active_model: Option<crate::agent::ModelRef>,
+    /// Team identity for sessions participating in a team (lead or teammate).
+    /// `None` when the session is not part of a team.
+    pub team_context: Option<Arc<TeamContext>>,
+    /// Optional team manager for spawning teammate sessions (M3+).
+    /// `None` until `TeamManager` is wired into the session processor.
+    pub team_manager: Option<Arc<dyn TeamManagerInterface>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -300,5 +365,23 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(lsp_definition::LspDefinitionTool));
     registry.register(Arc::new(lsp_references::LspReferencesTool));
     registry.register(Arc::new(lsp_diagnostics::LspDiagnosticsTool));
+    // Team coordination tools
+    registry.register(Arc::new(team_approve_plan::TeamApprovePlanTool));
+    registry.register(Arc::new(team_assign_task::TeamAssignTaskTool));
+    registry.register(Arc::new(team_broadcast::TeamBroadcastTool));
+    registry.register(Arc::new(team_cleanup::TeamCleanupTool));
+    registry.register(Arc::new(team_create::TeamCreateTool));
+    registry.register(Arc::new(team_idle::TeamIdleTool));
+    registry.register(Arc::new(team_message::TeamMessageTool));
+    registry.register(Arc::new(team_read_messages::TeamReadMessagesTool));
+    registry.register(Arc::new(team_shutdown_ack::TeamShutdownAckTool));
+    registry.register(Arc::new(team_shutdown_teammate::TeamShutdownTeammateTool));
+    registry.register(Arc::new(team_spawn::TeamSpawnTool));
+    registry.register(Arc::new(team_status::TeamStatusTool));
+    registry.register(Arc::new(team_submit_plan::TeamSubmitPlanTool));
+    registry.register(Arc::new(team_task_claim::TeamTaskClaimTool));
+    registry.register(Arc::new(team_task_complete::TeamTaskCompleteTool));
+    registry.register(Arc::new(team_task_create::TeamTaskCreateTool));
+    registry.register(Arc::new(team_task_list::TeamTaskListTool));
     registry
 }

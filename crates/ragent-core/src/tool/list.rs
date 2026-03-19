@@ -21,6 +21,7 @@ impl Tool for ListTool {
         "list"
     }
 
+    /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &str {
         "List directory contents with tree-like output. Supports depth control."
     }
@@ -45,6 +46,13 @@ impl Tool for ListTool {
         "file:read"
     }
 
+    /// Lists directory contents in a tree format.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The specified path is not a directory or does not exist
+    /// - The directory cannot be read due to permission issues
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let dir = input["path"]
             .as_str()
@@ -54,7 +62,10 @@ impl Tool for ListTool {
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 
         if !dir.is_dir() {
-            anyhow::bail!("Path '{}' is not a directory or does not exist", dir.display());
+            anyhow::bail!(
+                "Path '{}' is not a directory or does not exist",
+                dir.display()
+            );
         }
 
         let mut lines = Vec::new();
@@ -68,6 +79,11 @@ impl Tool for ListTool {
     }
 }
 
+/// Recursively lists directory contents with tree formatting.
+///
+/// # Errors
+///
+/// Returns an error if a directory cannot be read due to permission issues.
 fn list_recursive(
     dir: &Path,
     prefix: &str,
@@ -143,6 +159,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {

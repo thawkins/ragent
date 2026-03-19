@@ -184,10 +184,7 @@ pub async fn invoke_forked_skill(
     );
 
     // 2. Resolve the subagent
-    let agent_name = invocation
-        .fork_agent
-        .as_deref()
-        .unwrap_or("general");
+    let agent_name = invocation.fork_agent.as_deref().unwrap_or("general");
 
     let config = crate::config::Config::default();
     let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
@@ -319,7 +316,10 @@ mod tests {
 
         assert!(result.content.starts_with("Deploy staging at "));
         // Year should be a 4-digit number
-        let year_part = result.content.strip_prefix("Deploy staging at ").unwrap_or("");
+        let year_part = result
+            .content
+            .strip_prefix("Deploy staging at ")
+            .unwrap_or("");
         assert!(
             year_part.parse::<u32>().is_ok(),
             "Expected year, got: {year_part}"

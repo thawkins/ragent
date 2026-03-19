@@ -1,16 +1,14 @@
 //! External integration tests for the @ file references feature.
 
 use ragent_core::reference::fuzzy::{collect_project_files, fuzzy_match};
-use ragent_core::reference::parse::{parse_refs, FileRef};
+use ragent_core::reference::parse::{FileRef, parse_refs};
 use ragent_core::reference::resolve::resolve_all_refs;
 use std::fs;
 use std::path::PathBuf;
 
 fn make_temp_dir(suffix: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "ragent_test_integ_{suffix}_{}",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("ragent_test_integ_{suffix}_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create temp dir");
     dir

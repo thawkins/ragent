@@ -37,6 +37,12 @@ impl std::fmt::Display for LibreFormat {
 }
 
 /// Detects the LibreOffice document format from a file path's extension.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file has no extension
+/// - The extension is not `.odt`, `.ods`, or `.odp`
 pub fn detect_format(path: &Path) -> Result<LibreFormat> {
     let ext = path
         .extension()
@@ -53,15 +59,24 @@ pub fn detect_format(path: &Path) -> Result<LibreFormat> {
 }
 
 /// Resolves a path string against a working directory.
+///
+/// If `path_str` is absolute, returns it as-is. Otherwise, joins it to `working_dir`.
 pub fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
-    if p.is_absolute() { p } else { working_dir.join(p) }
+    if p.is_absolute() {
+        p
+    } else {
+        working_dir.join(p)
+    }
 }
 
 /// Maximum output size in bytes before truncation (100 KB).
 pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 
 /// Truncates output text if it exceeds [`MAX_OUTPUT_BYTES`].
+///
+/// If the text is within limits, returns it unchanged. Otherwise, truncates at
+/// the last newline before the limit and appends a truncation notice.
 pub fn truncate_output(text: String) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         text
@@ -77,15 +92,25 @@ pub fn truncate_output(text: String) -> String {
 }
 
 /// Read the raw content of a named entry from an ODF ZIP archive as UTF-8.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file cannot be opened
+/// - The file is not a valid ZIP/ODF archive
+/// - The named entry does not exist in the archive
+/// - The entry content cannot be read as UTF-8
 pub fn read_zip_entry(path: &Path, entry_name: &str) -> Result<String> {
-    let file = std::fs::File::open(path)
-        .with_context(|| format!("Cannot open {}", path.display()))?;
+    let file =
+        std::fs::File::open(path).with_context(|| format!("Cannot open {}", path.display()))?;
     let mut zip = zip::ZipArchive::new(file)
         .with_context(|| format!("Not a valid ZIP/ODF archive: {}", path.display()))?;
-    let mut entry = zip.by_name(entry_name)
+    let mut entry = zip
+        .by_name(entry_name)
         .with_context(|| format!("Entry '{}' not found in {}", entry_name, path.display()))?;
     let mut buf = String::new();
-    entry.read_to_string(&mut buf)
+    entry
+        .read_to_string(&mut buf)
         .with_context(|| format!("Failed to read '{}' from {}", entry_name, path.display()))?;
     Ok(buf)
 }
@@ -158,6 +183,10 @@ pub fn xml_to_text(xml: &str) -> String {
 
 /// Read a named metadata field from `meta.xml` inside the ODF archive.
 /// Returns `None` if the field is absent or unreadable.
+///
+/// # Errors
+///
+/// Returns `None` if `meta.xml` cannot be read or parsed.
 pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
     let xml = read_zip_entry(path, "meta.xml").ok()?;
     let mut reader = Reader::from_str(&xml);
@@ -166,7 +195,7 @@ pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
     let mut inside = false;
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
                 let local = e.local_name();
                 inside = std::str::from_utf8(local.as_ref()).unwrap_or("") == field_local_name;
             }
@@ -175,7 +204,9 @@ pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
                 return Some(s);
             }
             Ok(Event::Eof) | Err(_) => break,
-            _ => { inside = false; }
+            _ => {
+                inside = false;
+            }
         }
         buf.clear();
     }
@@ -183,8 +214,11 @@ pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
 }
 
 /// Get an attribute value by local name from a BytesStart element.
+///
+/// Returns `None` if the attribute is not found.
 pub fn attr_value(e: &quick_xml::events::BytesStart<'_>, local_name: &str) -> Option<String> {
-    e.attributes().flatten().find(|a| {
-        std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == local_name
-    }).map(|a| decode_attr_value(&a))
+    e.attributes()
+        .flatten()
+        .find(|a| std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == local_name)
+        .map(|a| decode_attr_value(&a))
 }

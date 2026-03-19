@@ -19,6 +19,11 @@ use std::path::PathBuf;
 /// * `allowed_tools` - Tools the skill may use
 /// * `body` - The instruction body
 ///
+/// # Errors
+///
+/// This function does not return errors. It always constructs a valid `SkillInfo`
+/// with the provided parameters and defaults for optional fields.
+///
 /// # Examples
 ///
 /// ```
@@ -71,6 +76,11 @@ pub fn make_bundled_skill(
 /// - `/debug` — Troubleshoots the current session via debug logs
 /// - `/loop` — Runs a prompt repeatedly on an interval
 ///
+/// # Errors
+///
+/// This function does not return errors. It always returns a vector of exactly
+/// 4 bundled skills with pre-configured frontmatter and bodies.
+///
 /// # Examples
 ///
 /// ```
@@ -86,12 +96,7 @@ pub fn make_bundled_skill(
 /// assert!(names.contains(&"loop"));
 /// ```
 pub fn bundled_skills() -> Vec<SkillInfo> {
-    vec![
-        simplify_skill(),
-        batch_skill(),
-        debug_skill(),
-        loop_skill(),
-    ]
+    vec![simplify_skill(), batch_skill(), debug_skill(), loop_skill()]
 }
 
 /// `/simplify [output_path]` — Reviews recently changed files for code quality, reuse,
@@ -142,11 +147,7 @@ fn debug_skill() -> SkillInfo {
         "Troubleshoots current session by reading debug logs",
         Some("[description]"),
         false,
-        vec![
-            "bash".to_string(),
-            "read".to_string(),
-            "grep".to_string(),
-        ],
+        vec!["bash".to_string(), "read".to_string(), "grep".to_string()],
         DEBUG_BODY,
     )
 }
@@ -159,10 +160,7 @@ fn loop_skill() -> SkillInfo {
         "Runs a prompt repeatedly on an interval (scheduled tasks)",
         Some("[interval] <prompt>"),
         true,
-        vec![
-            "bash".to_string(),
-            "read".to_string(),
-        ],
+        vec!["bash".to_string(), "read".to_string()],
         LOOP_BODY,
     )
 }
@@ -195,7 +193,6 @@ Check the output path above. If it contains a file path (not empty/blank), you M
 3. Confirm to the user that the file was saved
 
 Example: If output path shows 'docs/review.md', save findings to 'docs/review.md'.";
-
 
 const BATCH_BODY: &str = "\
 Apply the following instruction across all matching files in the codebase:
@@ -340,10 +337,7 @@ mod tests {
         assert_eq!(skill.name, "loop");
         assert!(skill.body.contains("$ARGUMENTS"));
         assert!(skill.disable_model_invocation, "loop is user-only");
-        assert_eq!(
-            skill.argument_hint.as_deref(),
-            Some("[interval] <prompt>")
-        );
+        assert_eq!(skill.argument_hint.as_deref(), Some("[interval] <prompt>"));
     }
 
     #[test]

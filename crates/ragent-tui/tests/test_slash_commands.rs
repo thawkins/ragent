@@ -14,8 +14,9 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_tui::App;
-use ragent_tui::app::{LogLevel, ScreenMode};
+use ragent_tui::app::{ConfiguredProvider, LogLevel, ProviderSetupStep, ProviderSource, ScreenMode};
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -32,7 +33,8 @@ fn make_app() -> App {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
-            lsp_manager: std::sync::OnceLock::new(),
+        lsp_manager: std::sync::OnceLock::new(),
+        team_manager: std::sync::OnceLock::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -266,6 +268,77 @@ fn test_slash_provider_opens_setup() {
     );
 }
 
+#[test]
+fn test_slash_provider_selection_updates_displayed_provider() {
+    let mut app = make_app();
+
+    // Start with a different provider so we can verify the display updates.
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "openai".to_string(),
+        name: "OpenAI (GPT)".to_string(),
+        source: ProviderSource::Database,
+    });
+    app.selected_model = Some("openai/gpt-4".to_string());
+
+    // Simulate selecting a provider/model via the interactive dialog.
+    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+        provider_id: "ollama".to_string(),
+        provider_name: "Ollama (Local)".to_string(),
+        models: vec![("llama3.2".to_string(), "Llama 3.2".to_string())],
+        selected: 0,
+    });
+
+    // Press Enter to confirm the model selection.
+    ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+
+    assert_eq!(
+        app.configured_provider.as_ref().map(|p| p.id.as_str()),
+        Some("ollama"),
+        "provider should update when a new model is selected"
+    );
+    assert_eq!(
+        app.provider_model_label().as_deref(),
+        Some("Ollama (Local) / llama3.2"),
+        "provider/model label should reflect the new provider"
+    );
+}
+
+#[test]
+fn test_model_selector_navigation_wraps_top_and_bottom() {
+    let mut app = make_app();
+    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+        provider_id: "copilot".to_string(),
+        provider_name: "GitHub Copilot".to_string(),
+        models: vec![
+            ("m1".to_string(), "Model 1".to_string()),
+            ("m2".to_string(), "Model 2".to_string()),
+            ("m3".to_string(), "Model 3".to_string()),
+        ],
+        selected: 0,
+    });
+
+    ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+    );
+    match app.provider_setup.as_ref().expect("provider setup present") {
+        ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 2),
+        _ => panic!("expected SelectModel state"),
+    }
+
+    ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+    );
+    match app.provider_setup.as_ref().expect("provider setup present") {
+        ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 0),
+        _ => panic!("expected SelectModel state"),
+    }
+}
+
 // ── /provider_reset ─────────────────────────────────────────────────
 
 #[test]
@@ -311,6 +384,40 @@ fn test_slash_command_clears_input() {
     assert!(app.slash_menu.is_none(), "slash menu should be closed");
 }
 
+#[test]
+fn test_input_cursor_left_right_and_editing() {
+    let mut app = make_app();
+    app.input = "abc".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    // Move cursor left twice (from end to between 'b' and 'c')
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+
+    assert_eq!(app.input_cursor, 1);
+
+    // Insert a character at the cursor position
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+    assert_eq!(app.input, "aXbc");
+    assert_eq!(app.input_cursor, 2);
+
+    // Move to end and delete the inserted character
+    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+    assert_eq!(app.input_cursor, 4);
+
+    // Backspace at end removes the last character.
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(app.input, "aXb");
+    assert_eq!(app.input_cursor, 3);
+
+    // Move left one position and delete the inserted character.
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.input_cursor, 2);
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(app.input, "ab");
+    assert_eq!(app.input_cursor, 1);
+}
+
 // ── with leading slash and without ──────────────────────────────────
 
 #[test]
@@ -346,7 +453,10 @@ fn test_slash_tools_lists_builtin_tools() {
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Built-in Tools:"), "should have built-in heading");
+    assert!(
+        text.contains("Built-in Tools:"),
+        "should have built-in heading"
+    );
     assert!(text.contains("read"), "should list 'read' tool");
     assert!(text.contains("bash"), "should list 'bash' tool");
     assert!(text.contains("edit"), "should list 'edit' tool");

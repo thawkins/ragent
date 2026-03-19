@@ -8,8 +8,10 @@ pub mod app;
 pub mod input;
 pub mod layout;
 pub mod layout_active_agents;
+pub mod layout_teams;
 pub mod logo;
 pub mod tips;
+pub mod tracing_layer;
 pub mod widgets;
 
 pub use app::App;
@@ -32,10 +34,16 @@ use ragent_core::provider::ProviderRegistry;
 use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
 
+use tracing_layer::TuiLogReceiver;
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
 /// loop until the user quits. The terminal is restored on exit.
+///
+/// `log_rx` receives tracing records captured by [`tracing_layer::TuiTracingLayer`]
+/// and routes them into the on-screen log panel so they never corrupt the
+/// alternate-screen rendering.
 ///
 /// If `resume_session_id` is provided, the TUI loads the existing session
 /// and its message history before entering the event loop.
@@ -60,7 +68,8 @@ use ragent_core::storage::Storage;
 /// #     processor: Arc<SessionProcessor>,
 /// # ) -> anyhow::Result<()> {
 /// let agent = AgentInfo::new("general", "General-purpose agent");
-/// ragent_tui::run_tui(bus, storage, registry, processor, agent, false, None).await?;
+/// let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
+/// ragent_tui::run_tui(bus, storage, registry, processor, agent, false, None, rx).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -72,6 +81,7 @@ pub async fn run_tui(
     agent: AgentInfo,
     show_log: bool,
     resume_session_id: Option<String>,
+    log_rx: TuiLogReceiver,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -89,6 +99,16 @@ pub async fn run_tui(
     );
     app.check_provider_health();
 
+    // Set up persistent input history (kept across sessions in the data dir).
+    let history_path = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("ragent")
+        .join("input_history.txt");
+    app.set_history_file(history_path);
+    if let Err(e) = app.load_history() {
+        tracing::warn!("Failed to load input history: {}", e);
+    }
+
     // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
     let mut bus_rx = event_bus.subscribe();
 
@@ -102,9 +122,7 @@ pub async fn run_tui(
     };
     {
         let mut mgr = lsp_manager.write().await;
-        let lsp_configs = Config::load()
-            .map(|c| c.lsp)
-            .unwrap_or_default();
+        let lsp_configs = Config::load().map(|c| c.lsp).unwrap_or_default();
         if !lsp_configs.is_empty() {
             mgr.connect_all(lsp_configs).await;
         }
@@ -138,6 +156,19 @@ pub async fn run_tui(
             }
         }
 
+        // Drain tracing records captured by TuiTracingLayer into the log panel.
+        while let Ok(record) = log_rx.try_recv() {
+            use tracing::Level;
+            let level = match record.level {
+                Level::ERROR => app::LogLevel::Error,
+                Level::WARN => app::LogLevel::Warn,
+                _ => app::LogLevel::Info,
+            };
+            if !record.message.is_empty() {
+                app.push_log(level, record.message);
+            }
+        }
+
         terminal.draw(|frame| layout::render(frame, &mut app))?;
 
         tokio::select! {
@@ -165,6 +196,11 @@ pub async fn run_tui(
                 }
             }
         }
+    }
+
+    // Save history before exiting
+    if let Err(e) = app.save_history() {
+        tracing::warn!("Failed to save input history: {}", e);
     }
 
     // Restore terminal — disable mouse capture first to stop generating

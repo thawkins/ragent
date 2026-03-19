@@ -24,6 +24,9 @@ impl Tool for PlanEnterTool {
         "plan_enter"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Delegate to the plan agent for read-only codebase analysis and \
          architecture planning. The plan agent cannot modify files."
@@ -46,23 +49,28 @@ impl Tool for PlanEnterTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "plan"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `task` parameter is missing or empty.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task = input["task"]
             .as_str()
             .context("Missing required 'task' parameter")?;
 
         if task.trim().is_empty() {
-            bail!("Task description must not be empty. Provide a description of what to plan or analyse.");
+            bail!(
+                "Task description must not be empty. Provide a description of what to plan or analyse."
+            );
         }
 
-        let context = input["context"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let context = input["context"].as_str().unwrap_or("").to_string();
 
         ctx.event_bus.publish(Event::AgentSwitchRequested {
             session_id: ctx.session_id.clone(),
@@ -74,10 +82,7 @@ impl Tool for PlanEnterTool {
         let content = if context.is_empty() {
             format!("Delegating to plan agent: {}", task)
         } else {
-            format!(
-                "Delegating to plan agent: {}\nContext: {}",
-                task, context
-            )
+            format!("Delegating to plan agent: {}\nContext: {}", task, context)
         };
 
         Ok(ToolOutput {
@@ -104,6 +109,9 @@ impl Tool for PlanExitTool {
         "plan_exit"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Return control from the plan agent to the previous agent. \
          Pass back a summary of the analysis or plan."
@@ -122,17 +130,25 @@ impl Tool for PlanExitTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "plan"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `summary` parameter is missing or empty.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let summary = input["summary"]
             .as_str()
             .context("Missing required 'summary' parameter")?;
 
         if summary.trim().is_empty() {
-            bail!("Summary must not be empty. Provide the plan or analysis result to return to the calling agent.");
+            bail!(
+                "Summary must not be empty. Provide the plan or analysis result to return to the calling agent."
+            );
         }
 
         ctx.event_bus.publish(Event::AgentRestoreRequested {
@@ -141,7 +157,10 @@ impl Tool for PlanExitTool {
         });
 
         Ok(ToolOutput {
-            content: format!("Returning to previous agent with plan summary:\n{}", summary),
+            content: format!(
+                "Returning to previous agent with plan summary:\n{}",
+                summary
+            ),
             metadata: Some(json!({
                 "agent_restore": true,
                 "summary_length": summary.len(),

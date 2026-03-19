@@ -1,0 +1,21 @@
+{
+  "name": "my-agent",
+  "description": "A minimal custom agent example",
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "authors": ["Your Name"],
+  "created_at": "2025-01-01T00:00:00Z",
+  "skills": [],
+  "domains": [],
+  "locators": [],
+  "modules": [
+    {
+      "type": "ragent/agent/v1",
+      "payload": {
+        "system_prompt": "You are a helpful AI agent.\nWorking directory: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
+        "mode": "primary",
+        "max_steps": 50
+      }
+    }
+  ]
+}

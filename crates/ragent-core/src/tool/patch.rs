@@ -21,6 +21,9 @@ impl Tool for PatchTool {
         "patch"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Apply a unified diff patch to one or more files. The patch must be in \
          unified diff format (as produced by `diff -u` or `git diff`). All hunks \
@@ -49,10 +52,18 @@ impl Tool for PatchTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "file:write"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `patch` parameter is missing, if the patch format is
+    /// invalid, if no valid hunks are found, if any target file cannot be read,
+    /// if any hunk fails to apply, or if file writing fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let patch_str = input["patch"]
             .as_str()
@@ -63,7 +74,9 @@ impl Tool for PatchTool {
         let file_patches = parse_unified_diff(patch_str)?;
 
         if file_patches.is_empty() {
-            bail!("No valid diff hunks found in the patch content. Ensure the patch is in unified diff format (as produced by 'diff -u' or 'git diff').");
+            bail!(
+                "No valid diff hunks found in the patch content. Ensure the patch is in unified diff format (as produced by 'diff -u' or 'git diff')."
+            );
         }
 
         // Phase 1: Read all files and validate all hunks
@@ -168,8 +181,8 @@ enum HunkLine {
 }
 
 /// Parse a unified diff string into a list of per-file patches.
-fn parse_unified_diff(patch: &str) -> Result<Vec<FilePatch>> {
-    let lines: Vec<&str> = patch.lines().collect();
+fn parse_unified_diff(diff_text: &str) -> Result<Vec<FilePatch>> {
+    let lines: Vec<&str> = diff_text.lines().collect();
     let mut result: Vec<FilePatch> = Vec::new();
     let mut i = 0;
 
@@ -177,7 +190,7 @@ fn parse_unified_diff(patch: &str) -> Result<Vec<FilePatch>> {
         // Look for --- / +++ header pair
         if lines[i].starts_with("--- ") && i + 1 < lines.len() && lines[i + 1].starts_with("+++ ") {
             let target_line = lines[i + 1];
-            let path = parse_file_path(target_line);
+            let file_path = parse_file_path(target_line);
             i += 2;
 
             let mut hunks = Vec::new();
@@ -190,7 +203,7 @@ fn parse_unified_diff(patch: &str) -> Result<Vec<FilePatch>> {
             }
 
             if !hunks.is_empty() {
-                result.push(FilePatch { path, hunks });
+                result.push(FilePatch { path: file_path, hunks });
             }
         } else {
             i += 1;
@@ -335,11 +348,7 @@ fn apply_hunk(file_lines: &[String], hunk: &Hunk, fuzz: usize) -> Result<Vec<Str
         let _context_offset = fuzz_level; // lines trimmed from top
 
         if let Some(pos) = find_match(file_lines, &trimmed_old, target_line) {
-            let actual_pos = if fuzz_level > 0 {
-                pos
-            } else {
-                pos
-            };
+            let actual_pos = if fuzz_level > 0 { pos } else { pos };
             // Build result: lines before + new content + lines after
             let mut result = Vec::with_capacity(file_lines.len());
             result.extend(file_lines[..actual_pos].iter().cloned());

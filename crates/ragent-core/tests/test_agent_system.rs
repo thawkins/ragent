@@ -304,9 +304,15 @@ fn test_build_system_prompt_with_skills() {
         Some(&registry),
     );
 
-    assert!(prompt.contains("## Available Skills"), "Should have skills section");
+    assert!(
+        prompt.contains("## Available Skills"),
+        "Should have skills section"
+    );
     assert!(prompt.contains("/deploy"), "Should list deploy skill");
-    assert!(prompt.contains("<environment>"), "Should show argument hint");
+    assert!(
+        prompt.contains("<environment>"),
+        "Should show argument hint"
+    );
     assert!(
         prompt.contains("Deploy the application"),
         "Should show description"
@@ -323,12 +329,7 @@ fn test_build_system_prompt_no_skills_registry() {
         ..AgentInfo::default()
     };
 
-    let prompt = build_system_prompt(
-        &agent,
-        std::path::Path::new("/proj"),
-        "src/",
-        None,
-    );
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "src/", None);
 
     assert!(
         !prompt.contains("Available Skills"),
@@ -388,14 +389,12 @@ fn test_build_system_prompt_skills_excludes_agent_only_disabled() {
     user_only.scope = SkillScope::Project;
     registry.register(user_only);
 
-    let prompt = build_system_prompt(
-        &agent,
-        std::path::Path::new("/proj"),
-        "",
-        Some(&registry),
-    );
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "", Some(&registry));
 
-    assert!(prompt.contains("/review"), "Should list agent-invocable skill");
+    assert!(
+        prompt.contains("/review"),
+        "Should list agent-invocable skill"
+    );
     assert!(
         !prompt.contains("/manual"),
         "Should exclude model-invocation-disabled skill"
@@ -426,12 +425,7 @@ fn test_build_system_prompt_agent_specific_skills() {
     s2.scope = SkillScope::Project;
     registry.register(s2);
 
-    let prompt = build_system_prompt(
-        &agent,
-        std::path::Path::new("/proj"),
-        "",
-        Some(&registry),
-    );
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "", Some(&registry));
 
     assert!(
         prompt.contains("/build-check"),
@@ -460,12 +454,7 @@ fn test_build_system_prompt_skills_order_after_agents_md() {
     skill.scope = SkillScope::Project;
     registry.register(skill);
 
-    let prompt = build_system_prompt(
-        &agent,
-        std::path::Path::new("/proj"),
-        "",
-        Some(&registry),
-    );
+    let prompt = build_system_prompt(&agent, std::path::Path::new("/proj"), "", Some(&registry));
 
     // Skills section should appear before Guidelines
     let skills_pos = prompt.find("Available Skills").unwrap();

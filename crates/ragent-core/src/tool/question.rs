@@ -19,6 +19,9 @@ impl Tool for QuestionTool {
         "question"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &str {
         "Ask the user a question and wait for their response. \
          Use this when you need clarification or confirmation."
@@ -37,10 +40,16 @@ impl Tool for QuestionTool {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &str {
         "question"
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the `question` parameter is missing.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let question = input["question"]
             .as_str()

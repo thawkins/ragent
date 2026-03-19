@@ -20,6 +20,11 @@ pub enum Role {
 }
 
 impl fmt::Display for Role {
+    /// Format the role as a lowercase string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Role::User => write!(f, "user"),
@@ -45,6 +50,11 @@ pub enum ToolCallStatus {
 /// Runtime state of a single tool invocation, including its input,
 /// output, and timing information.
 impl fmt::Display for ToolCallStatus {
+    /// Format the tool call status as a lowercase string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ToolCallStatus::Pending => write!(f, "pending"),

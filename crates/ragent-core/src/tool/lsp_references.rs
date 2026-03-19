@@ -4,7 +4,9 @@
 //! throughout the workspace using the LSP `textDocument/references` request.
 
 use anyhow::{Context as _, Result};
-use lsp_types::{Position, ReferenceContext, ReferenceParams, TextDocumentPositionParams, WorkDoneProgressParams};
+use lsp_types::{
+    Position, ReferenceContext, ReferenceParams, TextDocumentPositionParams, WorkDoneProgressParams,
+};
 use serde_json::{Value, json};
 use url::Url;
 
@@ -23,6 +25,7 @@ impl Tool for LspReferencesTool {
         "lsp_references"
     }
 
+    /// Returns the tool description.
     fn description(&self) -> &str {
         "Find all usages (references) of a symbol in the workspace using the Language \
          Server Protocol. Returns file paths and line numbers. \
@@ -58,42 +61,70 @@ impl Tool for LspReferencesTool {
         "lsp:read"
     }
 
+    /// Executes the LSP references query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Required parameters (`path`, `line`, `column`) are missing or invalid
+    /// - The file path cannot be resolved or canonicalized
+    /// - No LSP manager is configured in the context
+    /// - No LSP server is available for the file's language/extension
+    /// - The document cannot be opened by the LSP server
+    /// - The LSP references request fails
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let path_str = input["path"].as_str().context("Missing required 'path' parameter")?;
-        let line = input["line"].as_u64().context("Missing required 'line' parameter")? as u32;
-        let column = input["column"].as_u64().context("Missing required 'column' parameter")? as u32;
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
+        let line = input["line"]
+            .as_u64()
+            .context("Missing required 'line' parameter")? as u32;
+        let column = input["column"]
+            .as_u64()
+            .context("Missing required 'column' parameter")? as u32;
         let include_declaration = input["include_declaration"].as_bool().unwrap_or(true);
 
         let lsp_line = line.saturating_sub(1);
         let lsp_char = column.saturating_sub(1);
 
         let path = ctx.working_dir.join(path_str);
-        let path = path.canonicalize()
+        let path = path
+            .canonicalize()
             .with_context(|| format!("Cannot resolve path: {path_str}"))?;
 
         let client = {
-            let lsp = ctx.lsp_manager.as_ref()
+            let lsp = ctx
+                .lsp_manager
+                .as_ref()
                 .context("No LSP manager — add a server to ragent.json 'lsp' section")?;
             let guard = lsp.read().await;
-            guard.client_for_path(&path)
-                .with_context(|| format!(
+            guard.client_for_path(&path).with_context(|| {
+                format!(
                     "No LSP server for '{}' files",
                     path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                ))?
+                )
+            })?
         };
 
-        client.open_document(&path).await
+        client
+            .open_document(&path)
+            .await
             .with_context(|| format!("LSP: failed to open {}", path.display()))?;
 
         let uri = client.text_document_id(&path)?;
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: uri,
-                position: Position { line: lsp_line, character: lsp_char },
+                position: Position {
+                    line: lsp_line,
+                    character: lsp_char,
+                },
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: lsp_types::PartialResultParams::default(),
-            context: ReferenceContext { include_declaration },
+            context: ReferenceContext {
+                include_declaration,
+            },
         };
 
         let result: Option<Vec<lsp_types::Location>> = client
@@ -105,14 +136,20 @@ impl Tool for LspReferencesTool {
 
         if locations.is_empty() {
             return Ok(ToolOutput {
-                content: format!("No references found for symbol at {}:{}:{}", path_str, line, column),
+                content: format!(
+                    "No references found for symbol at {}:{}:{}",
+                    path_str, line, column
+                ),
                 metadata: Some(json!({ "count": 0 })),
             });
         }
 
         let mut out = format!(
             "{} reference(s) to symbol at {}:{}:{}:\n\n",
-            locations.len(), path_str, line, column
+            locations.len(),
+            path_str,
+            line,
+            column
         );
         let mut locs_json = Vec::new();
 

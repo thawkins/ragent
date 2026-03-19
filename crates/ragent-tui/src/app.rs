@@ -21,580 +21,18 @@ use ragent_core::{
     provider::ProviderRegistry,
     session::processor::SessionProcessor,
     storage::Storage,
+    team::{
+        Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamManager, TeamMember,
+        TeamStore,
+    },
 };
 
 use crate::input::{self, InputAction};
 use crate::tips;
 
-/// Returns `true` if `path` has a recognised image file extension.
-fn is_image_path(path: &std::path::Path) -> bool {
-    matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .as_deref(),
-        Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif")
-    )
-}
+mod state;
+pub use self::state::*;
 
-/// Decode `%XX` percent-encoding in a file-URI path component.
-fn percent_decode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next();
-            let h2 = chars.next();
-            if let (Some(a), Some(b)) = (h1, h2) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
-            }
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a temp file.
-///
-/// Returns the path of the written file.
-fn save_clipboard_image_to_temp(
-    img_data: &arboard::ImageData<'_>,
-) -> anyhow::Result<std::path::PathBuf> {
-    use image::{ImageBuffer, Rgba};
-
-    let width = img_data.width as u32;
-    let height = img_data.height as u32;
-    let bytes = img_data.bytes.as_ref().to_vec();
-
-    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(width, height, bytes)
-            .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions mismatch pixel buffer"))?;
-
-    let tmp_dir = std::env::temp_dir();
-    let filename = format!(
-        "ragent_paste_{}.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
-    let path = tmp_dir.join(filename);
-    img.save(&path)?;
-    Ok(path)
-}
-
-/// Severity level for a log entry displayed in the log panel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogLevel {
-    /// Informational message (prompts sent, session created, etc.).
-    Info,
-    /// Tool-related activity (call start, call end).
-    Tool,
-    /// Warning or recoverable issue.
-    Warn,
-    /// Unrecoverable error.
-    Error,
-}
-
-/// A single entry in the log panel.
-#[derive(Debug, Clone)]
-pub struct LogEntry {
-    /// Wall-clock timestamp (UTC).
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-    /// Severity / category.
-    pub level: LogLevel,
-    /// Human-readable log message.
-    pub message: String,
-}
-
-/// Which screen the TUI is currently showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScreenMode {
-    /// Centered landing page with logo, prompt, and tips.
-    Home,
-    /// Three-panel chat layout with status bar, messages, and input.
-    Chat,
-}
-
-/// Providers that ragent can connect to.
-pub const PROVIDER_LIST: &[(&str, &str)] = &[
-    ("anthropic", "Anthropic (Claude)"),
-    ("openai", "OpenAI (GPT)"),
-    ("copilot", "GitHub Copilot"),
-    ("ollama", "Ollama (Local)"),
-];
-
-/// State of the interactive provider-setup dialog.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderSetupStep {
-    /// Choosing which provider to configure.
-    SelectProvider {
-        /// Index of the highlighted provider in [`PROVIDER_LIST`].
-        selected: usize,
-    },
-    /// Entering an API key for the chosen provider.
-    EnterKey {
-        /// The provider id (e.g. `"anthropic"`).
-        provider_id: String,
-        /// Human-readable display name.
-        provider_name: String,
-        /// The key text entered so far.
-        key_input: String,
-        /// Optional error message from a previous attempt.
-        error: Option<String>,
-    },
-    /// Waiting for the user to complete Copilot device flow authorisation.
-    DeviceFlowPending {
-        /// Short code the user enters at the verification URL.
-        user_code: String,
-        /// URL the user must visit (e.g. `https://github.com/login/device`).
-        verification_uri: String,
-    },
-    /// Choosing which model to use from the selected provider.
-    SelectModel {
-        /// The provider id (e.g. `"anthropic"`).
-        provider_id: String,
-        /// Human-readable provider display name.
-        provider_name: String,
-        /// Available models as `(model_id, display_name)` pairs.
-        models: Vec<(String, String)>,
-        /// Index of the highlighted model.
-        selected: usize,
-    },
-    /// Setup complete — briefly confirm success.
-    Done {
-        /// Provider that was just configured.
-        provider_name: String,
-        /// Model that was selected, if any.
-        model_name: Option<String>,
-    },
-    /// Choosing which agent to switch to.
-    SelectAgent {
-        /// Available agent names and descriptions.
-        agents: Vec<(String, String)>,
-        /// Index of the highlighted agent.
-        selected: usize,
-    },
-    /// Choosing which provider to reset and remove credentials for.
-    ResetProvider {
-        /// Index of the highlighted provider in [`PROVIDER_LIST`].
-        selected: usize,
-    },
-}
-
-/// Information about a configured provider.
-#[derive(Debug, Clone)]
-pub struct ConfiguredProvider {
-    /// Provider identifier (e.g. `"anthropic"`).
-    pub id: String,
-    /// Human-readable name.
-    pub name: String,
-    /// How the key was found.
-    pub source: ProviderSource,
-}
-
-/// Where a provider key came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderSource {
-    /// From an environment variable.
-    EnvVar,
-    /// From the ragent database.
-    Database,
-    /// Auto-discovered (e.g. Copilot IDE config).
-    AutoDiscovered,
-}
-
-/// A registered slash command.
-#[derive(Debug, Clone)]
-pub struct SlashCommandDef {
-    /// The trigger word (without the leading `/`).
-    pub trigger: &'static str,
-    /// Short description shown in the menu.
-    pub description: &'static str,
-}
-
-/// All available slash commands.
-pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
-    SlashCommandDef {
-        trigger: "about",
-        description: "Show application info, version, and authors",
-    },
-    SlashCommandDef {
-        trigger: "agent",
-        description: "Switch the active agent",
-    },
-    SlashCommandDef {
-        trigger: "clear",
-        description: "Clear message history for the current session",
-    },
-    SlashCommandDef {
-        trigger: "cancel",
-        description: "Cancel a background task (/cancel <task_id_prefix>)",
-    },
-    SlashCommandDef {
-        trigger: "compact",
-        description: "Summarise and compact the conversation history",
-    },
-    SlashCommandDef {
-        trigger: "help",
-        description: "Show available slash commands",
-    },
-    SlashCommandDef {
-        trigger: "log",
-        description: "Toggle the log panel on/off",
-    },
-    SlashCommandDef {
-        trigger: "model",
-        description: "Switch the active model on the current provider",
-    },
-    SlashCommandDef {
-        trigger: "provider",
-        description: "Change the LLM provider (re-enters setup flow)",
-    },
-    SlashCommandDef {
-        trigger: "provider_reset",
-        description: "Reset the current provider and remove stored credentials",
-    },
-    SlashCommandDef {
-        trigger: "quit",
-        description: "Exit ragent",
-    },
-    SlashCommandDef {
-        trigger: "resume",
-        description: "Resume the agent from where it was halted",
-    },
-    SlashCommandDef {
-        trigger: "system",
-        description: "Override the agent system prompt (/system <prompt>)",
-    },
-    SlashCommandDef {
-        trigger: "tools",
-        description: "List all available tools (built-in and MCP)",
-    },
-    SlashCommandDef {
-        trigger: "skills",
-        description: "List all registered skills and their descriptions",
-    },
-    SlashCommandDef {
-        trigger: "tasks",
-        description: "Show background task status and cancel tasks",
-    },
-    SlashCommandDef {
-        trigger: "lsp",
-        description: "Show LSP server status (/lsp discover | /lsp connect <id> | /lsp disconnect <id>)",
-    },
-    SlashCommandDef {
-        trigger: "mcp",
-        description: "Show MCP server status (/mcp discover | /mcp connect <id> | /mcp disconnect <id>)",
-    },
-    SlashCommandDef {
-        trigger: "todos",
-        description: "Show TODO items for the current session",
-    },
-];
-
-/// A single entry in the slash-command autocomplete menu.
-#[derive(Debug, Clone)]
-pub struct SlashMenuEntry {
-    /// The trigger word (without the leading `/`).
-    pub trigger: String,
-    /// Short description shown in the menu.
-    pub description: String,
-    /// Whether this entry is a skill (vs. a builtin command).
-    pub is_skill: bool,
-}
-
-/// State of the slash-command autocomplete menu.
-#[derive(Debug, Clone)]
-pub struct SlashMenuState {
-    /// Entries that match the current filter.
-    pub matches: Vec<SlashMenuEntry>,
-    /// Currently highlighted index within `matches`.
-    pub selected: usize,
-    /// The filter text typed after `/` (e.g. `"mo"` for `/mo`).
-    pub filter: String,
-}
-
-/// An entry in the `@` file reference autocomplete menu.
-#[derive(Debug, Clone)]
-pub struct FileMenuEntry {
-    /// Display string shown in the menu.
-    pub display: String,
-    /// Relative path to the file or directory.
-    pub path: std::path::PathBuf,
-    /// Whether this entry is a directory.
-    pub is_dir: bool,
-}
-
-/// State of the `@` file reference autocomplete menu.
-#[derive(Debug, Clone)]
-pub struct FileMenuState {
-    /// Entries that match the current query.
-    pub matches: Vec<FileMenuEntry>,
-    /// Currently highlighted index within `matches`.
-    pub selected: usize,
-    /// The query text typed after `@` (e.g. `"main"` for `@main`).
-    pub query: String,
-}
-
-/// Identifies which pane a scrollbar drag is acting on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScrollbarDragPane {
-    /// Dragging the messages pane scrollbar.
-    Messages,
-    /// Dragging the log pane scrollbar.
-    Log,
-}
-
-/// Identifies which pane a text selection lives in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SelectionPane {
-    /// Selection in the messages pane.
-    Messages,
-    /// Selection in the log pane.
-    Log,
-    /// Selection in the chat-screen input widget.
-    Input,
-    /// Selection in the home-screen input widget.
-    HomeInput,
-}
-
-/// A mouse-driven text selection within a pane.
-#[derive(Debug, Clone)]
-pub struct TextSelection {
-    /// Which pane the selection is in.
-    pub pane: SelectionPane,
-    /// Anchor point (where the mouse was first pressed), screen coordinates.
-    pub anchor: (u16, u16),
-    /// Current endpoint (where the mouse is now), screen coordinates.
-    pub endpoint: (u16, u16),
-}
-
-impl TextSelection {
-    /// Return `(start, end)` with start ≤ end in row-major order.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use ragent_tui::app::{TextSelection, SelectionPane};
-    ///
-    /// let sel = TextSelection {
-    ///     pane: SelectionPane::Messages,
-    ///     anchor: (10, 5),
-    ///     endpoint: (3, 2),
-    /// };
-    /// let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
-    /// assert_eq!((start_col, start_row), (3, 2));
-    /// assert_eq!((end_col, end_row), (10, 5));
-    /// ```
-    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
-        if self.anchor.1 < self.endpoint.1
-            || (self.anchor.1 == self.endpoint.1 && self.anchor.0 <= self.endpoint.0)
-        {
-            (self.anchor, self.endpoint)
-        } else {
-            (self.endpoint, self.anchor)
-        }
-    }
-}
-
-/// Which action the context menu item represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextAction {
-    /// Copy selected text then delete it from the input.
-    Cut,
-    /// Copy selected text to the clipboard.
-    Copy,
-    /// Insert clipboard text at the current input cursor.
-    Paste,
-}
-
-/// State for the right-click context menu.
-#[derive(Debug, Clone)]
-pub struct ContextMenuState {
-    /// Screen column where the menu top-left should appear.
-    pub x: u16,
-    /// Screen row where the menu top-left should appear.
-    pub y: u16,
-    /// The pane that was right-clicked.
-    pub pane: SelectionPane,
-    /// Currently highlighted item index.
-    pub selected: usize,
-    /// Items available in this context (enabled/disabled).
-    pub items: Vec<(ContextAction, bool)>,
-}
-
-///
-/// Shown as an overlay that lists discovered language servers with numbered
-/// rows. The user types a number and presses Enter to enable a server, or
-/// presses Esc to dismiss.
-#[derive(Debug, Clone)]
-pub struct LspDiscoverState {
-    /// Servers found during discovery.
-    pub servers: Vec<DiscoveredServer>,
-    /// Number being typed by the user (e.g. `"2"`).
-    pub number_input: String,
-    /// Feedback message shown after an enable action or on error.
-    pub feedback: Option<String>,
-}
-
-/// State for the interactive `/mcp discover` dialog.
-///
-/// Shown as an overlay that lists discovered MCP servers with numbered
-/// rows. The user types a number and presses Enter to enable a server, or
-/// presses Esc to dismiss.
-#[derive(Debug, Clone)]
-pub struct McpDiscoverState {
-    /// Servers found during discovery.
-    pub servers: Vec<DiscoveredMcpServer>,
-    /// Number being typed by the user (e.g. `"2"`).
-    pub number_input: String,
-    /// Feedback message shown after an enable action or on error.
-    pub feedback: Option<String>,
-}
-
-/// Core TUI application state.
-///
-/// Holds the message list, input buffer, scroll offset, permission dialogs,
-/// token usage counters, and a reference to the shared [`EventBus`].
-pub struct App {
-    /// Chat message history.
-    pub messages: Vec<Message>,
-    /// Current text input buffer.
-    pub input: String,
-    /// Scroll offset for the message view (lines from bottom).
-    pub scroll_offset: u16,
-    /// Whether the event loop should keep running.
-    pub is_running: bool,
-    /// Shared event bus for agent communication.
-    pub event_bus: Arc<EventBus>,
-    /// Persistent storage for provider auth and sessions.
-    pub storage: Arc<Storage>,
-    /// Current session identifier.
-    pub session_id: Option<String>,
-    /// Name of the active agent.
-    pub agent_name: String,
-    /// Human-readable status string shown in the status bar.
-    pub status: String,
-    /// Active permission request overlay, if any.
-    pub permission_pending: Option<PermissionRequest>,
-    /// Cumulative (input, output) token counts.
-    pub token_usage: (u64, u64),
-    /// Input token count from the most recent LLM request (used for context-window % display).
-    pub last_input_tokens: u64,
-    /// Which screen is currently displayed.
-    pub current_screen: ScreenMode,
-    /// Randomly selected tip shown on the home screen.
-    pub tip: &'static str,
-    /// Current working directory displayed on the home screen.
-    pub cwd: String,
-    /// Git branch name if the cwd is inside a git repository.
-    pub git_branch: Option<String>,
-    /// Provider setup dialog state, if the dialog is open.
-    pub provider_setup: Option<ProviderSetupStep>,
-    /// Currently configured provider, if any.
-    pub configured_provider: Option<ConfiguredProvider>,
-    /// Provider registry for querying available models.
-    pub provider_registry: Arc<ProviderRegistry>,
-    /// Currently selected model in `"provider/model"` format, if any.
-    pub selected_model: Option<String>,
-    /// Session processor for sending messages to the LLM.
-    pub session_processor: Arc<SessionProcessor>,
-    /// Resolved agent configuration.
-    pub agent_info: AgentInfo,
-    /// Non-hidden agents available for cycling via Shift+Tab.
-    pub cycleable_agents: Vec<AgentInfo>,
-    /// Index into `cycleable_agents` for the currently active agent.
-    pub current_agent_index: usize,
-    /// Whether the configured provider/model is reachable.
-    /// `0` = not yet checked, `1` = available, `2` = unavailable.
-    pub provider_health: Arc<AtomicU8>,
-    /// Slash-command autocomplete menu, shown when the input starts with `/`.
-    pub slash_menu: Option<SlashMenuState>,
-    /// File reference autocomplete menu, shown when `@` is typed.
-    pub file_menu: Option<FileMenuState>,
-    /// Cached project files for `@` autocomplete (lazily populated).
-    pub project_files_cache: Option<Vec<std::path::PathBuf>>,
-    /// Previously submitted input lines (oldest first).
-    pub input_history: Vec<String>,
-    /// Current position when navigating history (`None` = new input).
-    pub history_index: Option<usize>,
-    /// Saved in-progress input while browsing history.
-    pub history_draft: String,
-    /// Whether the log panel is visible.
-    pub show_log: bool,
-    /// Log entries displayed in the log panel.
-    pub log_entries: Vec<LogEntry>,
-    /// Scroll offset for the log panel (lines from bottom).
-    pub log_scroll_offset: u16,
-    /// Cached area of the messages pane (set during render for mouse hit-testing).
-    pub message_area: Rect,
-    /// Cached area of the log panel (set during render for mouse hit-testing).
-    pub log_area: Rect,
-    /// Maximum scroll value for the messages pane (set during render).
-    pub message_max_scroll: u16,
-    /// Maximum scroll value for the log pane (set during render).
-    pub log_max_scroll: u16,
-    /// Scroll offset for the active-agents subpanel (lines from top).
-    pub active_agents_scroll_offset: u16,
-    /// Maximum scroll value for the active-agents subpanel (set during render).
-    pub active_agents_max_scroll: u16,
-    /// Active scrollbar drag, if any.
-    pub scrollbar_drag: Option<ScrollbarDragPane>,
-    /// Active text selection, if any.
-    pub text_selection: Option<TextSelection>,
-    /// Plain-text lines from the last message pane render (for copy).
-    pub message_content_lines: Vec<String>,
-    /// Plain-text lines from the last log pane render (for copy).
-    pub log_content_lines: Vec<String>,
-    /// Cached area of the chat-screen input widget (set during render).
-    pub input_area: Rect,
-    /// Cached area of the home-screen input widget (set during render).
-    pub home_input_area: Rect,
-    /// Snapshot of MCP servers and their tools (populated when MCP is connected).
-    pub mcp_servers: Vec<McpServer>,
-    /// Snapshot of LSP server descriptors (populated via `LspStatusChanged` events).
-    pub lsp_servers: Vec<LspServer>,
-    /// Handle to the running LSP manager (kept alive for the lifetime of the TUI).
-    pub lsp_manager: Option<SharedLspManager>,
-    /// Active LSP discovery dialog, if any.
-    pub lsp_discover: Option<LspDiscoverState>,
-    /// Active MCP discovery dialog, if any.
-    pub mcp_discover: Option<McpDiscoverState>,
-    /// When true, the next assistant text delta starts a new message instead
-    /// of appending to the current one. Set by `MessageEnd` events to
-    /// separate init-exchange output from the main response.
-    pub force_new_message: bool,
-    /// Saved agent stack for returning from sub-agents (e.g. plan → general).
-    pub agent_stack: Vec<AgentInfo>,
-    /// Pending plan delegation: `(task, context)` set by `AgentSwitchRequested`,
-    /// consumed by `MessageEnd` to auto-send the task to the plan agent.
-    pub pending_plan_task: Option<(String, String)>,
-    /// Pending agent restore: summary from `AgentRestoreRequested`,
-    /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
-    pub pending_plan_restore: Option<String>,
-    /// Whether the agent is currently processing a message.
-    pub is_processing: bool,
-    /// Cancellation flag shared with the processor task; set to `true` on ESC.
-    pub cancel_flag: Option<Arc<AtomicBool>>,
-    /// Whether the last agent run was halted by the user (ESC).
-    pub agent_halted: bool,
-    /// Monotonically increasing step counter for tool calls.
-    pub tool_step_counter: u32,
-    /// Maps tool call IDs to their `(short_session_id, step_number)` for log/message correlation.
-    pub tool_step_map: HashMap<String, (String, u32)>,
-    /// Active background sub-agent tasks (F14).
-    pub active_tasks: Vec<ragent_core::task::TaskEntry>,
-    /// Whether the keybindings help panel is currently visible.
-    pub show_shortcuts: bool,
-    /// Active right-click context menu, if any.
-    pub context_menu: Option<ContextMenuState>,
-    /// Image files staged to be sent with the next message (populated by Alt+V).
-    pub pending_attachments: Vec<std::path::PathBuf>,
-}
 
 impl App {
     /// Create a new [`App`] with default state and the given event bus.
@@ -646,9 +84,29 @@ impl App {
         let configured_provider = Self::detect_provider(&storage);
         let agent_name = agent_info.name.clone();
 
-        let cycleable_agents: Vec<AgentInfo> = ragent_core::agent::create_builtin_agents()
+        let cwd_path = std::env::current_dir().unwrap_or_default();
+        let builtin_agents = ragent_core::agent::create_builtin_agents();
+        let builtin_names: std::collections::HashSet<String> =
+            builtin_agents.iter().map(|a| a.name.clone()).collect();
+
+        let (custom_defs, mut all_diagnostics) =
+            ragent_core::agent::custom::load_custom_agents(&cwd_path);
+
+        let cycleable_agents: Vec<AgentInfo> = builtin_agents
             .into_iter()
             .filter(|a| !a.hidden)
+            .chain(custom_defs.iter().filter(|d| !d.agent_info.hidden).map(|d| {
+                let mut info = d.agent_info.clone();
+                if builtin_names.contains(&info.name) {
+                    let new_name = format!("custom:{}", info.name);
+                    all_diagnostics.push(format!(
+                        "custom agent '{}' collides with a built-in agent name — loaded as '{}'",
+                        info.name, new_name
+                    ));
+                    info.name = new_name;
+                }
+                info
+            }))
             .collect();
         let current_agent_index = cycleable_agents
             .iter()
@@ -658,9 +116,10 @@ impl App {
         // Load persisted model selection
         let selected_model = storage.get_setting("selected_model").ok().flatten();
 
-        Self {
+        let mut app = Self {
             messages: Vec::new(),
             input: String::new(),
+            input_cursor: 0,
             scroll_offset: 0,
             is_running: true,
             event_bus,
@@ -671,6 +130,7 @@ impl App {
             permission_pending: None,
             token_usage: (0, 0),
             last_input_tokens: 0,
+            quota_percent: None,
             current_screen: ScreenMode::Home,
             tip: tips::random_tip(),
             cwd,
@@ -716,14 +176,281 @@ impl App {
             pending_plan_restore: None,
             is_processing: false,
             cancel_flag: None,
-            agent_halted: false,
-            tool_step_counter: 0,
-            tool_step_map: HashMap::new(),
-            active_tasks: Vec::new(),
-            show_shortcuts: false,
-            context_menu: None,
-            pending_attachments: Vec::new(),
+            auto_compact_in_progress: false,
+            auto_compact_failed: false,
+            pending_send_after_compact: None,
+                          agent_halted: false,
+                          tool_step_map: HashMap::new(),
+                          active_tasks: Vec::new(),
+                          show_shortcuts: false,
+                          context_menu: None,
+                          pending_attachments: Vec::new(),
+                          history_file_path: None,
+                          history_picker: None,
+                          selected_agent_session_id: None,
+                          selected_agent_index: None,
+                          custom_agent_defs: custom_defs,
+                          custom_agent_diagnostics: all_diagnostics.clone(),
+                          active_team: None,
+                          team_members: Vec::new(),
+                          show_teams: false,
+                          teams_scroll_offset: 0,
+                          teams_max_scroll: 0,
+                      };
+
+        // Log any warnings from custom agent loading into the log panel
+        for diag in &all_diagnostics {
+            app.push_log(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
+
+        app
+    }
+
+    /// Add a user message to the input history and save it.
+    fn add_to_history(&mut self, text: String) {
+        // Don't add empty or duplicate entries
+        if text.is_empty() || self.input_history.last() == Some(&text) {
+            return;
+        }
+        self.input_history.push(text);
+        // Trim to 100 entries
+        if self.input_history.len() > 100 {
+            self.input_history.remove(0);
+        }
+        // Save after adding
+        let _ = self.save_history();
+        self.history_index = None;
+        self.history_draft.clear();
+    }
+
+    fn selected_model_context_window(&self) -> Option<usize> {
+        let model = self.selected_model.as_deref()?;
+        let (provider_id, model_id) = model.split_once('/')?;
+        self.provider_registry
+            .resolve_model(provider_id, model_id)
+            .map(|m| m.context_window)
+            .filter(|w| *w > 0)
+    }
+
+    fn should_auto_compact_before_send(&self) -> bool {
+        if self.auto_compact_in_progress
+            || self.auto_compact_failed
+            || self.pending_send_after_compact.is_some()
+        {
+            return false;
+        }
+        if self.session_id.is_none() || self.messages.is_empty() || self.last_input_tokens == 0 {
+            return false;
+        }
+        let Some(context_window) = self.selected_model_context_window() else {
+            return false;
+        };
+
+        // Start compaction before hitting hard limits.
+        let threshold = (context_window as f32 * 0.92) as u64;
+        self.last_input_tokens >= threshold
+    }
+
+    fn start_compaction(&mut self, auto_triggered: bool) -> bool {
+        if self.session_id.is_none() {
+            self.status = "⚠ No active session to compact".to_string();
+            return false;
+        }
+        if self.messages.is_empty() {
+            self.status = "⚠ No messages to compact".to_string();
+            return false;
+        }
+
+        let sid = self.session_id.clone().unwrap_or_default();
+        let compaction_agent = ragent_core::agent::resolve_agent("compaction", &Default::default())
+            .unwrap_or_else(|_| self.agent_info.clone());
+
+        // Override model to match current selection
+        let mut agent = compaction_agent;
+        if let Some(ref model_str) = self.selected_model
+            && let Some((provider, model)) = model_str.split_once('/')
+        {
+            agent.model = Some(ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model.to_string(),
+            });
+        }
+
+        let summary_prompt =
+            "Summarise the conversation so far into a concise representation that \
+             preserves all important context, decisions, code changes, file paths, \
+             and outstanding tasks. Output only the summary."
+                .to_string();
+
+        self.auto_compact_in_progress = auto_triggered;
+        if auto_triggered {
+            self.auto_compact_failed = false;
+            self.status = "compacting before send…".to_string();
+            self.push_log(
+                LogLevel::Warn,
+                "Auto-compaction triggered (context near limit)".to_string(),
+            );
+        } else {
+            self.status = "compacting…".to_string();
+            self.push_log(LogLevel::Info, "Compaction started".to_string());
+        }
+
+        let processor = self.session_processor.clone();
+        let event_bus = self.event_bus.clone();
+        tokio::spawn(async move {
+            match processor
+                .process_message(&sid, &summary_prompt, &agent, Arc::new(AtomicBool::new(false)))
+                .await
+            {
+                Ok(_) => {
+                    tracing::info!(session_id = %sid, "Compaction completed");
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Compaction failed");
+                    event_bus.publish(Event::AgentError {
+                        session_id: sid,
+                        error: format!("Compaction failed: {e}"),
+                    });
+                }
+            }
+        });
+        true
+    }
+
+    fn dispatch_user_message(
+        &mut self,
+        text: String,
+        image_paths: Vec<std::path::PathBuf>,
+    ) {
+        self.auto_compact_failed = false;
+        let Some(sid) = self.session_id.clone() else {
+            self.status = "⚠ No active session".to_string();
+            return;
+        };
+
+        let display_text = if image_paths.is_empty() {
+            text.clone()
+        } else {
+            let names: Vec<String> = image_paths
+                .iter()
+                .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+                .collect();
+            format!("[📎 {}] {}", names.join(", "), text)
+        };
+        let msg = Message::user_text(&sid, &display_text);
+        self.messages.push(msg);
+        self.input_history.push(text.clone());
+        self.history_index = None;
+        self.history_draft.clear();
+        self.input.clear();
+        self.input_cursor = 0;
+        self.file_menu = None;
+        self.status = "processing...".to_string();
+
+        let has_refs = !ragent_core::reference::parse::parse_refs(&text).is_empty();
+        if has_refs {
+            let ref_names: Vec<String> = ragent_core::reference::parse::parse_refs(&text)
+                .iter()
+                .map(|r| r.raw.clone())
+                .collect();
+            self.push_log(
+                LogLevel::Info,
+                format!("resolving refs: {}", ref_names.join(", ")),
+            );
+        }
+
+        let truncated = if text.len() > 120 {
+            let mut end = 120;
+            while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}…", &text[..end])
+        } else {
+            text.clone()
+        };
+        let model_tag = if let Some(ref model_str) = self.selected_model {
+            format!(" [{}]", model_str)
+        } else {
+            String::new()
+        };
+        self.push_log(
+            LogLevel::Info,
+            format!("prompt sent{}: {}", model_tag, truncated),
+        );
+
+        let mut agent = self.agent_info.clone();
+        if let Some(ref model_str) = self.selected_model
+            && let Some((provider, model)) = model_str.split_once('/')
+        {
+            agent.model = Some(ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model.to_string(),
+            });
+        }
+
+        let processor = self.session_processor.clone();
+        let flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(flag.clone());
+        tokio::spawn(async move {
+            let final_text = if has_refs {
+                let wd = std::env::current_dir().unwrap_or_default();
+                match ragent_core::reference::resolve::resolve_all_refs(&text, &wd).await {
+                    Ok((resolved, _)) => resolved,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "ref resolution failed, using original text");
+                        text.clone()
+                    }
+                }
+            } else {
+                text.clone()
+            };
+
+            if image_paths.is_empty() {
+                if let Err(e) = processor.process_message(&sid, &final_text, &agent, flag).await {
+                    tracing::debug!(error = %e, "Failed to process message");
+                }
+            } else {
+                let mut parts: Vec<ragent_core::message::MessagePart> = image_paths
+                    .into_iter()
+                    .filter(|p| p.exists())
+                    .map(|p| {
+                        let mime = if p
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.eq_ignore_ascii_case("png"))
+                            .unwrap_or(false)
+                        {
+                            "image/png"
+                        } else if p
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.eq_ignore_ascii_case("gif"))
+                            .unwrap_or(false)
+                        {
+                            "image/gif"
+                        } else {
+                            "image/jpeg"
+                        };
+                        ragent_core::message::MessagePart::Image {
+                            mime_type: mime.to_string(),
+                            path: p,
+                        }
+                    })
+                    .collect();
+                parts.push(ragent_core::message::MessagePart::Text { text: final_text });
+                let user_msg = ragent_core::message::Message::new(
+                    &sid,
+                    ragent_core::message::Role::User,
+                    parts,
+                );
+                if let Err(e) = processor
+                    .process_user_message(&sid, user_msg, &agent, flag)
+                    .await
+                {
+                    tracing::debug!(error = %e, "Failed to process message with images");
+                }
+            }
+        });
     }
 
     /// Detect the first configured provider by checking env vars and the database.
@@ -749,6 +476,21 @@ impl App {
                 .flatten()
                 .is_some()
         };
+
+        // Check for an explicit user preference first — this overrides auto-discovery
+        // so that e.g. selecting Ollama doesn't get overwritten by Copilot IDE tokens.
+        if let Ok(Some(preferred)) = storage.get_setting("preferred_provider") {
+            if !preferred.is_empty() && !is_disabled(&preferred) {
+                if let Some(&(pid, pname)) = PROVIDER_LIST.iter().find(|(id, _)| *id == preferred)
+                {
+                    return Some(ConfiguredProvider {
+                        id: pid.to_string(),
+                        name: pname.to_string(),
+                        source: ProviderSource::Database,
+                    });
+                }
+            }
+        }
 
         // Check Anthropic
         if !is_disabled("anthropic") {
@@ -846,6 +588,56 @@ impl App {
         self.configured_provider = Self::detect_provider(&self.storage);
     }
 
+    /// Return the current input length in characters.
+    pub(crate) fn input_len_chars(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    /// Return the byte offset corresponding to the current cursor position.
+    pub(crate) fn cursor_byte_pos(&self) -> usize {
+        self.cursor_byte_pos_at_char_index(self.input_cursor)
+    }
+
+    /// Return the byte offset corresponding to a character index.
+    pub(crate) fn cursor_byte_pos_at_char_index(&self, char_index: usize) -> usize {
+        if char_index == 0 {
+            return 0;
+        }
+        if char_index >= self.input_len_chars() {
+            return self.input.len();
+        }
+        // Walk the chars to determine the byte offset.
+        self.input
+            .char_indices()
+            .nth(char_index)
+            .map(|(byte, _)| byte)
+            .unwrap_or_else(|| self.input.len())
+    }
+
+    /// Move the cursor one character to the left (if possible).
+    pub(crate) fn cursor_move_left(&mut self) {
+        if self.input_cursor > 0 {
+            self.input_cursor -= 1;
+        }
+    }
+
+    /// Move the cursor one character to the right (if possible).
+    pub(crate) fn cursor_move_right(&mut self) {
+        if self.input_cursor < self.input_len_chars() {
+            self.input_cursor += 1;
+        }
+    }
+
+    /// Move the cursor to the beginning of the input line.
+    pub(crate) fn cursor_move_home(&mut self) {
+        self.input_cursor = 0;
+    }
+
+    /// Move the cursor to the end of the input line.
+    pub(crate) fn cursor_move_end(&mut self) {
+        self.input_cursor = self.input_len_chars();
+    }
+
     /// Attach an [`LspManager`] to the app.
     ///
     /// Called from `run_tui()` after the manager has been created and initial
@@ -903,16 +695,15 @@ impl App {
             }
             Err(_) => {
                 // No existing file — write a minimal config.
-                let out =
-                    serde_json::to_string_pretty(&serde_json::json!({ "lsp": {
-                        &server.id: {
-                            "command": server.executable.to_string_lossy(),
-                            "args": server.args,
-                            "extensions": server.extensions,
-                            "disabled": false,
-                        }
-                    }}))
-                    .map_err(|e| e.to_string())?;
+                let out = serde_json::to_string_pretty(&serde_json::json!({ "lsp": {
+                    &server.id: {
+                        "command": server.executable.to_string_lossy(),
+                        "args": server.args,
+                        "extensions": server.extensions,
+                        "disabled": false,
+                    }
+                }}))
+                .map_err(|e| e.to_string())?;
                 std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
             }
         }
@@ -925,7 +716,10 @@ impl App {
 
     /// Add a discovered MCP server to the `mcp` section in `ragent.json` and
     /// enable it. Returns `Ok(())` on success or an error description.
-    pub fn enable_discovered_mcp_server(&self, server: &DiscoveredMcpServer) -> Result<String, String> {
+    pub fn enable_discovered_mcp_server(
+        &self,
+        server: &DiscoveredMcpServer,
+    ) -> Result<String, String> {
         use ragent_core::config::Config;
 
         // Load (or default-construct) the current config.
@@ -967,17 +761,16 @@ impl App {
             }
             Err(_) => {
                 // No existing file — write a minimal config.
-                let out =
-                    serde_json::to_string_pretty(&serde_json::json!({ "mcp": {
-                        &server.id: {
-                            "type": "stdio",
-                            "command": server.executable.to_string_lossy(),
-                            "args": server.args,
-                            "env": server.env,
-                            "disabled": false,
-                        }
-                    }}))
-                    .map_err(|e| e.to_string())?;
+                let out = serde_json::to_string_pretty(&serde_json::json!({ "mcp": {
+                    &server.id: {
+                        "type": "stdio",
+                        "command": server.executable.to_string_lossy(),
+                        "args": server.args,
+                        "env": server.env,
+                        "disabled": false,
+                    }
+                }}))
+                .map_err(|e| e.to_string())?;
                 std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
             }
         }
@@ -1005,6 +798,51 @@ impl App {
                 self.status = format!("error: {}", e);
                 false
             }
+        }
+    }
+
+    /// Lazily initialise the TeamManager for the current session/team.
+    fn ensure_team_manager_for_team(
+        &mut self,
+        team_name: &str,
+        known_team_dir: Option<std::path::PathBuf>,
+    ) {
+        if self.session_processor.team_manager.get().is_some() {
+            return;
+        }
+        let Some(lead_session_id) = self.session_id.clone() else {
+            return;
+        };
+
+        let team_dir = if let Some(dir) = known_team_dir {
+            dir
+        } else {
+            let working_dir = std::env::current_dir().unwrap_or_default();
+            match TeamStore::load_by_name(team_name, &working_dir) {
+                Ok(store) => store.dir,
+                Err(e) => {
+                    self.push_log(
+                        LogLevel::Warn,
+                        format!("TeamManager init skipped: cannot load team '{team_name}': {e}"),
+                    );
+                    return;
+                }
+            }
+        };
+
+        let manager = Arc::new(TeamManager::new(
+            team_name.to_string(),
+            lead_session_id,
+            team_dir,
+            self.session_processor.clone(),
+            self.event_bus.clone(),
+        ));
+
+        if self.session_processor.team_manager.set(manager).is_ok() {
+            self.push_log(
+                LogLevel::Info,
+                format!("TeamManager initialised for team '{team_name}'"),
+            );
         }
     }
 
@@ -1043,10 +881,11 @@ impl App {
         self.current_screen = ScreenMode::Chat;
         self.status = format!("resumed ({} messages)", msg_count);
 
-        // Rebuild step counter from restored tool calls and populate log
-        self.tool_step_counter = 0;
+        // Rebuild tool_step_map from restored tool calls and populate log
+        // (step count comes from event_bus, not local counter)
         self.tool_step_map.clear();
-        let mut restored_logs: Vec<(u32, String, String)> = Vec::new();
+        let mut restored_logs: Vec<(u64, String, String)> = Vec::new();
+        let mut step_counter = 0u64;
         for msg in &self.messages {
             for part in &msg.parts {
                 if let MessagePart::ToolCall {
@@ -1055,24 +894,20 @@ impl App {
                     state,
                 } = part
                 {
-                    self.tool_step_counter += 1;
+                    step_counter += 1;
                     let short_sid = self
                         .session_id
                         .as_deref()
                         .map(short_session_id)
                         .unwrap_or_default();
                     self.tool_step_map
-                        .insert(call_id.clone(), (short_sid, self.tool_step_counter));
+                        .insert(call_id.clone(), (short_sid, step_counter as u32));
                     let icon = match state.status {
                         ragent_core::message::ToolCallStatus::Completed => "✓",
                         ragent_core::message::ToolCallStatus::Error => "✗",
                         _ => "…",
                     };
-                    restored_logs.push((
-                        self.tool_step_counter,
-                        tool.clone(),
-                        icon.to_string(),
-                    ));
+                    restored_logs.push((step_counter, tool.clone(), icon.to_string()));
                 }
             }
         }
@@ -1326,6 +1161,18 @@ impl App {
             .map(|p| p.id.as_str())
             .unwrap_or("");
 
+        // Provider rate-limit quota % takes priority when available.
+        if let Some(quota) = self.quota_percent {
+            let label = if provider_id == "copilot" {
+                let plan = ragent_core::provider::copilot::cached_copilot_plan()
+                    .unwrap_or_else(|| "Copilot".to_string());
+                format!("{} quota: {:.1}%", plan, quota)
+            } else {
+                format!("quota: {:.1}%", quota)
+            };
+            return (label, false);
+        }
+
         // Compute context-window usage % from last request's input token count.
         let context_pct: Option<f32> = self
             .selected_model
@@ -1337,18 +1184,23 @@ impl App {
                 self.provider_registry.resolve_model(pid, mid)
             })
             .filter(|m| m.context_window > 0)
-            .map(|m| {
-                (self.last_input_tokens as f32 / m.context_window as f32 * 100.0).min(100.0)
-            });
+            .map(|m| (self.last_input_tokens as f32 / m.context_window as f32 * 100.0).min(100.0));
 
         if provider_id == "copilot" {
             let plan = ragent_core::provider::copilot::cached_copilot_plan()
                 .unwrap_or_else(|| "Copilot".to_string());
             let text = match context_pct {
-                Some(p) => format!("{} {:.0}%", plan, p),
+                Some(p) => format!("{} ctx: {:.0}%", plan, p),
                 None => plan,
             };
             (text, false)
+        } else if provider_id == "ollama" {
+            match context_pct {
+                Some(p) => (format!("local ctx: {:.0}%", p), false),
+                None => ("local".to_string(), false),
+            }
+        } else if let Some(p) = context_pct {
+            (format!("ctx: {:.0}%", p), false)
         } else {
             ("unknown".to_string(), true)
         }
@@ -1441,7 +1293,8 @@ impl App {
                 0
             } else if let Some(exact) = matches.iter().position(|m| m.trigger == needle) {
                 exact
-            } else if let Some(prefix) = matches.iter().position(|m| m.trigger.starts_with(&needle)) {
+            } else if let Some(prefix) = matches.iter().position(|m| m.trigger.starts_with(&needle))
+            {
                 prefix
             } else {
                 0
@@ -1485,8 +1338,9 @@ impl App {
             // Lazily populate the project file cache
             if self.project_files_cache.is_none() {
                 let wd = std::env::current_dir().unwrap_or_default();
-                self.project_files_cache =
-                    Some(ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000));
+                self.project_files_cache = Some(
+                    ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000),
+                );
             }
 
             if let Some(ref candidates) = self.project_files_cache {
@@ -1508,12 +1362,12 @@ impl App {
                 if entries.is_empty() {
                     self.file_menu = None;
                 } else {
-                    let prev_selected =
-                        self.file_menu.as_ref().map(|m| m.selected).unwrap_or(0);
+                    let prev_selected = self.file_menu.as_ref().map(|m| m.selected).unwrap_or(0);
                     self.file_menu = Some(FileMenuState {
                         selected: prev_selected.min(entries.len().saturating_sub(1)),
                         matches: entries,
                         query: query.to_string(),
+                        current_dir: None,
                     });
                 }
             } else {
@@ -1524,25 +1378,105 @@ impl App {
         }
     }
 
-    /// Accept the currently selected file menu entry, replacing the `@query`
-    /// in the input with `@full/path`.
-    pub fn accept_file_menu_selection(&mut self) {
-        let path = if let Some(ref menu) = self.file_menu {
-            menu.matches
-                .get(menu.selected)
-                .map(|entry| entry.display.clone())
-        } else {
-            None
-        };
+    /// Populate the file menu with the immediate contents of `dir_rel`.
+    fn populate_directory_menu(&mut self, dir_rel: &std::path::Path) {
+        let wd = std::env::current_dir().unwrap_or_default();
+        let abs = wd.join(dir_rel);
+        let mut entries: Vec<FileMenuEntry> = Vec::new();
 
-        if let Some(path) = path {
-            // Replace @query with @path
-            if let Some(at_pos) = self.input.rfind('@') {
-                self.input.truncate(at_pos + 1);
-                self.input.push_str(&path);
+        if abs.is_dir() {
+            // Read the directory contents from disk (sorted)
+            if let Ok(rd) = std::fs::read_dir(&abs) {
+                let mut sorted: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+                sorted.sort_by_key(|e| e.file_name());
+                for entry in sorted {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    // Skip hidden
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    let path_abs = entry.path();
+                    let is_dir = path_abs.is_dir();
+                    let rel = path_abs
+                        .strip_prefix(&wd)
+                        .unwrap_or(&path_abs)
+                        .to_path_buf();
+                    let display = if is_dir {
+                        format!("{}/", rel.to_string_lossy())
+                    } else {
+                        rel.to_string_lossy().to_string()
+                    };
+                    entries.push(FileMenuEntry {
+                        display,
+                        path: rel,
+                        is_dir,
+                    });
+                }
+            }
+
+            // Add parent entry if not at project root
+            if !dir_rel.as_os_str().is_empty() {
+                let parent = dir_rel.parent().unwrap_or(std::path::Path::new(""));
+                let parent_display = if parent.as_os_str().is_empty() {
+                    "../".to_string()
+                } else {
+                    format!("{}/", parent.to_string_lossy())
+                };
+                entries.insert(
+                    0,
+                    FileMenuEntry {
+                        display: parent_display,
+                        path: parent.to_path_buf(),
+                        is_dir: true,
+                    },
+                );
             }
         }
+
+        if entries.is_empty() {
+            self.file_menu = None;
+        } else {
+            self.file_menu = Some(FileMenuState {
+                selected: 0,
+                matches: entries,
+                query: String::new(),
+                current_dir: Some(dir_rel.to_path_buf()),
+            });
+        }
+    }
+
+    /// Accept the currently selected file menu entry. If the selected entry is
+    /// a directory, navigate into it and show its contents. Returns `true` if a
+    /// file was inserted into the input (menu closed), or `false` if the menu
+    /// remains open due to directory navigation.
+    pub fn accept_file_menu_selection(&mut self) -> bool {
+        // Clone the selected entry out of the menu to avoid holding an
+        // immutable borrow of self while we call mutating methods below.
+        let selected_entry: Option<FileMenuEntry> = self
+            .file_menu
+            .as_ref()
+            .and_then(|m| m.matches.get(m.selected).cloned());
+
+        if let Some(entry) = selected_entry {
+            if entry.is_dir {
+                // Navigate into the directory instead of inserting it.
+                self.populate_directory_menu(&entry.path);
+                return false;
+            } else {
+                // Insert file path into the input and close the menu.
+                let path = entry.display.clone();
+                if let Some(at_pos) = self.input.rfind('@') {
+                    self.input.truncate(at_pos + 1);
+                    self.input.push_str(&path);
+                    self.input_cursor = self.input_len_chars();
+                }
+                self.file_menu = None;
+                return true;
+            }
+        }
+
         self.file_menu = None;
+        false
     }
 
     /// Execute a slash command by trigger name (e.g. `"/model"` or `"model"`).
@@ -1558,6 +1492,7 @@ impl App {
     pub fn execute_slash_command(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
+        self.input_cursor = 0;
         self.slash_menu = None;
         self.scroll_offset = 0;
         self.force_new_message = true;
@@ -1607,10 +1542,19 @@ impl App {
             "agent" => {
                 if args.is_empty() {
                     // Open the agent picker dialog
-                    let agents: Vec<(String, String)> = self
+                    let custom_names: std::collections::HashSet<String> = self
+                        .custom_agent_defs
+                        .iter()
+                        .map(|d| d.agent_info.name.clone())
+                        .collect();
+                    let agents: Vec<(String, String, bool)> = self
                         .cycleable_agents
                         .iter()
-                        .map(|a| (a.name.clone(), a.description.clone()))
+                        .map(|a| {
+                            let is_custom = custom_names.contains(&a.name)
+                                || a.name.starts_with("custom:");
+                            (a.name.clone(), a.description.clone(), is_custom)
+                        })
                         .collect();
                     let selected = self.current_agent_index;
                     self.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected });
@@ -1651,10 +1595,75 @@ impl App {
                     }
                 }
             }
+            "agents" => {
+                // Ensure a session exists so output can be displayed
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
+
+                let mut output = String::from("From: /agents\n\nBuilt-in Agents:\n\n");
+
+                let custom_names: std::collections::HashSet<String> = self
+                    .custom_agent_defs
+                    .iter()
+                    .map(|d| d.agent_info.name.clone())
+                    .collect();
+
+                for agent in &self.cycleable_agents {
+                    let is_custom = custom_names.contains(&agent.name)
+                        || agent.name.starts_with("custom:");
+                    if !is_custom {
+                        let active = if agent.name == self.agent_name { " ●" } else { "" };
+                        output.push_str(&format!(
+                            "  {:<18} {}{}\n",
+                            agent.name, agent.description, active
+                        ));
+                    }
+                }
+
+                if self.custom_agent_defs.is_empty() {
+                    output.push_str(
+                        "\nCustom Agents:\n\n  (none — place .json files in .ragent/agents/ or ~/.ragent/agents/)\n",
+                    );
+                } else {
+                    output.push_str("\nCustom Agents:\n\n");
+                    for def in &self.custom_agent_defs {
+                        let scope = if def.is_project_local { "project" } else { "global" };
+                        let name = &def.agent_info.name;
+                        let desc = &def.agent_info.description;
+                        let active = if *name == self.agent_name { " ●" } else { "" };
+                        output.push_str(&format!(
+                            "  {:<18} {} [{}]{}\n",
+                            name, desc, scope, active
+                        ));
+                    }
+                }
+
+                if !self.custom_agent_diagnostics.is_empty() {
+                    output.push_str("\nDiagnostics:\n\n");
+                    for diag in &self.custom_agent_diagnostics {
+                        output.push_str(&format!("  ⚠ {}\n", diag));
+                    }
+                }
+
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "agents".to_string();
+            }
             "clear" => {
                 self.messages.clear();
                 self.scroll_offset = 0;
-                self.tool_step_counter = 0;
                 self.tool_step_map.clear();
                 self.status = "messages cleared".to_string();
                 self.push_log(LogLevel::Info, "Message history cleared".to_string());
@@ -1666,17 +1675,17 @@ impl App {
                     return;
                 }
 
-                if let Some(task) = self
-                    .active_tasks
-                    .iter()
-                    .find(|t| t.id.starts_with(args))
-                {
+                if let Some(task) = self.active_tasks.iter().find(|t| t.id.starts_with(args)) {
                     let task_id = task.id.clone();
                     let agent = task.agent_name.clone();
                     if let Some(idx) = self.active_tasks.iter().position(|t| t.id == task_id) {
                         self.active_tasks.remove(idx);
                     }
-                    self.status = format!("Cancelled task {} ({})", &task_id[..8.min(task_id.len())], agent);
+                    self.status = format!(
+                        "Cancelled task {} ({})",
+                        &task_id[..8.min(task_id.len())],
+                        agent
+                    );
                     self.push_log(
                         LogLevel::Info,
                         format!(
@@ -1691,60 +1700,7 @@ impl App {
                 }
             }
             "compact" => {
-                if self.session_id.is_none() {
-                    self.status = "⚠ No active session to compact".to_string();
-                    return;
-                }
-                if self.messages.is_empty() {
-                    self.status = "⚠ No messages to compact".to_string();
-                    return;
-                }
-
-                let sid = self.session_id.clone().unwrap();
-                let compaction_agent =
-                    ragent_core::agent::resolve_agent("compaction", &Default::default())
-                        .unwrap_or_else(|_| self.agent_info.clone());
-
-                // Override model to match current selection
-                let mut agent = compaction_agent;
-                if let Some(ref model_str) = self.selected_model {
-                    if let Some((provider, model)) = model_str.split_once('/') {
-                        agent.model = Some(ModelRef {
-                            provider_id: provider.to_string(),
-                            model_id: model.to_string(),
-                        });
-                    }
-                }
-
-                // Build a summary prompt from the current messages
-                let summary_prompt =
-                    "Summarise the conversation so far into a concise representation that \
-                     preserves all important context, decisions, code changes, file paths, \
-                     and outstanding tasks. Output only the summary."
-                        .to_string();
-
-                self.status = "compacting…".to_string();
-                self.push_log(LogLevel::Info, "Compaction started".to_string());
-
-                let processor = self.session_processor.clone();
-                let event_bus = self.event_bus.clone();
-                tokio::spawn(async move {
-                    match processor
-                        .process_message(&sid, &summary_prompt, &agent, Arc::new(AtomicBool::new(false)))
-                        .await
-                    {
-                        Ok(_) => {
-                            tracing::info!(session_id = %sid, "Compaction completed");
-                        }
-                        Err(e) => {
-                            tracing::error!(error = %e, "Compaction failed");
-                            event_bus.publish(Event::AgentError {
-                                session_id: sid,
-                                error: format!("Compaction failed: {e}"),
-                            });
-                        }
-                    }
-                });
+                let _ = self.start_compaction(false);
             }
             "help" => {
                 // Ensure a session exists so the help text can be appended
@@ -1778,10 +1734,7 @@ impl App {
                 if !skills.is_empty() {
                     help_lines.push_str("\nSkills:\n");
                     for skill in &skills {
-                        let desc = skill
-                            .description
-                            .as_deref()
-                            .unwrap_or("(no description)");
+                        let desc = skill.description.as_deref().unwrap_or("(no description)");
                         let hint = skill
                             .argument_hint
                             .as_deref()
@@ -1808,6 +1761,22 @@ impl App {
                     "log panel hidden".to_string()
                 };
             }
+            "history" => {
+                if self.input_history.is_empty() {
+                    self.status = "No input history yet".to_string();
+                } else {
+                    // Show newest entries first
+                    let entries: Vec<String> =
+                        self.input_history.iter().rev().cloned().collect();
+                    self.history_picker = Some(crate::app::state::HistoryPickerState {
+                        entries,
+                        selected: 0,
+                        scroll_offset: 0,
+                    });
+                    self.input.clear();
+                    self.input_cursor = 0;
+                }
+            }
             "model" => {
                 if let Some(ref prov) = self.configured_provider {
                     let models = self.models_for_provider(&prov.id.clone());
@@ -1832,6 +1801,166 @@ impl App {
             "quit" => {
                 self.is_running = false;
             }
+            "reload" => {
+                let sub = args.split_whitespace().next().unwrap_or("all");
+                let do_agents = matches!(sub, "all" | "agents");
+                let do_config = matches!(sub, "all" | "config");
+                let do_mcp = matches!(sub, "all" | "mcp");
+                let do_skills = matches!(sub, "all" | "skills");
+
+                let mut report = String::from("From: /reload\n\n");
+
+                // ── reload agents ──────────────────────────────────────────────────
+                if do_agents {
+                    let cwd_path = std::env::current_dir().unwrap_or_default();
+                    let builtin_agents = ragent_core::agent::create_builtin_agents();
+                    let builtin_names: std::collections::HashSet<String> =
+                        builtin_agents.iter().map(|a| a.name.clone()).collect();
+
+                    let (new_defs, mut diags) =
+                        ragent_core::agent::custom::load_custom_agents(&cwd_path);
+
+                    // Rebuild cycleable list: builtins (non-hidden) + custom
+                    let mut new_cycleable: Vec<_> = builtin_agents
+                        .into_iter()
+                        .filter(|a| !a.hidden)
+                        .collect();
+                    for def in &new_defs {
+                        let mut info = def.agent_info.clone();
+                        if builtin_names.contains(&info.name) {
+                            let new_name = format!("custom:{}", info.name);
+                            diags.push(format!(
+                                "custom agent '{}' collides with a built-in — loaded as '{}'",
+                                info.name, new_name
+                            ));
+                            info.name = new_name;
+                        }
+                        if !info.hidden {
+                            new_cycleable.push(info);
+                        }
+                    }
+
+                    let prev_count = self.custom_agent_defs.len();
+                    self.custom_agent_defs = new_defs;
+                    self.custom_agent_diagnostics = diags.clone();
+                    // Preserve current_agent_index if possible
+                    let current_name = self.agent_name.clone();
+                    self.current_agent_index = new_cycleable
+                        .iter()
+                        .position(|a| a.name == current_name)
+                        .unwrap_or(0);
+                    self.cycleable_agents = new_cycleable;
+
+                    for d in &diags {
+                        self.push_log(LogLevel::Warn, format!("[reload agents] {}", d));
+                    }
+                    report.push_str(&format!(
+                        "✓ Agents reloaded — {} custom agent(s) (was {})\n",
+                        self.custom_agent_defs.len(),
+                        prev_count,
+                    ));
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "reload agents: {} custom agent(s) loaded",
+                            self.custom_agent_defs.len()
+                        ),
+                    );
+                }
+
+                // ── reload config ──────────────────────────────────────────────────
+                if do_config {
+                    match ragent_core::config::Config::load() {
+                        Ok(_cfg) => {
+                            // Refresh cached provider and model selections
+                            self.configured_provider = Self::detect_provider(&self.storage);
+                            self.selected_model =
+                                self.storage.get_setting("selected_model").ok().flatten();
+                            report.push_str("✓ Config reloaded (ragent.json)\n");
+                            self.push_log(LogLevel::Info, "reload config: ragent.json reloaded".to_string());
+                        }
+                        Err(e) => {
+                            report.push_str(&format!("✗ Config reload failed: {}\n", e));
+                            self.push_log(LogLevel::Warn, format!("reload config failed: {}", e));
+                        }
+                    }
+                }
+
+                // ── reload mcp ─────────────────────────────────────────────────────
+                if do_mcp {
+                    match ragent_core::config::Config::load() {
+                        Ok(cfg) => {
+                            // Rebuild the display list from config, preserving connected status
+                            let mut new_servers: Vec<ragent_core::mcp::McpServer> = Vec::new();
+                            for (id, mcp_cfg) in &cfg.mcp {
+                                let existing_status = self
+                                    .mcp_servers
+                                    .iter()
+                                    .find(|s| &s.id == id)
+                                    .map(|s| s.status.clone())
+                                    .unwrap_or(if mcp_cfg.disabled {
+                                        ragent_core::mcp::McpStatus::Disabled
+                                    } else {
+                                        ragent_core::mcp::McpStatus::Disabled
+                                    });
+                                let existing_tools = self
+                                    .mcp_servers
+                                    .iter()
+                                    .find(|s| &s.id == id)
+                                    .map(|s| s.tools.clone())
+                                    .unwrap_or_default();
+                                new_servers.push(ragent_core::mcp::McpServer {
+                                    id: id.clone(),
+                                    config: mcp_cfg.clone(),
+                                    status: existing_status,
+                                    tools: existing_tools,
+                                });
+                            }
+                            let prev = self.mcp_servers.len();
+                            self.mcp_servers = new_servers;
+                            report.push_str(&format!(
+                                "✓ MCP reloaded — {} server(s) in config (was {})\n",
+                                self.mcp_servers.len(),
+                                prev,
+                            ));
+                            self.push_log(
+                                LogLevel::Info,
+                                format!(
+                                    "reload mcp: {} server(s) in config",
+                                    self.mcp_servers.len()
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            report.push_str(&format!("✗ MCP reload failed: {}\n", e));
+                            self.push_log(LogLevel::Warn, format!("reload mcp failed: {}", e));
+                        }
+                    }
+                }
+
+                // ── reload skills ──────────────────────────────────────────────────
+                if do_skills {
+                    // Skills are loaded on-demand from disk each time they are needed;
+                    // there is no persistent cache to clear.  Just confirm to the user.
+                    report.push_str(
+                        "✓ Skills will be reloaded from disk on next use (no cache to clear)\n",
+                    );
+                    self.push_log(LogLevel::Info, "reload skills: confirmed (on-demand)".to_string());
+                }
+
+                if !matches!(sub, "all" | "agents" | "config" | "mcp" | "skills") {
+                    report.push_str(&format!(
+                        "Unknown subcommand '{}'. Usage: /reload [all|config|mcp|skills|agents]\n",
+                        sub
+                    ));
+                }
+
+                self.append_assistant_text(&report);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "reload".to_string();
+            }
             "resume" => {
                 if !self.agent_halted {
                     self.status = "Nothing to resume — agent was not halted".to_string();
@@ -1845,8 +1974,7 @@ impl App {
 
                 self.agent_halted = false;
                 let sid = self.session_id.clone().unwrap();
-                let resume_text =
-                    "You were previously interrupted by the user. Continue the task from where you left off.";
+                let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
                 self.status = "processing...".to_string();
@@ -1870,8 +1998,9 @@ impl App {
                 let flag = Arc::new(AtomicBool::new(false));
                 self.cancel_flag = Some(flag.clone());
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        processor.process_message(&sid, resume_text, &agent, flag).await
+                    if let Err(e) = processor
+                        .process_message(&sid, resume_text, &agent, flag)
+                        .await
                     {
                         tracing::debug!(error = %e, "Failed to resume agent");
                     }
@@ -1881,7 +2010,9 @@ impl App {
                 if args.is_empty() {
                     // Show current system prompt
                     if let Some(ref prompt) = self.agent_info.prompt {
-                        self.append_assistant_text(&format!("From: /system\nCurrent system prompt:\n{prompt}"));
+                        self.append_assistant_text(&format!(
+                            "From: /system\nCurrent system prompt:\n{prompt}"
+                        ));
                         if self.current_screen == ScreenMode::Home {
                             self.current_screen = ScreenMode::Chat;
                         }
@@ -1916,7 +2047,8 @@ impl App {
                 for def in &tool_defs {
                     output.push_str(&format!("  {:<16} {}\n", def.name, def.description));
                     // Show parameter actions indented under each tool
-                    if let Some(props) = def.parameters.get("properties").and_then(|v| v.as_object())
+                    if let Some(props) =
+                        def.parameters.get("properties").and_then(|v| v.as_object())
                     {
                         for (param, schema) in props {
                             let desc = schema
@@ -1990,10 +2122,7 @@ impl App {
                     let col_cmd = skills
                         .iter()
                         .map(|s| {
-                            let hint_len = s
-                                .argument_hint
-                                .as_ref()
-                                .map_or(0, |h| h.len() + 1);
+                            let hint_len = s.argument_hint.as_ref().map_or(0, |h| h.len() + 1);
                             s.name.len() + 1 + hint_len // +1 for leading '/'
                         })
                         .max()
@@ -2015,7 +2144,10 @@ impl App {
                     // Separator
                     output.push_str(&format!(
                         "  {:-<col_cmd$}  {:-<col_scope$}  {:-<col_access$}  {:-<11}\n",
-                        "", "", "", "",
+                        "",
+                        "",
+                        "",
+                        "",
                         col_cmd = col_cmd,
                         col_scope = col_scope,
                         col_access = col_access,
@@ -2035,10 +2167,7 @@ impl App {
                             (false, true) => "agent-only",
                             (false, false) => "disabled",
                         };
-                        let desc = skill
-                            .description
-                            .as_deref()
-                            .unwrap_or("(no description)");
+                        let desc = skill.description.as_deref().unwrap_or("(no description)");
                         output.push_str(&format!(
                             "  {:<col_cmd$}  {:<col_scope$}  {:<col_access$}  {}\n",
                             cmd_col,
@@ -2081,10 +2210,10 @@ impl App {
                     let status_str = format!("{}", task.status);
                     output.push_str(&format!(
                         "  {:<12}  {:<20}  {:<12}  {}\n",
-                        task_id, task.agent_name, status_str,
-                        task.result
-                            .as_deref()
-                            .unwrap_or("(running)")
+                        task_id,
+                        task.agent_name,
+                        status_str,
+                        task.result.as_deref().unwrap_or("(running)")
                     ));
                 }
 
@@ -2137,7 +2266,8 @@ impl App {
                             if let Some(ref mgr) = self.lsp_manager {
                                 let mgr = mgr.clone();
                                 let id = id.to_string();
-                                let config = ragent_core::config::Config::load().ok()
+                                let config = ragent_core::config::Config::load()
+                                    .ok()
                                     .and_then(|c| c.lsp.get(id.as_str()).cloned());
                                 if let Some(cfg) = config {
                                     let id_clone = id.clone();
@@ -2200,11 +2330,22 @@ impl App {
                                     out.push_str(&format!("    capabilities: {}\n", caps));
                                 }
                                 if !s.config.extensions.is_empty() {
-                                    out.push_str(&format!("    extensions:   {}\n", s.config.extensions.join(", ")));
+                                    out.push_str(&format!(
+                                        "    extensions:   {}\n",
+                                        s.config.extensions.join(", ")
+                                    ));
                                 }
                             }
-                            let connected = self.lsp_servers.iter().filter(|s| s.status == LspStatus::Connected).count();
-                            out.push_str(&format!("\n{}/{} server(s) connected\n", connected, self.lsp_servers.len()));
+                            let connected = self
+                                .lsp_servers
+                                .iter()
+                                .filter(|s| s.status == LspStatus::Connected)
+                                .count();
+                            out.push_str(&format!(
+                                "\n{}/{} server(s) connected\n",
+                                connected,
+                                self.lsp_servers.len()
+                            ));
                         }
                         out.push_str("\nSubcommands: /lsp discover  /lsp connect <id>  /lsp disconnect <id>\n");
                         self.append_assistant_text(&out);
@@ -2240,10 +2381,12 @@ impl App {
                     }
                     "connect" => {
                         if let Some(&id) = mcp_args.get(1) {
-                            let config = ragent_core::config::Config::load().ok()
+                            let config = ragent_core::config::Config::load()
+                                .ok()
                                 .and_then(|c| c.mcp.get(id).cloned());
                             if let Some(_cfg) = config {
-                                self.status = format!("MCP connect not yet implemented for '{}'", id);
+                                self.status =
+                                    format!("MCP connect not yet implemented for '{}'", id);
                             } else {
                                 self.status = format!("MCP '{}' not found in config", id);
                             }
@@ -2257,7 +2400,8 @@ impl App {
                     }
                     "disconnect" => {
                         if let Some(&id) = mcp_args.get(1) {
-                            self.status = format!("MCP disconnect not yet implemented for '{}'", id);
+                            self.status =
+                                format!("MCP disconnect not yet implemented for '{}'", id);
                         } else {
                             self.status = "Usage: /mcp disconnect <id>".to_string();
                         }
@@ -2279,17 +2423,25 @@ impl App {
                                     ragent_core::mcp::McpStatus::Connected => "🟢 connected",
                                     ragent_core::mcp::McpStatus::Disabled => "⚪ disabled",
                                     ragent_core::mcp::McpStatus::NeedsAuth => "🟡 needs auth",
-                                    ragent_core::mcp::McpStatus::Failed { error } => &format!("🔴 failed: {}", error),
+                                    ragent_core::mcp::McpStatus::Failed { error } => {
+                                        &format!("🔴 failed: {}", error)
+                                    }
                                 };
                                 out.push_str(&format!("  {:<18} {}\n", s.id, status_icon));
                                 if !s.tools.is_empty() {
                                     out.push_str(&format!("    tools: {}\n", s.tools.len()));
                                 }
                             }
-                            let connected = self.mcp_servers.iter()
+                            let connected = self
+                                .mcp_servers
+                                .iter()
                                 .filter(|s| s.status == ragent_core::mcp::McpStatus::Connected)
                                 .count();
-                            out.push_str(&format!("\n{}/{} server(s) connected\n", connected, self.mcp_servers.len()));
+                            out.push_str(&format!(
+                                "\n{}/{} server(s) connected\n",
+                                connected,
+                                self.mcp_servers.len()
+                            ));
                         }
                         out.push_str("\nSubcommands: /mcp discover  /mcp connect <id>  /mcp disconnect <id>\n");
                         self.append_assistant_text(&out);
@@ -2299,6 +2451,439 @@ impl App {
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "mcp".to_string();
+            }
+            "team" => {
+                // Split "subcommand rest-of-args"
+                let (sub, rest) = args
+                    .split_once(char::is_whitespace)
+                    .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
+                let sub = if sub.is_empty() { "status" } else { sub };
+
+                match sub {
+                    "status" | "" => {
+                        let mut output = String::from("From: /team status\n");
+                        if let Some(team) = self.active_team.clone() {
+                            self.ensure_team_manager_for_team(&team.name, None);
+                            output.push_str(&format!(
+                                "## Team: {} ({})\n\n",
+                                team.name,
+                                format!("{:?}", team.status).to_lowercase()
+                            ));
+                            output.push_str(&format!(
+                                "  ● lead (you)  session: {}\n",
+                                team.lead_session_id
+                            ));
+                            if self.team_members.is_empty() {
+                                output.push_str(
+                                    "  (no teammates yet — use team_spawn tool or /team create)\n",
+                                );
+                            } else {
+                                for m in &self.team_members {
+                                    let status = format!("{:?}", m.status).to_lowercase();
+                                    let task =
+                                        m.current_task_id.as_deref().unwrap_or("—").to_string();
+                                    output.push_str(&format!(
+                                        "  └ {:<18} {:<10} task:{}\n",
+                                        m.name, status, task
+                                    ));
+                                }
+                            }
+                            output.push_str(&format!(
+                                "\n{} teammate(s)\n",
+                                self.team_members.len()
+                            ));
+                        } else {
+                            output.push_str("No active team.\n\nUse `/team create <name>` to start a team.");
+                        }
+                        self.append_assistant_text(&output);
+                        self.status = "team: status".to_string();
+                    }
+                    "create" => {
+                        if !self.ensure_session() {
+                            return;
+                        }
+                        if rest.is_empty() {
+                            self.status = "Usage: /team create <name>".to_string();
+                            return;
+                        }
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        match TeamStore::create(rest, &sid, &working_dir, true) {
+                            Ok(store) => {
+                                let name = store.config.name.clone();
+                                let team_dir = store.dir.clone();
+                                self.active_team = Some(store.config);
+                                self.team_members.clear();
+                                self.show_teams = true;
+                                self.ensure_team_manager_for_team(&name, Some(team_dir));
+                                self.push_log(
+                                    LogLevel::Info,
+                                    format!("🤝 Team '{}' created", name),
+                                );
+                                self.append_assistant_text(&format!(
+                                    "From: /team create\nTeam '{}' created.\n\n\
+                                     Use the `team_spawn` tool to add teammates.",
+                                    name
+                                ));
+                                self.status = format!("team: {}", name);
+                            }
+                            Err(e) => {
+                                self.status = format!("Failed to create team: {}", e);
+                                self.push_log(
+                                    LogLevel::Error,
+                                    format!("team create failed: {}", e),
+                                );
+                            }
+                        }
+                    }
+                    "open" => {
+                        if !self.ensure_session() {
+                            return;
+                        }
+                        if rest.is_empty() {
+                            self.status = "Usage: /team open <name>".to_string();
+                            return;
+                        }
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        match TeamStore::load_by_name(rest, &working_dir) {
+                            Ok(store) => {
+                                let name = store.config.name.clone();
+                                let team_dir = store.dir.clone();
+                                self.team_members = store.config.members.clone();
+                                self.active_team = Some(store.config);
+                                self.show_teams = true;
+                                self.ensure_team_manager_for_team(&name, Some(team_dir));
+                                self.push_log(LogLevel::Info, format!("🤝 Team '{}' opened", name));
+                                self.append_assistant_text(&format!(
+                                    "From: /team open\nTeam '{}' opened.\n\nUse `/team status` to inspect teammates and tasks.",
+                                    name
+                                ));
+                                self.status = format!("team: {}", name);
+                            }
+                            Err(e) => {
+                                self.status = format!("Failed to open team: {}", e);
+                                self.push_log(
+                                    LogLevel::Error,
+                                    format!("team open failed for '{}': {}", rest, e),
+                                );
+                            }
+                        }
+                    }
+                    "close" => {
+                        if let Some(team) = self.active_team.as_ref() {
+                            let team_name = team.name.clone();
+                            self.active_team = None;
+                            self.team_members.clear();
+                            self.show_teams = false;
+                            self.push_log(
+                                LogLevel::Info,
+                                format!("🤝 Team '{}' closed for this session", team_name),
+                            );
+                            self.append_assistant_text(&format!(
+                                "From: /team close\nTeam '{}' closed for this session.",
+                                team_name
+                            ));
+                            self.status = "team closed".to_string();
+                        } else {
+                            self.status = "No active team to close".to_string();
+                        }
+                    }
+                    "delete" => {
+                        if rest.is_empty() {
+                            self.status = "Usage: /team delete <name>".to_string();
+                            return;
+                        }
+                        let deleting_active = self
+                            .active_team
+                            .as_ref()
+                            .is_some_and(|team| team.name == rest);
+                        if deleting_active {
+                            let active_count = self
+                                .team_members
+                                .iter()
+                                .filter(|m| matches!(m.status, MemberStatus::Working))
+                                .count();
+                            if active_count > 0 {
+                                self.status = format!(
+                                    "{} teammate(s) still active — shut them down first",
+                                    active_count
+                                );
+                                return;
+                            }
+                        }
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        match TeamStore::load_by_name(rest, &working_dir) {
+                            Ok(store) => match std::fs::remove_dir_all(&store.dir) {
+                                Ok(_) => {
+                                    if deleting_active {
+                                        self.active_team = None;
+                                        self.team_members.clear();
+                                        self.show_teams = false;
+                                    }
+                                    self.push_log(
+                                        LogLevel::Info,
+                                        format!("🗑️  Team '{}' deleted", rest),
+                                    );
+                                    self.append_assistant_text(&format!(
+                                        "From: /team delete\nTeam '{}' deleted.",
+                                        rest
+                                    ));
+                                    self.status = "team deleted".to_string();
+                                }
+                                Err(e) => {
+                                    self.status = format!("Failed to delete team: {e}");
+                                    self.push_log(
+                                        LogLevel::Error,
+                                        format!("team delete failed for '{}': {}", rest, e),
+                                    );
+                                }
+                            },
+                            Err(e) => {
+                                self.status = format!("Failed to load team: {e}");
+                                self.push_log(
+                                    LogLevel::Error,
+                                    format!("team delete failed for '{}': {}", rest, e),
+                                );
+                            }
+                        }
+                    }
+                    "message" => {
+                        let (name, text) = rest
+                            .split_once(char::is_whitespace)
+                            .map_or((rest, ""), |(n, t)| (n.trim(), t.trim()));
+                        if name.is_empty() || text.is_empty() {
+                            self.status =
+                                "Usage: /team message <teammate-name> <text>".to_string();
+                            return;
+                        }
+                        let member = self.team_members.iter().find(|m| m.name == name).cloned();
+                        match (self.active_team.clone(), member) {
+                            (Some(team), Some(member)) => {
+                                let working_dir = std::env::current_dir().unwrap_or_default();
+                                match TeamStore::load_by_name(&team.name, &working_dir) {
+                                    Ok(store) => {
+                                        match Mailbox::open(&store.dir, &member.agent_id) {
+                                            Ok(mb) => {
+                                                let msg = MailboxMessage::new(
+                                                    "lead",
+                                                    &member.agent_id,
+                                                    MessageType::Message,
+                                                    text,
+                                                );
+                                                match mb.push(msg) {
+                                                    Ok(_) => {
+                                                        self.push_log(
+                                                            LogLevel::Info,
+                                                            format!(
+                                                                "📨 lead → {name}: {text}"
+                                                            ),
+                                                        );
+                                                        self.status =
+                                                            format!("message sent to {name}");
+                                                    }
+                                                    Err(e) => {
+                                                        self.status = format!(
+                                                            "Failed to send message: {e}"
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                self.status =
+                                                    format!("Failed to open mailbox: {e}");
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.status = format!("Failed to load team: {e}");
+                                    }
+                                }
+                            }
+                            (None, _) => {
+                                self.status = "No active team".to_string();
+                            }
+                            (Some(_), None) => {
+                                self.status = format!("Teammate '{name}' not found");
+                            }
+                        }
+                    }
+                    "tasks" => {
+                        let team_opt = self.active_team.clone();
+                        if let Some(team) = team_opt {
+                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            match TeamStore::load_by_name(&team.name, &working_dir) {
+                                Ok(store) => match store.task_store() {
+                                    Ok(task_store) => match task_store.read() {
+                                        Ok(task_list) => {
+                                            let mut output = format!(
+                                                "From: /team tasks\n## Tasks — team '{}'\n\n",
+                                                team.name
+                                            );
+                                            if task_list.tasks.is_empty() {
+                                                output.push_str("  (no tasks)\n");
+                                            } else {
+                                                output.push_str(&format!(
+                                                    "  {:<12}  {:<34}  {:<12}  {}\n",
+                                                    "ID", "Title", "Status", "Assignee"
+                                                ));
+                                                output.push_str(&format!(
+                                                    "  {:-<12}  {:-<34}  {:-<12}  {:-<16}\n",
+                                                    "", "", "", ""
+                                                ));
+                                                for task in &task_list.tasks {
+                                                    let status = match task.status {
+                                                        TaskStatus::Pending => "pending",
+                                                        TaskStatus::InProgress => "in-progress",
+                                                        TaskStatus::Completed => "completed",
+                                                        TaskStatus::Cancelled => "cancelled",
+                                                    };
+                                                    let assignee = task
+                                                        .assigned_to
+                                                        .as_deref()
+                                                        .unwrap_or("—");
+                                                    output.push_str(&format!(
+                                                        "  {:<12}  {:<34}  {:<12}  {}\n",
+                                                        task.id, task.title, status, assignee
+                                                    ));
+                                                }
+                                            }
+                                            self.append_assistant_text(&output);
+                                            self.status =
+                                                format!("{} task(s)", task_list.tasks.len());
+                                        }
+                                        Err(e) => {
+                                            self.status = format!("Failed to read tasks: {e}");
+                                        }
+                                    },
+                                    Err(e) => {
+                                        self.status = format!("Failed to open task store: {e}");
+                                    }
+                                },
+                                Err(e) => {
+                                    self.status = format!("Failed to load team: {e}");
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "From: /team tasks\nNo active team.",
+                            );
+                            self.status = "no active team".to_string();
+                        }
+                    }
+                    "clear" => {
+                        let team_opt = self.active_team.clone();
+                        if let Some(team) = team_opt {
+                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            match TeamStore::load_by_name(&team.name, &working_dir) {
+                                Ok(store) => {
+                                    let tasks_path = store.dir.join("tasks.json");
+                                    let cleared_count = store
+                                        .task_store()
+                                        .ok()
+                                        .and_then(|s| s.read().ok())
+                                        .map(|l| l.tasks.len())
+                                        .unwrap_or(0);
+                                    let clear_result = if tasks_path.exists() {
+                                        std::fs::remove_file(&tasks_path)
+                                    } else {
+                                        Ok(())
+                                    };
+                                    match clear_result {
+                                        Ok(_) => {
+                                            self.append_assistant_text(&format!(
+                                                "From: /team clear\nCleared {} task(s) for team '{}'.",
+                                                cleared_count, team.name
+                                            ));
+                                            self.push_log(
+                                                LogLevel::Info,
+                                                format!(
+                                                    "🧹 Cleared {} task(s) from team '{}'",
+                                                    cleared_count, team.name
+                                                ),
+                                            );
+                                            self.status = "team tasks cleared".to_string();
+                                        }
+                                        Err(e) => {
+                                            self.status = format!("Failed to clear tasks: {e}");
+                                            self.push_log(
+                                                LogLevel::Error,
+                                                format!("team clear failed for '{}': {}", team.name, e),
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    self.status = format!("Failed to load team: {e}");
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "From: /team clear\nNo active team.",
+                            );
+                            self.status = "no active team".to_string();
+                        }
+                    }
+                    "cleanup" => {
+                        let team_opt = self.active_team.clone();
+                        if let Some(team) = team_opt {
+                            // Guard: ensure no teammates are still working.
+                            let active_count = self
+                                .team_members
+                                .iter()
+                                .filter(|m| matches!(m.status, MemberStatus::Working))
+                                .count();
+                            if active_count > 0 {
+                                self.status = format!(
+                                    "{} teammate(s) still active — shut them down first",
+                                    active_count
+                                );
+                                return;
+                            }
+                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let team_name = team.name.clone();
+                            let removed = match TeamStore::load_by_name(&team_name, &working_dir) {
+                                Ok(store) => std::fs::remove_dir_all(&store.dir).is_ok(),
+                                Err(_) => false,
+                            };
+                            self.active_team = None;
+                            self.team_members.clear();
+                            self.show_teams = false;
+                            if removed {
+                                self.push_log(
+                                    LogLevel::Info,
+                                    format!("🗑️  Team '{team_name}' cleaned up"),
+                                );
+                                self.append_assistant_text(&format!(
+                                    "From: /team cleanup\nTeam '{team_name}' cleaned up."
+                                ));
+                            } else {
+                                self.push_log(
+                                    LogLevel::Warn,
+                                    format!("Team '{team_name}' state cleared (dir not found)"),
+                                );
+                                self.append_assistant_text(&format!(
+                                    "From: /team cleanup\nTeam '{team_name}' state cleared."
+                                ));
+                            }
+                            self.status = "team cleaned up".to_string();
+                        } else {
+                            self.status = "No active team to clean up".to_string();
+                        }
+                    }
+                    _ => {
+                        self.status = format!(
+                            "Unknown /team subcommand '{}'. Usage: /team [status|create <name>|open <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
+                            sub
+                        );
+                        self.push_log(
+                            LogLevel::Warn,
+                            format!("unknown /team subcommand: {}", sub),
+                        );
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
             }
             "todos" => {
                 if !self.ensure_session() {
@@ -2399,10 +2984,8 @@ impl App {
 
                     let mut agent = self.agent_info.clone();
                     // Apply skill model override if present, otherwise use selected model
-                    if let Some(ref model_str) = skill
-                        .model
-                        .as_ref()
-                        .or(self.selected_model.as_ref())
+                    if let Some(ref model_str) =
+                        skill.model.as_ref().or(self.selected_model.as_ref())
                     {
                         if let Some((provider, model)) = model_str.split_once('/') {
                             agent.model = Some(ModelRef {
@@ -2421,17 +3004,14 @@ impl App {
                     // Show the skill invocation as a user message in the chat
                     let display_text = if args.is_empty() {
                         format!("/{}", cmd)
-                    } else {
-                        format!("/{} {}", cmd, args)
-                    };
-                    let user_msg = Message::user_text(&sid, &display_text);
-                    self.messages.push(user_msg);
-                    self.input_history.push(display_text);
-                    self.history_index = None;
-                    self.history_draft.clear();
-
-                    let flag = Arc::new(AtomicBool::new(false));
-                    self.cancel_flag = Some(flag.clone());
+                                          } else {
+                                              format!("/{} {}", cmd, args)
+                                          };
+                                          let user_msg = Message::user_text(&sid, &display_text);
+                                          self.messages.push(user_msg);
+                                          self.add_to_history(display_text);
+                    
+                                          let flag = Arc::new(AtomicBool::new(false));                    self.cancel_flag = Some(flag.clone());
 
                     tokio::spawn(async move {
                         match ragent_core::skill::invoke::invoke_skill(
@@ -2471,10 +3051,9 @@ impl App {
                                         }
                                     }
                                 } else {
-                                    let message =
-                                        ragent_core::skill::invoke::format_skill_message(
-                                            &invocation,
-                                        );
+                                    let message = ragent_core::skill::invoke::format_skill_message(
+                                        &invocation,
+                                    );
                                     if let Err(e) = processor
                                         .process_message(&sid, &message, &agent, flag)
                                         .await
@@ -2496,6 +3075,40 @@ impl App {
                     self.push_log(LogLevel::Warn, format!("Unknown command: /{}", cmd));
                 }
             }
+        }
+    }
+
+    /// Handle a key event while the history picker overlay is open.
+    fn handle_history_picker_key(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyCode;
+        let picker = match self.history_picker.as_mut() {
+            Some(p) => p,
+            None => return,
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.history_picker = None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if picker.selected > 0 {
+                    picker.selected -= 1;
+                    if picker.selected < picker.scroll_offset {
+                        picker.scroll_offset = picker.selected;
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if picker.selected + 1 < picker.entries.len() {
+                    picker.selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let chosen = picker.entries[picker.selected].clone();
+                self.history_picker = None;
+                self.input = chosen;
+                self.input_cursor = self.input.len();
+            }
+            _ => {}
         }
     }
 
@@ -2563,32 +3176,107 @@ impl App {
                     self.scrollbar_drag = Some(ScrollbarDragPane::Log);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Log);
-                } else {
-                    // Start text selection in whichever pane the click is in
-                    let pane = self.pane_at(event.column, event.row);
-                    if let Some(pane) = pane {
-                        self.text_selection = Some(TextSelection {
-                            pane,
-                            anchor: pos,
-                            endpoint: pos,
-                        });
-                    } else {
-                        self.text_selection = None;
-                    }
+                                } else {
+                                      // If the file menu is open and the click falls within its popup,
+                                      // handle file/directory selection via mouse.
+                                      if let Some(_menu_state) = self.file_menu.as_ref() {
+                                          // Compute popup rect used by the renderer so clicks map to rows.
+                                      }
+                
+                                      if self.file_menu.is_some() {
+                                          // Recompute popup geometry identical to layout::render_file_menu
+                                          let menu = self.file_menu.as_ref().unwrap();
+                                          let item_count = menu.matches.len() as u16;
+                                          let height = (item_count + 2).min(self.input_area.y);
+                                          let width = self.input_area.width.min(60);
+                                          let popup_x = self.input_area.x;
+                                          let popup_y = self.input_area.y.saturating_sub(height);
+                
+                                          // If click is inside the popup, determine which row was clicked.
+                                          if event.column >= popup_x
+                                              && event.column < popup_x.saturating_add(width)
+                                              && event.row >= popup_y
+                                              && event.row < popup_y.saturating_add(height)
+                                          {
+                                              // Content lines start one row below the popup top (inside the border)
+                                              let clicked_row = event.row.saturating_sub(popup_y + 1) as usize;
+                                              if clicked_row < menu.matches.len() {
+                                                  // Set the selected index (drop borrow immediately)
+                                                  {
+                                                      if let Some(ref mut m) = self.file_menu.as_mut() {
+                                                          m.selected = clicked_row;
+                                                      }
+                                                  }
+                
+                                                  // Accept the selection: this will navigate into directories
+                                                  // or insert a file path into the input. We do not auto-send
+                                                  // the message on mouse click; pressing Enter still sends.
+                                                  let _ = self.accept_file_menu_selection();
+                                                  return;
+                                              }
+                                          }
+                                      }
+                
+                                      // Start text selection in whichever pane the click is in
+                                      let pane = self.pane_at(event.column, event.row);
+                                      if let Some(pane) = pane {
+                                          self.text_selection = Some(TextSelection {
+                                              pane,
+                                              anchor: pos,
+                                              endpoint: pos,
+                                          });
+                                      } else {
+                                          self.text_selection = None;
+                                      }
+                                  }            }
+                          MouseEventKind::Drag(MouseButton::Left) => {
+                              if let Some(pane) = self.scrollbar_drag {
+                                  self.apply_scrollbar_drag(event.row, pane);
+                              } else if let Some(ref mut sel) = self.text_selection {
+                                  sel.endpoint = (event.column, event.row);
+                              }
+                          }
+            
+                          // Mouse move -> used for hover highlighting of file menu entries
+                          MouseEventKind::Moved => {
+                              // If file menu is open, update the highlighted row under the cursor.
+                              if self.file_menu.is_some() {
+                                  // Snapshot needed values without holding immutable borrows while mutating.
+                                  let item_count = self.file_menu.as_ref().map(|m| m.matches.len()).unwrap_or(0) as u16;
+                                  let height = (item_count + 2).min(self.input_area.y);
+                                  let width = self.input_area.width.min(60);
+                                  let popup_x = self.input_area.x;
+                                  let popup_y = self.input_area.y.saturating_sub(height);
+            
+                                  if event.column >= popup_x
+                                      && event.column < popup_x.saturating_add(width)
+                                      && event.row >= popup_y
+                                      && event.row < popup_y.saturating_add(height)
+                                  {
+                                      let hovered_row = event.row.saturating_sub(popup_y + 1) as usize;
+                                      if hovered_row < (item_count as usize) {
+                                          // Update selection if changed.
+                                          if let Some(ref mut m) = self.file_menu.as_mut() {
+                                              if m.selected != hovered_row {
+                                                  m.selected = hovered_row;
+                                              }
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+            
+                          MouseEventKind::Up(MouseButton::Left) => {
+                              self.scrollbar_drag = None;
+                              // Keep text_selection alive so it stays highlighted until right-click or next click
+                          }
+                          MouseEventKind::Down(MouseButton::Right) => {
+                // Right-click copies the active selection (if any) and clears it.
+                if self.text_selection.is_some() {
+                    self.copy_selection();
+                    return;
                 }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if let Some(pane) = self.scrollbar_drag {
-                    self.apply_scrollbar_drag(event.row, pane);
-                } else if let Some(ref mut sel) = self.text_selection {
-                    sel.endpoint = (event.column, event.row);
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                self.scrollbar_drag = None;
-                // Keep text_selection alive so it stays highlighted until right-click or next click
-            }
-            MouseEventKind::Down(MouseButton::Right) => {
+
                 let col = event.column;
                 let row = event.row;
                 let pane = self.pane_at(col, row).unwrap_or(SelectionPane::Messages);
@@ -2602,8 +3290,8 @@ impl App {
                 // Copy: anywhere with selection
                 // Paste: only in input panes with clipboard content
                 let items = vec![
-                    (ContextAction::Cut,   has_selection && in_input),
-                    (ContextAction::Copy,  has_selection),
+                    (ContextAction::Cut, has_selection && in_input),
+                    (ContextAction::Copy, has_selection),
                     (ContextAction::Paste, in_input && has_clipboard),
                 ];
 
@@ -2804,9 +3492,7 @@ impl App {
 
             // Resolve file:// URI
             let candidate = if let Some(rest) = trimmed.strip_prefix("file://") {
-                Some(std::path::PathBuf::from(
-                    percent_decode_path(rest),
-                ))
+                Some(std::path::PathBuf::from(percent_decode_path(rest)))
             } else if trimmed.starts_with('/') || trimmed.starts_with('.') {
                 // Plain absolute or relative path
                 Some(std::path::PathBuf::from(trimmed))
@@ -2867,7 +3553,10 @@ impl App {
             ContextAction::Cut => {
                 // Copy selected text then clear the input (cut only makes sense in input panes).
                 self.copy_selection();
-                if matches!(pane, Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)) {
+                if matches!(
+                    pane,
+                    Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
+                ) {
                     self.input.clear();
                     self.slash_menu = None;
                     self.file_menu = None;
@@ -2875,10 +3564,14 @@ impl App {
             }
             ContextAction::Paste => {
                 // Only paste into input panes.
-                if matches!(pane, Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)) {
+                if matches!(
+                    pane,
+                    Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
+                ) {
                     if let Some(text) = Self::get_clipboard() {
                         // Strip newlines for single-line input.
-                        let clean: String = text.chars().filter(|&c| c != '\n' && c != '\r').collect();
+                        let clean: String =
+                            text.chars().filter(|&c| c != '\n' && c != '\r').collect();
                         self.input.push_str(&clean);
                         if self.input.starts_with('/') {
                             self.update_slash_menu();
@@ -2905,11 +3598,7 @@ impl App {
             let item_count = menu.items.len() as u16;
             let menu_h = item_count + 2; // border top + items + border bottom
 
-            if col >= menu_x
-                && col < menu_x + menu_w
-                && row >= menu_y
-                && row < menu_y + menu_h
-            {
+            if col >= menu_x && col < menu_x + menu_w && row >= menu_y && row < menu_y + menu_h {
                 // Row inside border
                 if row > menu_y && row < menu_y + menu_h - 1 {
                     let item_idx = (row - menu_y - 1) as usize;
@@ -2969,6 +3658,11 @@ impl App {
     /// # }
     /// ```
     pub fn handle_key_event(&mut self, key: KeyEvent) {
+        // History picker intercepts all keys while it is open
+        if self.history_picker.is_some() {
+            self.handle_history_picker_key(key);
+            return;
+        }
         if let Some(action) = input::handle_key(self, key) {
             match action {
                 InputAction::SendMessage(text) => {
@@ -3000,143 +3694,23 @@ impl App {
                         }
                     }
 
-                    // Drain image attachments and build proper MessagePart::Image parts.
+                    // Drain image attachments once; either queue for auto-compaction
+                    // or send immediately.
                     let image_paths: Vec<std::path::PathBuf> =
                         self.pending_attachments.drain(..).collect();
-
-                    let sid = self.session_id.clone().unwrap();
-
-                    // Build the display message shown in the chat window.
-                    // (This is separate from the one the processor stores — we show a
-                    // preview with attachment file names while the processor creates the
-                    // authoritative stored record.)
-                    let display_text = if image_paths.is_empty() {
-                        text.clone()
-                    } else {
-                        let names: Vec<String> = image_paths
-                            .iter()
-                            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
-                            .collect();
-                        format!("[📎 {}] {}", names.join(", "), text)
-                    };
-                    let msg = Message::user_text(&sid, &display_text);
-                    self.messages.push(msg);
-                    self.input_history.push(text.clone());
-                    self.history_index = None;
-                    self.history_draft.clear();
-                    self.input.clear();
-                    self.file_menu = None;
-                    self.status = "processing...".to_string();
-
-                    // Check for @ file references (parsing is sync, resolution
-                    // happens inside the spawned async task to avoid blocking
-                    // the tokio runtime).
-                    let has_refs =
-                        !ragent_core::reference::parse::parse_refs(&text).is_empty();
-                    if has_refs {
-                        let ref_names: Vec<String> = ragent_core::reference::parse::parse_refs(&text)
-                            .iter()
-                            .map(|r| r.raw.clone())
-                            .collect();
-                        self.push_log(
-                            LogLevel::Info,
-                            format!("resolving refs: {}", ref_names.join(", ")),
-                        );
+                    if self.should_auto_compact_before_send() {
+                        self.pending_send_after_compact = Some((text, image_paths));
+                        if !self.start_compaction(true) {
+                            // If compaction could not start, fall back to direct send.
+                            if let Some((queued_text, queued_images)) =
+                                self.pending_send_after_compact.take()
+                            {
+                                self.dispatch_user_message(queued_text, queued_images);
+                            }
+                        }
+                        return;
                     }
-
-                    // Log the prompt
-                    let truncated = if text.len() > 120 {
-                        let mut end = 120;
-                        while end > 0 && !text.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        format!("{}…", &text[..end])
-                    } else {
-                        text.clone()
-                    };
-                    self.push_log(LogLevel::Info, format!("prompt sent: {}", truncated));
-
-                    // Build agent with the selected model override
-                    let mut agent = self.agent_info.clone();
-                    if let Some(ref model_str) = self.selected_model {
-                        if let Some((provider, model)) = model_str.split_once('/') {
-                            agent.model = Some(ModelRef {
-                                provider_id: provider.to_string(),
-                                model_id: model.to_string(),
-                            });
-                        }
-                    }
-
-                    // Spawn async task to resolve refs (if any) then process
-                    let processor = self.session_processor.clone();
-                    let flag = Arc::new(AtomicBool::new(false));
-                    self.cancel_flag = Some(flag.clone());
-                    tokio::spawn(async move {
-                        let final_text = if has_refs {
-                            let wd = std::env::current_dir().unwrap_or_default();
-                            match ragent_core::reference::resolve::resolve_all_refs(
-                                &text, &wd,
-                            )
-                            .await
-                            {
-                                Ok((resolved, _)) => resolved,
-                                Err(e) => {
-                                    tracing::warn!(error = %e, "ref resolution failed, using original text");
-                                    text.clone()
-                                }
-                            }
-                        } else {
-                            text.clone()
-                        };
-
-                        if image_paths.is_empty() {
-                            if let Err(e) =
-                                processor.process_message(&sid, &final_text, &agent, flag).await
-                            {
-                                tracing::debug!(error = %e, "Failed to process message");
-                            }
-                        } else {
-                            // Build a multi-part user message: images first, then text.
-                            let mut parts: Vec<ragent_core::message::MessagePart> = image_paths
-                                .into_iter()
-                                .filter(|p| p.exists())
-                                .map(|p| {
-                                    let mime = if p.extension()
-                                        .and_then(|e| e.to_str())
-                                        .map(|e| e.eq_ignore_ascii_case("png"))
-                                        .unwrap_or(false)
-                                    {
-                                        "image/png"
-                                    } else if p.extension()
-                                        .and_then(|e| e.to_str())
-                                        .map(|e| e.eq_ignore_ascii_case("gif"))
-                                        .unwrap_or(false)
-                                    {
-                                        "image/gif"
-                                    } else {
-                                        "image/jpeg"
-                                    };
-                                    ragent_core::message::MessagePart::Image {
-                                        mime_type: mime.to_string(),
-                                        path: p,
-                                    }
-                                })
-                                .collect();
-                            parts.push(ragent_core::message::MessagePart::Text {
-                                text: final_text,
-                            });
-                            let user_msg = ragent_core::message::Message::new(
-                                &sid,
-                                ragent_core::message::Role::User,
-                                parts,
-                            );
-                            if let Err(e) =
-                                processor.process_user_message(&sid, user_msg, &agent, flag).await
-                            {
-                                tracing::debug!(error = %e, "Failed to process message with images");
-                            }
-                        }
-                    });
+                    self.dispatch_user_message(text, image_paths);
                 }
                 InputAction::Quit => {
                     self.is_running = false;
@@ -3171,20 +3745,41 @@ impl App {
                         }
                         _ => {}
                     }
+                    self.input_cursor = self.input_len_chars();
                 }
                 InputAction::HistoryDown => match self.history_index {
                     Some(idx) if idx + 1 < self.input_history.len() => {
                         let idx = idx + 1;
                         self.history_index = Some(idx);
                         self.input = self.input_history[idx].clone();
+                        self.input_cursor = self.input_len_chars();
                     }
                     Some(_) => {
                         self.history_index = None;
                         self.input = self.history_draft.clone();
                         self.history_draft.clear();
+                        self.input_cursor = self.input_len_chars();
                     }
                     None => {}
                 },
+                InputAction::MoveCursorLeft => {
+                    self.cursor_move_left();
+                }
+                InputAction::MoveCursorRight => {
+                    self.cursor_move_right();
+                }
+                InputAction::MoveCursorHome => {
+                    self.cursor_move_home();
+                }
+                InputAction::MoveCursorEnd => {
+                    self.cursor_move_end();
+                }
+                InputAction::Delete => {
+                    if self.input_cursor < self.input_len_chars() {
+                        let del_pos = self.cursor_byte_pos();
+                        self.input.remove(del_pos);
+                    }
+                }
                 InputAction::SwitchAgent => {
                     if self.cycleable_agents.len() > 1 {
                         let prev = self.agent_name.clone();
@@ -3217,7 +3812,10 @@ impl App {
                     if let Some(ref flag) = self.cancel_flag {
                         flag.store(true, Ordering::Relaxed);
                         self.status = "halting agent…".to_string();
-                        self.push_log(LogLevel::Warn, "User pressed ESC — halting agent".to_string());
+                        self.push_log(
+                            LogLevel::Warn,
+                            "User pressed ESC — halting agent".to_string(),
+                        );
                     }
                 }
             }
@@ -3228,12 +3826,7 @@ impl App {
     ///
     /// Pushes the current agent onto the agent stack, switches to the plan
     /// agent, and spawns an async task to send the task to the plan agent.
-    fn execute_plan_delegation(
-        &mut self,
-        session_id: &str,
-        task: String,
-        context: String,
-    ) {
+    fn execute_plan_delegation(&mut self, session_id: &str, task: String, context: String) {
         // Push current agent to stack so plan_exit can restore it
         self.agent_stack.push(self.agent_info.clone());
 
@@ -3289,7 +3882,10 @@ impl App {
             let agent = self.agent_info.clone();
             let task_text = full_task;
             tokio::spawn(async move {
-                if let Err(e) = processor.process_message(&sid, &task_text, &agent, Arc::new(AtomicBool::new(false))).await {
+                if let Err(e) = processor
+                    .process_message(&sid, &task_text, &agent, Arc::new(AtomicBool::new(false)))
+                    .await
+                {
                     tracing::debug!(error = %e, "Plan agent failed");
                 }
             });
@@ -3313,10 +3909,7 @@ impl App {
             self.agent_info = prev_agent;
             self.agent_name = to_name.clone();
             self.status = format!("agent: {}", to_name);
-            self.push_log(
-                LogLevel::Info,
-                format!("plan restore: plan → {}", to_name),
-            );
+            self.push_log(LogLevel::Info, format!("plan restore: plan → {}", to_name));
 
             self.event_bus.publish(Event::AgentSwitched {
                 session_id: session_id.to_string(),
@@ -3387,10 +3980,11 @@ impl App {
                 ref tool,
             } => {
                 if self.is_current_session(session_id) {
-                    self.tool_step_counter += 1;
-                    let step = self.tool_step_counter;
+                    // Get the current step count from the event bus (single source of truth)
+                    let step = self.event_bus.current_step(session_id);
                     let short_sid = short_session_id(session_id);
-                    self.tool_step_map.insert(call_id.clone(), (short_sid.clone(), step));
+                    self.tool_step_map
+                        .insert(call_id.clone(), (short_sid.clone(), step as u32));
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
                     self.push_log(
@@ -3416,7 +4010,10 @@ impl App {
                     if let Some(err) = error {
                         self.push_log(
                             LogLevel::Error,
-                            format!("{}tool {} failed: {} ({}ms)", step_tag, tool, err, duration_ms),
+                            format!(
+                                "{}tool {} failed: {} ({}ms)",
+                                step_tag, tool, err, duration_ms
+                            ),
                         );
                     } else {
                         self.push_log(
@@ -3449,6 +4046,7 @@ impl App {
                 ..
             } => {
                 if self.is_current_session(session_id) {
+                    let was_auto_compaction = self.auto_compact_in_progress;
                     self.is_processing = false;
                     self.cancel_flag = None;
                     if *reason == FinishReason::Cancelled {
@@ -3470,6 +4068,16 @@ impl App {
                     // Handle pending agent restore: pop stack and inject summary
                     if let Some(summary) = self.pending_plan_restore.take() {
                         self.execute_plan_restore(session_id, &summary);
+                    }
+
+                    if was_auto_compaction {
+                        self.auto_compact_in_progress = false;
+                        self.push_log(LogLevel::Info, "Auto-compaction completed".to_string());
+                        if let Some((queued_text, queued_images)) =
+                            self.pending_send_after_compact.take()
+                        {
+                            self.dispatch_user_message(queued_text, queued_images);
+                        }
                     }
                 }
             }
@@ -3540,10 +4148,7 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.push_log(
                         LogLevel::Info,
-                        format!(
-                            "agent restore requested ({} chars)",
-                            summary.len()
-                        ),
+                        format!("agent restore requested ({} chars)", summary.len()),
                     );
                     self.pending_plan_restore = Some(summary.clone());
                 }
@@ -3553,6 +4158,15 @@ impl App {
                 ref error,
             } => {
                 if self.is_current_session(session_id) {
+                    if self.auto_compact_in_progress {
+                        self.auto_compact_in_progress = false;
+                        self.auto_compact_failed = true;
+                        self.pending_send_after_compact = None;
+                        self.push_log(
+                            LogLevel::Warn,
+                            "Auto-compaction failed; send blocked for this turn".to_string(),
+                        );
+                    }
                     // Full details go to the log panel only
                     self.push_log(LogLevel::Error, format!("agent error: {}", error));
                     // Clean summary for the status bar and chat panel
@@ -3579,23 +4193,41 @@ impl App {
                     );
                 }
             }
+            Event::QuotaUpdate {
+                ref session_id,
+                percent,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.quota_percent = Some(percent);
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("quota: {:.1}% used", percent),
+                    );
+                }
+            }
             Event::ToolsSent {
                 ref session_id,
                 ref tools,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(
-                        LogLevel::Info,
-                        format!("tools sent: [{}]", tools.join(", ")),
-                    );
+                    // Only log the list of tools during system initialisation (first step).
+                    // The SessionProcessor increments the EventBus step at the start of
+                    // each loop iteration; the first LLM request corresponds to step 1.
+                    if self.event_bus.current_step(session_id) <= 1 {
+                        self.push_log(
+                            LogLevel::Info,
+                            format!("tools sent: [{}]", tools.join(", ")),
+                        );
+                    }
                 }
             }
             Event::ModelResponse {
                 ref session_id,
                 ref text,
+                elapsed_ms,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(LogLevel::Info, format!("model response: {}", text));
+                    self.push_log(LogLevel::Info, format!("model response ({elapsed_ms}ms): {text}"));
                 }
             }
             Event::ToolCallArgs {
@@ -3629,10 +4261,7 @@ impl App {
                             }
                         }
                     } else {
-                        self.push_log(
-                            LogLevel::Tool,
-                            format!("{}→ {}({})", step_tag, tool, args),
-                        );
+                        self.push_log(LogLevel::Tool, format!("{}→ {}({})", step_tag, tool, args));
                     }
                 }
             }
@@ -3654,7 +4283,10 @@ impl App {
                         .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     let icon = if success { "✓" } else { "✗" };
-                    self.push_log(LogLevel::Tool, format!("{}← {} {} {}", step_tag, tool, icon, content));
+                    self.push_log(
+                        LogLevel::Tool,
+                        format!("{}← {} {} {}", step_tag, tool, icon, content),
+                    );
                 }
             }
             Event::SubagentStart {
@@ -3738,7 +4370,10 @@ impl App {
                     );
                 }
             }
-            Event::LspStatusChanged { ref server_id, ref status } => {
+            Event::LspStatusChanged {
+                ref server_id,
+                ref status,
+            } => {
                 // Update or insert the server descriptor for status display.
                 if let Some(s) = self.lsp_servers.iter_mut().find(|s| s.id == *server_id) {
                     s.status = status.clone();
@@ -3759,6 +4394,107 @@ impl App {
                     LogLevel::Info,
                     format!("{icon} LSP '{}' → {:?}", server_id, status),
                 );
+            }
+            Event::TeammateSpawned {
+                ref session_id,
+                ref team_name,
+                ref teammate_name,
+                ref agent_id,
+            } => {
+                if self.is_current_session(session_id) {
+                    // Add new member to team_members if not already present.
+                    if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
+                        let member = TeamMember::new(
+                            teammate_name.as_str(),
+                            agent_id.as_str(),
+                            "teammate",
+                        );
+                        self.team_members.push(member);
+                    }
+                    self.show_teams = true;
+                    self.push_log(
+                        LogLevel::Info,
+                        format!(
+                            "🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"
+                        ),
+                    );
+                }
+            }
+            Event::TeammateMessage {
+                ref session_id,
+                ref team_name,
+                ref from,
+                ref to,
+                ref preview,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("📨 [{team_name}] {from} → {to}: {preview}"),
+                    );
+                }
+            }
+            Event::TeammateIdle {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                        m.status = MemberStatus::Idle;
+                    }
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("💤 [{team_name}] Teammate {agent_id} is idle"),
+                    );
+                }
+            }
+            Event::TeamTaskClaimed {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+                ref task_id,
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                        m.status = MemberStatus::Working;
+                        m.current_task_id = Some(task_id.clone());
+                    }
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
+                    );
+                }
+            }
+            Event::TeamTaskCompleted {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+                ref task_id,
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                        m.current_task_id = None;
+                    }
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
+                    );
+                }
+            }
+            Event::TeamCleanedUp {
+                ref session_id,
+                ref team_name,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.active_team = None;
+                    self.team_members.clear();
+                    self.show_teams = false;
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("🗑️  Team '{team_name}' cleaned up"),
+                    );
+                }
             }
             _ => {}
         }
@@ -3796,18 +4532,18 @@ impl App {
     /// ```rust,no_run
     /// # use ragent_tui::App;
     /// # use ragent_tui::app::LogLevel;
-    /// # fn example(app: &mut App) {
-    /// app.push_log(LogLevel::Info, "Session started".to_string());
-    /// # }
-    /// ```
-    pub fn push_log(&mut self, level: LogLevel, message: String) {
-        self.log_entries.push(LogEntry {
-            timestamp: chrono::Utc::now(),
-            level,
-            message,
-        });
-    }
-
+          /// # fn example(app: &mut App) {
+          /// app.push_log(LogLevel::Info, "Session started".to_string());
+          /// # }
+          /// ```
+          pub fn push_log(&mut self, level: LogLevel, message: String) {
+              self.log_entries.push(LogEntry {
+                  timestamp: chrono::Utc::now(),
+                  level,
+                  message,
+                  session_id: self.session_id.clone(),
+              });
+          }
     fn is_current_session(&self, session_id: &str) -> bool {
         self.session_id.as_deref() == Some(session_id)
     }
@@ -3999,6 +4735,12 @@ fn summarise_error(raw: &str) -> String {
     // Try to extract just the human-readable message from common patterns
     // e.g. "LLM call failed: Unknown model: claude-haiku-4.5"
     let cleaned = raw.trim().strip_prefix("LLM call failed: ").unwrap_or(raw);
+
+    if cleaned.contains("not accessible via the /chat/completions endpoint")
+        || cleaned.contains("unsupported_api_for_model")
+    {
+        return "Selected model is not available for chat/completions; use /model and pick a non-Codex chat model".to_string();
+    }
 
     // Truncate to a reasonable length for the status bar
     if cleaned.len() > 120 {

@@ -6,7 +6,7 @@
 use axum::response::sse::Event as SseEvent;
 use ragent_core::event::Event;
 
-/// Convert a ragent_core [`Event`] into an Axum [`SseEvent`].
+/// Convert a `ragent_core` [`Event`] into an Axum [`SseEvent`].
 ///
 /// # Examples
 ///
@@ -173,11 +173,12 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
                 "tools": tools,
             }),
         ),
-        Event::ModelResponse { session_id, text } => (
+        Event::ModelResponse { session_id, text, elapsed_ms } => (
             "model_response",
             serde_json::json!({
                 "session_id": session_id,
                 "text": text,
+                "elapsed_ms": elapsed_ms,
             }),
         ),
         Event::ToolCallArgs {
@@ -226,6 +227,13 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
             serde_json::json!({
                 "session_id": session_id,
                 "reason": reason,
+            }),
+        ),
+        Event::QuotaUpdate { session_id, percent } => (
+            "quota_update",
+            serde_json::json!({
+                "session_id": session_id,
+                "percent": percent,
             }),
         ),
         Event::SubagentStart {
@@ -279,6 +287,58 @@ pub fn event_to_sse(event: &Event) -> SseEvent {
             serde_json::json!({
                 "server_id": server_id,
                 "status": format!("{:?}", status),
+            }),
+        ),
+        Event::TeammateSpawned { session_id, team_name, teammate_name, agent_id } => (
+            "teammate_spawned",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
+                "teammate_name": teammate_name,
+                "agent_id": agent_id,
+            }),
+        ),
+        Event::TeammateMessage { session_id, team_name, from, to, preview } => (
+            "teammate_message",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
+                "from": from,
+                "to": to,
+                "preview": preview,
+            }),
+        ),
+        Event::TeammateIdle { session_id, team_name, agent_id } => (
+            "teammate_idle",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
+                "agent_id": agent_id,
+            }),
+        ),
+        Event::TeamTaskClaimed { session_id, team_name, agent_id, task_id } => (
+            "team_task_claimed",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
+                "agent_id": agent_id,
+                "task_id": task_id,
+            }),
+        ),
+        Event::TeamTaskCompleted { session_id, team_name, agent_id, task_id } => (
+            "team_task_completed",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
+                "agent_id": agent_id,
+                "task_id": task_id,
+            }),
+        ),
+        Event::TeamCleanedUp { session_id, team_name } => (
+            "team_cleaned_up",
+            serde_json::json!({
+                "session_id": session_id,
+                "team_name": team_name,
             }),
         ),
     };

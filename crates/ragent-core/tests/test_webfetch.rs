@@ -12,8 +12,10 @@ fn make_ctx() -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        team_context: None,
+        team_manager: None,
+        active_model: None,
     }
 }
 
@@ -66,10 +68,12 @@ async fn test_webfetch_invalid_scheme() {
         .execute(json!({ "url": "ftp://example.com" }), &ctx)
         .await;
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("http:// and https://"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("http:// and https://")
+    );
 }
 
 #[tokio::test]
@@ -151,17 +155,19 @@ async fn test_webfetch_plain_text() {
     let url = start_test_server(body, "text/plain").await;
 
     let ctx = make_ctx();
-    let result = tool()
-        .execute(json!({ "url": url }), &ctx)
-        .await
-        .unwrap();
+    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     assert!(result.content.contains("Hello from the test server!"));
     assert!(result.content.contains("Line 3"));
 
     let meta = result.metadata.unwrap();
     assert_eq!(meta["status"], 200);
-    assert!(meta["content_type"].as_str().unwrap().contains("text/plain"));
+    assert!(
+        meta["content_type"]
+            .as_str()
+            .unwrap()
+            .contains("text/plain")
+    );
 }
 
 #[tokio::test]
@@ -170,10 +176,7 @@ async fn test_webfetch_html_to_text() {
     let url = start_test_server(body, "text/html").await;
 
     let ctx = make_ctx();
-    let result = tool()
-        .execute(json!({ "url": url }), &ctx)
-        .await
-        .unwrap();
+    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     // Should contain the text content, not HTML tags
     assert!(result.content.contains("Title"));
@@ -220,10 +223,7 @@ async fn test_webfetch_metadata() {
     let url = start_test_server(body, "text/plain").await;
 
     let ctx = make_ctx();
-    let result = tool()
-        .execute(json!({ "url": url }), &ctx)
-        .await
-        .unwrap();
+    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     let meta = result.metadata.unwrap();
     assert_eq!(meta["status"], 200);
@@ -235,10 +235,7 @@ async fn test_webfetch_metadata() {
 async fn test_webfetch_connection_refused() {
     let ctx = make_ctx();
     let result = tool()
-        .execute(
-            json!({ "url": "http://127.0.0.1:1", "timeout": 2 }),
-            &ctx,
-        )
+        .execute(json!({ "url": "http://127.0.0.1:1", "timeout": 2 }), &ctx)
         .await;
     assert!(result.is_err());
 }
@@ -247,9 +244,7 @@ async fn test_webfetch_connection_refused() {
 async fn test_webfetch_http_error() {
     let url = start_error_server(404).await;
     let ctx = make_ctx();
-    let result = tool()
-        .execute(json!({ "url": url }), &ctx)
-        .await;
+    let result = tool().execute(json!({ "url": url }), &ctx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("404"));
 }

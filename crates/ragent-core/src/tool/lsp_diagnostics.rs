@@ -22,6 +22,7 @@ impl Tool for LspDiagnosticsTool {
         "lsp_diagnostics"
     }
 
+    /// Returns the tool description.
     fn description(&self) -> &str {
         "Show compiler errors, warnings, and hints accumulated from connected LSP servers. \
          Pass a file path to filter results, or omit for all diagnostics. \
@@ -51,16 +52,26 @@ impl Tool for LspDiagnosticsTool {
         "lsp:read"
     }
 
+    /// Executes the LSP diagnostics query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No LSP manager is configured in the context
+    /// - The file path (if provided) cannot be resolved or canonicalized
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let path_filter = input["path"].as_str();
         let severity_filter = input["severity"].as_str().unwrap_or("all");
 
-        let lsp = ctx.lsp_manager.as_ref()
+        let lsp = ctx
+            .lsp_manager
+            .as_ref()
             .context("No LSP manager — add a server to ragent.json 'lsp' section")?;
 
         let filter_path = if let Some(p) = path_filter {
             let full = ctx.working_dir.join(p);
-            let canonical = full.canonicalize()
+            let canonical = full
+                .canonicalize()
                 .with_context(|| format!("Cannot resolve path: {p}"))?;
             Some(canonical)
         } else {

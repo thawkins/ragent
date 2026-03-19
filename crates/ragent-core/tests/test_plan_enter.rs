@@ -17,8 +17,10 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         event_bus: bus.clone(),
         storage: None,
         task_manager: None,
-            lsp_manager: None,
-            active_model: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
     };
     (ctx, bus)
 }
@@ -168,9 +170,7 @@ async fn test_plan_enter_with_context() {
 
     let event = rx.try_recv().unwrap();
     match event {
-        Event::AgentSwitchRequested {
-            context, task, ..
-        } => {
+        Event::AgentSwitchRequested { context, task, .. } => {
             assert_eq!(task, "Plan refactoring");
             assert_eq!(context, "The user wants to split the monolith");
         }
@@ -183,9 +183,7 @@ async fn test_plan_enter_without_context() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool
-        .execute(json!({"task": "Simple analysis"}), &ctx)
-        .await;
+    let result = tool.execute(json!({"task": "Simple analysis"}), &ctx).await;
 
     let output = result.unwrap();
     assert!(!output.content.contains("Context:"));

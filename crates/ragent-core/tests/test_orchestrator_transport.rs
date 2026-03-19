@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use futures::future::FutureExt;
 
+use ragent_core::orchestrator::transport::{HttpRouter, RemoteAgentDescriptor, RouterComposite};
 use ragent_core::orchestrator::{
     AgentRegistry, Coordinator, InProcessRouter, JobDescriptor, OrchestrationMessage, Responder,
     Router,
 };
-use ragent_core::orchestrator::transport::{HttpRouter, RemoteAgentDescriptor, RouterComposite};
 
 // ── HttpRouter registration API ──────────────────────────────────────────────
 
@@ -84,7 +84,10 @@ async fn test_http_router_match_agents_none() {
 #[tokio::test]
 async fn test_http_router_send_unknown_agent_returns_err() {
     let router = HttpRouter::new(Duration::from_millis(200));
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "x".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "x".to_string(),
+    };
     let err = router.send("ghost", msg).await;
     assert!(err.is_err());
     assert!(err.unwrap_err().to_string().contains("not registered"));
@@ -103,7 +106,10 @@ async fn test_http_router_send_unreachable_endpoint_returns_err() {
         })
         .await;
 
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "test".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "test".to_string(),
+    };
     let err = router.send("unreachable", msg).await;
     assert!(err.is_err(), "expected error when endpoint is unreachable");
 }
@@ -121,7 +127,10 @@ async fn test_composite_uses_first_router_on_success() {
     let http = Arc::new(HttpRouter::new(Duration::from_millis(100)));
     let composite = RouterComposite::new(vec![local, http]);
 
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "ping".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "ping".to_string(),
+    };
     let result = composite.send("local-agent", msg).await.unwrap();
     assert_eq!(result, "local:ping");
 }
@@ -141,7 +150,10 @@ async fn test_composite_falls_back_to_second_router() {
 
     let composite = RouterComposite::new(vec![local, fallback]);
 
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "hi".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "hi".to_string(),
+    };
     let result = composite.send("fb-agent", msg).await.unwrap();
     assert_eq!(result, "fallback:hi");
 }
@@ -153,7 +165,10 @@ async fn test_composite_all_fail_returns_err() {
     let r2 = Arc::new(InProcessRouter::new(AgentRegistry::new()));
     let composite = RouterComposite::new(vec![r1, r2]);
 
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "x".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "x".to_string(),
+    };
     assert!(composite.send("nobody", msg).await.is_err());
 }
 
@@ -161,7 +176,10 @@ async fn test_composite_all_fail_returns_err() {
 #[tokio::test]
 async fn test_composite_empty_returns_err() {
     let composite = RouterComposite::new(vec![]);
-    let msg = OrchestrationMessage { job_id: "j".to_string(), payload: "y".to_string() };
+    let msg = OrchestrationMessage {
+        job_id: "j".to_string(),
+        payload: "y".to_string(),
+    };
     let err = composite.send("anyone", msg).await;
     assert!(err.is_err());
     assert!(err.unwrap_err().to_string().contains("no routers"));
@@ -174,7 +192,9 @@ async fn test_composite_empty_returns_err() {
 async fn test_coordinator_with_composite_router() {
     let registry = AgentRegistry::new();
     let r: Responder = Arc::new(|p: String| async move { format!("comp:{}", p) }.boxed());
-    registry.register("comp-agent", vec!["cap".to_string()], Some(r)).await;
+    registry
+        .register("comp-agent", vec!["cap".to_string()], Some(r))
+        .await;
 
     let local = Arc::new(InProcessRouter::new(registry.clone()));
     let composite = RouterComposite::new(vec![local]);

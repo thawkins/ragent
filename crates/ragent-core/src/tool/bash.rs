@@ -26,11 +26,11 @@ impl Tool for BashTool {
         "bash"
     }
 
-    fn description(&self) -> &str {
-        "Execute a shell command and return stdout and stderr. \
-         Commands are run with bash -c in the working directory."
-    }
-
+        /// Returns a human-readable description of what the tool does.
+        fn description(&self) -> &str {
+            "Execute a shell command and return stdout and stderr. \
+               Commands are run with bash -c in the working directory."
+        }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -52,6 +52,14 @@ impl Tool for BashTool {
         "bash:execute"
     }
 
+    /// Executes a shell command via `bash -c`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The `command` parameter is missing or invalid
+    /// - The command contains a dangerous pattern (e.g., `rm -rf /`, `mkfs`, `dd if=`)
+    /// - The command fails to execute (command not found, permission denied, etc.)
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let command = input["command"]
             .as_str()
@@ -62,7 +70,9 @@ impl Tool for BashTool {
 
         for pattern in DENIED_PATTERNS {
             if command.contains(pattern) {
-                bail!("Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system.");
+                bail!(
+                    "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
+                );
             }
         }
 

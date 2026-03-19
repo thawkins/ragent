@@ -1,6 +1,6 @@
-use criterion::{criterion_group, criterion_main, Criterion};
-use tempfile::tempdir;
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::path::PathBuf;
+use tempfile::tempdir;
 
 fn prepare_files(count: usize) -> (tempfile::TempDir, Vec<PathBuf>) {
     let dir = tempdir().expect("tempdir");
@@ -19,27 +19,29 @@ fn bench_commit(c: &mut Criterion) {
 
     for &count in &counts {
         group.bench_function(format!("commit_concurrency_1_{}", count), |b| {
-            b.to_async(tokio::runtime::Runtime::new().unwrap()).iter(|| async move {
-                let (_dir, paths) = prepare_files(count);
-                let mut staging = ragent_core::file_ops::EditStaging::new(false);
-                for p in &paths {
-                    let new = format!("modified {}", p.file_name().unwrap().to_string_lossy());
-                    staging.stage_edit(p, new).await.expect("stage");
-                }
-                let _ = staging.commit_all(1).await.expect("commit");
-            })
+            b.to_async(tokio::runtime::Runtime::new().unwrap())
+                .iter(|| async move {
+                    let (_dir, paths) = prepare_files(count);
+                    let mut staging = ragent_core::file_ops::EditStaging::new(false);
+                    for p in &paths {
+                        let new = format!("modified {}", p.file_name().unwrap().to_string_lossy());
+                        staging.stage_edit(p, new).await.expect("stage");
+                    }
+                    let _ = staging.commit_all(1).await.expect("commit");
+                })
         });
 
         group.bench_function(format!("commit_concurrency_par_{}", count), |b| {
-            b.to_async(tokio::runtime::Runtime::new().unwrap()).iter(|| async move {
-                let (_dir, paths) = prepare_files(count);
-                let mut staging = ragent_core::file_ops::EditStaging::new(false);
-                for p in &paths {
-                    let new = format!("modified {}", p.file_name().unwrap().to_string_lossy());
-                    staging.stage_edit(p, new).await.expect("stage");
-                }
-                let _ = staging.commit_all(num_cpus::get()).await.expect("commit");
-            })
+            b.to_async(tokio::runtime::Runtime::new().unwrap())
+                .iter(|| async move {
+                    let (_dir, paths) = prepare_files(count);
+                    let mut staging = ragent_core::file_ops::EditStaging::new(false);
+                    for p in &paths {
+                        let new = format!("modified {}", p.file_name().unwrap().to_string_lossy());
+                        staging.stage_edit(p, new).await.expect("stage");
+                    }
+                    let _ = staging.commit_all(num_cpus::get()).await.expect("commit");
+                })
         });
     }
 
