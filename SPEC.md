@@ -56,19 +56,23 @@ ragent is a Rust reimplementation of [OpenCode](https://github.com/anomalyco/ope
 
 ### Implementation Status Summary
 
-## Highlights (0.1.0-alpha.16)
+## Highlights (0.1.0-alpha.19)
 
 - Image attachment support (Alt+V): paste images from clipboard or file URIs; pending attachments are displayed before sending.
 - Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
 - New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
 - Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).
+- Teams lifecycle slash commands expanded: `/team open`, `/team close`, `/team delete`, `/team clear`.
+- Team task display improved with tabular `/team tasks` output.
+- Automatic pre-send context compaction added in the TUI when context usage nears window limits.
+- Copilot provider supports reasoning effort levels and model request-cost multipliers in selector UI.
 
 
 
 | Status | Count | Sections |
 |--------|-------|----------|
 | ✅ Implemented | 15 | CLI, Config, Session Mgmt, Messages, Tools, HTTP Server, TUI, MCP, Event Bus, Storage, Shell, Snapshot, Todo List, Extended Thinking, **Skills** |
-| ⚠️ Partial | 8 | Providers (4/12), Agent System (8/10 agents), Permissions (core only), Custom Agents (struct only), Instructions (basic), Session Resume (by-ID only), Compaction (manual /compact), Headless (--no-tui only) |
+| ⚠️ Partial | 8 | Providers (4/12), Agent System (8/10 agents), Permissions (core only), Custom Agents (struct only), Instructions (basic), Session Resume (by-ID only), Compaction (auto+manual), Headless (--no-tui only) |
 | ❌ Not Started | 11 | LSP, Hooks, Memory, Trusted Dirs, Codebase Indexing, Post-Edit Diagnostics, Prompt Enhancement, File Ignore, Suggested Responses, Worktree, @ References |
 
 **Overall: 34 sections — 44% fully implemented, 24% partial, 32% not yet started**

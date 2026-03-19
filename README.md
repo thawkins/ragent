@@ -138,14 +138,17 @@ Teams let one lead session coordinate multiple teammates with shared tasks and m
 Quick flow:
 
 - Create a team: `/team create <name>` (or `team_create`)
+- Re-open an existing team: `/team open <name>`
 - Spawn teammates: `team_spawn`
 - Add/list/claim/complete tasks: `team_task_create`, `team_task_list`, `team_task_claim`, `team_task_complete`
 - Communicate: `/team message ...` or `team_message`, plus `team_read_messages`
+- Reset/close/delete team state: `/team clear`, `/team close`, `/team delete <name>`
 - Cleanup when finished: `/team cleanup` or `team_cleanup`
 
 Docs and examples:
 
 - Guide: [`docs/teams.md`](docs/teams.md)
+- How-to manual: [`docs/howto_teams.md`](docs/howto_teams.md)
 - Example bundles: [`examples/teams/`](examples/teams/)
 
 ## Architecture
@@ -184,12 +187,10 @@ User Input
 
 ## Project Status
 
-**v0.1.0-alpha.2** — Early development. Core architecture is in place and the
-binary compiles. The TUI features a home screen with provider setup dialog,
-agent cycling, slash-command autocomplete, provider health checks, and
-`/provider_reset` for credential management. GitHub Copilot integration now uses
-plan-specific API endpoints with robust device flow authentication. See
-[TODO.md](TODO.md) for unimplemented functions.
+**v0.1.0-alpha.19** — Early development with active Teams and Copilot UX improvements.
+Recent updates include expanded Teams lifecycle commands (`/team open|close|delete|clear`),
+tabular `/team tasks`, automatic pre-send context compaction, Copilot reasoning-level
+selection, and improved model metadata/compatibility handling.
 
 ## License
 

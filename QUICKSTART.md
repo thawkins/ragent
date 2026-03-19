@@ -357,6 +357,12 @@ Check status any time:
 /team tasks
 ```
 
+Open an existing team:
+
+```text
+/team open feature-squad
+```
+
 ### Spawn teammates (tool-driven)
 
 Use `team_spawn` with a role-specific prompt:
@@ -381,11 +387,15 @@ Use `team_spawn` with a role-specific prompt:
 
 - Lead message teammate: `/team message <name> <text>` or `team_message`
 - Teammate inbox: `team_read_messages`
+- Reset task list: `/team clear`
+- Close current session context: `/team close`
+- Delete persisted team: `/team delete <name>`
 - Cleanup: `/team cleanup` or `team_cleanup`
 
 For full details and advanced workflows (plan approval, hooks, graceful shutdown), see:
 
 - [`docs/teams.md`](docs/teams.md)
+- [`docs/howto_teams.md`](docs/howto_teams.md)
 - [`examples/teams/`](examples/teams/)
 
 ---
