@@ -7,6 +7,20 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, ConfiguredProvider, ContextAction, ProviderSource, PROVIDER_LIST, ProviderSetupStep};
 
+fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
+    if char_index == 0 {
+        return 0;
+    }
+    let len_chars = s.chars().count();
+    if char_index >= len_chars {
+        return s.len();
+    }
+    s.char_indices()
+        .nth(char_index)
+        .map(|(byte, _)| byte)
+        .unwrap_or(s.len())
+}
+
 /// A high-level action produced by interpreting a key event.
 #[derive(Debug)]
 pub enum InputAction {
@@ -14,6 +28,8 @@ pub enum InputAction {
     SendMessage(String),
     /// Exit the application.
     Quit,
+    /// Confirm guarded keyboard quit (Ctrl+D after Ctrl+C).
+    ConfirmQuit,
     /// Scroll the message view upward.
     ScrollUp,
     /// Scroll the message view downward.
@@ -34,8 +50,16 @@ pub enum InputAction {
     MoveCursorHome,
     /// Move the cursor to the end of the input line.
     MoveCursorEnd,
+    /// Move the cursor one word left.
+    MoveCursorWordLeft,
+    /// Move the cursor one word right.
+    MoveCursorWordRight,
     /// Delete the character under the cursor.
     Delete,
+    /// Delete the previous word.
+    DeletePrevWord,
+    /// Delete from cursor to end of line.
+    DeleteToLineEnd,
     /// Cycle to the next configured agent.
     SwitchAgent,
     /// Execute a `/`-prefixed command.
@@ -192,83 +216,108 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Char(c) => {
-                // Keep cursor-aware editing behavior while slash menu is open.
-                let insert_pos = app.cursor_byte_pos();
-                app.input.insert(insert_pos, c);
-                app.cursor_move_right();
-                app.update_slash_menu();
+                app.insert_char_at_cursor(c);
                 return None;
             }
             KeyCode::Backspace => {
-                // Delete the character before the cursor (same as normal mode).
-                if app.input_cursor > 0 {
-                    let delete_pos = app.cursor_byte_pos_at_char_index(app.input_cursor - 1);
-                    app.input.remove(delete_pos);
-                    app.cursor_move_left();
-                }
-                app.update_slash_menu();
+                app.delete_prev_char();
                 return None;
             }
             _ => return None,
         }
     }
 
-    // If file menu is active, intercept navigation keys
+    // If file menu is active, intercept navigation keys while still allowing
+    // normal in-line editing and cursor motion.
     if app.file_menu.is_some() {
         match key.code {
             KeyCode::Up => {
-                if let Some(ref mut menu) = app.file_menu {
-                    if !menu.matches.is_empty() {
-                        menu.selected = if menu.selected == 0 {
-                            menu.matches.len() - 1
-                        } else {
-                            menu.selected - 1
-                        };
+                if let Some(ref mut menu) = app.file_menu && !menu.matches.is_empty() {
+                    menu.selected = if menu.selected == 0 {
+                        menu.matches.len() - 1
+                    } else {
+                        menu.selected - 1
+                    };
+                    const FILE_MENU_VISIBLE_ROWS: usize = 8;
+                    if menu.selected < menu.scroll_offset {
+                        menu.scroll_offset = menu.selected;
+                    } else if menu.selected + 1 < FILE_MENU_VISIBLE_ROWS {
+                        menu.scroll_offset = 0;
                     }
                 }
                 return None;
             }
             KeyCode::Down => {
-                if let Some(ref mut menu) = app.file_menu {
-                    if !menu.matches.is_empty() {
-                        menu.selected = (menu.selected + 1) % menu.matches.len();
+                if let Some(ref mut menu) = app.file_menu && !menu.matches.is_empty() {
+                    menu.selected = (menu.selected + 1) % menu.matches.len();
+                    const FILE_MENU_VISIBLE_ROWS: usize = 8;
+                    if menu.selected >= menu.scroll_offset + FILE_MENU_VISIBLE_ROWS {
+                        menu.scroll_offset = menu.selected + 1 - FILE_MENU_VISIBLE_ROWS;
                     }
                 }
                 return None;
             }
             KeyCode::Tab => {
-                              // If the menu is showing a directory, Tab should navigate into
-                              // the selected directory rather than inserting a path.
-                              let closed = app.accept_file_menu_selection();
-                              if closed {
-                                  // A file was inserted and menu closed; nothing more to do.
-                                  return None;
-                              }
-                              // Menu remains open (navigated into directory)
-                              return None;
-                          }
-                          KeyCode::Enter => {
-                              // Accept selection. If a file was inserted, submit the message.
-                              let closed = app.accept_file_menu_selection();
-                              if closed {
-                                  let text = app.input.clone();
-                                  if !text.is_empty() {
-                                      return Some(InputAction::SendMessage(text));
-                                  }
-                              }
-                              return None;
-                          }            KeyCode::Esc => {
+                // If the menu is showing a directory, Tab navigates into it;
+                // if it is a file, insert it and close the menu.
+                let _ = app.accept_file_menu_selection();
+                return None;
+            }
+            KeyCode::Enter => {
+                // Accept selection only. Sending is a separate Enter after menu closes.
+                let _ = app.accept_file_menu_selection();
+                return None;
+            }
+            KeyCode::Esc => {
                 app.file_menu = None;
                 return None;
             }
+            KeyCode::Char('\\') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.file_menu_show_hidden = !app.file_menu_show_hidden;
+                app.refresh_input_menus();
+                return None;
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorHome);
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorEnd);
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorLeft);
+            }
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorRight);
+            }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::DeletePrevWord);
+            }
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::DeleteToLineEnd);
+            }
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorWordLeft);
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorWordRight);
+            }
+            KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorHome);
+            }
+            KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::MoveCursorEnd);
+            }
+            KeyCode::Left => return Some(InputAction::MoveCursorLeft),
+            KeyCode::Right => return Some(InputAction::MoveCursorRight),
+            KeyCode::Home => return Some(InputAction::MoveCursorHome),
+            KeyCode::End => return Some(InputAction::MoveCursorEnd),
+            KeyCode::Delete => return Some(InputAction::Delete),
             KeyCode::Char(c) => {
-                app.input.push(c);
-                app.update_file_menu();
+                app.insert_char_at_cursor(c);
                 return None;
             }
             KeyCode::Backspace => {
-                app.input.pop();
-                app.update_file_menu();
+                app.delete_prev_char();
                 return None;
             }
             _ => return None,
@@ -286,8 +335,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             Some(InputAction::SendMessage(text))
         }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(InputAction::Quit)
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(InputAction::Quit),
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::ConfirmQuit)
         }
         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
             // Alt+V: paste image from clipboard as a staged attachment.
@@ -299,42 +349,43 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             app.show_shortcuts = true;
             None
         }
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorHome)
+        }
+        KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorEnd)
+        }
+        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorLeft)
+        }
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorRight)
+        }
+        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::DeletePrevWord)
+        }
+        KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::DeleteToLineEnd)
+        }
         KeyCode::Char(c) => {
-            // Insert at the cursor position rather than always appending.
-            let insert_pos = app.cursor_byte_pos();
-            app.input.insert(insert_pos, c);
-            app.cursor_move_right();
-
-            // If the input now starts with '/', show the slash menu
-            if app.input.starts_with('/') {
-                app.update_slash_menu();
-            }
-            // If input contains '@', show the file menu
-            if app.input.contains('@') {
-                app.update_file_menu();
-            }
+            app.insert_char_at_cursor(c);
             None
         }
         KeyCode::Backspace => {
-            // Backspace deletes the character before the cursor.
-            if app.input_cursor > 0 {
-                let delete_pos = app.cursor_byte_pos_at_char_index(app.input_cursor - 1);
-                app.input.remove(delete_pos);
-                app.cursor_move_left();
-            }
-            // Update or close the slash menu
-            if app.input.starts_with('/') {
-                app.update_slash_menu();
-            } else {
-                app.slash_menu = None;
-            }
-            // Update or close the file menu
-            if app.input.contains('@') {
-                app.update_file_menu();
-            } else {
-                app.file_menu = None;
-            }
+            app.delete_prev_char();
             None
+        }
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorWordLeft)
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorWordRight)
+        }
+        KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorHome)
+        }
+        KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::MoveCursorEnd)
         }
         KeyCode::Left => Some(InputAction::MoveCursorLeft),
         KeyCode::Right => Some(InputAction::MoveCursorRight),
@@ -450,6 +501,15 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         provider_id: pid.to_string(),
                         provider_name: pname.to_string(),
                         key_input: String::new(),
+                        key_cursor: 0,
+                        endpoint_input: app
+                            .storage
+                            .get_setting("generic_openai_api_base")
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default(),
+                        endpoint_cursor: 0,
+                        editing_endpoint: false,
                         error: None,
                     });
                 }
@@ -462,6 +522,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             provider_id,
             provider_name,
             mut key_input,
+            mut key_cursor,
+            mut endpoint_input,
+            mut endpoint_cursor,
+            mut editing_endpoint,
             ..
         } => match key.code {
             KeyCode::Enter => {
@@ -471,6 +535,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         provider_id,
                         provider_name,
                         key_input,
+                        key_cursor,
+                        endpoint_input,
+                        endpoint_cursor,
+                        editing_endpoint,
                         error: Some("API key cannot be empty.".to_string()),
                     });
                 } else if provider_id == "copilot"
@@ -480,6 +548,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         provider_id,
                         provider_name,
                         key_input,
+                        key_cursor,
+                        endpoint_input,
+                        endpoint_cursor,
+                        editing_endpoint,
                         error: Some(
                             "PATs (github_pat_/ghp_) are not supported by \
                              the Copilot API. Run: gh auth refresh -s copilot"
@@ -488,6 +560,14 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     });
                 } else {
                     let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
+                    if provider_id == "generic_openai" {
+                        let endpoint = endpoint_input.trim();
+                        if endpoint.is_empty() {
+                            let _ = app.storage.delete_setting("generic_openai_api_base");
+                        } else {
+                            let _ = app.storage.set_setting("generic_openai_api_base", endpoint);
+                        }
+                    }
                     let _ = app
                         .storage
                         .delete_setting(&format!("provider_{provider_id}_disabled"));
@@ -501,21 +581,151 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     });
                 }
             }
-            KeyCode::Char(c) => {
-                key_input.push(c);
+            KeyCode::Tab if provider_id == "generic_openai" => {
+                editing_endpoint = !editing_endpoint;
                 app.provider_setup = Some(ProviderSetupStep::EnterKey {
                     provider_id,
                     provider_name,
                     key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::Char(c) => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    let insert_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor);
+                    endpoint_input.insert(insert_pos, c);
+                    endpoint_cursor += 1;
+                } else {
+                    let insert_pos = cursor_byte_pos(&key_input, key_cursor);
+                    key_input.insert(insert_pos, c);
+                    key_cursor += 1;
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
                     error: None,
                 });
             }
             KeyCode::Backspace => {
-                key_input.pop();
+                if provider_id == "generic_openai" && editing_endpoint {
+                    if endpoint_cursor > 0 {
+                        let remove_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor - 1);
+                        endpoint_input.remove(remove_pos);
+                        endpoint_cursor -= 1;
+                    }
+                } else {
+                    if key_cursor > 0 {
+                        let remove_pos = cursor_byte_pos(&key_input, key_cursor - 1);
+                        key_input.remove(remove_pos);
+                        key_cursor -= 1;
+                    }
+                }
                 app.provider_setup = Some(ProviderSetupStep::EnterKey {
                     provider_id,
                     provider_name,
                     key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::Delete => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    if endpoint_cursor < endpoint_input.chars().count() {
+                        let remove_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor);
+                        endpoint_input.remove(remove_pos);
+                    }
+                } else if key_cursor < key_input.chars().count() {
+                    let remove_pos = cursor_byte_pos(&key_input, key_cursor);
+                    key_input.remove(remove_pos);
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::Left => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    endpoint_cursor = endpoint_cursor.saturating_sub(1);
+                } else {
+                    key_cursor = key_cursor.saturating_sub(1);
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::Right => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    endpoint_cursor = (endpoint_cursor + 1).min(endpoint_input.chars().count());
+                } else {
+                    key_cursor = (key_cursor + 1).min(key_input.chars().count());
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::Home => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    endpoint_cursor = 0;
+                } else {
+                    key_cursor = 0;
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+            }
+            KeyCode::End => {
+                if provider_id == "generic_openai" && editing_endpoint {
+                    endpoint_cursor = endpoint_input.chars().count();
+                } else {
+                    key_cursor = key_input.chars().count();
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
                     error: None,
                 });
             }
@@ -524,6 +734,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     provider_id,
                     provider_name,
                     key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
                     error: None,
                 });
             }
@@ -699,6 +913,8 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 // Clear provider-specific settings
                 if pid == "copilot" {
                     let _ = app.storage.delete_setting("copilot_api_base");
+                } else if pid == "generic_openai" {
+                    let _ = app.storage.delete_setting("generic_openai_api_base");
                 }
                 let is_active = app
                     .configured_provider
@@ -733,6 +949,10 @@ fn start_copilot_device_flow_setup(app: &mut App) {
                 provider_id: "copilot".to_string(),
                 provider_name: "GitHub Copilot".to_string(),
                 key_input: String::new(),
+                key_cursor: 0,
+                endpoint_input: String::new(),
+                endpoint_cursor: 0,
+                editing_endpoint: false,
                 error: Some("Async runtime not available for device flow.".to_string()),
             });
             return;
@@ -751,6 +971,10 @@ fn start_copilot_device_flow_setup(app: &mut App) {
                 provider_id: "copilot".to_string(),
                 provider_name: "GitHub Copilot".to_string(),
                 key_input: String::new(),
+                key_cursor: 0,
+                endpoint_input: String::new(),
+                endpoint_cursor: 0,
+                editing_endpoint: false,
                 error: Some(format!("Device flow failed: {e}")),
             });
             return;
@@ -849,12 +1073,14 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
                             let state = app.lsp_discover.as_mut().unwrap();
                             match result {
                                 Ok(msg) => {
-                                    state.feedback = Some(msg);
+                                state.feedback = Some(msg);
                                     state.number_input.clear();
+                                    state.number_cursor = 0;
                                 }
                                 Err(e) => {
                                     state.feedback = Some(format!("✗ {e}"));
                                     state.number_input.clear();
+                                    state.number_cursor = 0;
                                 }
                             }
                         }
@@ -863,6 +1089,7 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
                             let state = app.lsp_discover.as_mut().unwrap();
                             state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
                             state.number_input.clear();
+                            state.number_cursor = 0;
                         }
                     }
                 }
@@ -871,6 +1098,7 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
                     let state = app.lsp_discover.as_mut().unwrap();
                     state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
                     state.number_input.clear();
+                    state.number_cursor = 0;
                 }
             }
         }
@@ -878,14 +1106,53 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
         // Backspace in number input
         KeyCode::Backspace => {
             if let Some(ref mut state) = app.lsp_discover {
-                state.number_input.pop();
+                if state.number_cursor > 0 {
+                    let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor - 1);
+                    state.number_input.remove(remove_pos);
+                    state.number_cursor -= 1;
+                }
+            }
+        }
+
+        KeyCode::Delete => {
+            if let Some(ref mut state) = app.lsp_discover
+                && state.number_cursor < state.number_input.chars().count()
+            {
+                let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
+                state.number_input.remove(remove_pos);
+            }
+        }
+
+        KeyCode::Left => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_cursor = state.number_cursor.saturating_sub(1);
+            }
+        }
+
+        KeyCode::Right => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_cursor = (state.number_cursor + 1).min(state.number_input.chars().count());
+            }
+        }
+
+        KeyCode::Home => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_cursor = 0;
+            }
+        }
+
+        KeyCode::End => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.number_cursor = state.number_input.chars().count();
             }
         }
 
         // Digit character for number input
         KeyCode::Char(c) if c.is_ascii_digit() => {
             if let Some(ref mut state) = app.lsp_discover {
-                state.number_input.push(c);
+                let insert_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
+                state.number_input.insert(insert_pos, c);
+                state.number_cursor += 1;
             }
         }
 
@@ -923,12 +1190,14 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                             let state = app.mcp_discover.as_mut().unwrap();
                             match result {
                                 Ok(msg) => {
-                                    state.feedback = Some(msg);
+                                state.feedback = Some(msg);
                                     state.number_input.clear();
+                                    state.number_cursor = 0;
                                 }
                                 Err(e) => {
                                     state.feedback = Some(format!("✗ {e}"));
                                     state.number_input.clear();
+                                    state.number_cursor = 0;
                                 }
                             }
                         }
@@ -937,6 +1206,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                             let state = app.mcp_discover.as_mut().unwrap();
                             state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
                             state.number_input.clear();
+                            state.number_cursor = 0;
                         }
                     }
                 }
@@ -945,6 +1215,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                     let state = app.mcp_discover.as_mut().unwrap();
                     state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
                     state.number_input.clear();
+                    state.number_cursor = 0;
                 }
             }
         }
@@ -952,14 +1223,53 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
         // Backspace in number input
         KeyCode::Backspace => {
             if let Some(ref mut state) = app.mcp_discover {
-                state.number_input.pop();
+                if state.number_cursor > 0 {
+                    let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor - 1);
+                    state.number_input.remove(remove_pos);
+                    state.number_cursor -= 1;
+                }
+            }
+        }
+
+        KeyCode::Delete => {
+            if let Some(ref mut state) = app.mcp_discover
+                && state.number_cursor < state.number_input.chars().count()
+            {
+                let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
+                state.number_input.remove(remove_pos);
+            }
+        }
+
+        KeyCode::Left => {
+            if let Some(ref mut state) = app.mcp_discover {
+                state.number_cursor = state.number_cursor.saturating_sub(1);
+            }
+        }
+
+        KeyCode::Right => {
+            if let Some(ref mut state) = app.mcp_discover {
+                state.number_cursor = (state.number_cursor + 1).min(state.number_input.chars().count());
+            }
+        }
+
+        KeyCode::Home => {
+            if let Some(ref mut state) = app.mcp_discover {
+                state.number_cursor = 0;
+            }
+        }
+
+        KeyCode::End => {
+            if let Some(ref mut state) = app.mcp_discover {
+                state.number_cursor = state.number_input.chars().count();
             }
         }
 
         // Digit character for number input
         KeyCode::Char(c) if c.is_ascii_digit() => {
             if let Some(ref mut state) = app.mcp_discover {
-                state.number_input.push(c);
+                let insert_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
+                state.number_input.insert(insert_pos, c);
+                state.number_cursor += 1;
             }
         }
 

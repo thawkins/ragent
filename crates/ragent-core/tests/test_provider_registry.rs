@@ -10,6 +10,10 @@ fn test_default_provider_registry_has_all_providers() {
     let ids: Vec<&str> = providers.iter().map(|p| p.id.as_str()).collect();
     assert!(ids.contains(&"anthropic"), "Missing anthropic provider");
     assert!(ids.contains(&"openai"), "Missing openai provider");
+    assert!(
+        ids.contains(&"generic_openai"),
+        "Missing generic_openai provider"
+    );
     assert!(ids.contains(&"copilot"), "Missing copilot provider");
     assert!(ids.contains(&"ollama"), "Missing ollama provider");
 }
@@ -38,6 +42,10 @@ fn test_provider_registry_get() {
     let openai = registry.get("openai");
     assert!(openai.is_some());
     assert_eq!(openai.unwrap().name(), "OpenAI");
+
+    let generic_openai = registry.get("generic_openai");
+    assert!(generic_openai.is_some());
+    assert_eq!(generic_openai.unwrap().name(), "Generic OpenAI API");
 
     let copilot = registry.get("copilot");
     assert!(copilot.is_some());
@@ -80,6 +88,20 @@ fn test_openai_default_models() {
     assert!(!models.is_empty());
     for model in &models {
         assert_eq!(model.provider_id, "openai");
+        assert!(!model.id.is_empty());
+        assert!(model.context_window > 0);
+    }
+}
+
+#[test]
+fn test_generic_openai_default_models() {
+    let registry = create_default_registry();
+    let generic_openai = registry.get("generic_openai").unwrap();
+    let models = generic_openai.default_models();
+
+    assert!(!models.is_empty());
+    for model in &models {
+        assert_eq!(model.provider_id, "generic_openai");
         assert!(!model.id.is_empty());
         assert!(model.context_window > 0);
     }

@@ -18,7 +18,7 @@ use ragent_core::{
     tool,
 };
 use ragent_tui::App;
-use ragent_tui::app::{SelectionPane, TextSelection};
+use ragent_tui::app::{ContextAction, ContextMenuState, SelectionPane, TextSelection};
 
 fn make_app() -> App {
     let event_bus = Arc::new(EventBus::default());
@@ -209,10 +209,10 @@ fn test_selection_normalized_same_row() {
     assert_eq!((ec, er), (20, 5));
 }
 
-// ---------- Right-click copy ----------
+// ---------- Right-click context menu ----------
 
 #[test]
-fn test_right_click_clears_selection() {
+fn test_right_click_opens_context_menu_and_keeps_selection() {
     let mut app = make_app();
     app.message_area = Rect::new(0, 1, 80, 20);
     app.message_content_lines = vec![
@@ -227,16 +227,71 @@ fn test_right_click_clears_selection() {
     });
 
     app.handle_mouse_event(right_click(5, 5));
-    // Selection should be consumed (taken) by copy
-    assert!(app.text_selection.is_none());
+    assert!(app.text_selection.is_some());
+    let menu = app.context_menu.as_ref().expect("context menu should open");
+    assert_eq!(menu.pane, SelectionPane::Messages);
+    assert_eq!(menu.items.len(), 3);
+    assert_eq!(menu.items[0], (ContextAction::Cut, false));
+    assert_eq!(menu.items[1], (ContextAction::Copy, true));
 }
 
 #[test]
-fn test_right_click_with_no_selection_is_noop() {
+fn test_right_click_with_no_selection_opens_disabled_menu() {
     let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
     assert!(app.text_selection.is_none());
     app.handle_mouse_event(right_click(5, 5));
     assert!(app.text_selection.is_none());
+    let menu = app.context_menu.as_ref().expect("context menu should open");
+    assert_eq!(menu.pane, SelectionPane::Messages);
+    assert_eq!(menu.items[0], (ContextAction::Cut, false));
+    assert_eq!(menu.items[1], (ContextAction::Copy, false));
+}
+
+#[test]
+fn test_right_click_with_selection_in_other_pane_disables_copy_for_clicked_pane() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.log_area = Rect::new(80, 1, 30, 20);
+    app.show_log = true;
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Messages,
+        anchor: (1, 1),
+        endpoint: (5, 1),
+    });
+
+    app.handle_mouse_event(right_click(90, 5));
+
+    let menu = app.context_menu.as_ref().expect("context menu should open");
+    assert_eq!(menu.pane, SelectionPane::Log);
+    assert_eq!(menu.items[1], (ContextAction::Copy, false));
+}
+
+#[test]
+fn test_context_copy_keeps_selection() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.message_content_lines = vec!["You: hello world".to_string()];
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Messages,
+        anchor: (1, 1),
+        endpoint: (5, 1),
+    });
+    app.context_menu = Some(ContextMenuState {
+        x: 1,
+        y: 1,
+        pane: SelectionPane::Messages,
+        selected: 1,
+        items: vec![
+            (ContextAction::Cut, false),
+            (ContextAction::Copy, true),
+            (ContextAction::Paste, false),
+        ],
+    });
+
+    app.execute_context_action(ContextAction::Copy);
+
+    assert!(app.text_selection.is_some());
 }
 
 // ---------- extract_text_from_lines ----------
@@ -309,4 +364,118 @@ fn test_new_click_replaces_selection() {
     let sel = app.text_selection.as_ref().unwrap();
     assert_eq!(sel.anchor, (30, 10));
     assert_eq!(sel.endpoint, (30, 10));
+}
+
+#[test]
+fn test_context_cut_on_input_removes_selected_range_only() {
+    let mut app = make_app();
+    app.input_area = Rect::new(0, 22, 40, 3);
+    app.input = "abcdef".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Input,
+        // Select "cd" from "> abcdef" in inner row y=23.
+        anchor: (5, 23),
+        endpoint: (6, 23),
+    });
+    app.context_menu = Some(ContextMenuState {
+        x: 1,
+        y: 1,
+        pane: SelectionPane::Input,
+        selected: 0,
+        items: vec![(ContextAction::Cut, true)],
+    });
+
+    app.execute_context_action(ContextAction::Cut);
+
+    assert_eq!(app.input, "abef");
+    assert_eq!(app.input_cursor, 2);
+}
+
+#[test]
+fn test_extract_text_from_lines_unicode_uses_character_columns() {
+    let lines = vec!["a💡b".to_string()];
+    let text = App::extract_text_from_lines(&lines, 0, 0, 1, 0, 1, 0);
+    assert_eq!(text, "💡");
+}
+
+#[test]
+fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
+    let mut app = make_app();
+    app.input_area = Rect::new(0, 22, 6, 4); // inner width = 4
+    app.input = "ab💡cd".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.text_selection = Some(TextSelection {
+        pane: SelectionPane::Input,
+        // Wrapped display lines for "> ab💡cd" (inner_w=4):
+        // row 23: "> ab", row 24: "💡cd"
+        anchor: (1, 24),
+        endpoint: (1, 24),
+    });
+    app.context_menu = Some(ContextMenuState {
+        x: 1,
+        y: 1,
+        pane: SelectionPane::Input,
+        selected: 0,
+        items: vec![(ContextAction::Cut, true)],
+    });
+
+    app.execute_context_action(ContextAction::Cut);
+
+    assert_eq!(app.input, "abcd");
+    assert_eq!(app.input_cursor, 2);
+}
+
+
+#[test]
+fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
+    let mut app = make_app();
+    app.home_input_area = Rect::new(20, 15, 40, 3);
+    app.input_area = Rect::default();
+    app.input = "@src".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.file_menu = Some(ragent_tui::app::FileMenuState {
+        matches: vec![ragent_tui::app::FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "src".to_string(),
+        current_dir: None,
+    });
+
+    // Click inside file menu popup based on home_input_area geometry.
+    // item_count=1 => height=4 (includes hint row), popup starts at y=11, first item row=12.
+    app.handle_mouse_event(mouse_down(20, 12));
+
+    assert!(
+        app.file_menu.is_none(),
+        "click should accept file entry and close menu"
+    );
+    assert!(app.input.contains("src/main.rs"));
+}
+
+#[test]
+fn test_left_click_outside_file_menu_closes_popup() {
+    let mut app = make_app();
+    app.home_input_area = Rect::new(20, 15, 40, 3);
+    app.input = "@".to_string();
+    app.input_cursor = 1;
+    app.file_menu = Some(ragent_tui::app::FileMenuState {
+        matches: vec![ragent_tui::app::FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "src".to_string(),
+        current_dir: None,
+    });
+
+    // Popup is above y=15, so y=20 is outside.
+    app.handle_mouse_event(mouse_down(20, 20));
+    assert!(app.file_menu.is_none(), "outside click should dismiss popup");
 }

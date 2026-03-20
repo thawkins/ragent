@@ -33,6 +33,19 @@ use crate::tips;
 mod state;
 pub use self::state::*;
 
+#[derive(Debug, Clone, Copy)]
+struct MentionSpan {
+    at_start: usize,
+    token_start: usize,
+    token_end: usize,
+}
+
+impl MentionSpan {
+    fn query<'a>(&self, input: &'a str) -> &'a str {
+        &input[self.token_start..self.token_end]
+    }
+}
+
 
 impl App {
     /// Create a new [`App`] with default state and the given event bus.
@@ -146,7 +159,11 @@ impl App {
             provider_health: Arc::new(AtomicU8::new(0)),
             slash_menu: None,
             file_menu: None,
+            file_menu_show_hidden: false,
             project_files_cache: None,
+            project_files_cache_cwd: None,
+            project_files_cache_refreshed_at: None,
+            project_files_cache_count: 0,
             input_history: Vec::new(),
             history_index: None,
             history_draft: String::new(),
@@ -181,10 +198,11 @@ impl App {
             pending_send_after_compact: None,
                           agent_halted: false,
                           tool_step_map: HashMap::new(),
-                          active_tasks: Vec::new(),
-                          show_shortcuts: false,
-                          context_menu: None,
-                          pending_attachments: Vec::new(),
+            active_tasks: Vec::new(),
+            show_shortcuts: false,
+            quit_armed: false,
+            context_menu: None,
+            pending_attachments: Vec::new(),
                           history_file_path: None,
                           history_picker: None,
                           selected_agent_session_id: None,
@@ -516,6 +534,26 @@ impl App {
                 }
             }
         }
+        // Check Generic OpenAI API
+        if !is_disabled("generic_openai") {
+            if let Ok(key) = std::env::var("GENERIC_OPENAI_API_KEY") {
+                if !key.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "generic_openai".into(),
+                        name: "Generic OpenAI API".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
+            } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
+                && !key.is_empty()
+            {
+                return Some(ConfiguredProvider {
+                    id: "generic_openai".into(),
+                    name: "Generic OpenAI API".into(),
+                    source: ProviderSource::EnvVar,
+                });
+            }
+        }
         // Check Copilot env var
         if !is_disabled("copilot") {
             if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
@@ -593,6 +631,198 @@ impl App {
         self.input.chars().count()
     }
 
+    #[inline]
+    fn assert_input_cursor_invariant(&self) {
+        debug_assert!(self.input_cursor <= self.input_len_chars());
+    }
+
+    #[inline]
+    fn pane_area(&self, pane: SelectionPane) -> Rect {
+        match pane {
+            SelectionPane::Messages => self.message_area,
+            SelectionPane::Log => self.log_area,
+            SelectionPane::Input => self.input_area,
+            SelectionPane::HomeInput => self.home_input_area,
+        }
+    }
+
+    #[inline]
+    fn assert_ui_invariants(&self) {
+        self.assert_input_cursor_invariant();
+        if let Some(sel) = &self.text_selection {
+            debug_assert!(
+                self.pane_area(sel.pane).area() > 0,
+                "selection pane {:?} has no active area",
+                sel.pane
+            );
+        }
+        if let Some(menu) = &self.context_menu {
+            debug_assert!(
+                self.pane_area(menu.pane).area() > 0,
+                "context menu pane {:?} has no active area",
+                menu.pane
+            );
+        }
+    }
+
+    fn debug_log_input_transition(&self, source: &str, before_input: &str, before_cursor: usize) {
+        #[cfg(debug_assertions)]
+        {
+            if before_input != self.input || before_cursor != self.input_cursor {
+                tracing::debug!(
+                    source,
+                    before_chars = before_input.chars().count(),
+                    before_cursor,
+                    after_chars = self.input_len_chars(),
+                    after_cursor = self.input_cursor,
+                    screen = ?self.current_screen,
+                    slash_menu = self.slash_menu.is_some(),
+                    file_menu = self.file_menu.is_some(),
+                    "input transition"
+                );
+            }
+        }
+    }
+
+    /// Set cursor to a clamped character index.
+    pub(crate) fn set_cursor_char_index_clamped(&mut self, index: usize) {
+        self.input_cursor = index.min(self.input_len_chars());
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Refresh slash/file menus based on current input.
+    pub(crate) fn refresh_input_menus(&mut self) {
+        if self.input.starts_with('/') {
+            self.update_slash_menu();
+        } else {
+            self.slash_menu = None;
+        }
+        if self.input.contains('@') {
+            self.update_file_menu();
+        } else {
+            self.file_menu = None;
+        }
+    }
+
+    fn refresh_project_files_cache(&mut self) {
+        let wd = std::env::current_dir().unwrap_or_default();
+        let files = ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000);
+        self.project_files_cache_count = files.len();
+        self.project_files_cache = Some(files);
+        self.project_files_cache_cwd = Some(wd);
+        self.project_files_cache_refreshed_at = Some(std::time::SystemTime::now());
+    }
+
+    /// Insert a single character at the current cursor position.
+    pub(crate) fn insert_char_at_cursor(&mut self, c: char) {
+        let insert_pos = self.cursor_byte_pos();
+        self.input.insert(insert_pos, c);
+        self.cursor_move_right();
+        self.refresh_input_menus();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Insert text at the current cursor position.
+    pub(crate) fn insert_text_at_cursor(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let insert_pos = self.cursor_byte_pos();
+        self.input.insert_str(insert_pos, text);
+        self.set_cursor_char_index_clamped(self.input_cursor + text.chars().count());
+        self.refresh_input_menus();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Delete the character before the cursor, if any.
+    pub(crate) fn delete_prev_char(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let delete_pos = self.cursor_byte_pos_at_char_index(self.input_cursor - 1);
+        self.input.remove(delete_pos);
+        self.cursor_move_left();
+        self.refresh_input_menus();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Delete the character at the cursor, if any.
+    pub(crate) fn delete_next_char(&mut self) {
+        if self.input_cursor >= self.input_len_chars() {
+            return;
+        }
+        let delete_pos = self.cursor_byte_pos();
+        self.input.remove(delete_pos);
+        self.refresh_input_menus();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Remove a char-index range from input and place cursor at the range start.
+    pub(crate) fn remove_input_char_range(&mut self, start: usize, end: usize) {
+        if start >= end {
+            return;
+        }
+        let clamped_start = start.min(self.input_len_chars());
+        let clamped_end = end.min(self.input_len_chars());
+        if clamped_start >= clamped_end {
+            return;
+        }
+        let byte_start = self.cursor_byte_pos_at_char_index(clamped_start);
+        let byte_end = self.cursor_byte_pos_at_char_index(clamped_end);
+        self.input.replace_range(byte_start..byte_end, "");
+        self.set_cursor_char_index_clamped(clamped_start);
+        self.refresh_input_menus();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Compute selected input char range for input/home-input panes.
+    fn input_selection_char_range(&self, sel: &TextSelection) -> Option<(usize, usize)> {
+        if !matches!(sel.pane, SelectionPane::Input | SelectionPane::HomeInput) {
+            return None;
+        }
+        let area = if sel.pane == SelectionPane::Input {
+            self.input_area
+        } else {
+            self.home_input_area
+        };
+        if area.width < 2 || area.height < 2 {
+            return None;
+        }
+        let inner_x = area.x + 1;
+        let inner_y = area.y + 1;
+        let inner_w = area.width.saturating_sub(2).max(1) as usize;
+        let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
+        let start_disp = start_row.saturating_sub(inner_y) as usize * inner_w
+            + start_col.saturating_sub(inner_x) as usize;
+        let end_disp_exclusive = end_row.saturating_sub(inner_y) as usize * inner_w
+            + end_col.saturating_sub(inner_x) as usize
+            + 1;
+        let display_len = self.input_len_chars() + 2; // "> " prefix
+        let start_disp = start_disp.min(display_len);
+        let end_disp_exclusive = end_disp_exclusive.min(display_len);
+        if end_disp_exclusive <= start_disp {
+            return None;
+        }
+        let start_input = start_disp.saturating_sub(2).min(self.input_len_chars());
+        let end_input = end_disp_exclusive
+            .saturating_sub(2)
+            .min(self.input_len_chars());
+        if end_input <= start_input {
+            None
+        } else {
+            Some((start_input, end_input))
+        }
+    }
+
+    /// Return the currently active input widget area for overlay geometry.
+    fn active_input_widget_area(&self) -> Rect {
+        if self.home_input_area.area() > 0 {
+            self.home_input_area
+        } else {
+            self.input_area
+        }
+    }
+
     /// Return the byte offset corresponding to the current cursor position.
     pub(crate) fn cursor_byte_pos(&self) -> usize {
         self.cursor_byte_pos_at_char_index(self.input_cursor)
@@ -619,6 +849,7 @@ impl App {
         if self.input_cursor > 0 {
             self.input_cursor -= 1;
         }
+        self.assert_input_cursor_invariant();
     }
 
     /// Move the cursor one character to the right (if possible).
@@ -626,16 +857,66 @@ impl App {
         if self.input_cursor < self.input_len_chars() {
             self.input_cursor += 1;
         }
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Move cursor one word to the left.
+    pub(crate) fn cursor_move_word_left(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let chars: Vec<char> = self.input.chars().collect();
+        let mut i = self.input_cursor.min(chars.len());
+        while i > 0 && chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        self.set_cursor_char_index_clamped(i);
+    }
+
+    /// Move cursor one word to the right.
+    pub(crate) fn cursor_move_word_right(&mut self) {
+        let chars: Vec<char> = self.input.chars().collect();
+        let len = chars.len();
+        let mut i = self.input_cursor.min(len);
+        while i < len && !chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
+        self.set_cursor_char_index_clamped(i);
     }
 
     /// Move the cursor to the beginning of the input line.
     pub(crate) fn cursor_move_home(&mut self) {
         self.input_cursor = 0;
+        self.assert_input_cursor_invariant();
     }
 
     /// Move the cursor to the end of the input line.
     pub(crate) fn cursor_move_end(&mut self) {
         self.input_cursor = self.input_len_chars();
+        self.assert_input_cursor_invariant();
+    }
+
+    /// Delete the word immediately before the cursor.
+    pub(crate) fn delete_prev_word(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let end = self.input_cursor;
+        self.cursor_move_word_left();
+        let start = self.input_cursor;
+        self.remove_input_char_range(start, end);
+    }
+
+    /// Delete from cursor to end of line.
+    pub(crate) fn delete_to_end_of_line(&mut self) {
+        let end = self.input_len_chars();
+        self.remove_input_char_range(self.input_cursor, end);
     }
 
     /// Attach an [`LspManager`] to the app.
@@ -1315,74 +1596,65 @@ impl App {
     /// Detects the last `@` token in the input, extracts the query after it,
     /// and populates `file_menu` with matching project files.
     pub fn update_file_menu(&mut self) {
-        // Find the last '@' that's a valid reference trigger
-        let input = &self.input;
-        if let Some(at_pos) = input.rfind('@') {
-            // '@' must be at start or preceded by whitespace
-            if at_pos > 0 {
-                let prev_byte = input.as_bytes()[at_pos - 1];
-                if prev_byte.is_ascii_alphanumeric() || prev_byte == b'.' {
-                    self.file_menu = None;
-                    return;
-                }
-            }
+        let Some(active) = self.active_mention_span() else {
+            self.file_menu = None;
+            return;
+        };
+        let query = active.query(&self.input).to_string();
 
-            let query = &input[at_pos + 1..];
+        if let Some(dir) = self.file_menu.as_ref().and_then(|m| m.current_dir.clone()) {
+            self.populate_directory_menu(&dir, Some(&query));
+            return;
+        }
 
-            // Close menu if query contains whitespace (user finished typing ref)
-            if query.contains(char::is_whitespace) {
-                self.file_menu = None;
-                return;
-            }
+        // Lazily populate or refresh the project file cache when cwd changes.
+        let wd = std::env::current_dir().unwrap_or_default();
+        let cache_stale = self
+            .project_files_cache_cwd
+            .as_ref()
+            .is_none_or(|cached| *cached != wd);
+        if self.project_files_cache.is_none() || cache_stale {
+            self.refresh_project_files_cache();
+        }
 
-            // Lazily populate the project file cache
-            if self.project_files_cache.is_none() {
-                let wd = std::env::current_dir().unwrap_or_default();
-                self.project_files_cache = Some(
-                    ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000),
-                );
-            }
+        if let Some(ref candidates) = self.project_files_cache {
+            let matches = ragent_core::reference::fuzzy::fuzzy_match(&query, candidates);
 
-            if let Some(ref candidates) = self.project_files_cache {
-                let matches = ragent_core::reference::fuzzy::fuzzy_match(query, candidates);
+            let entries: Vec<FileMenuEntry> = matches
+                .into_iter()
+                .take(15)
+                .map(|m| {
+                    let is_dir = m.path.to_string_lossy().ends_with('/');
+                    FileMenuEntry {
+                        display: m.path.to_string_lossy().to_string(),
+                        path: m.path,
+                        is_dir,
+                    }
+                })
+                .collect();
 
-                let entries: Vec<FileMenuEntry> = matches
-                    .into_iter()
-                    .take(15)
-                    .map(|m| {
-                        let is_dir = m.path.to_string_lossy().ends_with('/');
-                        FileMenuEntry {
-                            display: m.path.to_string_lossy().to_string(),
-                            path: m.path,
-                            is_dir,
-                        }
-                    })
-                    .collect();
-
-                if entries.is_empty() {
-                    self.file_menu = None;
-                } else {
-                    let prev_selected = self.file_menu.as_ref().map(|m| m.selected).unwrap_or(0);
-                    self.file_menu = Some(FileMenuState {
-                        selected: prev_selected.min(entries.len().saturating_sub(1)),
-                        matches: entries,
-                        query: query.to_string(),
-                        current_dir: None,
-                    });
-                }
-            } else {
-                self.file_menu = None;
-            }
+            let prev_selected = self.file_menu.as_ref().map(|m| m.selected).unwrap_or(0);
+            self.file_menu = Some(FileMenuState {
+                selected: prev_selected.min(entries.len().saturating_sub(1)),
+                matches: entries,
+                scroll_offset: 0,
+                query,
+                current_dir: None,
+            });
         } else {
             self.file_menu = None;
         }
     }
 
     /// Populate the file menu with the immediate contents of `dir_rel`.
-    fn populate_directory_menu(&mut self, dir_rel: &std::path::Path) {
+    fn populate_directory_menu(&mut self, dir_rel: &std::path::Path, filter: Option<&str>) {
         let wd = std::env::current_dir().unwrap_or_default();
         let abs = wd.join(dir_rel);
         let mut entries: Vec<FileMenuEntry> = Vec::new();
+        let filter_lower = filter
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_lowercase());
 
         if abs.is_dir() {
             // Read the directory contents from disk (sorted)
@@ -1392,7 +1664,12 @@ impl App {
                 for entry in sorted {
                     let name = entry.file_name().to_string_lossy().to_string();
                     // Skip hidden
-                    if name.starts_with('.') {
+                    if name.starts_with('.') && !self.file_menu_show_hidden {
+                        continue;
+                    }
+                    if let Some(ref f) = filter_lower
+                        && !name.to_lowercase().contains(f)
+                    {
                         continue;
                     }
                     let path_abs = entry.path();
@@ -1431,6 +1708,16 @@ impl App {
                     },
                 );
             }
+
+            // Add explicit "back to fuzzy search" action.
+            entries.insert(
+                0,
+                FileMenuEntry {
+                    display: "<back to fuzzy>".to_string(),
+                    path: std::path::PathBuf::new(),
+                    is_dir: true,
+                },
+            );
         }
 
         if entries.is_empty() {
@@ -1439,7 +1726,8 @@ impl App {
             self.file_menu = Some(FileMenuState {
                 selected: 0,
                 matches: entries,
-                query: String::new(),
+                scroll_offset: 0,
+                query: filter.unwrap_or_default().to_string(),
                 current_dir: Some(dir_rel.to_path_buf()),
             });
         }
@@ -1450,6 +1738,9 @@ impl App {
     /// file was inserted into the input (menu closed), or `false` if the menu
     /// remains open due to directory navigation.
     pub fn accept_file_menu_selection(&mut self) -> bool {
+        if self.file_menu.as_ref().is_some_and(|m| m.matches.is_empty()) {
+            return false;
+        }
         // Clone the selected entry out of the menu to avoid holding an
         // immutable borrow of self while we call mutating methods below.
         let selected_entry: Option<FileMenuEntry> = self
@@ -1459,16 +1750,25 @@ impl App {
 
         if let Some(entry) = selected_entry {
             if entry.is_dir {
+                if entry.display == "<back to fuzzy>" {
+                    self.update_file_menu();
+                    return false;
+                }
                 // Navigate into the directory instead of inserting it.
-                self.populate_directory_menu(&entry.path);
+                self.populate_directory_menu(&entry.path, None);
                 return false;
             } else {
                 // Insert file path into the input and close the menu.
                 let path = entry.display.clone();
-                if let Some(at_pos) = self.input.rfind('@') {
-                    self.input.truncate(at_pos + 1);
-                    self.input.push_str(&path);
-                    self.input_cursor = self.input_len_chars();
+                if let Some(active) = self.active_mention_span() {
+                    let replacement = format!("@{path}");
+                    self.input.replace_range(active.at_start..active.token_end, &replacement);
+                    let cursor_chars = self.input[..active.at_start].chars().count()
+                        + replacement.chars().count();
+                    self.set_cursor_char_index_clamped(cursor_chars);
+                } else {
+                    self.file_menu = None;
+                    return false;
                 }
                 self.file_menu = None;
                 return true;
@@ -1477,6 +1777,48 @@ impl App {
 
         self.file_menu = None;
         false
+    }
+
+    fn mention_spans(&self) -> Vec<MentionSpan> {
+        let bytes = self.input.as_bytes();
+        let mut spans = Vec::new();
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if bytes[i] == b'@' {
+                if i > 0 {
+                    let prev = bytes[i - 1];
+                    if prev.is_ascii_alphanumeric() || prev == b'.' {
+                        i += 1;
+                        continue;
+                    }
+                }
+                let at_start = i;
+                i += 1;
+                let token_start = i;
+                while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                if i > token_start {
+                    spans.push(MentionSpan {
+                        at_start,
+                        token_start,
+                        token_end: i,
+                    });
+                }
+                continue;
+            }
+            i += 1;
+        }
+        spans
+    }
+
+    fn active_mention_span(&self) -> Option<MentionSpan> {
+        let cursor = self.cursor_byte_pos();
+        let spans = self.mention_spans();
+        spans
+            .iter()
+            .find(|span| cursor >= span.at_start && cursor <= span.token_end)
+            .copied()
     }
 
     /// Execute a slash command by trigger name (e.g. `"/model"` or `"model"`).
@@ -1496,6 +1838,7 @@ impl App {
         self.slash_menu = None;
         self.scroll_offset = 0;
         self.force_new_message = true;
+        self.assert_ui_invariants();
 
         // Split into command and optional argument text.
         let (cmd, args) = stripped
@@ -1668,6 +2011,17 @@ impl App {
                 self.status = "messages cleared".to_string();
                 self.push_log(LogLevel::Info, "Message history cleared".to_string());
             }
+            "browse_refresh" => {
+                self.refresh_project_files_cache();
+                self.status = format!("browse index refreshed ({})", self.project_files_cache_count);
+                self.push_log(
+                    LogLevel::Info,
+                    format!(
+                        "@ picker index refreshed ({} entries)",
+                        self.project_files_cache_count
+                    ),
+                );
+            }
             "cancel" => {
                 if args.is_empty() {
                     self.status = "⚠ Please provide a task ID prefix: /cancel <id>".to_string();
@@ -1753,6 +2107,81 @@ impl App {
                 }
                 self.status = "help".to_string();
             }
+            "inputdiag" => {
+                if self.session_id.is_none() {
+                    let dir = std::env::current_dir().unwrap_or_default();
+                    match self.session_processor.session_manager.create_session(dir) {
+                        Ok(session) => {
+                            self.session_id = Some(session.id);
+                        }
+                        Err(e) => {
+                            self.status = format!("error: {}", e);
+                            return;
+                        }
+                    }
+                }
+                let selection = self
+                    .text_selection
+                    .as_ref()
+                    .map(|s| format!("{:?} {:?}->{:?}", s.pane, s.anchor, s.endpoint))
+                    .unwrap_or_else(|| "none".to_string());
+                let context_menu = self
+                    .context_menu
+                    .as_ref()
+                    .map(|m| format!("{:?} selected={}", m.pane, m.selected))
+                    .unwrap_or_else(|| "none".to_string());
+                let diag = format!(
+                    "From: /inputdiag\n\
+                     Input diagnostics:\n\
+                       screen: {:?}\n\
+                       input chars: {}\n\
+                       input cursor: {}\n\
+                       slash menu: {}\n\
+                       file menu: {}\n\
+                       history picker: {}\n\
+                       selection: {}\n\
+                       context menu: {}\n\
+                       message area: {:?}\n\
+                       log area: {:?}\n\
+                       input area: {:?}\n\
+                       home input area: {:?}\n\
+                       browse cache cwd: {:?}\n\
+                       browse cache entries: {}\n\
+                       browse cache refreshed: {:?}\n\
+                       browse menu state: {}",
+                    self.current_screen,
+                    self.input_len_chars(),
+                    self.input_cursor,
+                    self.slash_menu.is_some(),
+                    self.file_menu.is_some(),
+                    self.history_picker.is_some(),
+                    selection,
+                    context_menu,
+                    self.message_area,
+                    self.log_area,
+                    self.input_area,
+                    self.home_input_area,
+                    self.project_files_cache_cwd,
+                    self.project_files_cache_count,
+                    self.project_files_cache_refreshed_at,
+                    self.file_menu
+                        .as_ref()
+                        .map(|m| format!(
+                            "query='{}' dir={:?} selected={} offset={} results={}",
+                            m.query,
+                            m.current_dir,
+                            m.selected,
+                            m.scroll_offset,
+                            m.matches.len()
+                        ))
+                        .unwrap_or_else(|| "none".to_string())
+                );
+                self.append_assistant_text(&diag);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "inputdiag".to_string();
+            }
             "log" => {
                 self.show_log = !self.show_log;
                 self.status = if self.show_log {
@@ -1798,7 +2227,7 @@ impl App {
             "provider_reset" => {
                 self.provider_setup = Some(ProviderSetupStep::ResetProvider { selected: 0 });
             }
-            "quit" => {
+            "quit" | "exit" => {
                 self.is_running = false;
             }
             "reload" => {
@@ -2254,6 +2683,7 @@ impl App {
                         self.lsp_discover = Some(LspDiscoverState {
                             servers: found,
                             number_input: String::new(),
+                            number_cursor: 0,
                             feedback: None,
                         });
                         if self.current_screen == ScreenMode::Home {
@@ -2372,6 +2802,7 @@ impl App {
                         self.mcp_discover = Some(McpDiscoverState {
                             servers: found,
                             number_input: String::new(),
+                            number_cursor: 0,
                             feedback: None,
                         });
                         if self.current_screen == ScreenMode::Home {
@@ -3076,6 +3507,7 @@ impl App {
                 }
             }
         }
+        self.assert_ui_invariants();
     }
 
     /// Handle a key event while the history picker overlay is open.
@@ -3106,7 +3538,7 @@ impl App {
                 let chosen = picker.entries[picker.selected].clone();
                 self.history_picker = None;
                 self.input = chosen;
-                self.input_cursor = self.input.len();
+                self.set_cursor_char_index_clamped(self.input_len_chars());
             }
             _ => {}
         }
@@ -3130,6 +3562,8 @@ impl App {
     /// # }
     /// ```
     pub fn handle_mouse_event(&mut self, event: MouseEvent) {
+        let before_input = self.input.clone();
+        let before_cursor = self.input_cursor;
         // If context menu is open, intercept clicks.
         if self.context_menu.is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = event.kind {
@@ -3138,6 +3572,8 @@ impl App {
                 // Second right-click dismisses the menu.
                 self.context_menu = None;
             }
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("mouse-context", &before_input, before_cursor);
             return;
         }
 
@@ -3186,11 +3622,13 @@ impl App {
                                       if self.file_menu.is_some() {
                                           // Recompute popup geometry identical to layout::render_file_menu
                                           let menu = self.file_menu.as_ref().unwrap();
+                                          let input_area = self.active_input_widget_area();
                                           let item_count = menu.matches.len() as u16;
-                                          let height = (item_count + 2).min(self.input_area.y);
-                                          let width = self.input_area.width.min(60);
-                                          let popup_x = self.input_area.x;
-                                          let popup_y = self.input_area.y.saturating_sub(height);
+                                          let visible_items = item_count.max(1).min(8);
+                                          let height = (visible_items + 1 + 2).min(input_area.y);
+                                          let width = input_area.width.min(60);
+                                          let popup_x = input_area.x;
+                                          let popup_y = input_area.y.saturating_sub(height);
                 
                                           // If click is inside the popup, determine which row was clicked.
                                           if event.column >= popup_x
@@ -3200,11 +3638,12 @@ impl App {
                                           {
                                               // Content lines start one row below the popup top (inside the border)
                                               let clicked_row = event.row.saturating_sub(popup_y + 1) as usize;
-                                              if clicked_row < menu.matches.len() {
+                                              let absolute_row = menu.scroll_offset + clicked_row;
+                                              if absolute_row < menu.matches.len() {
                                                   // Set the selected index (drop borrow immediately)
                                                   {
                                                       if let Some(ref mut m) = self.file_menu.as_mut() {
-                                                          m.selected = clicked_row;
+                                                          m.selected = absolute_row;
                                                       }
                                                   }
                 
@@ -3214,6 +3653,10 @@ impl App {
                                                   let _ = self.accept_file_menu_selection();
                                                   return;
                                               }
+                                          } else {
+                                              // Click outside popup dismisses the file menu.
+                                              self.file_menu = None;
+                                              return;
                                           }
                                       }
                 
@@ -3242,11 +3685,13 @@ impl App {
                               // If file menu is open, update the highlighted row under the cursor.
                               if self.file_menu.is_some() {
                                   // Snapshot needed values without holding immutable borrows while mutating.
+                                  let input_area = self.active_input_widget_area();
                                   let item_count = self.file_menu.as_ref().map(|m| m.matches.len()).unwrap_or(0) as u16;
-                                  let height = (item_count + 2).min(self.input_area.y);
-                                  let width = self.input_area.width.min(60);
-                                  let popup_x = self.input_area.x;
-                                  let popup_y = self.input_area.y.saturating_sub(height);
+                                  let visible_items = item_count.max(1).min(8);
+                                  let height = (visible_items + 1 + 2).min(input_area.y);
+                                  let width = input_area.width.min(60);
+                                  let popup_x = input_area.x;
+                                  let popup_y = input_area.y.saturating_sub(height);
             
                                   if event.column >= popup_x
                                       && event.column < popup_x.saturating_add(width)
@@ -3254,11 +3699,14 @@ impl App {
                                       && event.row < popup_y.saturating_add(height)
                                   {
                                       let hovered_row = event.row.saturating_sub(popup_y + 1) as usize;
-                                      if hovered_row < (item_count as usize) {
+                                      let absolute_row =
+                                          self.file_menu.as_ref().map(|m| m.scroll_offset).unwrap_or(0)
+                                              + hovered_row;
+                                      if absolute_row < (item_count as usize) {
                                           // Update selection if changed.
                                           if let Some(ref mut m) = self.file_menu.as_mut() {
-                                              if m.selected != hovered_row {
-                                                  m.selected = hovered_row;
+                                              if m.selected != absolute_row {
+                                                  m.selected = absolute_row;
                                               }
                                           }
                                       }
@@ -3271,43 +3719,42 @@ impl App {
                               // Keep text_selection alive so it stays highlighted until right-click or next click
                           }
                           MouseEventKind::Down(MouseButton::Right) => {
-                // Right-click copies the active selection (if any) and clears it.
-                if self.text_selection.is_some() {
-                    self.copy_selection();
-                    return;
-                }
+                              // Right-click contract: always open context menu when inside a pane.
+                              // Actions are enabled only when valid for that pane + selection context.
+                              let col = event.column;
+                              let row = event.row;
+                              let Some(pane) = self.pane_at(col, row) else {
+                                  self.context_menu = None;
+                                  return;
+                              };
 
-                let col = event.column;
-                let row = event.row;
-                let pane = self.pane_at(col, row).unwrap_or(SelectionPane::Messages);
+                              let selection_for_pane = self
+                                  .text_selection
+                                  .as_ref()
+                                  .is_some_and(|s| s.pane == pane);
+                              let in_input =
+                                  matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
+                              let has_clipboard = Self::get_clipboard().is_some_and(|s| !s.is_empty());
 
-                // Determine available actions based on context.
-                let has_selection = self.text_selection.is_some();
-                let in_input = matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
-                let has_clipboard = Self::get_clipboard().map_or(false, |s| !s.is_empty());
+                              let items = vec![
+                                  (ContextAction::Cut, selection_for_pane && in_input),
+                                  (ContextAction::Copy, selection_for_pane),
+                                  (ContextAction::Paste, in_input && has_clipboard),
+                              ];
+                              let selected = items.iter().position(|(_, en)| *en).unwrap_or(0);
 
-                // Cut: only in input panes with selection
-                // Copy: anywhere with selection
-                // Paste: only in input panes with clipboard content
-                let items = vec![
-                    (ContextAction::Cut, has_selection && in_input),
-                    (ContextAction::Copy, has_selection),
-                    (ContextAction::Paste, in_input && has_clipboard),
-                ];
-
-                // Find first enabled item as default selection
-                let selected = items.iter().position(|(_, en)| *en).unwrap_or(0);
-
-                self.context_menu = Some(ContextMenuState {
-                    x: col,
-                    y: row,
-                    pane,
-                    selected,
-                    items,
-                });
-            }
+                              self.context_menu = Some(ContextMenuState {
+                                  x: col,
+                                  y: row,
+                                  pane,
+                                  selected,
+                                  items,
+                              });
+                          }
             _ => {}
         }
+        self.assert_ui_invariants();
+        self.debug_log_input_transition("mouse", &before_input, before_cursor);
     }
 
     /// Determine which selection pane a screen position falls in.
@@ -3327,11 +3774,16 @@ impl App {
     }
 
     /// Copy the currently selected text to the system clipboard.
-    fn copy_selection(&mut self) {
-        let sel = match self.text_selection.take() {
+    ///
+    /// When `consume_selection` is true, clears the active selection after copying.
+    fn copy_selection(&mut self, consume_selection: bool) {
+        let sel = match self.text_selection.clone() {
             Some(s) => s,
             None => return,
         };
+        if consume_selection {
+            self.text_selection = None;
+        }
         let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
 
         let lines: &[String] = match sel.pane {
@@ -3348,12 +3800,18 @@ impl App {
                 let inner_x = area.x + 1; // inside border
                 let inner_y = area.y + 1;
                 let inner_w = area.width.saturating_sub(2).max(1) as usize;
-                // Wrap the input text into display lines
-                let wrapped: Vec<String> = input_text
-                    .as_bytes()
-                    .chunks(inner_w)
-                    .map(|c| String::from_utf8_lossy(c).into_owned())
-                    .collect();
+                // Wrap the input text into display lines (character-width based).
+                let chars: Vec<char> = input_text.chars().collect();
+                let mut wrapped: Vec<String> = Vec::new();
+                let mut start = 0usize;
+                while start < chars.len() {
+                    let end = (start + inner_w).min(chars.len());
+                    wrapped.push(chars[start..end].iter().collect::<String>());
+                    start = end;
+                }
+                if wrapped.is_empty() {
+                    wrapped.push(String::new());
+                }
                 let text = Self::extract_text_from_lines(
                     &wrapped, inner_x, inner_y, start_col, start_row, end_col, end_row,
                 );
@@ -3421,28 +3879,20 @@ impl App {
             let line_idx = screen_row.saturating_sub(inner_y) as usize;
             let line = lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
             let line_start = if screen_row == start_row {
-                let byte_idx = start_col.saturating_sub(inner_x) as usize;
-                // Snap to a valid char boundary
-                let mut idx = byte_idx.min(line.len());
-                while idx < line.len() && !line.is_char_boundary(idx) {
-                    idx += 1;
-                }
-                idx
+                start_col.saturating_sub(inner_x) as usize
             } else {
                 0
             };
             let line_end = if screen_row == end_row {
-                let byte_idx = (end_col.saturating_sub(inner_x) as usize + 1).min(line.len());
-                let mut idx = byte_idx;
-                while idx < line.len() && !line.is_char_boundary(idx) {
-                    idx += 1;
-                }
-                idx
+                end_col.saturating_sub(inner_x) as usize + 1
             } else {
-                line.len()
+                line.chars().count()
             };
-            if line_start < line.len() {
-                result.push_str(&line[line_start..line_end.min(line.len())]);
+            let line_char_count = line.chars().count();
+            let start = line_start.min(line_char_count);
+            let end = line_end.min(line_char_count);
+            if start < end {
+                result.extend(line.chars().skip(start).take(end - start));
             }
             if screen_row < end_row {
                 result.push('\n');
@@ -3544,22 +3994,25 @@ impl App {
     /// Execute a context menu action (Cut / Copy / Paste) and close the menu.
     pub fn execute_context_action(&mut self, action: ContextAction) {
         let pane = self.context_menu.as_ref().map(|m| m.pane);
+        let selection = self.text_selection.clone();
         self.context_menu = None;
 
         match action {
             ContextAction::Copy => {
-                self.copy_selection();
+                self.copy_selection(false);
             }
             ContextAction::Cut => {
-                // Copy selected text then clear the input (cut only makes sense in input panes).
-                self.copy_selection();
+                // Copy selected text then remove only the selected span in input panes.
+                self.copy_selection(true);
                 if matches!(
                     pane,
                     Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
                 ) {
-                    self.input.clear();
-                    self.slash_menu = None;
-                    self.file_menu = None;
+                    if let Some(sel) = selection.as_ref()
+                        && let Some((start, end)) = self.input_selection_char_range(sel)
+                    {
+                        self.remove_input_char_range(start, end);
+                    }
                 }
             }
             ContextAction::Paste => {
@@ -3572,13 +4025,12 @@ impl App {
                         // Strip newlines for single-line input.
                         let clean: String =
                             text.chars().filter(|&c| c != '\n' && c != '\r').collect();
-                        self.input.push_str(&clean);
-                        if self.input.starts_with('/') {
-                            self.update_slash_menu();
+                        if let Some(sel) = selection.as_ref()
+                            && let Some((start, end)) = self.input_selection_char_range(sel)
+                        {
+                            self.remove_input_char_range(start, end);
                         }
-                        if self.input.contains('@') {
-                            self.update_file_menu();
-                        }
+                        self.insert_text_at_cursor(&clean);
                     }
                 }
             }
@@ -3658,9 +4110,13 @@ impl App {
     /// # }
     /// ```
     pub fn handle_key_event(&mut self, key: KeyEvent) {
+        let before_input = self.input.clone();
+        let before_cursor = self.input_cursor;
         // History picker intercepts all keys while it is open
         if self.history_picker.is_some() {
             self.handle_history_picker_key(key);
+            self.assert_ui_invariants();
+            self.debug_log_input_transition("key-history-picker", &before_input, before_cursor);
             return;
         }
         if let Some(action) = input::handle_key(self, key) {
@@ -3713,7 +4169,15 @@ impl App {
                     self.dispatch_user_message(text, image_paths);
                 }
                 InputAction::Quit => {
-                    self.is_running = false;
+                    self.quit_armed = true;
+                    self.status = "Press Ctrl+D to quit (or use /quit or /exit)".to_string();
+                }
+                InputAction::ConfirmQuit => {
+                    if self.quit_armed {
+                        self.is_running = false;
+                    } else {
+                        self.status = "Press Ctrl+C first, then Ctrl+D to quit".to_string();
+                    }
                 }
                 InputAction::ScrollUp => {
                     self.scroll_offset = self.scroll_offset.saturating_add(3);
@@ -3768,6 +4232,12 @@ impl App {
                 InputAction::MoveCursorRight => {
                     self.cursor_move_right();
                 }
+                InputAction::MoveCursorWordLeft => {
+                    self.cursor_move_word_left();
+                }
+                InputAction::MoveCursorWordRight => {
+                    self.cursor_move_word_right();
+                }
                 InputAction::MoveCursorHome => {
                     self.cursor_move_home();
                 }
@@ -3775,10 +4245,13 @@ impl App {
                     self.cursor_move_end();
                 }
                 InputAction::Delete => {
-                    if self.input_cursor < self.input_len_chars() {
-                        let del_pos = self.cursor_byte_pos();
-                        self.input.remove(del_pos);
-                    }
+                    self.delete_next_char();
+                }
+                InputAction::DeletePrevWord => {
+                    self.delete_prev_word();
+                }
+                InputAction::DeleteToLineEnd => {
+                    self.delete_to_end_of_line();
                 }
                 InputAction::SwitchAgent => {
                     if self.cycleable_agents.len() > 1 {
@@ -3820,6 +4293,8 @@ impl App {
                 }
             }
         }
+        self.assert_ui_invariants();
+        self.debug_log_input_transition("key", &before_input, before_cursor);
     }
 
     /// Execute a plan agent delegation.

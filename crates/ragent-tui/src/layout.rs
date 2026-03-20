@@ -27,6 +27,24 @@ use crate::widgets::message_widget::{
     tool_result_summary,
 };
 
+fn shorten_middle(s: &str, max_chars: usize) -> String {
+    let total = s.chars().count();
+    if total <= max_chars {
+        return s.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let keep_left = (max_chars - 1) / 2;
+    let keep_right = max_chars - 1 - keep_left;
+    let left: String = s.chars().take(keep_left).collect();
+    let right: String = s
+        .chars()
+        .skip(total.saturating_sub(keep_right))
+        .collect();
+    format!("{left}…{right}")
+}
+
 /// The version string shown on the home screen.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -90,15 +108,14 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
 
 fn render_home(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
+    app.message_area = Rect::default();
+    app.log_area = Rect::default();
+    app.input_area = Rect::default();
 
     // Compute input height based on wrapped text length
     let max_width = 88u16.min(area.width.saturating_sub(4));
     let inner_width = max_width.saturating_sub(2).max(1) as usize; // inside borders
-    let input_text_len = app.input.len() + 2; // "> " prefix
-    let num_lines = ((input_text_len as f32) / (inner_width as f32))
-        .ceil()
-        .max(1.0) as u16;
-    let input_height = num_lines + 2; // +2 for top and bottom borders
+    let input_height = input_widget_height(app.input_len_chars(), inner_width);
 
     // Vertical layout: flex-grow top | logo | gap | prompt | provider | tip | flex-grow bottom | status bar
     let chunks = Layout::default()
@@ -122,19 +139,17 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     // Prompt — centered input
     let home_input_area = centered_horizontal(max_width, chunks[3]);
     app.home_input_area = home_input_area;
-    render_home_input(frame, app, chunks[3]);
+    render_home_input(frame, app, home_input_area);
     apply_selection_highlight(frame, app, SelectionPane::HomeInput, home_input_area);
 
     // Slash menu dropdown (above the input, if active)
     if app.slash_menu.is_some() {
-        let input_area = centered_horizontal(max_width, chunks[3]);
-        render_slash_menu(frame, app, input_area);
+        render_slash_menu(frame, app, home_input_area);
     }
 
     // File menu dropdown (above the input, if active)
     if app.file_menu.is_some() {
-        let input_area = centered_horizontal(max_width, chunks[3]);
-        render_file_menu(frame, app, input_area);
+        render_file_menu(frame, app, home_input_area);
     }
 
     // Provider status
@@ -198,10 +213,7 @@ const INPUT_PLACEHOLDER: &str =
     "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
 
 fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 88u16.min(area.width.saturating_sub(4));
-    let centered = centered_horizontal(max_width, area);
-
-    let inner_width = centered.width.saturating_sub(2).max(1) as usize;
+    let inner_width = area.width.saturating_sub(2).max(1) as usize;
 
     // Show staged attachments in the block title when present.
     let title = if app.pending_attachments.is_empty() {
@@ -238,21 +250,22 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(INPUT_PLACEHOLDER, Style::default().fg(Color::DarkGray)),
         ]);
         let paragraph = Paragraph::new(ghost).block(block);
-        frame.render_widget(paragraph, centered);
+        frame.render_widget(paragraph, area);
         // Cursor sits right after the "> " prefix.
-        frame.set_cursor_position((centered.x + 1 + 2, centered.y + 1));
+        frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
     } else {
-        let input_text = format!("> {}", app.input);
-        let wrapped_lines = char_wrap(&input_text, inner_width);
+        let wrapped_lines = input_widget_lines(&app.input, inner_width);
+        let wrapped_lines: Vec<Line<'_>> = wrapped_lines
+            .into_iter()
+            .map(Line::from)
+            .collect();
         let paragraph = Paragraph::new(wrapped_lines).block(block);
-        frame.render_widget(paragraph, centered);
+        frame.render_widget(paragraph, area);
 
         // Position cursor accounting for wrapped lines
-        let cursor_pos = app.input.len() + 2; // "> " prefix
-        let cursor_line = cursor_pos / inner_width;
-        let cursor_col = cursor_pos % inner_width;
-        let cursor_x = centered.x + 1 + cursor_col as u16;
-        let cursor_y = centered.y + 1 + cursor_line as u16;
+        let (cursor_line, cursor_col) = input_cursor_display_pos(app.input_cursor, inner_width);
+        let cursor_x = area.x + 1 + cursor_col as u16;
+        let cursor_y = area.y + 1 + cursor_line as u16;
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
@@ -383,8 +396,13 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             frame.render_widget(paragraph, area);
         }
         ProviderSetupStep::EnterKey {
+            provider_id,
             provider_name,
             key_input,
+            key_cursor,
+            endpoint_input,
+            endpoint_cursor,
+            editing_endpoint,
             error,
             ..
         } => {
@@ -402,7 +420,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
 
             // Show masked key input
             let masked = if key_input.is_empty() {
-                "".to_string()
+                String::new()
             } else {
                 let char_count = key_input.chars().count();
                 if char_count <= 8 {
@@ -420,10 +438,49 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     format!("{}…{}", first4, last4)
                 }
             };
+            let key_cursor_display = if !*editing_endpoint {
+                *key_cursor
+            } else {
+                masked.chars().count()
+            };
             lines.push(Line::from(vec![
-                Span::styled("> ", Style::default().fg(Color::Cyan)),
-                Span::styled(masked, Style::default().fg(Color::White)),
+                Span::styled(
+                    if !*editing_endpoint { "> " } else { "  " },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    with_cursor_marker(&masked, key_cursor_display),
+                    Style::default().fg(Color::White),
+                ),
             ]));
+
+            if provider_id == "generic_openai" {
+                lines.push(Line::from(""));
+                lines.push(Line::from("Endpoint URL (optional, e.g. http://localhost:11434/v1):"));
+                let endpoint_cursor_display = if *editing_endpoint {
+                    *endpoint_cursor
+                } else {
+                    endpoint_input.chars().count()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if *editing_endpoint { "> " } else { "  " },
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        if endpoint_input.is_empty() {
+                            "(use default/env)".to_string()
+                        } else {
+                            with_cursor_marker(endpoint_input, endpoint_cursor_display)
+                        },
+                        Style::default().fg(Color::White),
+                    ),
+                ]));
+                lines.push(Line::from(Span::styled(
+                    "Tab switches between API key and endpoint fields",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            }
 
             if let Some(err) = error {
                 lines.push(Line::from(""));
@@ -817,12 +874,11 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
         None => return,
     };
 
-    if menu.matches.is_empty() {
-        return;
-    }
-
+    let hint_row_count: u16 = 1;
+    let max_visible_rows: u16 = 8;
     let item_count = menu.matches.len() as u16;
-    let height = (item_count + 2).min(input_area.y);
+    let visible_items = item_count.max(1).min(max_visible_rows);
+    let height = (visible_items + hint_row_count + 2).min(input_area.y);
     let width = input_area.width.min(60);
 
     let popup = Rect::new(
@@ -835,37 +891,65 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(Clear, popup);
 
     let mut lines: Vec<Line<'_>> = Vec::new();
-    for (i, entry) in menu.matches.iter().enumerate() {
-        let is_selected = i == menu.selected;
-        let (indicator, path_style) = if is_selected {
-            (
-                "▸ ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else if entry.is_dir {
-            ("  ", Style::default().fg(Color::Blue))
-        } else {
-            ("  ", Style::default().fg(Color::White))
-        };
-        let icon = if entry.is_dir { "📁 " } else { "📄 " };
-        lines.push(Line::from(vec![
-            Span::styled(indicator, path_style),
-            Span::raw(icon),
-            Span::styled(&entry.display, path_style),
-        ]));
+    if menu.matches.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  No matches",
+            Style::default().fg(Color::DarkGray),
+        )]));
+    } else {
+        let start = menu.scroll_offset.min(menu.matches.len().saturating_sub(1));
+        let end = (start + visible_items as usize).min(menu.matches.len());
+        for (i, entry) in menu.matches[start..end].iter().enumerate() {
+            let absolute_i = start + i;
+            let is_selected = absolute_i == menu.selected;
+            let (indicator, path_style) = if is_selected {
+                (
+                    "▸ ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if entry.is_dir {
+                ("  ", Style::default().fg(Color::Blue))
+            } else {
+                ("  ", Style::default().fg(Color::White))
+            };
+            let icon = if entry.is_dir { "📁 " } else { "📄 " };
+            let display = shorten_middle(&entry.display, width.saturating_sub(8) as usize);
+            lines.push(Line::from(vec![
+                Span::styled(indicator, path_style),
+                Span::raw(icon),
+                Span::styled(display, path_style),
+            ]));
+        }
     }
 
-          let title = if let Some(ref dir) = menu.current_dir {
-              format!(" @{}/ ", dir.to_string_lossy())
-          } else {
-              format!(" @{} ", menu.query)
-          };
-          let block = Block::default()
-              .title(title)
-              .borders(Borders::ALL)
-              .border_style(Style::default().fg(Color::DarkGray));
+    lines.push(Line::from(vec![Span::styled(
+        "  Enter/Tab accept  Esc close  Ctrl+\\ hidden",
+        Style::default().fg(Color::DarkGray),
+    )]));
+
+    let title = if let Some(ref dir) = menu.current_dir {
+        let hidden = if app.file_menu_show_hidden { " hidden:on" } else { "" };
+        format!(
+            " @{}/ [{}/{}]{} ",
+            dir.to_string_lossy(),
+            menu.selected.saturating_add(1).min(menu.matches.len()),
+            menu.matches.len(),
+            hidden
+        )
+    } else {
+        format!(
+            " @{} [{}/{}] ",
+            menu.query,
+            menu.selected.saturating_add(1).min(menu.matches.len()),
+            menu.matches.len()
+        )
+    };
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup);
@@ -939,21 +1023,50 @@ fn centered_horizontal(width: u16, area: Rect) -> Rect {
 ///
 /// Unlike word wrapping, this breaks at exact character boundaries so that
 /// cursor positioning via `pos / width` and `pos % width` is always correct.
-fn char_wrap<'a>(text: &'a str, width: usize) -> Vec<Line<'a>> {
+fn char_wrap(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
-        return vec![Line::from(text)];
+        return vec![text.to_string()];
     }
+    let chars: Vec<char> = text.chars().collect();
     let mut lines = Vec::new();
-    let mut start = 0;
-    while start < text.len() {
-        let end = (start + width).min(text.len());
-        lines.push(Line::from(&text[start..end]));
+    let mut start = 0usize;
+    while start < chars.len() {
+        let end = (start + width).min(chars.len());
+        lines.push(chars[start..end].iter().collect::<String>());
         start = end;
     }
     if lines.is_empty() {
-        lines.push(Line::from(""));
+        lines.push(String::new());
     }
     lines
+}
+
+fn input_cursor_display_pos(cursor_chars: usize, inner_width: usize) -> (usize, usize) {
+    let display_pos = cursor_chars + 2; // "> " prefix
+    (display_pos / inner_width, display_pos % inner_width)
+}
+
+fn with_cursor_marker(text: &str, cursor: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let c = cursor.min(chars.len());
+    let mut out = String::with_capacity(text.len() + 3);
+    out.extend(chars[..c].iter());
+    out.push('█');
+    out.extend(chars[c..].iter());
+    out
+}
+
+fn input_widget_height(input_chars: usize, inner_width: usize) -> u16 {
+    let input_text_len = input_chars + 2; // "> " prefix
+    let num_lines = ((input_text_len as f32) / (inner_width as f32))
+        .ceil()
+        .max(1.0) as u16;
+    num_lines + 2 // +2 for borders
+}
+
+fn input_widget_lines(input: &str, inner_width: usize) -> Vec<String> {
+    let input_text = format!("> {}", input);
+    char_wrap(&input_text, inner_width)
 }
 
 // ---------------------------------------------------------------------------
@@ -961,14 +1074,11 @@ fn char_wrap<'a>(text: &'a str, width: usize) -> Vec<Line<'a>> {
 // ---------------------------------------------------------------------------
 
 fn render_chat(frame: &mut Frame, app: &mut App) {
+    app.home_input_area = Rect::default();
     // Compute chat input height based on wrapped text
     let chat_area = frame.area();
     let input_inner_width = chat_area.width.saturating_sub(2).max(1) as usize;
-    let input_text_len = app.input.len() + 2; // "> " prefix
-    let input_lines = ((input_text_len as f32) / (input_inner_width as f32))
-        .ceil()
-        .max(1.0) as u16;
-    let input_height = input_lines + 2; // +2 for borders
+    let input_height = input_widget_height(app.input_len_chars(), input_inner_width);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -1622,17 +1732,17 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         // Cursor sits right after the "> " prefix.
         frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
     } else {
-        let input_text = format!("> {}", app.input);
         // Character-wrap the text so cursor math (pos / width) stays correct
-        let wrapped_lines = char_wrap(&input_text, inner_width);
+        let wrapped_lines: Vec<Line<'_>> = input_widget_lines(&app.input, inner_width)
+            .into_iter()
+            .map(Line::from)
+            .collect();
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
 
         // Position cursor accounting for wrapped lines.
         // Use the character index (not byte length) so unicode content behaves.
-        let cursor_pos = app.input_cursor + 2; // "> " prefix
-        let cursor_line = cursor_pos / inner_width;
-        let cursor_col = cursor_pos % inner_width;
+        let (cursor_line, cursor_col) = input_cursor_display_pos(app.input_cursor, inner_width);
         let cursor_x = area.x + 1 + cursor_col as u16;
         let cursor_y = area.y + 1 + cursor_line as u16;
         frame.set_cursor_position((cursor_x, cursor_y));
@@ -1646,12 +1756,18 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("/", "Slash command — opens command menu"),
     ("?", "Show this keybindings help panel"),
     ("Left/Right", "Move cursor within the input line"),
+    ("Ctrl+Left/Right", "Move cursor by word"),
     ("Home/End", "Jump to start/end of input"),
+    ("Ctrl+Home/End", "Jump to input start/end"),
+    ("Ctrl+A / Ctrl+E", "Jump to input start/end (terminal style)"),
+    ("Ctrl+B / Ctrl+F", "Move cursor left/right (terminal style)"),
     ("Delete", "Delete character under cursor"),
+    ("Ctrl+W", "Delete previous word"),
+    ("Ctrl+K", "Delete to end of line"),
     ("Alt+V", "Paste image from clipboard as attachment"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
-    ("Ctrl+C", "Quit application"),
+    ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),
     // ── Navigation ──────────────────────────────────────────────────────
     ("Shift+↑ / PageUp", "Scroll messages up"),
     ("Shift+↓ / PageDown", "Scroll messages down"),
@@ -1953,12 +2069,11 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         lines.push(Line::from(vec![
             Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
             Span::styled(
-                state.number_input.as_str(),
+                with_cursor_marker(state.number_input.as_str(), state.number_cursor),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("█", Style::default().fg(Color::Cyan)), // cursor
         ]));
         lines.push(Line::from(Span::styled(
             "  Enter to enable  Esc to cancel",
@@ -2106,12 +2221,11 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         lines.push(Line::from(vec![
             Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
             Span::styled(
-                state.number_input.as_str(),
+                with_cursor_marker(state.number_input.as_str(), state.number_cursor),
                 Style::default()
                     .fg(Color::Magenta)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("█", Style::default().fg(Color::Magenta)), // cursor
         ]));
         lines.push(Line::from(Span::styled(
             "  Enter to enable  Esc to cancel",

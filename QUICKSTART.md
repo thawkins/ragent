@@ -180,6 +180,12 @@ Ragent loads configuration from multiple sources (last wins):
     "anthropic": {
       "env": ["ANTHROPIC_API_KEY"]
     },
+    "generic_openai": {
+      "env": ["GENERIC_OPENAI_API_KEY"],
+      "api": {
+        "base_url": "http://127.0.0.1:8080"
+      }
+    },
     "ollama": {
       "api": {
         "base_url": "http://localhost:11434"
@@ -689,6 +695,8 @@ Rate limit: 60 requests per minute per session on the messages endpoint.
 |------------------------|------------------------------------------------|----------------------------|
 | `ANTHROPIC_API_KEY`    | Anthropic API key                              | —                          |
 | `OPENAI_API_KEY`       | OpenAI API key                                 | —                          |
+| `GENERIC_OPENAI_API_KEY` | Generic OpenAI API key                       | —                          |
+| `GENERIC_OPENAI_API_BASE` | Generic OpenAI endpoint URL (host + port)   | `https://api.openai.com`   |
 | `GITHUB_COPILOT_TOKEN` | Copilot OAuth token (auto-discovered from IDE) | —                          |
 | `OLLAMA_HOST`          | Ollama server URL                              | `http://localhost:11434`   |
 | `OLLAMA_API_KEY`       | Optional auth for remote Ollama                | —                          |

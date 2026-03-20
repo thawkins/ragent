@@ -124,6 +124,7 @@ pub enum ScreenMode {
 pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("anthropic", "Anthropic (Claude)"),
     ("openai", "OpenAI (GPT)"),
+    ("generic_openai", "Generic OpenAI API"),
     ("copilot", "GitHub Copilot"),
     ("ollama", "Ollama (Local)"),
 ];
@@ -144,6 +145,14 @@ pub enum ProviderSetupStep {
         provider_name: String,
         /// The key text entered so far.
         key_input: String,
+        /// Cursor position (char index) inside `key_input`.
+        key_cursor: usize,
+        /// Optional API base URL (used by Generic OpenAI API provider).
+        endpoint_input: String,
+        /// Cursor position (char index) inside `endpoint_input`.
+        endpoint_cursor: usize,
+        /// Whether endpoint input is currently focused.
+        editing_endpoint: bool,
         /// Optional error message from a previous attempt.
         error: Option<String>,
     },
@@ -232,6 +241,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "List all agents — built-in and custom",
     },
     SlashCommandDef {
+        trigger: "browse_refresh",
+        description: "Refresh the @ file-picker project index",
+    },
+    SlashCommandDef {
         trigger: "clear",
         description: "Clear message history for the current session",
     },
@@ -252,6 +265,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Browse and re-use previous inputs (↑/↓ to select, Enter to insert)",
     },
     SlashCommandDef {
+        trigger: "inputdiag",
+        description: "Dump input/cursor/selection diagnostics for troubleshooting",
+    },
+    SlashCommandDef {
         trigger: "log",
         description: "Toggle the log panel on/off",
     },
@@ -270,6 +287,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "quit",
         description: "Exit ragent",
+    },
+    SlashCommandDef {
+        trigger: "exit",
+        description: "Exit ragent (alias of /quit)",
     },
     SlashCommandDef {
         trigger: "reload",
@@ -364,6 +385,8 @@ pub struct FileMenuState {
     pub matches: Vec<FileMenuEntry>,
     /// Currently highlighted index within `matches`.
     pub selected: usize,
+    /// Scroll offset for long result lists.
+    pub scroll_offset: usize,
     /// The query text typed after `@` (e.g. `"main"` for `@main`).
     pub query: String,
     /// If set, the menu is currently showing the contents of this directory
@@ -468,6 +491,8 @@ pub struct LspDiscoverState {
     pub servers: Vec<DiscoveredServer>,
     /// Number being typed by the user (e.g. `"2"`).
     pub number_input: String,
+    /// Cursor position (char index) inside `number_input`.
+    pub number_cursor: usize,
     /// Feedback message shown after an enable action or on error.
     pub feedback: Option<String>,
 }
@@ -483,6 +508,8 @@ pub struct McpDiscoverState {
     pub servers: Vec<DiscoveredMcpServer>,
     /// Number being typed by the user (e.g. `"2"`).
     pub number_input: String,
+    /// Cursor position (char index) inside `number_input`.
+    pub number_cursor: usize,
     /// Feedback message shown after an enable action or on error.
     pub feedback: Option<String>,
 }
@@ -550,8 +577,16 @@ pub struct App {
     pub slash_menu: Option<SlashMenuState>,
     /// File reference autocomplete menu, shown when `@` is typed.
     pub file_menu: Option<FileMenuState>,
+    /// Whether directory mode should include hidden files/dirs.
+    pub file_menu_show_hidden: bool,
     /// Cached project files for `@` autocomplete (lazily populated).
     pub project_files_cache: Option<Vec<std::path::PathBuf>>,
+    /// Working directory used to build `project_files_cache`.
+    pub project_files_cache_cwd: Option<std::path::PathBuf>,
+    /// Last refresh timestamp for the `@` picker cache.
+    pub project_files_cache_refreshed_at: Option<std::time::SystemTime>,
+    /// Number of indexed entries from the last cache refresh.
+    pub project_files_cache_count: usize,
     /// Previously submitted input lines (oldest first).
     pub input_history: Vec<String>,
     /// Current position when navigating history (`None` = new input).
@@ -631,6 +666,8 @@ pub struct App {
     pub active_tasks: Vec<ragent_core::task::TaskEntry>,
     /// Whether the keybindings help panel is currently visible.
     pub show_shortcuts: bool,
+    /// Whether Ctrl+C has armed a guarded keyboard exit sequence.
+    pub quit_armed: bool,
     /// Active right-click context menu, if any.
     pub context_menu: Option<ContextMenuState>,
     /// Image files staged to be sent with the next message (populated by Alt+V).

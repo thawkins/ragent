@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.0-alpha.20] - 2026-05-21
+
+### Added
+- Input changes improvements
+- New OpenAI generic provider support
+
 ## [0.1.0-alpha.19] - 2026-03-19
 
 ### Changed

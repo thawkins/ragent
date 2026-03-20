@@ -57,6 +57,8 @@ Requires Rust 1.85+ (edition 2024).
 export ANTHROPIC_API_KEY="sk-..."
 # or
 export OPENAI_API_KEY="sk-..."
+# or (for Generic OpenAI API provider)
+export GENERIC_OPENAI_API_KEY="sk-..."
 
 # Launch the interactive TUI
 ragent
@@ -66,6 +68,20 @@ ragent run "Explain this codebase"
 
 # Start the HTTP server only
 ragent serve --port 9100
+```
+
+Generic OpenAI-compatible endpoint (including custom port) can be configured in
+`ragent.json`:
+
+```json
+{
+  "provider": {
+    "generic_openai": {
+      "env": ["GENERIC_OPENAI_API_KEY"],
+      "api": { "base_url": "http://127.0.0.1:8080" }
+    }
+  }
+}
 ```
 
 ## Usage

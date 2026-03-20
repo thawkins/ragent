@@ -16,7 +16,10 @@ use ragent_core::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_tui::App;
-use ragent_tui::app::{ConfiguredProvider, LogLevel, ProviderSetupStep, ProviderSource, ScreenMode};
+use ragent_tui::app::{
+    ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogLevel,
+    ProviderSetupStep, ProviderSource, ScreenMode,
+};
 
 /// Build an [`App`] backed by an in-memory database.
 fn make_app() -> App {
@@ -90,6 +93,7 @@ fn test_slash_help_shows_commands() {
     assert!(text.contains("/compact"), "help should mention /compact");
     assert!(text.contains("/agent"), "help should mention /agent");
     assert!(text.contains("/model"), "help should mention /model");
+    assert!(text.contains("/inputdiag"), "help should mention /inputdiag");
     assert!(text.contains("/help"), "help should mention /help");
 }
 
@@ -112,6 +116,15 @@ fn test_slash_quit_stops_app() {
 
     app.execute_slash_command("/quit");
     assert!(!app.is_running, "app should stop after /quit");
+}
+
+#[test]
+fn test_slash_exit_stops_app() {
+    let mut app = make_app();
+    assert!(app.is_running);
+
+    app.execute_slash_command("/exit");
+    assert!(!app.is_running, "app should stop after /exit");
 }
 
 // ── /system ─────────────────────────────────────────────────────────
@@ -307,6 +320,16 @@ fn test_slash_provider_selection_updates_displayed_provider() {
 }
 
 #[test]
+fn test_provider_list_includes_generic_openai() {
+    assert!(
+        ragent_tui::app::PROVIDER_LIST
+            .iter()
+            .any(|(id, name)| *id == "generic_openai" && *name == "Generic OpenAI API"),
+        "provider list should include Generic OpenAI API"
+    );
+}
+
+#[test]
 fn test_model_selector_navigation_wraps_top_and_bottom() {
     let mut app = make_app();
     app.provider_setup = Some(ProviderSetupStep::SelectModel {
@@ -349,6 +372,66 @@ fn test_slash_provider_reset_opens_dialog() {
     assert!(
         app.provider_setup.is_some(),
         "should open provider reset dialog"
+    );
+}
+
+#[test]
+fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
+    let mut app = make_app();
+    app.provider_setup = Some(ProviderSetupStep::EnterKey {
+        provider_id: "generic_openai".to_string(),
+        provider_name: "Generic OpenAI API".to_string(),
+        key_input: String::new(),
+        key_cursor: 0,
+        endpoint_input: String::new(),
+        endpoint_cursor: 0,
+        editing_endpoint: false,
+        error: None,
+    });
+
+    // Toggle to endpoint field and type URL.
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),
+    );
+    ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE),
+    );
+
+    match app.provider_setup.as_ref().expect("provider setup present") {
+        ProviderSetupStep::EnterKey {
+            endpoint_input,
+            editing_endpoint,
+            ..
+        } => {
+            assert!(*editing_endpoint);
+            assert_eq!(endpoint_input, "ht");
+        }
+        _ => panic!("expected EnterKey"),
+    }
+}
+
+#[test]
+fn test_generic_openai_enter_key_persists_endpoint_setting() {
+    let mut app = make_app();
+    app.provider_setup = Some(ProviderSetupStep::EnterKey {
+        provider_id: "generic_openai".to_string(),
+        provider_name: "Generic OpenAI API".to_string(),
+        key_input: "test-key".to_string(),
+        key_cursor: 8,
+        endpoint_input: "http://localhost:11434/v1".to_string(),
+        endpoint_cursor: 25,
+        editing_endpoint: false,
+        error: None,
+    });
+
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert_eq!(
+        app.storage.get_setting("generic_openai_api_base").ok().flatten(),
+        Some("http://localhost:11434/v1".to_string())
     );
 }
 
@@ -418,6 +501,455 @@ fn test_input_cursor_left_right_and_editing() {
     assert_eq!(app.input_cursor, 1);
 }
 
+#[test]
+fn test_input_editing_handles_unicode_backspace_and_delete() {
+    let mut app = make_app();
+    app.input = "a💡b".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    // Move to between 💡 and b, then backspace removes 💡.
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.input_cursor, 2);
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(app.input, "ab");
+    assert_eq!(app.input_cursor, 1);
+
+    // Delete at cursor should remove the next character.
+    app.input = "a💡b".to_string();
+    app.input_cursor = 1; // before 💡
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    assert_eq!(app.input, "ab");
+    assert_eq!(app.input_cursor, 1);
+}
+
+#[test]
+fn test_file_menu_mode_editing_respects_midline_cursor() {
+    let mut app = make_app();
+    app.input = "ab@cd".to_string();
+    app.input_cursor = 2; // between 'b' and '@'
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "src".to_string(),
+        current_dir: None,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+    assert_eq!(app.input, "abX@cd");
+    assert_eq!(app.input_cursor, 3);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(app.input, "ab@cd");
+    assert_eq!(app.input_cursor, 2);
+}
+
+#[test]
+fn test_history_picker_enter_sets_char_cursor_for_unicode() {
+    let mut app = make_app();
+    app.history_picker = Some(HistoryPickerState {
+        entries: vec!["éé".to_string()],
+        selected: 0,
+        scroll_offset: 0,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(app.history_picker.is_none());
+    assert_eq!(app.input, "éé");
+    assert_eq!(app.input_cursor, 2);
+}
+
+#[test]
+fn test_home_and_chat_keystrokes_have_same_edit_result() {
+    let mut home = make_app();
+    home.current_screen = ScreenMode::Home;
+
+    let mut chat = make_app();
+    chat.current_screen = ScreenMode::Chat;
+
+    let sequence = vec![
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('💡'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    ];
+
+    for key in sequence {
+        home.handle_key_event(key);
+    }
+    let sequence = vec![
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('💡'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+    ];
+    for key in sequence {
+        chat.handle_key_event(key);
+    }
+
+    assert_eq!(home.input, chat.input);
+    assert_eq!(home.input_cursor, chat.input_cursor);
+}
+
+#[test]
+fn test_ctrl_word_navigation_and_deletes() {
+    let mut app = make_app();
+    app.input = "hello world again".to_string();
+    app.input_cursor = app.input.chars().count();
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, "hello world ".chars().count());
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, "hello again");
+    assert_eq!(app.input_cursor, "hello ".chars().count());
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, "hello ");
+    assert_eq!(app.input_cursor, "hello ".chars().count());
+}
+
+#[test]
+fn test_ctrl_terminal_cursor_movement_bindings() {
+    let mut app = make_app();
+    app.input = "abcdef".to_string();
+    app.input_cursor = 3;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 2);
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 3);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 0);
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 6);
+}
+
+#[test]
+fn test_ctrl_home_end_bindings() {
+    let mut app = make_app();
+    app.input = "abcdef".to_string();
+    app.input_cursor = 3;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 0);
+    app.handle_key_event(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, 6);
+}
+
+#[test]
+fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
+    let mut app = make_app();
+    app.input = "compare @first with @second".to_string();
+    let first_cursor = app
+        .input
+        .find("@first")
+        .expect("first mention exists")
+        + "@fi".len();
+    app.input_cursor = app.input[..first_cursor].chars().count();
+
+    app.project_files_cache = Some(vec![
+        std::path::PathBuf::from("first_file.rs"),
+        std::path::PathBuf::from("second_file.rs"),
+    ]);
+    app.project_files_cache_cwd = Some(std::env::current_dir().expect("cwd"));
+
+    app.update_file_menu();
+    let menu = app.file_menu.as_ref().expect("file menu should open");
+    assert_eq!(menu.query, "first");
+    assert!(
+        menu.matches
+            .iter()
+            .any(|e| e.display.contains("first_file.rs"))
+    );
+}
+
+#[test]
+fn test_accept_file_menu_replaces_active_mention_span_only() {
+    let mut app = make_app();
+    app.input = "compare @first with @second".to_string();
+    let first_cursor = app
+        .input
+        .find("@first")
+        .expect("first mention exists")
+        + "@first".len();
+    app.input_cursor = app.input[..first_cursor].chars().count();
+
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/first_match.rs".to_string(),
+            path: std::path::PathBuf::from("src/first_match.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "first".to_string(),
+        current_dir: None,
+    });
+
+    let closed = app.accept_file_menu_selection();
+    assert!(closed);
+    assert_eq!(app.input, "compare @src/first_match.rs with @second");
+    assert_eq!(
+        app.input_cursor,
+        "compare @src/first_match.rs".chars().count()
+    );
+}
+
+#[test]
+fn test_file_menu_closes_when_cursor_not_inside_mention() {
+    let mut app = make_app();
+    app.input = "compare @first with @second".to_string();
+    app.input_cursor = 0;
+    app.project_files_cache = Some(vec![std::path::PathBuf::from("first.rs")]);
+
+    app.update_file_menu();
+    assert!(app.file_menu.is_none());
+}
+
+#[test]
+fn test_file_menu_mode_supports_cursor_movement_and_delete() {
+    let mut app = make_app();
+    app.input = "ab@cd".to_string();
+    app.input_cursor = 3; // between '@' and 'c'
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "c".to_string(),
+        current_dir: None,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(app.input_cursor, 2);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+    assert_eq!(app.input, "abcd");
+    assert_eq!(app.input_cursor, 2);
+}
+
+#[test]
+fn test_file_menu_mode_supports_ctrl_word_actions() {
+    let mut app = make_app();
+    app.input = "@hello world".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "world".to_string(),
+        current_dir: None,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input_cursor, "@hello ".chars().count());
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, "@hello ");
+    assert_eq!(app.input_cursor, "@hello ".chars().count());
+}
+
+#[test]
+fn test_file_menu_enter_accepts_without_sending() {
+    let mut app = make_app();
+    app.input = "@first".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/first.rs".to_string(),
+            path: std::path::PathBuf::from("src/first.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "first".to_string(),
+        current_dir: None,
+    });
+
+    let action = ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+    assert!(action.is_none(), "enter should accept mention but not send");
+    assert_eq!(app.input, "@src/first.rs");
+    assert!(app.file_menu.is_none(), "menu should close after file acceptance");
+}
+
+#[test]
+fn test_file_menu_no_matches_stays_open_for_feedback() {
+    let mut app = make_app();
+    app.input = "@nomatch".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.project_files_cache = Some(vec![std::path::PathBuf::from("src/first.rs")]);
+
+    app.update_file_menu();
+    let menu = app.file_menu.as_ref().expect("menu should stay open");
+    assert!(menu.matches.is_empty(), "no matches should be represented");
+    assert_eq!(menu.query, "nomatch");
+}
+
+#[test]
+fn test_slash_browse_refresh_updates_cache_metadata() {
+    let mut app = make_app();
+    app.project_files_cache = None;
+    app.project_files_cache_cwd = None;
+    app.project_files_cache_refreshed_at = None;
+    app.project_files_cache_count = 0;
+
+    app.execute_slash_command("/browse_refresh");
+
+    assert!(
+        app.status.starts_with("browse index refreshed"),
+        "status should reflect browse refresh"
+    );
+    assert!(app.project_files_cache.is_some(), "cache should be populated");
+    assert!(app.project_files_cache_cwd.is_some(), "cache cwd should be set");
+    assert!(
+        app.project_files_cache_refreshed_at.is_some(),
+        "cache timestamp should be set"
+    );
+    assert_eq!(
+        app.project_files_cache_count,
+        app.project_files_cache.as_ref().map(|v| v.len()).unwrap_or(0)
+    );
+}
+
+#[test]
+fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
+    let mut app = make_app();
+    app.input = "@src".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.project_files_cache = Some(vec![]);
+    app.project_files_cache_cwd = Some(std::path::PathBuf::from("/definitely/not/current"));
+
+    app.update_file_menu();
+
+    let cwd = std::env::current_dir().expect("cwd");
+    assert_eq!(app.project_files_cache_cwd, Some(cwd));
+    assert!(app.project_files_cache.is_some());
+    assert_eq!(
+        app.project_files_cache_count,
+        app.project_files_cache.as_ref().map(|v| v.len()).unwrap_or(0)
+    );
+}
+
+#[test]
+fn test_directory_menu_has_back_to_fuzzy_entry() {
+    let mut app = make_app();
+    app.input = "@src".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/".to_string(),
+            path: std::path::PathBuf::from("src"),
+            is_dir: true,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "src".to_string(),
+        current_dir: None,
+    });
+    let _ = app.accept_file_menu_selection();
+    let menu = app.file_menu.as_ref().expect("directory menu should open");
+    assert_eq!(
+        menu.matches.first().map(|e| e.display.as_str()),
+        Some("<back to fuzzy>")
+    );
+}
+
+#[test]
+fn test_file_menu_ctrl_backslash_toggles_hidden_filter() {
+    let mut app = make_app();
+    app.input = "@src".to_string();
+    app.input_cursor = app.input.chars().count();
+    app.file_menu = Some(FileMenuState {
+        matches: vec![FileMenuEntry {
+            display: "src/main.rs".to_string(),
+            path: std::path::PathBuf::from("src/main.rs"),
+            is_dir: false,
+        }],
+        selected: 0,
+        scroll_offset: 0,
+        query: "src".to_string(),
+        current_dir: Some(std::path::PathBuf::from("src")),
+    });
+
+    assert!(!app.file_menu_show_hidden);
+    let _ = ragent_tui::input::handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL),
+    );
+    assert!(app.file_menu_show_hidden);
+    assert!(app.file_menu.is_some());
+}
+
+#[test]
+fn test_file_menu_down_scrolls_selection_window() {
+    let mut app = make_app();
+    let mut entries = Vec::new();
+    for i in 0..12 {
+        entries.push(FileMenuEntry {
+            display: format!("src/file_{i}.rs"),
+            path: std::path::PathBuf::from(format!("src/file_{i}.rs")),
+            is_dir: false,
+        });
+    }
+    app.file_menu = Some(FileMenuState {
+        matches: entries,
+        selected: 0,
+        scroll_offset: 0,
+        query: "file".to_string(),
+        current_dir: None,
+    });
+
+    for _ in 0..9 {
+        let _ = ragent_tui::input::handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+        );
+    }
+    let menu = app.file_menu.as_ref().expect("menu");
+    assert_eq!(menu.selected, 9);
+    assert!(menu.scroll_offset > 0);
+}
+
+#[test]
+fn test_slash_inputdiag_reports_input_state() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.input = "abc".to_string();
+    app.input_cursor = 2;
+
+    app.execute_slash_command("/inputdiag");
+
+    assert_eq!(app.status, "inputdiag");
+    assert!(!app.messages.is_empty());
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Input diagnostics:"));
+    assert!(text.contains("input chars: 0"));
+    assert!(text.contains("input cursor: 0"));
+    assert!(text.contains("browse cache entries:"));
+    assert!(text.contains("browse menu state:"));
+}
+
 // ── with leading slash and without ──────────────────────────────────
 
 #[test]
@@ -425,6 +957,36 @@ fn test_slash_command_works_without_leading_slash() {
     let mut app = make_app();
     app.execute_slash_command("quit");
     assert!(!app.is_running, "/quit should work without leading slash");
+}
+
+#[test]
+fn test_keyboard_quit_requires_ctrl_c_then_ctrl_d() {
+    let mut app = make_app();
+    assert!(app.is_running);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    assert!(app.is_running, "Ctrl+D alone should not quit");
+    assert!(app.status.contains("Ctrl+C first"));
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(app.is_running, "Ctrl+C should arm, not quit");
+    assert!(app.status.contains("Ctrl+D"));
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    assert!(!app.is_running, "Ctrl+C then Ctrl+D should quit");
+}
+
+#[test]
+fn test_keyboard_quit_ctrl_c_then_ctrl_c_does_not_exit() {
+    let mut app = make_app();
+    assert!(app.is_running);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(app.is_running);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    assert!(app.is_running, "second Ctrl+C should not exit");
+    assert!(app.status.contains("Ctrl+D"));
 }
 
 // ── /system preserves whitespace ────────────────────────────────────

@@ -14,12 +14,51 @@ use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::provider::{ModelInfo, Provider};
 
+/// Default API base URL for OpenAI-compatible endpoints.
+pub const OPENAI_API_BASE: &str = "https://api.openai.com";
+
+/// Returns the default OpenAI model catalog with `provider_id` attached.
+pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
+    vec![
+        ModelInfo {
+            id: "gpt-4o".to_string(),
+            provider_id: provider_id.to_string(),
+            name: "GPT-4o".to_string(),
+            cost: Cost {
+                input: 2.50,
+                output: 10.0,
+            },
+            capabilities: Capabilities {
+                reasoning: false,
+                streaming: true,
+                vision: true,
+                tool_use: true,
+            },
+            context_window: 128_000,
+            max_output: Some(16_384),
+        },
+        ModelInfo {
+            id: "gpt-4o-mini".to_string(),
+            provider_id: provider_id.to_string(),
+            name: "GPT-4o Mini".to_string(),
+            cost: Cost {
+                input: 0.15,
+                output: 0.60,
+            },
+            capabilities: Capabilities {
+                reasoning: false,
+                streaming: true,
+                vision: true,
+                tool_use: true,
+            },
+            context_window: 128_000,
+            max_output: Some(16_384),
+        },
+    ]
+}
+
 /// Provider implementation for the OpenAI Chat Completions API.
 pub struct OpenAiProvider;
-
-impl OpenAiProvider {
-    const API_BASE: &'static str = "https://api.openai.com";
-}
 
 #[async_trait::async_trait]
 impl Provider for OpenAiProvider {
@@ -43,42 +82,7 @@ impl Provider for OpenAiProvider {
 
     /// Returns default OpenAI models (GPT-4o, GPT-4o Mini).
     fn default_models(&self) -> Vec<ModelInfo> {
-        vec![
-            ModelInfo {
-                id: "gpt-4o".to_string(),
-                provider_id: "openai".to_string(),
-                name: "GPT-4o".to_string(),
-                cost: Cost {
-                    input: 2.50,
-                    output: 10.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                },
-                context_window: 128_000,
-                max_output: Some(16_384),
-            },
-            ModelInfo {
-                id: "gpt-4o-mini".to_string(),
-                provider_id: "openai".to_string(),
-                name: "GPT-4o Mini".to_string(),
-                cost: Cost {
-                    input: 0.15,
-                    output: 0.60,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: true,
-                    tool_use: true,
-                },
-                context_window: 128_000,
-                max_output: Some(16_384),
-            },
-        ]
+        openai_default_models("openai")
     }
 
     /// Creates an [`OpenAiClient`] configured with the given API key and optional base URL.
@@ -92,26 +96,27 @@ impl Provider for OpenAiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
-        let client = OpenAiClient {
-            api_key: api_key.to_string(),
-            base_url: base_url
-                .unwrap_or(Self::API_BASE)
-                .trim_end_matches('/')
-                .to_string(),
-            http: reqwest::Client::new(),
-        };
+        let client = OpenAiClient::new(api_key, base_url.unwrap_or(OPENAI_API_BASE));
         Ok(Box::new(client))
     }
 }
 
 /// HTTP client for the OpenAI Chat Completions API with streaming SSE support.
-pub struct OpenAiClient {
+pub(crate) struct OpenAiClient {
     api_key: String,
     base_url: String,
     http: reqwest::Client,
 }
 
 impl OpenAiClient {
+    pub(crate) fn new(api_key: &str, base_url: &str) -> Self {
+        Self {
+            api_key: api_key.to_string(),
+            base_url: base_url.trim_end_matches('/').to_string(),
+            http: reqwest::Client::new(),
+        }
+    }
+
     /// Build the JSON request body for the OpenAI Chat Completions API.
     ///
     /// # Errors

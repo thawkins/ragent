@@ -170,14 +170,32 @@ impl SessionProcessor {
         };
 
         // For Copilot, pass the stored plan-specific API base URL
-        let base_url = if model_ref.provider_id == "copilot" {
-            self.session_manager
+        let base_url = match model_ref.provider_id.as_str() {
+            "copilot" => self
+                .session_manager
                 .storage()
                 .get_setting("copilot_api_base")
                 .ok()
-                .flatten()
-        } else {
-            None
+                .flatten(),
+            "generic_openai" => {
+                let cfg = crate::config::Config::load().ok();
+                self.session_manager
+                    .storage()
+                    .get_setting("generic_openai_api_base")
+                    .ok()
+                    .flatten()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| {
+                        cfg.and_then(|c| c.provider.get("generic_openai").cloned())
+                            .and_then(|p| p.api.and_then(|a| a.base_url))
+                    })
+                    .or_else(|| {
+                        std::env::var("GENERIC_OPENAI_API_BASE")
+                            .ok()
+                            .filter(|s| !s.trim().is_empty())
+                    })
+            }
+            _ => None,
         };
 
         tracing::info!(
@@ -758,6 +776,7 @@ impl SessionProcessor {
         let env_vars = match provider_id {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],
             "openai" => vec!["OPENAI_API_KEY"],
+            "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
             _ => vec![],
         };
 

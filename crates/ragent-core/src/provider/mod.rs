@@ -5,6 +5,7 @@
 
 pub mod anthropic;
 pub mod copilot;
+pub mod generic_openai;
 pub mod ollama;
 pub mod openai;
 
@@ -205,7 +206,7 @@ impl Default for ProviderRegistry {
     }
 }
 
-/// Creates a [`ProviderRegistry`] pre-populated with the built-in Anthropic and OpenAI providers.
+/// Creates a [`ProviderRegistry`] pre-populated with the built-in providers.
 ///
 /// # Examples
 ///
@@ -215,12 +216,14 @@ impl Default for ProviderRegistry {
 /// let registry = create_default_registry();
 /// assert!(registry.get("anthropic").is_some());
 /// assert!(registry.get("openai").is_some());
+/// assert!(registry.get("generic_openai").is_some());
 /// ```
 pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));
     registry.register(Box::new(copilot::CopilotProvider::new()));
     registry.register(Box::new(openai::OpenAiProvider));
+    registry.register(Box::new(generic_openai::GenericOpenAiProvider));
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry
 }
