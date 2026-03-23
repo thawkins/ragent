@@ -7,6 +7,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
+use crate::message::Role;
 
 /// Spawns a sub-agent to perform a focused task.
 ///
@@ -67,6 +68,51 @@ impl Tool for NewTaskTool {
     /// Returns an error if required parameters `agent` or `task` are missing,
     /// if the TaskManager has not been initialized, or if task spawning fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        if let Some(team) = ctx.team_context.as_ref() {
+            let guidance = if team.is_lead {
+                format!(
+                    "Session '{}' is the lead of active team '{}'. \
+                     Do not use `new_task` for team delegation. Use team tools (`team_spawn`, \
+                     `team_task_create`, `team_assign_task`, `team_message`) so teammate activity \
+                     and output stay visible in the Teams UI.",
+                    ctx.session_id, team.team_name
+                )
+            } else {
+                format!(
+                    "Session '{}' is teammate '{}' in active team '{}'. \
+                     Do not use `new_task` from a teammate session. Use team workflow tools \
+                     (`team_read_messages`, `team_task_claim`, `team_task_complete`, `team_idle`) \
+                     and report progress via team messaging.",
+                    ctx.session_id, team.agent_id, team.team_name
+                )
+            };
+
+            return Ok(ToolOutput {
+                content: guidance,
+                metadata: Some(json!({
+                    "blocked": true,
+                    "reason": "team_context_active",
+                    "team_name": team.team_name,
+                    "agent_id": team.agent_id,
+                    "is_lead": team.is_lead
+                })),
+            });
+        }
+
+        if session_recently_requested_team(ctx)? {
+            return Ok(ToolOutput {
+                content: "This session appears to be in team-orchestration mode based on recent \
+                          user instructions. Do not use `new_task` yet. Create/open a team with \
+                          `team_create`, then delegate with `team_spawn`, `team_task_create`, and \
+                          `team_assign_task` so teammate activity is visible in the Teams window."
+                    .to_string(),
+                metadata: Some(json!({
+                    "blocked": true,
+                    "reason": "team_requested_no_active_team"
+                })),
+            });
+        }
+
         let agent = input
             .get("agent")
             .and_then(|v| v.as_str())
@@ -153,4 +199,25 @@ impl Tool for NewTaskTool {
             })
         }
     }
+}
+
+fn session_recently_requested_team(ctx: &ToolContext) -> Result<bool> {
+    let Some(storage) = ctx.storage.as_ref() else {
+        return Ok(false);
+    };
+    let messages = storage.get_messages(&ctx.session_id)?;
+    let latest_user = messages.into_iter().rev().find(|m| m.role == Role::User);
+    let Some(msg) = latest_user else {
+        return Ok(false);
+    };
+    let txt = msg.text_content().to_lowercase();
+    let markers = [
+        "ask the team",
+        "use a team",
+        "create a team",
+        "team member",
+        "teammate",
+        "team to",
+    ];
+    Ok(markers.iter().any(|m| txt.contains(m)))
 }

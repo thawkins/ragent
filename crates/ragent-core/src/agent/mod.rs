@@ -251,7 +251,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                     .to_string(),
             ),
             permission: read_only_permissions(),
-            max_steps: Some(15),
+            max_steps: Some(500),
             skills: Vec::new(),
             options: HashMap::new(),
         },
@@ -643,6 +643,9 @@ pub fn build_system_prompt(
             .iter()
             .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
             .collect();
+        let max_background_agents = crate::config::Config::load()
+            .map(|c| c.experimental.max_background_agents)
+            .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS);
 
         // Load custom agents and collect the spawnable ones
         let (custom_defs, _) = custom::load_custom_agents(working_dir);
@@ -736,9 +739,9 @@ pub fn build_system_prompt(
 
         section.push_str(
             "\n**Choosing an agent:**\n\
-             - `explore` — fastest and cheapest; use for ANY codebase search, reading, or understanding.\n\
-               Read-only. Stateless — loses all context between calls.\n\
-               **Always prefer `explore` over doing file searches yourself.**\n\
+              - `explore` — fastest and cheapest; use for ANY codebase search, reading, or understanding.\n\
+                Read-only. Stateless — loses all context between calls.\n\
+                **Always prefer `explore` over doing file searches yourself.**\n\
              - `build`   — use when you need to compile, run tests, apply fixes, or execute shell commands.\n\
              - `plan`    — use to produce a structured implementation plan without making any changes.\n\
              - `general` — full-capability fallback; use when the task doesn't fit a specialist agent.\n\n\
@@ -746,17 +749,24 @@ pub fn build_system_prompt(
              - **Use `background: true` for ALL tasks whenever you spawn more than one in the same response.**\n\
                `background: false` blocks the entire agent loop — every subsequent tool call in the same\n\
                response waits for it to finish. This makes parallel spawning impossible.\n\
-             - Use `background: false` ONLY when you are spawning a single task and need its result\n\
-               before you can continue reasoning (e.g. a quick targeted lookup).\n\
-             - When in doubt, use `background: true`.\n\n\
-             **CRITICAL — Parallel explore agents for large codebase reviews:**\n\
-             When asked to review, understand, or analyse a codebase with multiple modules or\n\
-             directories, DO NOT do the work yourself. Instead:\n\
-             1. Identify 3-5 independent areas (e.g. by top-level crate, directory, or concern).\n\
-             2. Spawn a separate `explore` agent for EACH area in the SAME response turn,\n\
-                ALL with `background: true`. They will run concurrently.\n\
-             3. Use `list_tasks` to check progress. Synthesise results when all complete.\n\
-             This is dramatically faster and cheaper than sequential exploration.\n\n\
+              - Use `background: false` ONLY when you are spawning a single task and need its result\n\
+                before you can continue reasoning (e.g. a quick targeted lookup).\n\
+              - When in doubt, use `background: true`.\n\n\
+              **CRITICAL — Concurrency limit for background tasks:**\n\
+              - You can run at most **MAX_BG_TASKS** background tasks at once in this session.\n\
+              - Never call `new_task` with `background: true` if it would exceed this limit.\n\
+              - If the limit is reached, call `wait_tasks` (preferred) or `list_tasks`, then spawn only\n\
+                after one finishes. Queue additional work in batches.\n\
+              - Do not spam retries when you see \"Maximum concurrent background tasks reached\".\n\n\
+              **CRITICAL — Parallel explore agents for large codebase reviews:**\n\
+              When asked to review, understand, or analyse a codebase with multiple modules or\n\
+              directories, DO NOT do the work yourself. Instead:\n\
+              1. Identify independent areas (e.g. by top-level crate, directory, or concern).\n\
+                 Spawn at most **MAX_BG_TASKS** background agents in one batch.\n\
+              2. Spawn a separate `explore` agent for EACH area in the SAME response turn,\n\
+                 ALL with `background: true`. They will run concurrently.\n\
+              3. Use `list_tasks` to check progress. Synthesise results when all complete.\n\
+              This is dramatically faster and cheaper than sequential exploration.\n\n\
              **CRITICAL — Batch all questions into one explore call:**\n\
              The explore agent is stateless — it loses ALL context between calls. Every call starts fresh.\n\
              - Batch ALL related questions into ONE explore call with a comprehensive prompt.\n\
@@ -779,9 +789,10 @@ pub fn build_system_prompt(
              ```json\n\
              {\"agent\": \"explore\", \"task\": \"Find all usages of EventBus in src/ and explain how events flow\", \"background\": false}\n\
              ```\n\n\
-             Use `wait_tasks` to block until background tasks finish (preferred — no polling).\n\
-             Use `list_tasks` to check status without blocking. Use `cancel_task` to stop a task early.\n\n",
+              Use `wait_tasks` to block until background tasks finish (preferred — no polling).\n\
+              Use `list_tasks` to check status without blocking. Use `cancel_task` to stop a task early.\n\n",
         );
+        section = section.replace("MAX_BG_TASKS", &max_background_agents.to_string());
 
         prompt.push_str(&section);
     }

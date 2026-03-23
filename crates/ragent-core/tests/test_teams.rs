@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::thread;
 
 use ragent_core::event::EventBus;
+use ragent_core::message::Message;
 use ragent_core::team::{
     HookOutcome, Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, Task, TaskStatus,
     TaskStore, TeamConfig, TeamMember, TeamStore, run_hook,
@@ -585,6 +586,93 @@ async fn test_team_lifecycle_with_tools() {
     );
 }
 
+#[tokio::test]
+async fn test_team_create_without_name_auto_generates_name() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-auto-name");
+    std::fs::create_dir_all(project.join(".ragent")).unwrap();
+
+    let registry = create_default_registry();
+    let create = registry.get("team_create").unwrap();
+    let lead_ctx = make_tool_ctx(project.clone(), "lead-001", None);
+
+    let out = create
+        .execute(serde_json::json!({"project_local": true}), &lead_ctx)
+        .await
+        .unwrap();
+    let meta = out.metadata.expect("metadata");
+    let team_name = meta
+        .get("team_name")
+        .and_then(|v| v.as_str())
+        .expect("team_name")
+        .to_string();
+    assert!(
+        team_name.starts_with("team-"),
+        "expected auto-generated team name, got: {team_name}"
+    );
+    assert_eq!(meta.get("auto_named").and_then(|v| v.as_bool()), Some(true));
+
+    let loaded = TeamStore::load_by_name(&team_name, &project).expect("team should exist");
+    assert_eq!(loaded.config.name, team_name);
+}
+
+#[tokio::test]
+async fn test_team_create_existing_team_returns_error() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-open-existing");
+    std::fs::create_dir_all(project.join(".ragent")).unwrap();
+
+    let _existing =
+        TeamStore::create("existing-team", "lead-001", &project, true).expect("seed team");
+
+    let registry = create_default_registry();
+    let create = registry.get("team_create").unwrap();
+    let lead_ctx = make_tool_ctx(project.clone(), "lead-002", None);
+
+    let err = create
+        .execute(
+            serde_json::json!({"name":"existing-team","project_local": true}),
+            &lead_ctx,
+        )
+        .await
+        .expect_err("should fail when team already exists");
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("already exists"),
+        "error should mention existing team: {err_text}"
+    );
+    assert!(
+        err_text.contains("team_open") || err_text.contains("/team open"),
+        "error should direct user to open existing team: {err_text}"
+    );
+}
+
+#[tokio::test]
+async fn test_team_create_recovers_when_existing_dir_missing_config() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-recover-missing-config");
+    let team_dir = project.join(".ragent").join("teams").join("tui-review");
+    std::fs::create_dir_all(&team_dir).unwrap();
+
+    let registry = create_default_registry();
+    let create = registry.get("team_create").unwrap();
+    let lead_ctx = make_tool_ctx(project.clone(), "lead-003", None);
+
+    let out = create
+        .execute(
+            serde_json::json!({"name":"tui-review","project_local": true}),
+            &lead_ctx,
+        )
+        .await
+        .unwrap();
+    let meta = out.metadata.expect("metadata");
+    assert_eq!(meta.get("team_name").and_then(|v| v.as_str()), Some("tui-review"));
+
+    let loaded = TeamStore::load_by_name("tui-review", &project).expect("team should load");
+    assert_eq!(loaded.config.name, "tui-review");
+    assert_eq!(loaded.config.lead_session_id, "lead-003");
+}
+
 // ── Integration: hook exit-2 feedback semantics ───────────────────────────────
 
 #[tokio::test]
@@ -604,4 +692,120 @@ async fn test_hook_exit_2_feedback_blocks_idle() {
         }
         HookOutcome::Allow => panic!("expected feedback/block outcome for exit code 2"),
     }
+}
+
+#[tokio::test]
+async fn test_new_task_blocked_when_team_context_active() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-block-new-task");
+    std::fs::create_dir_all(project.join(".ragent")).unwrap();
+    TeamStore::create("alpha", "lead-session", &project, true).unwrap();
+
+    let registry = create_default_registry();
+    let new_task = registry.get("new_task").unwrap();
+    let lead_ctx = make_tool_ctx(
+        project.clone(),
+        "lead-session",
+        Some(Arc::new(TeamContext {
+            team_name: "alpha".to_string(),
+            agent_id: "lead".to_string(),
+            is_lead: true,
+        })),
+    );
+
+    let out = new_task
+        .execute(
+            serde_json::json!({
+                "agent":"explore",
+                "task":"scan repository",
+                "background":true
+            }),
+            &lead_ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        out.content.contains("Do not use `new_task` for team delegation"),
+        "expected team-context guard content, got: {}",
+        out.content
+    );
+    let meta = out.metadata.expect("metadata");
+    assert_eq!(meta.get("blocked").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        meta.get("reason").and_then(|v| v.as_str()),
+        Some("team_context_active")
+    );
+}
+
+#[tokio::test]
+async fn test_new_task_blocked_when_user_recently_requested_team() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-recent-team-request");
+    std::fs::create_dir_all(project.join(".ragent")).unwrap();
+    let storage = Arc::new(ragent_core::storage::Storage::open_in_memory().unwrap());
+    storage.create_session("sess-team-intent", &project.display().to_string()).unwrap();
+    storage
+        .create_message(&Message::user_text(
+            "sess-team-intent",
+            "ask the team to review crates/ragent-tui and report findings",
+        ))
+        .unwrap();
+
+    let registry = create_default_registry();
+    let new_task = registry.get("new_task").unwrap();
+    let ctx = ToolContext {
+        session_id: "sess-team-intent".to_string(),
+        working_dir: project,
+        event_bus: Arc::new(EventBus::new(32)),
+        storage: Some(storage),
+        task_manager: None,
+        lsp_manager: None,
+        active_model: None,
+        team_context: None,
+        team_manager: None,
+    };
+
+    let out = new_task
+        .execute(
+            serde_json::json!({
+                "agent":"explore",
+                "task":"scan repository",
+                "background":true
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        out.content.contains("team-orchestration mode"),
+        "expected recent team-request guard content, got: {}",
+        out.content
+    );
+    let meta = out.metadata.expect("metadata");
+    assert_eq!(
+        meta.get("reason").and_then(|v| v.as_str()),
+        Some("team_requested_no_active_team")
+    );
+}
+
+#[test]
+fn test_team_store_save_writes_valid_json_after_many_updates() {
+    let tmp = tmp();
+    let project = tmp.path().join("proj-store-atomic-save");
+    std::fs::create_dir_all(project.join(".ragent")).unwrap();
+    let mut store = TeamStore::create("atomic-team", "lead-atomic", &project, true).unwrap();
+
+    for i in 0..100u32 {
+        store.config.members.push(TeamMember::new(
+            format!("reviewer-{i}"),
+            format!("tm-{i:03}"),
+            "explore",
+        ));
+        store.save().expect("save should succeed");
+    }
+
+    let loaded = TeamStore::load_by_name("atomic-team", &project).expect("team loads");
+    assert_eq!(loaded.config.members.len(), 100);
 }

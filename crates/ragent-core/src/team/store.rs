@@ -106,6 +106,34 @@ impl TeamStore {
         Ok(store)
     }
 
+    /// Initialize an existing team directory that does not yet contain `config.json`.
+    ///
+    /// This is used to recover from partially-created team directories.
+    pub fn initialize_existing_without_config(
+        name: &str,
+        lead_session_id: &str,
+        working_dir: &Path,
+    ) -> Result<Self> {
+        let team_dir = find_team_dir(working_dir, name)
+            .ok_or_else(|| anyhow!("team '{name}' not found"))?;
+        let config_path = team_dir.join("config.json");
+        if config_path.exists() {
+            return Err(anyhow!(
+                "team '{}' already has config at {}",
+                name,
+                config_path.display()
+            ));
+        }
+
+        fs::create_dir_all(team_dir.join("mailbox"))
+            .with_context(|| "create mailbox subdirectory")?;
+
+        let config = TeamConfig::new(name, lead_session_id);
+        let store = Self { dir: team_dir, config };
+        store.save()?;
+        Ok(store)
+    }
+
     /// Load an existing team from `team_dir`.
     pub fn load(team_dir: &Path) -> Result<Self> {
         let config_path = team_dir.join("config.json");
@@ -129,9 +157,12 @@ impl TeamStore {
     /// Persist the current config to `config.json`.
     pub fn save(&self) -> Result<()> {
         let config_path = self.dir.join("config.json");
+        let tmp_path = self.dir.join("config.json.tmp");
         let json = serde_json::to_string_pretty(&self.config)?;
-        fs::write(&config_path, json)
-            .with_context(|| format!("write {}", config_path.display()))?;
+        fs::write(&tmp_path, json)
+            .with_context(|| format!("write {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, &config_path)
+            .with_context(|| format!("rename {} -> {}", tmp_path.display(), config_path.display()))?;
         Ok(())
     }
 

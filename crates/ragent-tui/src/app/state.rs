@@ -330,7 +330,11 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "team",
-        description: "Team management (/team status | create/open/delete <name> | close | message <id> <text> | tasks | clear | cleanup)",
+        description: "Team management (/team help|status|show [name]|create/open/delete <name>|close|message <id> <text>|tasks|clear|cleanup)",
+    },
+    SlashCommandDef {
+        trigger: "teams",
+        description: "Alias of /team (supports /teams show <name>)",
     },
 ];
 
@@ -481,6 +485,40 @@ pub struct ContextMenuState {
     pub items: Vec<(ContextAction, bool)>,
 }
 
+/// Target represented by the output overlay.
+#[derive(Debug, Clone)]
+pub enum OutputViewTarget {
+    /// Show output for a concrete session.
+    Session {
+        /// Session id to display.
+        session_id: String,
+        /// Human-friendly label shown in the title.
+        label: String,
+    },
+    /// Show output for a team member (with optional linked session).
+    TeamMember {
+        /// Team name used in log prefixes.
+        team_name: String,
+        /// Teammate id (e.g. `tm-001`).
+        agent_id: String,
+        /// Human-friendly teammate name.
+        teammate_name: String,
+        /// Optional linked session id.
+        session_id: Option<String>,
+    },
+}
+
+/// State for the scrollable output overlay panel.
+#[derive(Debug, Clone)]
+pub struct OutputViewState {
+    /// Selected output target.
+    pub target: OutputViewTarget,
+    /// Vertical scroll offset from top.
+    pub scroll_offset: u16,
+    /// Maximum scroll value computed during render.
+    pub max_scroll: u16,
+}
+
 ///
 /// Shown as an overlay that lists discovered language servers with numbered
 /// rows. The user types a number and presses Enter to enable a server, or
@@ -613,6 +651,8 @@ pub struct App {
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
     pub active_agents_max_scroll: u16,
+    /// Cached area of the active-agents subpanel.
+    pub active_agents_area: Rect,
     /// Active scrollbar drag, if any.
     pub scrollbar_drag: Option<ScrollbarDragPane>,
     /// Active text selection, if any.
@@ -625,6 +665,22 @@ pub struct App {
     pub input_area: Rect,
     /// Cached area of the home-screen input widget (set during render).
     pub home_input_area: Rect,
+    /// Cached area of the teams subpanel.
+    pub teams_area: Rect,
+    /// Cached area of the output overlay.
+    pub output_view_area: Rect,
+    /// Cached area of the Agents button beside chat input.
+    pub agents_button_area: Rect,
+    /// Cached area of the Teams button beside chat input.
+    pub teams_button_area: Rect,
+    /// Whether the Agents popup window is visible.
+    pub show_agents_window: bool,
+    /// Whether the Teams popup window is visible.
+    pub show_teams_window: bool,
+    /// Cached click target for Agents popup close button.
+    pub agents_close_button_area: Rect,
+    /// Cached click target for Teams popup close button.
+    pub teams_close_button_area: Rect,
     /// Snapshot of discovered MCP servers (populated by `/mcp discover`).
     pub mcp_servers: Vec<McpServer>,
     /// Snapshot of LSP server descriptors (populated via `LspStatusChanged` events).
@@ -692,12 +748,16 @@ pub struct App {
                 pub active_team: Option<TeamConfig>,
                 /// Current members of the active team (updated from events).
                 pub team_members: Vec<TeamMember>,
+                /// Per-teammate message counters: `agent_id -> (sent, received)`.
+                pub team_message_counts: HashMap<String, (u32, u32)>,
                 /// Whether the Teams panel is visible in the sidebar.
                 pub show_teams: bool,
                 /// Scroll offset for the Teams panel.
                 pub teams_scroll_offset: u16,
-                /// Max scroll for the Teams panel.
-                pub teams_max_scroll: u16,
+                 /// Max scroll for the Teams panel.
+                 pub teams_max_scroll: u16,
+                 /// Active output overlay state.
+                 pub output_view: Option<OutputViewState>,
             }impl App {
     /// Set the path for persisting input history.
     pub fn set_history_file(&mut self, path: std::path::PathBuf) {

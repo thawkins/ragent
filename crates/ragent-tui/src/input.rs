@@ -38,6 +38,14 @@ pub enum InputAction {
     LogScrollUp,
     /// Scroll the log panel downward.
     LogScrollDown,
+    /// Scroll active output view upward.
+    OutputViewPageUp,
+    /// Scroll active output view downward.
+    OutputViewPageDown,
+    /// Jump active output view to the start.
+    OutputViewToStart,
+    /// Jump active output view to the end.
+    OutputViewToEnd,
     /// Recall the previous entry from input history.
     HistoryUp,
     /// Recall the next entry from input history.
@@ -322,6 +330,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => return None,
         }
+    }
+
+    if app.output_view.is_some() {
+        return match key.code {
+            KeyCode::PageUp if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::OutputViewToStart)
+            }
+            KeyCode::PageDown if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(InputAction::OutputViewToEnd)
+            }
+            KeyCode::PageUp => Some(InputAction::OutputViewPageUp),
+            KeyCode::PageDown => Some(InputAction::OutputViewPageDown),
+            KeyCode::Esc => {
+                app.output_view = None;
+                app.selected_agent_session_id = None;
+                app.selected_agent_index = None;
+                None
+            }
+            _ => None,
+        };
     }
 
     match key.code {

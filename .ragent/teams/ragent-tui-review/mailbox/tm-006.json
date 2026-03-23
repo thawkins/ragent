@@ -1,0 +1,20 @@
+[
+  {
+    "message_id": "0c0e785b-5baa-4105-95c6-2f417838e9c0",
+    "from": "lead",
+    "to": "tm-006",
+    "type": "message",
+    "content": "Please run a static code review of the crate at crates/ragent-tui focusing on compliance, anti-patterns, unwrap/expect usage, println/eprintln, panics, concurrency, spawn usage, subprocess calls, env var handling, and large function complexity. Produce a JSON findings report and propose remediation milestones. Include file paths and line ranges for each finding.",
+    "sent_at": "2026-03-23T06:26:51.932849377Z",
+    "read": true
+  },
+  {
+    "message_id": "faa201a2-7570-42d3-ad11-7304fafeb659",
+    "from": "lead",
+    "to": "tm-006",
+    "type": "message",
+    "content": "Task 'task-001' and 'task-002' are high priority; please coordinate and ensure the final markdown report (docs/reports/ragent-tui-compliance.md) contains all findings, severity, file locations, suggested fixes, and a remediation plan with milestones and tasks including estimated hours. When complete, save the report to docs/reports/ragent-tui-compliance.md and mark task-001 as completed.",
+    "sent_at": "2026-03-23T06:27:00.330290234Z",
+    "read": true
+  }
+]

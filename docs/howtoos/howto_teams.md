@@ -62,6 +62,8 @@ Key files:
 /team open feature-squad
 ```
 
+`/team create` only creates new teams. If `feature-squad` already exists, use `/team open feature-squad` to reuse it.
+
 ### Inspect team state
 
 ```text
@@ -126,6 +128,8 @@ Teams are fully operable via tools. TUI commands are convenience wrappers.
   }
 }
 ```
+
+If the team already exists, `team_create` returns an error; use `/team open <name>` for reopening.
 
 ### 5.2 Spawn teammates
 
@@ -407,4 +411,3 @@ Fix:
   - `examples/teams/code-review/`
   - `examples/teams/parallel-feature/`
   - `examples/teams/hooks/`
-

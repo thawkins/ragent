@@ -25,7 +25,7 @@ use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
-use crate::tool::{ToolContext, ToolRegistry};
+use crate::tool::{TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
 
 /// Drives the agentic conversation loop for a single session.
@@ -223,6 +223,7 @@ impl SessionProcessor {
             .get_session(session_id)?
             .map(|s| s.directory.clone())
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let team_context_for_session = resolve_team_context_for_session(session_id, &working_dir);
 
         let file_tree = build_file_tree(&working_dir, 2);
 
@@ -543,7 +544,7 @@ impl SessionProcessor {
                         task_manager: self.task_manager.get().cloned(),
                         lsp_manager: self.lsp_manager.get().cloned(),
                         active_model: Some(model_ref.clone()),
-                        team_context: None,
+                        team_context: team_context_for_session.clone(),
                         team_manager: self
                             .team_manager
                             .get()
@@ -813,6 +814,42 @@ struct PendingToolCall {
     id: String,
     name: String,
     args_json: String,
+}
+
+/// Resolve team identity for the given `session_id`, if that session currently
+/// participates in a team as lead or teammate.
+fn resolve_team_context_for_session(
+    session_id: &str,
+    working_dir: &std::path::Path,
+) -> Option<Arc<TeamContext>> {
+    for (_name, dir, _) in crate::team::TeamStore::list_teams(working_dir) {
+        let Ok(store) = crate::team::TeamStore::load(&dir) else {
+            continue;
+        };
+        if store.config.status != crate::team::TeamStatus::Active {
+            continue;
+        }
+        if store.config.lead_session_id == session_id {
+            return Some(Arc::new(TeamContext {
+                team_name: store.config.name.clone(),
+                agent_id: "lead".to_string(),
+                is_lead: true,
+            }));
+        }
+        if let Some(member) = store
+            .config
+            .members
+            .iter()
+            .find(|m| m.session_id.as_deref() == Some(session_id))
+        {
+            return Some(Arc::new(TeamContext {
+                team_name: store.config.name.clone(),
+                agent_id: member.agent_id.clone(),
+                is_lead: false,
+            }));
+        }
+    }
+    None
 }
 
 fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {

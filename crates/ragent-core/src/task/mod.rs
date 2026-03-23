@@ -561,12 +561,13 @@ impl TaskManager {
 
 /// Truncate a string to `max_len` characters, appending "…" if truncated.
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        let mut truncated = s[..max_len].to_string();
-        truncated.push('…');
-        truncated
+    match s.char_indices().nth(max_len) {
+        Some((byte_idx, _)) => {
+            let mut truncated = s[..byte_idx].to_string();
+            truncated.push('…');
+            truncated
+        }
+        None => s.to_string(),
     }
 }
 
@@ -598,6 +599,20 @@ mod tests {
     fn test_truncate_str_long() {
         let result = truncate_str("hello world", 5);
         assert_eq!(result, "hello…");
+    }
+
+    #[test]
+    fn test_truncate_str_multibyte_boundary_safe() {
+        let s = "café naïve résumé";
+        let result = truncate_str(s, 6);
+        assert_eq!(result, "café n…");
+    }
+
+    #[test]
+    fn test_truncate_str_multibyte_not_truncated_when_shorter() {
+        let s = "naïve";
+        let result = truncate_str(s, 10);
+        assert_eq!(result, "naïve");
     }
 
     #[test]

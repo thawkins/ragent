@@ -118,6 +118,7 @@ pub trait TeamManagerInterface: Send + Sync {
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
+        active_model: Option<&crate::agent::ModelRef>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String>;
 }

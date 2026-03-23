@@ -24,11 +24,54 @@ fn pluralize(count: usize, singular: &str, plural: &str) -> String {
 
 /// Truncate a string to a maximum length, appending ellipsis if truncated.
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}…", &s[..max_len])
+    if s.chars().count() > max_len {
+        let truncated: String = s.chars().take(max_len).collect();
+        format!("{truncated}...")
     } else {
         s.to_string()
     }
+}
+
+fn truncate_json_strings(value: &serde_json::Value, max_len: usize) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(s) => serde_json::Value::String(truncate_str(s, max_len)),
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|v| truncate_json_strings(v, max_len))
+                .collect(),
+        ),
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (k, v) in map {
+                out.insert(k.clone(), truncate_json_strings(v, max_len));
+            }
+            serde_json::Value::Object(out)
+        }
+        _ => value.clone(),
+    }
+}
+
+fn summarize_tool_args(input: &serde_json::Value, max_str_len: usize) -> String {
+    let Some(obj) = input.as_object() else {
+        return String::new();
+    };
+    let truncated = truncate_json_strings(input, max_str_len);
+    let Some(tobj) = truncated.as_object() else {
+        return String::new();
+    };
+    let mut keys: Vec<&String> = obj.keys().collect();
+    keys.sort();
+    let mut parts = Vec::new();
+    for k in keys {
+        if let Some(v) = tobj.get(k) {
+            let value_text = match v {
+                serde_json::Value::String(s) => format!("\"{s}\""),
+                _ => serde_json::to_string(v).unwrap_or_else(|_| "?".to_string()),
+            };
+            parts.push(format!("{k}={value_text}"));
+        }
+    }
+    parts.join(", ")
 }
 
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
@@ -187,11 +230,13 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                       let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
                       format!("line {}, col {}", line, column)
                   }
-                  "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
-                      .get("path")
-                      .and_then(|v| v.as_str())
-                      .map(|p| make_relative_path(p, cwd))
-                      .unwrap_or_default(),        _ => String::new(),
+                   "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
+                       .get("path")
+                       .and_then(|v| v.as_str())
+                       .map(|p| make_relative_path(p, cwd))
+                       .unwrap_or_default(),
+        t if t.starts_with("team_") => summarize_tool_args(input, 40),
+        _ => summarize_tool_args(input, 40),
     }
 }
 
@@ -705,5 +750,57 @@ impl Widget for MessageWidget<'_> {
         let lines = self.to_lines();
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         paragraph.render(area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_input_summary;
+    use serde_json::json;
+
+    #[test]
+    fn test_team_tool_summary_includes_args() {
+        let input = json!({
+            "team_name": "alpha",
+            "teammate_name": "reviewer-1",
+            "agent_type": "general"
+        });
+        let summary = tool_input_summary("team_spawn", &input, "/tmp");
+        assert!(summary.contains("team_name=\"alpha\""));
+        assert!(summary.contains("teammate_name=\"reviewer-1\""));
+        assert!(summary.contains("agent_type=\"general\""));
+    }
+
+    #[test]
+    fn test_team_tool_summary_truncates_long_strings_with_three_dots() {
+        let long = "x".repeat(60);
+        let input = json!({
+            "team_name": "alpha",
+            "prompt": long
+        });
+        let summary = tool_input_summary("team_spawn", &input, "/tmp");
+        assert!(summary.contains("prompt=\""));
+        assert!(summary.contains("...\""), "summary should use three dots: {summary}");
+    }
+
+    #[test]
+    fn test_unknown_tool_summary_includes_args() {
+        let input = json!({
+            "path": "/tmp/file.txt",
+            "limit": 10
+        });
+        let summary = tool_input_summary("some_new_tool", &input, "/tmp");
+        assert!(summary.contains("path=\"/tmp/file.txt\""));
+        assert!(summary.contains("limit=10"));
+    }
+
+    #[test]
+    fn test_unknown_tool_summary_truncates_long_strings() {
+        let input = json!({
+            "note": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        });
+        let summary = tool_input_summary("some_new_tool", &input, "/tmp");
+        assert!(summary.contains("note=\""));
+        assert!(summary.contains("...\""), "summary should truncate with three dots: {summary}");
     }
 }

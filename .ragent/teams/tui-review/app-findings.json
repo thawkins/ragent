@@ -1,0 +1,179 @@
+{
+  "review_target": "crates/ragent-tui/src/app/",
+  "files_reviewed": [
+    "crates/ragent-tui/src/app/state.rs"
+  ],
+  "reviewer": "reviewer-ui (tm-002)",
+  "timestamp": "2025-03-21",
+  "summary": {
+    "total_findings": 18,
+    "critical": 0,
+    "high": 3,
+    "medium": 8,
+    "low": 7
+  },
+  "findings": [
+    {
+      "id": "APP-001",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [37, 54],
+      "severity": "High",
+      "category": "Correctness / Security",
+      "description": "percent_decode_path() is semantically incorrect for non-ASCII UTF-8 percent-encoded sequences. The function iterates over chars and pushes `byte as char` after decoding a single %XX hex pair. For multi-byte UTF-8 characters (e.g., é encoded as %C3%A9), each byte (0xC3, 0xA9) is cast individually to a Unicode scalar using `byte as char`, yielding U+00C3 (Ã) and U+00A9 (©) instead of the correct U+00E9 (é). This is both a correctness bug and a potential path-traversal/security concern if paths decoded by this function are used to locate files.",
+      "recommended_fix": "Collect decoded bytes into a Vec<u8>, then use `String::from_utf8_lossy` or `String::from_utf8` to convert to a String. Example:\n```rust\npub fn percent_decode_path(s: &str) -> String {\n    let bytes: Vec<u8> = /* hex-decode loop producing Vec<u8> */;\n    String::from_utf8_lossy(&bytes).into_owned()\n}\n```\nAlternatively, use the well-tested `percent-encoding` crate."
+    },
+    {
+      "id": "APP-002",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [75, 85],
+      "severity": "High",
+      "category": "AGENTS.md Compliance / Code Style",
+      "description": "save_clipboard_image_to_temp() uses std::env::temp_dir() (the OS temporary directory) for writing clipboard images. The project's AGENTS.md explicitly mandates that temporary files must be placed in `target/temp/`, not in the system /tmp. Using the system temp dir also bypasses the project's .gitignore rule for target/temp and may expose clipboard image data in a world-readable location on multi-user systems.",
+      "recommended_fix": "Resolve the project root at call time and write to `<project_root>/target/temp/ragent_paste_<timestamp>.png`. Ensure the directory is created if absent. Optionally accept a `temp_dir: &Path` parameter so the caller controls the location."
+    },
+    {
+      "id": "APP-003",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [761, 761],
+      "severity": "High",
+      "category": "Code Style / Formatting",
+      "description": "The closing brace `}` of the `App` struct and the opening `impl App {` block are on the same line (`}impl App {`) with no space or newline separating them. This is a malformed formatting that violates both `rustfmt` conventions and the project style guide (4-space indent, max 100 width). Furthermore, struct fields at lines 731–760 are indented with 16 spaces instead of the expected 4, suggesting a copy-paste or editor accident that was never cleaned up.",
+      "recommended_fix": "Run `cargo fmt` to auto-correct the formatting. Manually verify that all fields from `history_file_path` through `output_view` (lines 731–760) have 4-space indentation. Place a newline and blank line between the struct closing brace and the `impl` block."
+    },
+    {
+      "id": "APP-004",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [39, 39],
+      "severity": "Medium",
+      "category": "Anti-pattern / Dead code",
+      "description": "The variable `chars` is created as a `Peekable` iterator (`s.chars().peekable()`) but `peek()` is never called on it anywhere in the function. The `peekable()` call is unnecessary and generates a clippy `unused_peekable` warning.",
+      "recommended_fix": "Change `s.chars().peekable()` to `s.chars()` and update the type annotation of `chars` accordingly (or just remove the `.peekable()` call)."
+    },
+    {
+      "id": "APP-005",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [68, 69],
+      "severity": "Medium",
+      "category": "Anti-pattern / Potential truncation",
+      "description": "In save_clipboard_image_to_temp(), `img_data.width` and `img_data.height` are both of type `usize` and are cast to `u32` without bounds checking. On 64-bit platforms, a `usize` value >4GiB would silently truncate to a wrong `u32`, causing the ImageBuffer construction to fail or produce an image with wrong dimensions. Clippy flags this as `cast_possible_truncation`.",
+      "recommended_fix": "Use explicit checked conversions:\n```rust\nlet width = u32::try_from(img_data.width)\n    .map_err(|_| anyhow::anyhow!(\"image width too large for u32\"))?;\nlet height = u32::try_from(img_data.height)\n    .map_err(|_| anyhow::anyhow!(\"image height too large for u32\"))?;\n```"
+    },
+    {
+      "id": "APP-006",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [30, 30],
+      "severity": "Low",
+      "category": "Anti-pattern / Style",
+      "description": "Redundant closure in is_image_path(): `.map(|e| e.to_ascii_lowercase())` can be written as `.map(str::to_ascii_lowercase)`. Clippy flags this as `redundant_closure_for_method_calls`.",
+      "recommended_fix": "Replace `.map(|e| e.to_ascii_lowercase())` with `.map(str::to_ascii_lowercase)`."
+    },
+    {
+      "id": "APP-007",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [26, 34],
+      "severity": "Low",
+      "category": "Code Style / Documentation",
+      "description": "is_image_path() is a pure function returning `bool` from an immutable reference. Clippy suggests it should have a `#[must_use]` attribute so callers that ignore the return value get a compiler warning.",
+      "recommended_fix": "Add `#[must_use]` attribute before the function definition."
+    },
+    {
+      "id": "APP-008",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [37, 54],
+      "severity": "Low",
+      "category": "Code Style / Documentation",
+      "description": "percent_decode_path() is a pure function returning an owned String. Clippy suggests it should have a `#[must_use]` attribute.",
+      "recommended_fix": "Add `#[must_use]` attribute before the function definition."
+    },
+    {
+      "id": "APP-009",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [44, 49],
+      "severity": "Low",
+      "category": "Anti-pattern / Style",
+      "description": "Nested `if let` statements in percent_decode_path() can be collapsed into a single `if let (Some(a), Some(b)) = ... && let Ok(byte) = ...` chain. Clippy flags this as `collapsible_if`.",
+      "recommended_fix": "Collapse the two nested `if let` blocks into one using `&&` / `let` chains (Rust 2021 edition supports `if let` chains in nightly; alternatively restructure into a single `match`)."
+    },
+    {
+      "id": "APP-010",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [451, 459],
+      "severity": "Low",
+      "category": "Code Style / Performance",
+      "description": "TextSelection::normalized() takes `&self` and performs only comparisons. Clippy suggests it could be `const fn` and should have `#[must_use]` since its return value is discarded otherwise.",
+      "recommended_fix": "Add `pub const fn` and `#[must_use]` annotations:\n```rust\n#[must_use]\npub const fn normalized(&self) -> ((u16, u16), (u16, u16)) { ... }\n```"
+    },
+    {
+      "id": "APP-011",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [522, 527],
+      "severity": "Low",
+      "category": "Documentation",
+      "description": "The LspDiscoverState struct has a doc comment that begins with `///` followed immediately by an empty line and then the actual description — i.e., the first line of the doc comment is empty (`///`). This is non-standard and means the rustdoc title (first paragraph) is empty, which produces poor rendered documentation.",
+      "recommended_fix": "Move the description to the first `///` line:\n```rust\n/// State for the interactive `/lsp discover` dialog.\n///\n/// Shown as an overlay...\n```"
+    },
+    {
+      "id": "APP-012",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [150, 150],
+      "severity": "Low",
+      "category": "Documentation",
+      "description": "The doc comment for `endpoint_input` in ProviderSetupStep::EnterKey mentions 'Generic OpenAI API' without backtick-quoting it. Clippy flags 'OpenAI' as `doc_markdown` (a code identifier that should be wrapped in backticks).",
+      "recommended_fix": "Change `Generic OpenAI API provider` to `Generic \\`OpenAI\\` API provider` or add appropriate backticks."
+    },
+    {
+      "id": "APP-013",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [719, 719],
+      "severity": "Low",
+      "category": "Documentation",
+      "description": "The doc comment for `tool_step_map` mentions 'EventBus' without backtick-quoting it. Clippy flags this as `doc_markdown`.",
+      "recommended_fix": "Change `EventBus` to `` `EventBus` `` in the doc comment."
+    },
+    {
+      "id": "APP-014",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [559, 761],
+      "severity": "Medium",
+      "category": "AGENTS.md Compliance / Design",
+      "description": "The App struct contains more than 3 boolean fields. Clippy's `struct_excessive_bools` lint fires, warning there are at minimum 10 boolean fields (is_running, show_log, show_shortcuts, quit_armed, file_menu_show_hidden, force_new_message, is_processing, auto_compact_in_progress, auto_compact_failed, agent_halted, show_agents_window, show_teams_window, show_teams). The AGENTS.md advises against this pattern. Furthermore App is a god-struct with 70+ public fields, violating the single-responsibility principle and making testing extremely difficult.",
+      "recommended_fix": "Group related flags into smaller sub-structs (e.g., `UiState`, `AgentState`, `TeamState`, `ScrollState`) and compose them into App. At minimum, consider a bitflags approach for the boolean flags."
+    },
+    {
+      "id": "APP-015",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [783, 789],
+      "severity": "Medium",
+      "category": "Anti-pattern / Magic number",
+      "description": "In load_history(), the maximum history size is hardcoded as the magic number `100` in two places (the comparison `> 100` and the drain range calculation). This makes it impossible to configure without source code changes.",
+      "recommended_fix": "Define a named constant: `const MAX_HISTORY_ENTRIES: usize = 100;` and use it in both places."
+    },
+    {
+      "id": "APP-016",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [786, 807],
+      "severity": "Medium",
+      "category": "AGENTS.md Compliance / Logging",
+      "description": "Two `tracing::debug!()` calls remain in load_history() and save_history() that log internal file paths and history counts. Per AGENTS.md: 'after an issue has been resolved remove all debug! and tracing::debug! calls in the relevant code.' These appear to be operational logging left in from development rather than debugging of a resolved issue.",
+      "recommended_fix": "Remove the `tracing::debug!()` calls in load_history() (line 786) and save_history() (line 807), or promote them to `tracing::trace!()` if retaining them for diagnostic purposes."
+    },
+    {
+      "id": "APP-017",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [1, 811],
+      "severity": "Medium",
+      "category": "AGENTS.md Compliance / Testing",
+      "description": "The three public utility functions (is_image_path, percent_decode_path, save_clipboard_image_to_temp) and the TextSelection::normalized() method have no unit tests in the crate's tests/ directory. The TextSelection::normalized() doc-test example exists in the source, but the tests/ directory (crates/ragent-tui/tests/) contains no test file for app/state functions. AGENTS.md requires tests to be in crates/ragent-tui/tests/.",
+      "recommended_fix": "Create crates/ragent-tui/tests/test_app_state.rs with unit tests for:\n- is_image_path with various extensions (positive/negative cases)\n- percent_decode_path with ASCII, non-ASCII (%C3%A9), and malformed sequences\n- TextSelection::normalized with anchor > endpoint, anchor < endpoint, and equal"
+    },
+    {
+      "id": "APP-018",
+      "file": "crates/ragent-tui/src/app/state.rs",
+      "line_range": [612, 613],
+      "severity": "Medium",
+      "category": "Documentation / Code Style",
+      "description": "The `provider_health` field is documented inline as: '0 = not yet checked, 1 = available, 2 = unavailable' using raw magic numbers. This mapping is not enforced by any type, enum, or constant. Any code reading/writing this atomic could silently use wrong values.",
+      "recommended_fix": "Define an enum (or u8 constants) to represent the health states:\n```rust\nmod provider_health_state {\n    pub const UNCHECKED: u8 = 0;\n    pub const AVAILABLE: u8 = 1;\n    pub const UNAVAILABLE: u8 = 2;\n}\n```\nOr use an `AtomicU8` wrapper type with typed accessor methods."
+    }
+  ]
+}

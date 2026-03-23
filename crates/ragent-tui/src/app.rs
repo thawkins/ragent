@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use pulldown_cmark::{Options, Parser, html};
 use ratatui::layout::Rect;
 
 use ragent_core::{
@@ -48,6 +49,137 @@ impl MentionSpan {
 
 
 impl App {
+    fn is_ascii_table_line(line: &str) -> bool {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        trimmed.contains('│')
+            || (trimmed.contains('─')
+                && trimmed
+                    .chars()
+                    .all(|c| matches!(c, '─' | '┬' | '┼' | '┴' | ' ')))
+    }
+
+    fn table_row_cells(line: &str) -> Vec<String> {
+        line.split('│').map(|c| c.trim().to_string()).collect()
+    }
+
+    fn table_border(widths: &[usize]) -> String {
+        let mut out = String::from("+");
+        for w in widths {
+            out.push_str(&"-".repeat(*w + 2));
+            out.push('+');
+        }
+        out
+    }
+
+    fn normalize_ascii_tables(&self, rendered: &str) -> String {
+        let lines: Vec<&str> = rendered.lines().collect();
+        let mut out: Vec<String> = Vec::new();
+        let mut i = 0usize;
+
+        while i < lines.len() {
+            if !Self::is_ascii_table_line(lines[i]) {
+                out.push(lines[i].to_string());
+                i += 1;
+                continue;
+            }
+
+            let start = i;
+            while i < lines.len() && Self::is_ascii_table_line(lines[i]) {
+                i += 1;
+            }
+            let block = &lines[start..i];
+
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            let mut separators: Vec<bool> = Vec::new();
+            let mut col_count = 0usize;
+            for line in block {
+                let trimmed = line.trim();
+                if trimmed.contains('│') {
+                    let cells = Self::table_row_cells(trimmed);
+                    col_count = col_count.max(cells.len());
+                    rows.push(cells);
+                    separators.push(false);
+                } else {
+                    separators.push(true);
+                    rows.push(Vec::new());
+                }
+            }
+            if col_count == 0 {
+                out.extend(block.iter().map(|s| s.to_string()));
+                continue;
+            }
+
+            let mut widths = vec![0usize; col_count];
+            for row in &rows {
+                for (idx, cell) in row.iter().enumerate() {
+                    widths[idx] = widths[idx].max(cell.chars().count());
+                }
+            }
+
+            let border = Self::table_border(&widths);
+            let mut wrote_top = false;
+            for (idx, row) in rows.iter().enumerate() {
+                if separators[idx] {
+                    if !wrote_top {
+                        out.push(border.clone());
+                        wrote_top = true;
+                    } else {
+                        out.push(border.clone());
+                    }
+                    continue;
+                }
+                if !wrote_top {
+                    out.push(border.clone());
+                    wrote_top = true;
+                }
+                let mut line = String::from("|");
+                for col in 0..col_count {
+                    let cell = row.get(col).cloned().unwrap_or_default();
+                    let pad = widths[col].saturating_sub(cell.chars().count());
+                    line.push(' ');
+                    line.push_str(&cell);
+                    line.push_str(&" ".repeat(pad));
+                    line.push(' ');
+                    line.push('|');
+                }
+                out.push(line);
+            }
+            if wrote_top {
+                out.push(border);
+            }
+        }
+        out.join("\n")
+    }
+
+    fn render_markdown_to_ascii(&self, text: &str) -> String {
+        // Only convert markdown-like slash output; preserve plain runtime text.
+        if !text.starts_with("From: /") {
+            return text.to_string();
+        }
+        let mut opts = Options::empty();
+        opts.insert(Options::ENABLE_TABLES);
+        opts.insert(Options::ENABLE_STRIKETHROUGH);
+        opts.insert(Options::ENABLE_TASKLISTS);
+
+        let parser = Parser::new_ext(text, opts);
+        let mut html_buf = String::new();
+        html::push_html(&mut html_buf, parser);
+
+        let rendered = html2text::from_read(html_buf.as_bytes(), 120).unwrap_or_else(|_| {
+            // Fallback to original text when markdown conversion fails.
+            text.to_string()
+        });
+        let cleaned = rendered
+            .lines()
+            .map(|l| l.trim_end())
+            .collect::<Vec<&str>>()
+            .join("\n");
+        self.normalize_ascii_tables(&cleaned)
+    }
+
     /// Create a new [`App`] with default state and the given event bus.
     ///
     /// # Examples
@@ -176,12 +308,21 @@ impl App {
             log_max_scroll: 0,
             active_agents_scroll_offset: 0,
             active_agents_max_scroll: 0,
+            active_agents_area: Rect::default(),
             scrollbar_drag: None,
             text_selection: None,
             message_content_lines: Vec::new(),
             log_content_lines: Vec::new(),
             input_area: Rect::default(),
             home_input_area: Rect::default(),
+            teams_area: Rect::default(),
+            output_view_area: Rect::default(),
+            agents_button_area: Rect::default(),
+            teams_button_area: Rect::default(),
+            show_agents_window: false,
+            show_teams_window: false,
+            agents_close_button_area: Rect::default(),
+            teams_close_button_area: Rect::default(),
             mcp_servers: Vec::new(),
             lsp_servers: Vec::new(),
             lsp_manager: None,
@@ -211,9 +352,11 @@ impl App {
                           custom_agent_diagnostics: all_diagnostics.clone(),
                           active_team: None,
                           team_members: Vec::new(),
+                          team_message_counts: HashMap::new(),
                           show_teams: false,
                           teams_scroll_offset: 0,
                           teams_max_scroll: 0,
+                          output_view: None,
                       };
 
         // Log any warnings from custom agent loading into the log panel
@@ -1076,7 +1219,10 @@ impl App {
                 true
             }
             Err(e) => {
+                // Surface a visible assistant message so slash commands don't fail silently.
                 self.status = format!("error: {}", e);
+                let msg = format!("From: /system\nFailed to create session: {}", e);
+                self.append_assistant_text(&msg);
                 false
             }
         }
@@ -1124,6 +1270,35 @@ impl App {
                 LogLevel::Info,
                 format!("TeamManager initialised for team '{team_name}'"),
             );
+        }
+    }
+
+    /// Best-effort hydration for teammate session IDs from on-disk team config.
+    ///
+    /// Some events (e.g. spawn) may arrive before session IDs are fully reflected
+    /// in-memory. This keeps UI activity metrics accurate.
+    pub fn refresh_team_member_session_ids(&mut self) {
+        let Some(team_name) = self.active_team.as_ref().map(|t| t.name.clone()) else {
+            return;
+        };
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let Ok(store) = TeamStore::load_by_name(&team_name, &working_dir) else {
+            return;
+        };
+
+        for member in &mut self.team_members {
+            if member.session_id.is_some() {
+                continue;
+            }
+            if let Some(stored) = store
+                .config
+                .members
+                .iter()
+                .find(|m| m.agent_id == member.agent_id)
+                .and_then(|m| m.session_id.clone())
+            {
+                member.session_id = Some(stored);
+            }
         }
     }
 
@@ -1832,6 +2007,30 @@ impl App {
     /// # }
     /// ```
     pub fn execute_slash_command(&mut self, raw: &str) {
+        // Top-level wrapper: single entry and single exit. Log invocation and
+        // call the inner implementation which may return early. On return,
+        // log completion and number of assistant output lines added.
+        let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
+        let (cmd, args) = stripped
+            .split_once(char::is_whitespace)
+            .map_or((stripped, ""), |(c, a)| (c, a.trim()));
+        let start_lines = self.assistant_output_lines();
+        self.push_log(LogLevel::Info, format!("Executing /{} {}", cmd, args));
+
+        // Call the original implementation moved to an inner function.
+        self.execute_slash_command_inner(raw);
+
+        let end_lines = self.assistant_output_lines();
+        let added = end_lines.saturating_sub(start_lines);
+        self.push_log(
+            LogLevel::Info,
+            format!("Finished /{} {} — {} lines output", cmd, args, added),
+        );
+    }
+
+    // Original implementation moved to an inner function. Keep its signature
+    // private so the public API has a single-entry single-exit wrapper.
+    fn execute_slash_command_inner(&mut self, raw: &str) {
         let stripped = raw.strip_prefix('/').unwrap_or(raw).trim();
         self.input.clear();
         self.input_cursor = 0;
@@ -1845,21 +2044,14 @@ impl App {
             .split_once(char::is_whitespace)
             .map_or((stripped, ""), |(c, a)| (c, a.trim()));
 
+        // Central session gate for slash commands.
+        // Commands may still choose to bypass this (e.g. quit/exit).
+        if !matches!(cmd, "quit" | "exit") && !self.ensure_session() {
+            return;
+        }
+
         match cmd {
             "about" => {
-                // Ensure a session exists so the about text can be displayed
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
                 let about = format!(
                     "  ragent — AI Coding Agent\n\
                      \n\
@@ -1939,20 +2131,6 @@ impl App {
                 }
             }
             "agents" => {
-                // Ensure a session exists so output can be displayed
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
-
                 let mut output = String::from("From: /agents\n\nBuilt-in Agents:\n\n");
 
                 let custom_names: std::collections::HashSet<String> = self
@@ -2057,19 +2235,6 @@ impl App {
                 let _ = self.start_compaction(false);
             }
             "help" => {
-                // Ensure a session exists so the help text can be appended
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
                 let mut help_lines = String::from("From: /help\nAvailable commands:\n");
                 for cmd_def in SLASH_COMMANDS {
                     help_lines.push_str(&format!(
@@ -2108,18 +2273,6 @@ impl App {
                 self.status = "help".to_string();
             }
             "inputdiag" => {
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
                 let selection = self
                     .text_selection
                     .as_ref()
@@ -2458,19 +2611,6 @@ impl App {
                 }
             }
             "tools" => {
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
-
                 let tool_defs = self.session_processor.tool_registry.definitions();
                 let mut output = String::from("From: /tools\nBuilt-in Tools:\n\n");
                 for def in &tool_defs {
@@ -2519,19 +2659,6 @@ impl App {
                 self.status = "tools".to_string();
             }
             "skills" => {
-                // Ensure a session exists so the output can be displayed
-                if self.session_id.is_none() {
-                    let dir = std::env::current_dir().unwrap_or_default();
-                    match self.session_processor.session_manager.create_session(dir) {
-                        Ok(session) => {
-                            self.session_id = Some(session.id);
-                        }
-                        Err(e) => {
-                            self.status = format!("error: {}", e);
-                            return;
-                        }
-                    }
-                }
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
                     .map(|c| c.skill_dirs)
@@ -2668,9 +2795,6 @@ impl App {
                 self.status = "tasks".to_string();
             }
             "lsp" => {
-                if !self.ensure_session() {
-                    return;
-                }
                 let lsp_args: Vec<&str> = args.split_whitespace().collect();
                 let sub = lsp_args.first().copied().unwrap_or("");
                 match sub {
@@ -2787,9 +2911,6 @@ impl App {
                 self.status = "lsp".to_string();
             }
             "mcp" => {
-                if !self.ensure_session() {
-                    return;
-                }
                 let mcp_args: Vec<&str> = args.split_whitespace().collect();
                 let sub = mcp_args.first().copied().unwrap_or("");
                 match sub {
@@ -2883,14 +3004,35 @@ impl App {
                 }
                 self.status = "mcp".to_string();
             }
-            "team" => {
+            "team" | "teams" => {
                 // Split "subcommand rest-of-args"
                 let (sub, rest) = args
                     .split_once(char::is_whitespace)
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
                 let sub = if sub.is_empty() { "status" } else { sub };
-
                 match sub {
+                    "help" => {
+                        let output = "From: /team help
+## /team command reference
+
+| Command | Arguments | Description |
+|---|---|---|
+| `/team help` | none | Show this command reference table. |
+| `/team status` | none | Show the currently active team in this session. |
+| `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
+| `/team create <name>` | required `name` | Create a new project-local team and set it active. |
+| `/team open <name>` | required `name` | Open an existing team and set it active. |
+| `/team close` | none | Close the active team in this session (does not delete on disk). |
+| `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
+| `/team message <teammate-name> <text>` | required `teammate-name`, required `text` | Send a mailbox message from lead to a teammate. |
+| `/team tasks` | none | Show the task table for the active team. |
+| `/team clear` | none | Clear/remove the active team task list file. |
+| `/team cleanup` | none | Clean up the active team (requires no working teammates). |
+
+Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams show`).";
+                        self.append_assistant_text(output);
+                        self.status = "team: help".to_string();
+                    }
                     "status" | "" => {
                         let mut output = String::from("From: /team status\n");
                         if let Some(team) = self.active_team.clone() {
@@ -2930,9 +3072,6 @@ impl App {
                         self.status = "team: status".to_string();
                     }
                     "create" => {
-                        if !self.ensure_session() {
-                            return;
-                        }
                         if rest.is_empty() {
                             self.status = "Usage: /team create <name>".to_string();
                             return;
@@ -2945,6 +3084,7 @@ impl App {
                                 let team_dir = store.dir.clone();
                                 self.active_team = Some(store.config);
                                 self.team_members.clear();
+                                self.team_message_counts.clear();
                                 self.show_teams = true;
                                 self.ensure_team_manager_for_team(&name, Some(team_dir));
                                 self.push_log(
@@ -2968,9 +3108,6 @@ impl App {
                         }
                     }
                     "open" => {
-                        if !self.ensure_session() {
-                            return;
-                        }
                         if rest.is_empty() {
                             self.status = "Usage: /team open <name>".to_string();
                             return;
@@ -2981,6 +3118,7 @@ impl App {
                                 let name = store.config.name.clone();
                                 let team_dir = store.dir.clone();
                                 self.team_members = store.config.members.clone();
+                                self.team_message_counts.clear();
                                 self.active_team = Some(store.config);
                                 self.show_teams = true;
                                 self.ensure_team_manager_for_team(&name, Some(team_dir));
@@ -3000,11 +3138,99 @@ impl App {
                             }
                         }
                     }
+                    "show" => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        if rest.is_empty() {
+                            let teams = TeamStore::list_teams(&working_dir);
+                            let mut output = String::from("From: /team show\n");
+                            if teams.is_empty() {
+                                output.push_str("No registered teams found.");
+                                self.status = "team: show all (0)".to_string();
+                            } else {
+                                output.push_str("## Registered teams\n\n");
+                                for (name, dir, is_project_local) in teams {
+                                    match TeamStore::load(&dir) {
+                                        Ok(store) => {
+                                            let team = store.config;
+                                            let scope =
+                                                if is_project_local { "project" } else { "global" };
+                                            output.push_str(&format!(
+                                                "  ● {:<18} {:<10} lead:{} teammates:{}\n",
+                                                team.name,
+                                                format!("{:?}", team.status).to_lowercase(),
+                                                team.lead_session_id,
+                                                team.members.len()
+                                            ));
+                                            output.push_str(&format!(
+                                                "    scope:{} path:{}\n",
+                                                scope,
+                                                dir.display()
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            output.push_str(&format!(
+                                                "  ● {} (failed to load: {})\n",
+                                                name, e
+                                            ));
+                                        }
+                                    }
+                                }
+                                self.status = "team: show all".to_string();
+                            }
+                            self.append_assistant_text(&output);
+                            return;
+                        }
+                        match TeamStore::load_by_name(rest, &working_dir) {
+                            Ok(store) => {
+                                let team = store.config.clone();
+                                self.ensure_team_manager_for_team(
+                                    &team.name,
+                                    Some(store.dir.clone()),
+                                );
+
+                                let mut output = String::from("From: /team show\n");
+                                output.push_str(&format!(
+                                    "## Team: {} ({})\n\n",
+                                    team.name,
+                                    format!("{:?}", team.status).to_lowercase()
+                                ));
+                                output.push_str(&format!(
+                                    "  ● lead-session: {}\n",
+                                    team.lead_session_id
+                                ));
+                                if team.members.is_empty() {
+                                    output.push_str("  (no teammates yet)\n");
+                                } else {
+                                    for m in &team.members {
+                                        let status = format!("{:?}", m.status).to_lowercase();
+                                        let task =
+                                            m.current_task_id.as_deref().unwrap_or("—").to_string();
+                                        let sid = m.session_id.as_deref().unwrap_or("—");
+                                        output.push_str(&format!(
+                                            "  └ {:<18} {:<10} agent:{} session:{} task:{}\n",
+                                            m.name, status, m.agent_id, sid, task
+                                        ));
+                                    }
+                                }
+                                output.push_str(&format!("\n{} teammate(s)\n", team.members.len()));
+                                self.append_assistant_text(&output);
+                                self.status = format!("team: show {}", team.name);
+                            }
+                            Err(e) => {
+                                self.status = format!("Failed to load team: {e}");
+                                self.push_log(
+                                    LogLevel::Error,
+                                    format!("team show failed for '{}': {}", rest, e),
+                                );
+                            }
+                        }
+                    }
                     "close" => {
                         if let Some(team) = self.active_team.as_ref() {
                             let team_name = team.name.clone();
                             self.active_team = None;
                             self.team_members.clear();
+                            self.team_message_counts.clear();
                             self.show_teams = false;
                             self.push_log(
                                 LogLevel::Info,
@@ -3049,6 +3275,7 @@ impl App {
                                     if deleting_active {
                                         self.active_team = None;
                                         self.team_members.clear();
+                                        self.team_message_counts.clear();
                                         self.show_teams = false;
                                     }
                                     self.push_log(
@@ -3264,12 +3491,37 @@ impl App {
                                 .filter(|m| matches!(m.status, MemberStatus::Working))
                                 .count();
                             if active_count > 0 {
-                                self.status = format!(
-                                    "{} teammate(s) still active — shut them down first",
-                                    active_count
+                                // Build list of active teammate names
+                                let active_names: Vec<String> = self
+                                    .team_members
+                                    .iter()
+                                    .filter(|m| m.status != MemberStatus::Stopped)
+                                    .map(|m| format!("{} ({})", m.name, m.agent_id))
+                                    .collect();
+
+                                // Log a warning with the list of active teammates
+                                self.push_log(
+                                    LogLevel::Warn,
+                                    format!(
+                                        "Cannot clean up team '{}': {} teammate(s) still active: {}",
+                                        team.name,
+                                        active_names.len(),
+                                        active_names.join(", ")
+                                    ),
                                 );
+
+                                // Also show a message in the chat window listing active teammates
+                                let mut msg = format!("From: /team cleanup\nCannot clean up team '{}' because the following teammate(s) are still active:\n\n", team.name);
+                                for name in &active_names {
+                                    msg.push_str(&format!("  - {}\n", name));
+                                }
+                                msg.push_str("\nYou can shut them down individually with team_shutdown_teammate, or run `/team forcecleanup` to deactivate and remove them.");
+                                self.append_assistant_text(&msg);
+
+                                self.status = format!("{} teammate(s) still active — shut them down first", active_count);
                                 return;
                             }
+
                             let working_dir = std::env::current_dir().unwrap_or_default();
                             let team_name = team.name.clone();
                             let removed = match TeamStore::load_by_name(&team_name, &working_dir) {
@@ -3278,6 +3530,7 @@ impl App {
                             };
                             self.active_team = None;
                             self.team_members.clear();
+                            self.team_message_counts.clear();
                             self.show_teams = false;
                             if removed {
                                 self.push_log(
@@ -3301,9 +3554,118 @@ impl App {
                             self.status = "No active team to clean up".to_string();
                         }
                     }
+                    "forcecleanup" | "force-cleanup" => {
+                        // Confirm with the user before destructive operation.
+                        let confirm_msg = "Are you sure you want to force-cleanup the active team (deactivate teammates and remove on-disk resources)? Press Enter to confirm or Esc to cancel.";
+                        // Use append_assistant_text to display a modal-style message and
+                        // set a temporary flag that instructs input handling to treat
+                        // Enter as confirmation for the next command. For simplicity
+                        // here, show the message and require the user to re-run the
+                        // command with the explicit suffix " confirm" (e.g. "/team forcecleanup confirm").
+                        let args_lower = args.to_lowercase();
+                        if args_lower != "confirm" {
+                            self.append_assistant_text(&format!(
+                                "From: /team forcecleanup\n{}\n\nTo confirm, re-run: /team forcecleanup confirm",
+                                confirm_msg
+                            ));
+                            self.push_log(
+                                LogLevel::Info,
+                                "forcecleanup confirmation required".to_string(),
+                            );
+                            self.status = "forcecleanup confirmation required".to_string();
+                            return;
+                        }
+                        // If confirmed, fall through to original behaviour
+                    }
+                        let team_opt = self.active_team.clone();
+                        if let Some(team) = team_opt {
+                            let working_dir = std::env::current_dir().unwrap_or_default();
+                            let team_name = team.name.clone();
+                            match TeamStore::load_by_name(&team_name, &working_dir) {
+                                Ok(mut store) => {
+                                    // Attempt graceful shutdown of active teammate sessions first
+                                    let mut deactivated: Vec<String> = Vec::new();
+                                    for m in &mut store.config.members {
+                                        if m.status != MemberStatus::Stopped {
+                                            // Try to contact team manager to request shutdown if available
+                                            if let Some(tm) = self.session_processor.team_manager.get() {
+                                                // best-effort: ignore errors
+                                                let _ = tm.spawn_teammate(
+                                                    &store.config.name,
+                                                    &m.name,
+                                                    &m.agent_type,
+                                                    "shutdown",
+                                                    None,
+                                                );
+                                            }
+                                            let desc = format!("{} ({})", m.name, m.agent_id);
+                                            m.status = MemberStatus::Stopped;
+                                            deactivated.push(desc);
+                                        }
+                                    }
+                                    // Persist best-effort
+                                    if let Err(e) = store.save() {
+                                        self.push_log(
+                                            LogLevel::Warn,
+                                            format!("Failed to persist team member status before force cleanup: {}", e),
+                                        );
+                                    }
+
+                                    // Remove directory
+                                    let removed = std::fs::remove_dir_all(&store.dir).is_ok();
+
+                                    // Update TUI state
+                                    self.active_team = None;
+                                    self.team_members.clear();
+                                    self.team_message_counts.clear();
+                                    self.show_teams = false;
+
+                                    if !deactivated.is_empty() {
+                                        self.push_log(
+                                            LogLevel::Info,
+                                            format!("Deactivated teammates: {}", deactivated.join(", ")),
+                                        );
+                                    }
+
+                                    if removed {
+                                        self.push_log(
+                                            LogLevel::Info,
+                                            format!("🗑️  Team '{team_name}' force cleaned up"),
+                                        );
+                                        let mut msg = format!("From: /team forcecleanup\nTeam '{team_name}' force cleaned up. The following teammate(s) were deactivated and removed:\n\n");
+                                        for d in &deactivated {
+                                            msg.push_str(&format!("  - {}\n", d));
+                                        }
+                                        self.append_assistant_text(&msg);
+                                    } else {
+                                        self.push_log(
+                                            LogLevel::Warn,
+                                            format!("Team '{team_name}' state cleared (dir not found)"),
+                                        );
+                                        let mut msg = format!("From: /team forcecleanup\nTeam '{team_name}' state cleared. The following teammate(s) were deactivated:\n\n");
+                                        for d in &deactivated {
+                                            msg.push_str(&format!("  - {}\n", d));
+                                        }
+                                        self.append_assistant_text(&msg);
+                                    }
+
+                                    self.status = "team force cleaned up".to_string();
+                                }
+                                Err(e) => {
+                                    self.status = format!("Failed to force cleanup team: {}", e);
+                                    self.push_log(
+                                        LogLevel::Error,
+                                        format!("forcecleanup failed for '{}': {}", team_name, e),
+                                    );
+                                }
+                            }
+                        } else {
+                            self.status = "No active team to clean up".to_string();
+                        }
+                    },
                     _ => {
                         self.status = format!(
-                            "Unknown /team subcommand '{}'. Usage: /team [status|create <name>|open <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
+                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show [name]|create <name>|open <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
                             sub
                         );
                         self.push_log(
@@ -3579,14 +3941,26 @@ impl App {
 
         match event.kind {
             MouseEventKind::ScrollUp => {
-                if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    self.scroll_output_view_by(-3);
+                } else if self.show_log && self.log_area.contains((event.column, event.row).into()) {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_add(3);
                 }
             }
             MouseEventKind::ScrollDown => {
-                if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    self.scroll_output_view_by(3);
+                } else if self.show_log && self.log_area.contains((event.column, event.row).into()) {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
@@ -3594,6 +3968,102 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 let pos = (event.column, event.row);
+                if self.agents_button_area.contains(pos.into()) {
+                    if self.active_tasks.is_empty() {
+                        return;
+                    }
+                    self.show_agents_window = !self.show_agents_window;
+                    if self.show_agents_window {
+                        self.show_teams_window = false;
+                    }
+                    return;
+                }
+                if self.teams_button_area.contains(pos.into()) {
+                    if self.active_team.is_none() {
+                        return;
+                    }
+                    self.show_teams_window = !self.show_teams_window;
+                    if self.show_teams_window {
+                        self.show_agents_window = false;
+                    }
+                    return;
+                }
+                if self.agents_close_button_area.contains(pos.into()) {
+                    self.show_agents_window = false;
+                    return;
+                }
+                if self.teams_close_button_area.contains(pos.into()) {
+                    self.show_teams_window = false;
+                    return;
+                }
+                if self.output_view.is_some()
+                    && self
+                        .output_view_area
+                        .contains((event.column, event.row).into())
+                {
+                    return;
+                }
+                if self.output_view.is_some() {
+                    self.output_view = None;
+                    self.selected_agent_session_id = None;
+                    self.selected_agent_index = None;
+                }
+                if self
+                    .active_agents_area
+                    .contains((event.column, event.row).into())
+                {
+                    let row = event
+                        .row
+                        .saturating_sub(self.active_agents_area.y.saturating_add(1));
+                    let absolute_row = row.saturating_add(self.active_agents_scroll_offset) as usize;
+                    if absolute_row == 1 {
+                        if let Some(ref sid) = self.session_id {
+                            self.selected_agent_index = Some(0);
+                            self.open_output_view_session(sid.clone(), "primary".to_string());
+                        }
+                        return;
+                    }
+                    if absolute_row >= 2 {
+                        let idx = absolute_row - 2;
+                        if let Some(task) = self.active_tasks.get(idx).cloned() {
+                            self.selected_agent_index = Some(idx + 1);
+                            self.open_output_view_session(
+                                task.child_session_id.clone(),
+                                format!("{} [{}]", task.agent_name, short_session_id(&task.id)),
+                            );
+                        }
+                        return;
+                    }
+                }
+                if self.teams_area.contains((event.column, event.row).into()) {
+                    let row = event
+                        .row
+                        .saturating_sub(self.teams_area.y.saturating_add(1));
+                    let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
+                    if absolute_row == 1 {
+                        if let Some(ref sid) = self.session_id {
+                            self.open_output_view_session(sid.clone(), "lead".to_string());
+                        }
+                        return;
+                    }
+                    if absolute_row >= 2 {
+                        let idx = absolute_row - 2;
+                        if let Some(member) = self.team_members.get(idx).cloned() {
+                            let team_name = self
+                                .active_team
+                                .as_ref()
+                                .map(|t| t.name.clone())
+                                .unwrap_or_else(|| "team".to_string());
+                            self.open_output_view_team_member(
+                                team_name,
+                                member.agent_id.clone(),
+                                member.name.clone(),
+                                member.session_id.clone(),
+                            );
+                        }
+                        return;
+                    }
+                }
                 // Scrollbar drag takes priority (rightmost column of pane)
                 if self.message_area.height > 0
                     && event.column == self.message_area.right().saturating_sub(1)
@@ -4191,6 +4661,18 @@ impl App {
                 InputAction::LogScrollDown => {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                 }
+                InputAction::OutputViewPageUp => {
+                    self.scroll_output_view_by(-5);
+                }
+                InputAction::OutputViewPageDown => {
+                    self.scroll_output_view_by(5);
+                }
+                InputAction::OutputViewToStart => {
+                    self.jump_output_view_start();
+                }
+                InputAction::OutputViewToEnd => {
+                    self.jump_output_view_end();
+                }
                 InputAction::HistoryUp => {
                     if self.input_history.is_empty() {
                         return;
@@ -4752,6 +5234,21 @@ impl App {
             } => {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
+                    if *tool == "team_create"
+                        && success
+                        && let Some(meta) = metadata
+                        && let Some(team_name) = meta.get("team_name").and_then(|v| v.as_str())
+                    {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir) {
+                            let name = store.config.name.clone();
+                            let team_dir = store.dir.clone();
+                            self.team_members = store.config.members.clone();
+                            self.active_team = Some(store.config);
+                            self.show_teams = true;
+                            self.ensure_team_manager_for_team(&name, Some(team_dir));
+                        }
+                    }
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
@@ -4885,6 +5382,22 @@ impl App {
                             "teammate",
                         );
                         self.team_members.push(member);
+                        self.team_message_counts
+                            .entry(agent_id.clone())
+                            .or_insert((0, 0));
+                    }
+                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id)
+                        && m.session_id.is_none()
+                    {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
+                            && let Some(stored) =
+                                store.config.members.iter().find(|x| x.agent_id == *agent_id)
+                        {
+                            m.session_id = stored.session_id.clone();
+                            m.status = stored.status.clone();
+                            m.current_task_id = stored.current_task_id.clone();
+                        }
                     }
                     self.show_teams = true;
                     self.push_log(
@@ -4903,6 +5416,17 @@ impl App {
                 ref preview,
             } => {
                 if self.is_current_session(session_id) {
+                    if from.as_str() != "lead" {
+                        let counts = self
+                            .team_message_counts
+                            .entry(from.clone())
+                            .or_insert((0, 0));
+                        counts.0 = counts.0.saturating_add(1);
+                    }
+                    if to.as_str() != "lead" {
+                        let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
+                        counts.1 = counts.1.saturating_add(1);
+                    }
                     self.push_log(
                         LogLevel::Info,
                         format!("📨 [{team_name}] {from} → {to}: {preview}"),
@@ -4964,6 +5488,7 @@ impl App {
                 if self.is_current_session(session_id) {
                     self.active_team = None;
                     self.team_members.clear();
+                    self.team_message_counts.clear();
                     self.show_teams = false;
                     self.push_log(
                         LogLevel::Info,
@@ -5019,11 +5544,73 @@ impl App {
                   session_id: self.session_id.clone(),
               });
           }
+
+    fn open_output_view_session(&mut self, session_id: String, label: String) {
+        self.selected_agent_session_id = Some(session_id.clone());
+        self.output_view = Some(OutputViewState {
+            target: OutputViewTarget::Session { session_id, label },
+            scroll_offset: 0,
+            max_scroll: 0,
+        });
+    }
+
+    fn open_output_view_team_member(
+        &mut self,
+        team_name: String,
+        agent_id: String,
+        teammate_name: String,
+        session_id: Option<String>,
+    ) {
+        self.selected_agent_session_id = session_id.clone();
+        self.output_view = Some(OutputViewState {
+            target: OutputViewTarget::TeamMember {
+                team_name,
+                agent_id,
+                teammate_name,
+                session_id,
+            },
+            scroll_offset: 0,
+            max_scroll: 0,
+        });
+    }
+
+    fn scroll_output_view_by(&mut self, delta: i16) {
+        if let Some(ref mut view) = self.output_view {
+            if delta >= 0 {
+                view.scroll_offset = (view.scroll_offset + delta as u16).min(view.max_scroll);
+            } else {
+                view.scroll_offset = view.scroll_offset.saturating_sub((-delta) as u16);
+            }
+        }
+    }
+
+    fn jump_output_view_start(&mut self) {
+        if let Some(ref mut view) = self.output_view {
+            view.scroll_offset = 0;
+        }
+    }
+
+    fn jump_output_view_end(&mut self) {
+        if let Some(ref mut view) = self.output_view {
+            view.scroll_offset = view.max_scroll;
+        }
+    }
+
     fn is_current_session(&self, session_id: &str) -> bool {
         self.session_id.as_deref() == Some(session_id)
     }
 
+    /// Count the total number of output lines produced by assistant messages.
+    fn assistant_output_lines(&self) -> usize {
+        self.messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .map(|m| m.text_content().lines().count())
+            .sum()
+    }
+
     fn append_assistant_text(&mut self, text: &str) {
+        let rendered = self.render_markdown_to_ascii(text);
         if !self.force_new_message {
             if let Some(last) = self.messages.last_mut()
                 && last.role == Role::Assistant
@@ -5032,10 +5619,10 @@ impl App {
                 // otherwise start a new Text part so text after tool calls
                 // appears in the correct position.
                 if let Some(MessagePart::Text { text: t }) = last.parts.last_mut() {
-                    t.push_str(text);
+                    t.push_str(&rendered);
                 } else {
                     last.parts.push(MessagePart::Text {
-                        text: text.to_string(),
+                        text: rendered.clone(),
                     });
                 }
                 return;
@@ -5048,7 +5635,7 @@ impl App {
                 sid,
                 Role::Assistant,
                 vec![MessagePart::Text {
-                    text: text.to_string(),
+                    text: rendered,
                 }],
             );
             self.messages.push(msg);

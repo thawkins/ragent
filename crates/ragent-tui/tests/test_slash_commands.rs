@@ -17,7 +17,8 @@ use ragent_core::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_tui::App;
 use ragent_tui::app::{
-    ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogLevel,
+    ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogEntry, LogLevel,
+    OutputViewState, OutputViewTarget,
     ProviderSetupStep, ProviderSource, ScreenMode,
 };
 
@@ -69,8 +70,11 @@ fn test_slash_clear_empties_messages() {
     assert!(app.messages.is_empty(), "messages should be cleared");
     assert_eq!(app.scroll_offset, 0, "scroll should reset");
     assert_eq!(app.status, "messages cleared");
-    assert_eq!(app.log_entries.len(), 1);
-    assert!(app.log_entries[0].message.contains("cleared"));
+    // Should log the command start, the action, and the completion.
+    assert!(app.log_entries.len() >= 2, "expected at least start+action logs");
+    assert!(app.log_entries[0].message.contains("Executing /clear"));
+    assert!(app.log_entries.iter().any(|e| e.message.contains("cleared")));
+    assert!(app.log_entries.last().unwrap().message.contains("Finished /clear"));
 }
 
 // ── /help ───────────────────────────────────────────────────────────
@@ -139,8 +143,11 @@ fn test_slash_system_sets_prompt() {
         Some("You are a pirate. Respond in pirate speak.")
     );
     assert_eq!(app.status, "system prompt updated");
-    assert_eq!(app.log_entries.len(), 1);
-    assert!(app.log_entries[0].message.contains("System prompt set"));
+    // Should have start/action/finish logs
+    assert!(app.log_entries.len() >= 2);
+    assert!(app.log_entries[0].message.contains("Executing /system"));
+    assert!(app.log_entries.iter().any(|e| e.message.contains("System prompt set")));
+    assert!(app.log_entries.last().unwrap().message.contains("Finished /system"));
 }
 
 #[test]
@@ -233,10 +240,11 @@ fn test_slash_compact_no_session_shows_warning() {
 
     app.execute_slash_command("/compact");
     assert!(
-        app.status.contains("No active session"),
-        "should warn about missing session: {}",
+        app.status.contains("No messages"),
+        "should create session then warn about empty messages: {}",
         app.status
     );
+    assert!(app.session_id.is_some(), "session should be created");
 }
 
 #[test]
@@ -448,8 +456,11 @@ fn test_slash_unknown_command_shows_error() {
         app.status
     );
     assert!(app.status.contains("foobar"));
-    assert_eq!(app.log_entries.len(), 1);
-    assert_eq!(app.log_entries[0].level, LogLevel::Warn);
+    // Expect at least start and completion logs plus the warning.
+    assert!(app.log_entries.len() >= 2);
+    assert!(app.log_entries.iter().any(|e| e.level == LogLevel::Warn));
+    assert!(app.log_entries[0].message.contains("Executing /foobar"));
+    assert!(app.log_entries.last().unwrap().message.contains("Finished /foobar"));
 }
 
 // ── input clearing ──────────────────────────────────────────────────
@@ -987,6 +998,76 @@ fn test_keyboard_quit_ctrl_c_then_ctrl_c_does_not_exit() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(app.is_running, "second Ctrl+C should not exit");
     assert!(app.status.contains("Ctrl+D"));
+}
+
+#[test]
+fn test_output_view_paging_shortcuts() {
+    let mut app = make_app();
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::Session {
+            session_id: "s1".to_string(),
+            label: "primary".to_string(),
+        },
+        scroll_offset: 10,
+        max_scroll: 50,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 5);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 10);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageUp, KeyModifiers::CONTROL));
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 0);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::CONTROL));
+    assert_eq!(app.output_view.as_ref().unwrap().scroll_offset, 50);
+}
+
+#[test]
+fn test_output_view_escape_closes_overlay() {
+    let mut app = make_app();
+    app.selected_agent_session_id = Some("s1".to_string());
+    app.selected_agent_index = Some(1);
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::Session {
+            session_id: "s1".to_string(),
+            label: "primary".to_string(),
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    assert!(app.output_view.is_none());
+    assert!(app.selected_agent_session_id.is_none());
+    assert!(app.selected_agent_index.is_none());
+}
+
+#[test]
+fn test_output_view_team_member_without_session_uses_log_filter() {
+    let mut app = make_app();
+    app.log_entries.push(LogEntry {
+        timestamp: chrono::Utc::now(),
+        level: LogLevel::Info,
+        message: "📨 [alpha] tm-001 → lead: done".to_string(),
+        session_id: None,
+    });
+
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::TeamMember {
+            team_name: "alpha".to_string(),
+            agent_id: "tm-001".to_string(),
+            teammate_name: "writer".to_string(),
+            session_id: None,
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+    });
+
+    app.handle_key_event(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+    assert!(app.output_view.is_some());
 }
 
 // ── /system preserves whitespace ────────────────────────────────────

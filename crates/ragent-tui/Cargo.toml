@@ -24,6 +24,8 @@ chrono = { workspace = true }
 rand = { workspace = true }
 arboard = { workspace = true }
 image = { workspace = true }
+html2text = { workspace = true }
+pulldown-cmark = "0.12"
 
 [build-dependencies]
 chrono = { workspace = true }

@@ -7,10 +7,12 @@ use std::sync::Arc;
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use ratatui::{Terminal, backend::TestBackend};
 
 use ragent_core::{
     agent,
     event::EventBus,
+    message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus},
     permission::PermissionChecker,
     provider,
     session::{SessionManager, processor::SessionProcessor},
@@ -18,7 +20,10 @@ use ragent_core::{
     tool,
 };
 use ragent_tui::App;
-use ragent_tui::app::{ContextAction, ContextMenuState, SelectionPane, TextSelection};
+use ragent_tui::app::{
+    ContextAction, ContextMenuState, OutputViewState, OutputViewTarget, ScreenMode, SelectionPane,
+    TextSelection,
+};
 
 fn make_app() -> App {
     let event_bus = Arc::new(EventBus::default());
@@ -169,6 +174,260 @@ fn test_mouse_up_preserves_selection() {
 
     // Selection should still be present after release
     assert!(app.text_selection.is_some());
+}
+
+#[test]
+fn test_clicking_active_agents_row_opens_output_view() {
+    let mut app = make_app();
+    app.session_id = Some("lead-s1".to_string());
+    app.show_agents_window = true;
+    app.active_agents_area = Rect::new(0, 10, 80, 8);
+    app.active_tasks.push(ragent_core::task::TaskEntry {
+        id: "task-12345678".to_string(),
+        parent_session_id: "lead-s1".to_string(),
+        child_session_id: "child-s1".to_string(),
+        agent_name: "explore".to_string(),
+        task_prompt: "x".to_string(),
+        background: true,
+        status: ragent_core::task::TaskStatus::Running,
+        result: None,
+        error: None,
+        created_at: chrono::Utc::now(),
+        completed_at: None,
+        reported: false,
+    });
+
+    app.handle_mouse_event(mouse_down(2, 13));
+    assert!(app.output_view.is_some());
+    assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
+}
+
+#[test]
+fn test_clicking_teams_row_opens_output_view() {
+    let mut app = make_app();
+    app.session_id = Some("lead-s1".to_string());
+    app.show_teams_window = true;
+    app.active_team = Some(ragent_core::team::TeamConfig::new("alpha", "lead-s1"));
+    let mut member = ragent_core::team::TeamMember::new("writer", "tm-001", "general");
+    member.session_id = Some("tm-s1".to_string());
+    app.team_members.push(member);
+    app.teams_area = Rect::new(0, 20, 80, 8);
+
+    app.handle_mouse_event(mouse_down(2, 23));
+    assert!(app.output_view.is_some());
+    assert_eq!(app.selected_agent_session_id.as_deref(), Some("tm-s1"));
+}
+
+#[test]
+fn test_click_outside_output_view_closes_overlay() {
+    let mut app = make_app();
+    app.output_view = Some(ragent_tui::app::OutputViewState {
+        target: ragent_tui::app::OutputViewTarget::Session {
+            session_id: "s1".to_string(),
+            label: "primary".to_string(),
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+    });
+    app.output_view_area = Rect::new(10, 10, 40, 10);
+
+    app.handle_mouse_event(mouse_down(1, 1));
+    assert!(app.output_view.is_none());
+}
+
+#[test]
+fn test_clicking_agents_button_toggles_agents_window() {
+    let mut app = make_app();
+    app.active_tasks.push(ragent_core::task::TaskEntry {
+        id: "task-1".to_string(),
+        parent_session_id: "lead-s1".to_string(),
+        child_session_id: "child-s1".to_string(),
+        agent_name: "explore".to_string(),
+        task_prompt: "x".to_string(),
+        background: true,
+        status: ragent_core::task::TaskStatus::Running,
+        result: None,
+        error: None,
+        created_at: chrono::Utc::now(),
+        completed_at: None,
+        reported: false,
+    });
+    app.agents_button_area = Rect::new(2, 30, 9, 3);
+
+    app.handle_mouse_event(mouse_down(3, 31));
+    assert!(app.show_agents_window);
+
+    app.handle_mouse_event(mouse_down(3, 31));
+    assert!(!app.show_agents_window);
+}
+
+#[test]
+fn test_clicking_teams_button_toggles_teams_window() {
+    let mut app = make_app();
+    app.active_team = Some(ragent_core::team::TeamConfig::new("alpha", "lead-s1"));
+    app.teams_button_area = Rect::new(12, 30, 9, 3);
+
+    app.handle_mouse_event(mouse_down(13, 31));
+    assert!(app.show_teams_window);
+
+    app.handle_mouse_event(mouse_down(13, 31));
+    assert!(!app.show_teams_window);
+}
+
+#[test]
+fn test_clicking_disabled_buttons_does_not_open_windows() {
+    let mut app = make_app();
+    app.agents_button_area = Rect::new(2, 30, 9, 3);
+    app.teams_button_area = Rect::new(12, 30, 9, 3);
+
+    app.handle_mouse_event(mouse_down(3, 31));
+    app.handle_mouse_event(mouse_down(13, 31));
+
+    assert!(!app.show_agents_window);
+    assert!(!app.show_teams_window);
+}
+
+#[test]
+fn test_clicking_close_button_closes_windows() {
+    let mut app = make_app();
+    app.show_agents_window = true;
+    app.show_teams_window = true;
+    app.agents_close_button_area = Rect::new(90, 30, 10, 3);
+    app.teams_close_button_area = Rect::new(90, 34, 10, 3);
+
+    app.handle_mouse_event(mouse_down(91, 31));
+    assert!(!app.show_agents_window);
+    assert!(app.show_teams_window);
+
+    app.handle_mouse_event(mouse_down(91, 35));
+    assert!(!app.show_teams_window);
+}
+
+#[test]
+fn test_output_view_can_load_messages_for_non_current_session() {
+    let mut app = make_app();
+    app.session_id = Some("lead-s1".to_string());
+    app.storage
+        .create_session("child-s1", "/tmp")
+        .expect("create child session");
+    app.storage
+        .create_message(&ragent_core::message::Message::user_text(
+            "child-s1",
+            "hello from child",
+        ))
+        .expect("create message");
+
+    let msgs = app.storage.get_messages("child-s1").expect("read child messages");
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].text_content(), "hello from child");
+}
+
+#[test]
+fn test_output_view_overlay_renders_non_current_session_message() {
+    let mut app = make_app();
+    app.current_screen = ScreenMode::Chat;
+    app.session_id = Some("lead-s1".to_string());
+    app.storage
+        .create_session("child-s1", "/tmp")
+        .expect("create child session");
+    app.storage
+        .create_message(&ragent_core::message::Message::user_text(
+            "child-s1",
+            "hello from child",
+        ))
+        .expect("create child message");
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::Session {
+            session_id: "child-s1".to_string(),
+            label: "explore [abcd1234]".to_string(),
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+    });
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("render frame");
+
+    let buffer = terminal.backend().buffer().clone();
+    let mut all_text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            let cell = buffer.cell((x, y)).expect("cell");
+            all_text.push_str(cell.symbol());
+        }
+        all_text.push('\n');
+    }
+
+    assert!(
+        all_text.contains("hello from child"),
+        "output overlay should render child-session message, got:\n{all_text}"
+    );
+}
+
+#[test]
+fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
+    let mut app = make_app();
+    app.current_screen = ScreenMode::Chat;
+    app.session_id = Some("lead-s1".to_string());
+    app.storage
+        .create_session("tm-s1", "/tmp")
+        .expect("create teammate session");
+
+    let tool_msg = Message::new(
+        "tm-s1",
+        Role::Assistant,
+        vec![MessagePart::ToolCall {
+            tool: "bash".to_string(),
+            call_id: "c1".to_string(),
+            state: ToolCallState {
+                status: ToolCallStatus::Completed,
+                input: serde_json::json!({"command":"echo hi"}),
+                output: Some(serde_json::json!({"line_count": 2})),
+                error: None,
+                duration_ms: Some(12),
+            },
+        }],
+    );
+    app.storage
+        .create_message(&tool_msg)
+        .expect("create tool-call message");
+
+    app.output_view = Some(OutputViewState {
+        target: OutputViewTarget::Session {
+            session_id: "tm-s1".to_string(),
+            label: "writer [abcd1234]".to_string(),
+        },
+        scroll_offset: 0,
+        max_scroll: 0,
+    });
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).expect("create test terminal");
+    terminal
+        .draw(|frame| ragent_tui::layout::render(frame, &mut app))
+        .expect("render frame");
+
+    let buffer = terminal.backend().buffer().clone();
+    let mut all_text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            let cell = buffer.cell((x, y)).expect("cell");
+            all_text.push_str(cell.symbol());
+        }
+        all_text.push('\n');
+    }
+
+    assert!(
+        all_text.contains("TOOL"),
+        "output overlay should include tool lines, got:\n{all_text}"
+    );
+    assert!(
+        all_text.contains("Bash") || all_text.contains("bash"),
+        "output overlay should include tool name, got:\n{all_text}"
+    );
 }
 
 // ---------- Selection normalization ----------

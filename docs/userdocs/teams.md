@@ -36,6 +36,8 @@ Or via tool:
 }
 ```
 
+Note: `team_create` creates a new team and fails if that name already exists. To reuse an existing team, use `/team open <name>`.
+
 ### 2) Spawn teammates
 
 Use `team_spawn` for each teammate:

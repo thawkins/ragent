@@ -19,7 +19,8 @@ use crate::layout_active_agents::render_active_agents_subpanel;
 use ragent_core::message::{MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
-    App, ContextAction, LogLevel, PROVIDER_LIST, ProviderSetupStep, ScreenMode, SelectionPane,
+    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, ScreenMode,
+    SelectionPane,
 };
 use crate::logo;
 use crate::widgets::message_widget::{
@@ -71,6 +72,80 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
+fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Rect) {
+    let gap = 1u16;
+    let button_w = ((button_col_area.width.saturating_sub(gap)) / 2).max(7);
+    let agents_x = button_col_area.x;
+    let teams_x = agents_x.saturating_add(button_w).saturating_add(gap);
+    let y = button_col_area.y;
+    let h = button_col_area.height.max(3);
+
+    app.agents_button_area = Rect::new(agents_x, y, button_w, h);
+    app.teams_button_area = Rect::new(teams_x, y, button_w, h);
+
+    let agents_enabled = !app.active_tasks.is_empty();
+    let teams_enabled = app.active_team.is_some();
+    let agents_active = agents_enabled && app.show_agents_window;
+    let teams_active = teams_enabled && app.show_teams_window;
+
+    let agents_text_style = if agents_active {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD)
+    } else if agents_enabled {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+    let teams_text_style = if teams_active {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD)
+    } else if teams_enabled {
+        Style::default().fg(Color::White)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+
+    let agents_border_style = if agents_active {
+        Style::default().fg(Color::Blue).bg(Color::Blue)
+    } else if agents_enabled {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+    let teams_border_style = if teams_active {
+        Style::default().fg(Color::Blue).bg(Color::Blue)
+    } else if teams_enabled {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+    };
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(" Agents ", agents_text_style)))
+            .style(agents_text_style)
+            .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(agents_border_style),
+        ),
+        app.agents_button_area,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(" Teams ", teams_text_style)))
+            .style(teams_text_style)
+            .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(teams_border_style),
+        ),
+        app.teams_button_area,
+    );
+}
+
 /// Apply a visual highlight to cells within the active text selection.
 fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, area: Rect) {
     let sel = match &app.text_selection {
@@ -111,6 +186,22 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     app.message_area = Rect::default();
     app.log_area = Rect::default();
     app.input_area = Rect::default();
+    app.active_agents_area = Rect::default();
+    app.teams_area = Rect::default();
+    app.output_view_area = Rect::default();
+    app.agents_button_area = Rect::default();
+    app.teams_button_area = Rect::default();
+    app.agents_close_button_area = Rect::default();
+    app.teams_close_button_area = Rect::default();
+    app.show_agents_window = false;
+    app.show_teams_window = false;
+    if app
+        .text_selection
+        .as_ref()
+        .is_some_and(|s| s.pane == SelectionPane::Input)
+    {
+        app.text_selection = None;
+    }
 
     // Compute input height based on wrapped text length
     let max_width = 88u16.min(area.width.saturating_sub(4));
@@ -1075,9 +1166,21 @@ fn input_widget_lines(input: &str, inner_width: usize) -> Vec<String> {
 
 fn render_chat(frame: &mut Frame, app: &mut App) {
     app.home_input_area = Rect::default();
+    if app
+        .text_selection
+        .as_ref()
+        .is_some_and(|s| s.pane == SelectionPane::HomeInput)
+    {
+        app.text_selection = None;
+    }
     // Compute chat input height based on wrapped text
     let chat_area = frame.area();
-    let input_inner_width = chat_area.width.saturating_sub(2).max(1) as usize;
+    let button_col_w = 18u16;
+    let input_inner_width = chat_area
+        .width
+        .saturating_sub(button_col_w)
+        .saturating_sub(2)
+        .max(1) as usize;
     let input_height = input_widget_height(app.input_len_chars(), input_inner_width);
 
     let chunks = Layout::default()
@@ -1110,22 +1213,30 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     } else {
         app.message_area = chunks[1];
         app.log_area = Rect::default();
+        app.active_agents_area = Rect::default();
+        app.teams_area = Rect::default();
         render_messages(frame, app, chunks[1]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[1]);
     }
 
-    app.input_area = chunks[2];
-    render_input(frame, app, chunks[2]);
-    apply_selection_highlight(frame, app, SelectionPane::Input, chunks[2]);
+    let input_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(button_col_w), Constraint::Min(20)])
+        .split(chunks[2]);
+
+    app.input_area = input_chunks[1];
+    render_input(frame, app, input_chunks[1]);
+    apply_selection_highlight(frame, app, SelectionPane::Input, input_chunks[1]);
+    draw_input_side_buttons(frame, app, input_chunks[0]);
 
     // Slash menu dropdown (above the chat input, if active)
     if app.slash_menu.is_some() {
-        render_slash_menu(frame, app, chunks[2]);
+        render_slash_menu(frame, app, input_chunks[1]);
     }
 
     // File menu dropdown (above the chat input, if active)
     if app.file_menu.is_some() {
-        render_file_menu(frame, app, chunks[2]);
+        render_file_menu(frame, app, input_chunks[1]);
     }
 
     if app.permission_pending.is_some() {
@@ -1156,6 +1267,24 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     if app.context_menu.is_some() {
         render_context_menu(frame, app);
     }
+
+    if app.show_agents_window {
+        render_agents_window_overlay(frame, app);
+    } else {
+        app.agents_close_button_area = Rect::default();
+    }
+    if app.show_teams_window {
+        render_teams_window_overlay(frame, app);
+    } else {
+        app.teams_close_button_area = Rect::default();
+    }
+
+    // Render output overlay last so it always appears above Teams/Agents popups.
+    if app.output_view.is_some() {
+        render_output_view_overlay(frame, app);
+    } else {
+        app.output_view_area = Rect::default();
+    }
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -1172,42 +1301,9 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
       let inner = block.inner(area);
       frame.render_widget(block, area);
 
-      // Reserve rows at the bottom for subpanels (agents and/or teams).
-      const AGENT_PANEL_HEIGHT: u16 = 8;
-      const TEAMS_PANEL_HEIGHT: u16 = 8;
-      let show_agents = !app.active_tasks.is_empty();
-      let show_teams = app.active_team.is_some();
-      let subpanel_height = match (show_agents, show_teams) {
-          (true, true)  => AGENT_PANEL_HEIGHT + TEAMS_PANEL_HEIGHT,
-          (true, false) => AGENT_PANEL_HEIGHT,
-          (false, true) => TEAMS_PANEL_HEIGHT,
-          (false, false) => 0,
-      };
-
-      let (log_inner, subpanel_area_opt) = if subpanel_height > 0 && inner.height > subpanel_height + 1 {
-          let log_h = inner.height - subpanel_height;
-          (
-              Rect { height: log_h, ..inner },
-              Some(Rect { y: inner.y + log_h, height: subpanel_height, ..inner }),
-          )
-      } else {
-          (inner, None)
-      };
-
-      // Derive per-subpanel areas from the combined subpanel area.
-      let (agent_area_opt, teams_area_opt) = if let Some(sub) = subpanel_area_opt {
-          match (show_agents, show_teams) {
-              (true, true) => (
-                  Some(Rect { height: AGENT_PANEL_HEIGHT, ..sub }),
-                  Some(Rect { y: sub.y + AGENT_PANEL_HEIGHT, height: TEAMS_PANEL_HEIGHT, ..sub }),
-              ),
-              (true, false) => (Some(sub), None),
-              (false, true) => (None, Some(sub)),
-              (false, false) => (None, None),
-          }
-      } else {
-          (None, None)
-      };
+      let log_inner = inner;
+      app.active_agents_area = Rect::default();
+      app.teams_area = Rect::default();
 
       // Determine which session to display logs for.
       // If a specific agent is selected, show its logs; otherwise show primary session.
@@ -1234,12 +1330,6 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
               Style::default().fg(Color::DarkGray),
           )));
           frame.render_widget(empty, log_inner);
-          if let Some(agent_area) = agent_area_opt {
-              render_active_agents_subpanel(frame, app, agent_area);
-          }
-          if let Some(teams_area) = teams_area_opt {
-              crate::layout_teams::render_teams_subpanel(frame, app, teams_area);
-          }
           return;
       }
 
@@ -1310,13 +1400,269 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
     }
 
-    // Render subpanels in the reserved bottom area.
-    if let Some(agent_area) = agent_area_opt {
-        render_active_agents_subpanel(frame, app, agent_area);
+}
+
+fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
+    let area = centered_rect(85, 70, frame.area());
+    app.output_view_area = area;
+    frame.render_widget(Clear, area);
+
+    let Some(view) = app.output_view.as_mut() else {
+        return;
+    };
+
+    let (title, target_session, team_filter): (
+        String,
+        Option<String>,
+        Option<(String, String, String)>,
+    ) = match &view.target {
+        OutputViewTarget::Session { session_id, label } => (
+            format!(" Output: {label} "),
+            Some(session_id.clone()),
+            None,
+        ),
+        OutputViewTarget::TeamMember {
+            team_name,
+            agent_id,
+            teammate_name,
+            session_id,
+        } => (
+            format!(" Output: {} [{}] ", teammate_name, agent_id),
+            session_id.clone(),
+            Some((team_name.clone(), agent_id.clone(), teammate_name.clone())),
+        ),
+    };
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    if let Some(ref sid) = target_session {
+        let session_messages = if app.session_id.as_deref() == Some(sid.as_str()) {
+            app.messages.clone()
+        } else {
+            app.storage.get_messages(sid).unwrap_or_default()
+        };
+        for msg in &session_messages {
+            let ts = msg.created_at.format("%H:%M:%S");
+            let who = match msg.role {
+                Role::User => "You",
+                Role::Assistant => "Assistant",
+            };
+            let mut wrote_any = false;
+            for part in &msg.parts {
+                match part {
+                    MessagePart::Text { text } => {
+                        for (idx, line) in text.lines().enumerate() {
+                            let prefix = if idx == 0 {
+                                format!("{ts} MSG {who}: ")
+                            } else {
+                                " ".repeat(15)
+                            };
+                            lines.push(Line::from(vec![
+                                Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                                Span::raw(line.to_string()),
+                            ]));
+                            wrote_any = true;
+                        }
+                    }
+                    MessagePart::ToolCall { tool, state, .. } => {
+                        let display_name = capitalize_tool_name(tool);
+                        let input_summary = tool_input_summary(tool, &state.input, &app.cwd);
+                        let mut detail = if input_summary.is_empty() {
+                            display_name
+                        } else {
+                            format!("{display_name} {input_summary}")
+                        };
+                        if state.status == ToolCallStatus::Completed
+                            && let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, &app.cwd)
+                        {
+                            detail.push_str(&format!(" -> {result}"));
+                        } else if state.status == ToolCallStatus::Error
+                            && let Some(err) = state.error.as_deref()
+                        {
+                            detail.push_str(&format!(" -> {err}"));
+                        }
+                        let icon = match state.status {
+                            ToolCallStatus::Completed => "✓",
+                            ToolCallStatus::Error => "✗",
+                            ToolCallStatus::Running => "…",
+                            ToolCallStatus::Pending => "○",
+                        };
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                format!("{ts} TOOL {icon} "),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::raw(detail),
+                        ]));
+                        wrote_any = true;
+                    }
+                    MessagePart::Reasoning { text } => {
+                        for line in text.lines() {
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    format!("{ts} RSN "),
+                                    Style::default().fg(Color::DarkGray),
+                                ),
+                                Span::raw(line.to_string()),
+                            ]));
+                        }
+                        wrote_any = true;
+                    }
+                    MessagePart::Image { path, .. } => {
+                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                        lines.push(Line::from(vec![
+                            Span::styled(format!("{ts} IMG "), Style::default().fg(Color::DarkGray)),
+                            Span::raw(format!("[image: {name}]")),
+                        ]));
+                        wrote_any = true;
+                    }
+                }
+            }
+            if !wrote_any {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{ts} MSG {who}: "), Style::default().fg(Color::DarkGray)),
+                    Span::raw("(empty)"),
+                ]));
+            }
+        }
     }
-    if let Some(teams_area) = teams_area_opt {
-        crate::layout_teams::render_teams_subpanel(frame, app, teams_area);
+
+    for entry in app.log_entries.iter().filter(|entry| {
+        if let Some((ref team_name, ref agent_id, ref teammate_name)) = team_filter {
+            entry.message.contains(&format!("[{team_name}]"))
+                && (entry.message.contains(agent_id) || entry.message.contains(teammate_name))
+        } else if let Some(ref sid) = target_session {
+            entry.session_id.as_deref() == Some(sid.as_str())
+                || (entry.session_id.is_none() && app.session_id.as_deref() == Some(sid.as_str()))
+        } else {
+            false
+        }
+    }) {
+        let ts = entry.timestamp.format("%H:%M:%S");
+        lines.push(Line::from(vec![
+            Span::styled(format!("{ts} LOG "), Style::default().fg(Color::DarkGray)),
+            Span::raw(entry.message.clone()),
+        ]));
     }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "No output yet for this target",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+
+    let total = paragraph.line_count(inner.width) as u16;
+    let visible = inner.height;
+    view.max_scroll = total.saturating_sub(visible);
+    view.scroll_offset = view.scroll_offset.min(view.max_scroll);
+
+    frame.render_widget(paragraph.scroll((view.scroll_offset, 0)), area);
+
+    if total > visible {
+        let mut sb_state =
+            ScrollbarState::new(view.max_scroll as usize).position(view.scroll_offset as usize);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight),
+            area,
+            &mut sb_state,
+        );
+    }
+}
+
+fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
+    let area = centered_rect(58, 56, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " Agents ",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let close_w = 10u16.min(inner.width);
+    let close_h = 3u16.min(inner.height);
+    let close_x = inner.right().saturating_sub(close_w);
+    let close_y = inner.bottom().saturating_sub(close_h);
+    let close_area = Rect::new(close_x, close_y, close_w, close_h);
+    app.agents_close_button_area = close_area;
+
+    let content_h = inner.height.saturating_sub(close_h + 1);
+    let content_area = Rect::new(inner.x, inner.y, inner.width, content_h.max(1));
+    app.active_agents_area = content_area;
+    render_active_agents_subpanel(frame, app, content_area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " Close ",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .alignment(Alignment::Center),
+        close_area,
+    );
+}
+
+fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
+    let area = centered_rect(58, 56, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " Teams ",
+            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Blue));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let close_w = 10u16.min(inner.width);
+    let close_h = 3u16.min(inner.height);
+    let close_x = inner.right().saturating_sub(close_w);
+    let close_y = inner.bottom().saturating_sub(close_h);
+    let close_area = Rect::new(close_x, close_y, close_w, close_h);
+    app.teams_close_button_area = close_area;
+
+    let content_h = inner.height.saturating_sub(close_h + 1);
+    let content_area = Rect::new(inner.x, inner.y, inner.width, content_h.max(1));
+    app.teams_area = content_area;
+    crate::layout_teams::render_teams_subpanel(frame, app, content_area);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            " Close ",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .alignment(Alignment::Center),
+        close_area,
+    );
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -1774,6 +2120,8 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("↑ / ↓", "Browse input history"),
     ("Ctrl+PageUp", "Scroll log panel up"),
     ("Ctrl+PageDown", "Scroll log panel down"),
+    ("PageUp / PageDown", "Scroll opened output overlay"),
+    ("Ctrl+PageUp/PageDown", "Output overlay: jump start/end"),
     // ── Agent ────────────────────────────────────────────────────────────
     ("Tab", "Cycle to next agent"),
     ("Esc", "Cancel running agent (while processing)"),

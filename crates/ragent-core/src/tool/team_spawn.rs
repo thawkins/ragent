@@ -97,6 +97,7 @@ impl Tool for TeamSpawnTool {
                 teammate_name,
                 agent_type,
                 input.get("prompt").and_then(|v| v.as_str()).unwrap_or(""),
+                ctx.active_model.as_ref(),
                 &ctx.working_dir,
             )
             .await?;

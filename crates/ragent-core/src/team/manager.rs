@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, warn};
 
 use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
@@ -78,6 +78,18 @@ If `require_plan_approval` is enabled, call `team_submit_plan` before starting
 implementation and wait for a `plan_approved` mailbox reply.
 "#,
     )
+}
+
+fn apply_teammate_model_override(
+    agent: &mut AgentInfo,
+    active_model: Option<&crate::agent::ModelRef>,
+) {
+    if let Some(m) = active_model {
+        // Force teammates onto the lead's active provider/model to avoid
+        // silent startup failures when built-in teammate defaults reference
+        // an unconfigured provider.
+        agent.model = Some(m.clone());
+    }
 }
 
 // ── Hook runner ───────────────────────────────────────────────────────────────
@@ -160,6 +172,8 @@ pub struct TeamManager {
     event_bus: Arc<EventBus>,
     /// Mailbox poll interval.
     poll_interval: Duration,
+    /// Serialises spawn operations to avoid concurrent config read/write races.
+    spawn_lock: Arc<Mutex<()>>,
 }
 
 impl TeamManager {
@@ -179,6 +193,7 @@ impl TeamManager {
             processor,
             event_bus,
             poll_interval: Duration::from_millis(500),
+            spawn_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -197,8 +212,11 @@ impl TeamManager {
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
+        active_model: Option<&crate::agent::ModelRef>,
         working_dir: &Path,
     ) -> Result<String> {
+        let _guard = self.spawn_lock.lock().await;
+
         // Allocate agent ID and update config.
         let agent_id = {
             let mut store = TeamStore::load(&self.team_dir)?;
@@ -243,6 +261,7 @@ impl TeamManager {
         let mut agent = resolve_agent_with_customs(agent_type, &config, working_dir)
             .unwrap_or_else(|_| AgentInfo::new(agent_type, "Teammate agent"));
         agent.mode = AgentMode::Subagent;
+        apply_teammate_model_override(&mut agent, active_model);
 
         let team_addition = build_team_prompt_addition(
             &self.team_name,
@@ -423,6 +442,31 @@ impl TeamManager {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::apply_teammate_model_override;
+    use crate::agent::{AgentInfo, ModelRef};
+
+    #[test]
+    fn test_apply_teammate_model_override_uses_active_model() {
+        let mut agent = AgentInfo::new("explore", "test");
+        agent.model = Some(ModelRef {
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-3-5-haiku-latest".to_string(),
+        });
+
+        let active = ModelRef {
+            provider_id: "copilot".to_string(),
+            model_id: "claude-sonnet-4.6".to_string(),
+        };
+        apply_teammate_model_override(&mut agent, Some(&active));
+
+        let model = agent.model.expect("model set");
+        assert_eq!(model.provider_id, "copilot");
+        assert_eq!(model.model_id, "claude-sonnet-4.6");
+    }
+}
+
 // ── TeamManagerInterface impl ────────────────────────────────────────────────
 
 #[async_trait::async_trait]
@@ -433,9 +477,16 @@ impl TeamManagerInterface for TeamManager {
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
+        active_model: Option<&crate::agent::ModelRef>,
         working_dir: &Path,
     ) -> Result<String> {
-        self.spawn_teammate_internal(teammate_name, agent_type, prompt, working_dir)
+        self.spawn_teammate_internal(
+            teammate_name,
+            agent_type,
+            prompt,
+            active_model,
+            working_dir,
+        )
             .await
     }
 }
