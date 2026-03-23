@@ -26,6 +26,7 @@ use ragent_core::{
         Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamManager, TeamMember,
         TeamStore,
     },
+    tool::TeamManagerInterface,
 };
 
 use crate::input::{self, InputAction};
@@ -3557,11 +3558,6 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     "forcecleanup" | "force-cleanup" => {
                         // Confirm with the user before destructive operation.
                         let confirm_msg = "Are you sure you want to force-cleanup the active team (deactivate teammates and remove on-disk resources)? Press Enter to confirm or Esc to cancel.";
-                        // Use append_assistant_text to display a modal-style message and
-                        // set a temporary flag that instructs input handling to treat
-                        // Enter as confirmation for the next command. For simplicity
-                        // here, show the message and require the user to re-run the
-                        // command with the explicit suffix " confirm" (e.g. "/team forcecleanup confirm").
                         let args_lower = args.to_lowercase();
                         if args_lower != "confirm" {
                             self.append_assistant_text(&format!(
@@ -3575,8 +3571,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.status = "forcecleanup confirmation required".to_string();
                             return;
                         }
-                        // If confirmed, fall through to original behaviour
-                    }
+
+                        // If confirmed, perform the force cleanup
                         let team_opt = self.active_team.clone();
                         if let Some(team) = team_opt {
                             let working_dir = std::env::current_dir().unwrap_or_default();
@@ -3590,13 +3586,28 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                             // Try to contact team manager to request shutdown if available
                                             if let Some(tm) = self.session_processor.team_manager.get() {
                                                 // best-effort: ignore errors
-                                                let _ = tm.spawn_teammate(
-                                                    &store.config.name,
-                                                    &m.name,
-                                                    &m.agent_type,
-                                                    "shutdown",
-                                                    None,
-                                                );
+                                                // Best-effort: request teammate to shutdown asynchronously.
+                                                // Fire-and-forget via tokio::spawn; ignore result.
+                                                let team_name_clone = store.config.name.clone();
+                                                let m_name = m.name.clone();
+                                                let m_agent_type = m.agent_type.clone();
+                                                let working_dir_clone = store.dir.clone();
+                                                let active_model = None;
+                                                if let Some(tm_arc) = self.session_processor.team_manager.get() {
+                                                    let tm = tm_arc.clone();
+                                                    tokio::spawn(async move {
+                                                        let _ = tm
+                                                            .spawn_teammate(
+                                                                &team_name_clone,
+                                                                &m_name,
+                                                                &m_agent_type,
+                                                                "shutdown",
+                                                                active_model,
+                                                                &working_dir_clone,
+                                                            )
+                                                            .await;
+                                                    });
+                                                }
                                             }
                                             let desc = format!("{} ({})", m.name, m.agent_id);
                                             m.status = MemberStatus::Stopped;
