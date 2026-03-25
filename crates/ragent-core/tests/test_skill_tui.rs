@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.6: External tests for TUI-related skill functionality.
 //!
 //! Tests skill registry filtering, listing, and bundled skill properties

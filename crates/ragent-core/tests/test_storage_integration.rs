@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 use ragent_core::message::Message;
 use ragent_core::storage::{Storage, deobfuscate_key, obfuscate_key};
 use std::sync::Arc;

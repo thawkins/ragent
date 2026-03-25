@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 use ragent_core::agent::resolve_agent;
 use ragent_core::config::Config;
 

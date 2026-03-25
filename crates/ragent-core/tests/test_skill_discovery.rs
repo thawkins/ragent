@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.4: External tests for skill discovery.
 //!
 //! Covers filesystem-based skill discovery including extra directories,

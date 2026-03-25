@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for TUI slash command parsing and dispatch (TASK-006).
 //!
 //! Verifies each slash command updates app state correctly, handles arguments,

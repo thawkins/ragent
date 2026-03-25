@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for TUI agent switching (TASK-005).
 //!
 //! Verifies that cycling through agents updates the agent name, status bar,

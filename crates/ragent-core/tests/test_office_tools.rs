@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Integration tests for the Office document tools (office_read, office_write, office_info).
 //!
 //! These tests use round-trip patterns: write a document with `office_write`,

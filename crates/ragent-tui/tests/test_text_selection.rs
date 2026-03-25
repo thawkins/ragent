@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for text selection and copy.
 //!
 //! Verifies mouse-driven text selection, highlight tracking,

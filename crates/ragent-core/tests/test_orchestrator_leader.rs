@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for in-process leader election and CoordinatorCluster (Task 5.2).
 
 use futures::future::FutureExt;

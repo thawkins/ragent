@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for policy-based conflict resolution and human-in-the-loop (Task 5.3).
 
 use futures::future::FutureExt;

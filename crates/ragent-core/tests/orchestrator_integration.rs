@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Integration tests for the orchestration layer.
 //!
 //! These tests spin up multiple in-process agents and exercise the full

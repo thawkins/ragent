@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for Phase 2 background agent infrastructure:
 //! - cancel_task tool
 //! - list_tasks tool

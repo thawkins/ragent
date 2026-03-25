@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.3: External tests for dynamic context injection.
 //!
 //! Covers edge cases in `!`command`` pattern matching and replacement.

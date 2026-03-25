@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for session processor error propagation paths (Task 5.2).
 
 use std::path::PathBuf;

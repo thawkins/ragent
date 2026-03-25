@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for blueprint seeding including README copy, task_seed.json handling and spawn-prompts.md
 
 use std::path::PathBuf;
@@ -53,7 +55,7 @@ async fn test_team_create_applies_blueprint_readme_tasks_and_spawn() {
     let lead_ctx = make_tool_ctx(project.clone(), "lead-001");
 
     // Execute team_create with blueprint
-    let out = create.execute(serde_json::json!({"name":"bp-sample","project_local":true,"blueprint":"bp1"}), &lead_ctx).await.unwrap();
+    let _out = create.execute(serde_json::json!({"name":"bp-sample","project_local":true,"blueprint":"bp1"}), &lead_ctx).await.unwrap();
 
     // Assert README copied
     let team_dir = project.join(".ragent").join("teams").join("bp-sample");
@@ -64,7 +66,8 @@ async fn test_team_create_applies_blueprint_readme_tasks_and_spawn() {
 
     // Assert tasks include Seed Task and Tool Created
     let loaded = TeamStore::load_by_name("bp-sample", &project).expect("team should load");
-    let titles: Vec<String> = loaded.read().unwrap().tasks.iter().map(|t| t.title.clone()).collect();
+    let task_list = loaded.task_store().expect("task store").read().expect("read tasks");
+    let titles: Vec<String> = task_list.tasks.iter().map(|t| t.title.clone()).collect();
     assert!(titles.iter().any(|t| t.contains("Seed Task")), "Seed Task should exist");
     assert!(titles.iter().any(|t| t.contains("Tool Created")), "Tool-created task should exist");
 

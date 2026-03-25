@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Integration tests for parallel tool execution with concurrency limits.
 
 use ragent_core::event::EventBus;

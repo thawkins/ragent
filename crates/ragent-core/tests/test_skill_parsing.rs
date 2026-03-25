@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.1: External tests for SKILL.md parsing.
 //!
 //! Covers edge cases in YAML frontmatter parsing and body extraction

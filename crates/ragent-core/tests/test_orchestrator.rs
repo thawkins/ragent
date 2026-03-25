@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Unit tests for orchestrator primitives: AgentRegistry, InProcessRouter,
 //! Coordinator routing, aggregation strategies, and Metrics.
 

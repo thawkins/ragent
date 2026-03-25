@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 use ragent_core::event::EventBus;
 use ragent_core::tool::multiedit::MultiEditTool;
 use ragent_core::tool::{Tool, ToolContext};

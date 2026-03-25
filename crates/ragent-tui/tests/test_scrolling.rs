@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for scroll and mouse support.
 //!
 //! Verifies keyboard and mouse-driven scrolling of the message and log panes,

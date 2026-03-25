@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.2: External tests for argument substitution.
 //!
 //! Covers edge cases in `$ARGUMENTS`, `$ARGUMENTS[N]`, `$N`,

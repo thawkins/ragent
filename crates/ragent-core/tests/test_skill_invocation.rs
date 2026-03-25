@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Phase 10.5: External tests for skill invocation.
 //!
 //! Covers end-to-end invocation logic, forked skill metadata,

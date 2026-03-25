@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for session import persistence (TASK-008).
 //!
 //! Verifies that exported messages can be imported into a new session,

@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! External integration tests for the @ file references feature.
 
 use ragent_core::reference::fuzzy::{collect_project_files, fuzzy_match};

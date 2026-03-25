@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for CLI session resume (TASK-007).
 //!
 //! Verifies that `App::load_session` correctly restores session state

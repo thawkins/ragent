@@ -1,3 +1,5 @@
+#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+
 //! Tests for the websearch tool.
 //!
 //! Unit tests cover schema validation, trait conformance, and error handling.
