@@ -52,6 +52,6 @@ fn test_truncate_output_respects_max_bytes() {
 #[test]
 fn test_truncate_output_no_truncate_when_small() {
     let base = "a".repeat(10);
-    let _out = truncate_output(base.clone());
+    let out = truncate_output(base.clone());
     assert_eq!(out, base);
 }

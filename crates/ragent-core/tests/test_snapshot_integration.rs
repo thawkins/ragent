@@ -1,7 +1,7 @@
 //! Tests for test_snapshot_integration.rs
 
 use ragent_core::snapshot::*;
-use std::io::Write;
+
 use std::path::PathBuf;
 
 fn test_dir(name: &str) -> PathBuf {

@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use ragent_core::event::{Event, EventBus};
-use ragent_core::tool::{Tool, ToolContext, create_default_registry};
+use ragent_core::tool::{ToolContext, create_default_registry};
 use serde_json::json;
 
 fn test_ctx() -> (ToolContext, Arc<EventBus>) {

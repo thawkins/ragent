@@ -533,7 +533,7 @@ async fn test_team_lifecycle_with_tools() {
             .metadata
             .as_ref()
             .and_then(|m| m.get("status"))
-            .and_then(|v| v.as_str()),
+            .and_then(|v: &serde_json::Value| v.as_str()),
         Some("pending_manager")
     );
 
@@ -598,21 +598,21 @@ async fn test_team_create_without_name_auto_generates_name() {
     let create = registry.get("team_create").unwrap();
     let lead_ctx = make_tool_ctx(project.clone(), "lead-001", None);
 
-    let _out = create
+    let out = create
         .execute(serde_json::json!({"project_local": true}), &lead_ctx)
         .await
         .unwrap();
     let meta = out.metadata.expect("metadata");
     let team_name = meta
         .get("team_name")
-        .and_then(|v| v.as_str())
+        .and_then(|v: &serde_json::Value| v.as_str())
         .expect("team_name")
         .to_string();
     assert!(
         team_name.starts_with("team-"),
         "expected auto-generated team name, got: {team_name}"
     );
-    assert_eq!(meta.get("auto_named").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(meta.get("auto_named").and_then(|v: &serde_json::Value| v.as_bool()), Some(true));
 
     let loaded = TeamStore::load_by_name(&team_name, &project).expect("team should exist");
     assert_eq!(loaded.config.name, team_name);
@@ -660,7 +660,7 @@ async fn test_team_create_recovers_when_existing_dir_missing_config() {
     let create = registry.get("team_create").unwrap();
     let lead_ctx = make_tool_ctx(project.clone(), "lead-003", None);
 
-    let _out = create
+    let out = create
         .execute(
             serde_json::json!({"name":"tui-review","project_local": true}),
             &lead_ctx,
@@ -668,7 +668,7 @@ async fn test_team_create_recovers_when_existing_dir_missing_config() {
         .await
         .unwrap();
     let meta = out.metadata.expect("metadata");
-    assert_eq!(meta.get("team_name").and_then(|v| v.as_str()), Some("tui-review"));
+    assert_eq!(meta.get("team_name").and_then(|v: &serde_json::Value| v.as_str()), Some("tui-review"));
 
     let loaded = TeamStore::load_by_name("tui-review", &project).expect("team should load");
     assert_eq!(loaded.config.name, "tui-review");
@@ -715,7 +715,7 @@ async fn test_new_task_blocked_when_team_context_active() {
         })),
     );
 
-    let _out = new_task
+    let out = new_task
         .execute(
             serde_json::json!({
                 "agent":"explore",
@@ -733,9 +733,9 @@ async fn test_new_task_blocked_when_team_context_active() {
         out.content
     );
     let meta = out.metadata.expect("metadata");
-    assert_eq!(meta.get("blocked").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(meta.get("blocked").and_then(|v: &serde_json::Value| v.as_bool()), Some(true));
     assert_eq!(
-        meta.get("reason").and_then(|v| v.as_str()),
+        meta.get("reason").and_then(|v: &serde_json::Value| v.as_str()),
         Some("team_context_active")
     );
 }
@@ -768,7 +768,7 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
         team_manager: None,
     };
 
-    let _out = new_task
+    let out = new_task
         .execute(
             serde_json::json!({
                 "agent":"explore",
@@ -787,7 +787,7 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
     );
     let meta = out.metadata.expect("metadata");
     assert_eq!(
-        meta.get("reason").and_then(|v| v.as_str()),
+        meta.get("reason").and_then(|v: &serde_json::Value| v.as_str()),
         Some("team_requested_no_active_team")
     );
 }

@@ -83,7 +83,7 @@ fn test_message_create_and_retrieve_ordered() {
 
 #[test]
 fn test_message_update_parts() {
-    use ragent_core::message::{MessagePart, Role};
+    use ragent_core::message::MessagePart;
 
     let storage = Storage::open_in_memory().unwrap();
     storage.create_session("s1", "/tmp").unwrap();

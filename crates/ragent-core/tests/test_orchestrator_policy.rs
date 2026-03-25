@@ -137,7 +137,7 @@ fn test_policy_human_review_custom_fallback() {
 fn test_logging_fallback_format() {
     let fb = LoggingFallback;
     let responses = vec![("ag1".to_string(), "result1".to_string())];
-    let _out = fb.on_conflict("jid", &responses);
+    let out = fb.on_conflict("jid", &responses);
     assert!(out.contains("[human-review]"));
     assert!(out.contains("ag1"));
     assert!(out.contains("result1"));
