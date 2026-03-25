@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use serde_json::{Value, json};
+use chrono::Utc;
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::team::TeamStore;
@@ -24,20 +25,19 @@ impl Tool for TeamCreateTool {
         json!({
             "type": "object",
             "properties": {
+                "blueprint": {
+                    "type": "string",
+                    "description": "Blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name>"
+                },
                 "name": {
                     "type": "string",
-                    "description": "Unique name for the team (lowercase, hyphens OK)"
+                    "description": "Optional team name (lowercase, hyphens OK). If omitted, name will be generated from blueprint and timestamp"
                 },
                 "project_local": {
                     "type": "boolean",
                     "description": "If true, store team in [PROJECT]/.ragent/teams/; otherwise in ~/.ragent/teams/. Default: true"
-                },
-                "blueprint": {
-                    "type": "string",
-                    "description": "Optional blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name>"
                 }
-            },
-            "required": ["name"]
+            }
         })
     }
 
@@ -46,20 +46,23 @@ impl Tool for TeamCreateTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let generated_name = format!(
-            "team-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
+        // Blueprint is mandatory now. Validate presence.
+        let bp = input
+            .get("blueprint")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .ok_or_else(|| anyhow::anyhow!("'blueprint' parameter is required"))?;
+
+        // Determine team name: use provided name or generate from blueprint + timestamp
         let name = input
             .get("name")
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(ToString::to_string)
-            .unwrap_or(generated_name);
+            .unwrap_or_else(|| format!("{}-{}", bp, Utc::now().format("%Y%m%d-%H-%M-%S")));
 
         let project_local = input
             .get("project_local")

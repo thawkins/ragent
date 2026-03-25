@@ -472,7 +472,7 @@ fn test_team_create_sets_active_team() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
 
-    app.execute_slash_command("/team create my-test-team");
+    app.execute_slash_command("/team create bp1 my-test-team");
 
     std::env::set_current_dir(original_dir).unwrap();
 

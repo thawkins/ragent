@@ -3022,7 +3022,7 @@ impl App {
 | `/team help` | none | Show this command reference table. |
 | `/team status` | none | Show the currently active team in this session. |
 | `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
-| `/team create <name>` | required `name` | Create a new project-local team and set it active. |
+| `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
 
 | `/team close` | none | Close the active team in this session (does not delete on disk). |
 | `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
@@ -3068,26 +3068,33 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.team_members.len()
                             ));
                         } else {
-                            output.push_str("No active team.\n\nUse `/team create <name>` to start a team.");
+                            output.push_str("No active team.\n\nUse `/team create <blueprint> [name]` to start a team (blueprint required).");
                         }
                         self.append_assistant_text(&output);
                         self.status = "team: status".to_string();
                     }
                     "create" => {
                         if rest.is_empty() {
-                            self.status = "Usage: /team create <name> [blueprint]".to_string();
+                            self.status = "Usage: /team create <blueprint> [name]".to_string();
                             return;
                         }
 
-                        // Parse optional blueprint token
+                        // Parse blueprint (mandatory) then optional name
                         let mut parts = rest.split_whitespace();
-                        let name = parts.next().unwrap_or("").to_string();
-                        let blueprint = parts.next().map(|s| s.to_string());
+                        let blueprint = parts.next().unwrap_or("").to_string();
+                        let mut name = parts.next().map(|s| s.to_string());
 
-                        if name.is_empty() {
-                            self.status = "Usage: /team create <name> [blueprint]".to_string();
+                        if blueprint.is_empty() {
+                            self.status = "Usage: /team create <blueprint> [name]".to_string();
                             return;
                         }
+
+                        // If no name provided, generate one from blueprint + timestamp
+                        if name.is_none() {
+                            let generated_name = format!("{}-{}", blueprint, chrono::Utc::now().format("%Y%m%d-%H-%M-%S"));
+                            name = Some(generated_name);
+                        }
+                        let name = name.unwrap();
 
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let sid = self.session_id.clone().unwrap_or_default();
@@ -3111,7 +3118,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.status = format!("team: {}", name);
 
                                 // If blueprint provided, invoke the team_create tool to apply seeding asynchronously
-                                if let Some(bp) = blueprint {
+                                let bp = blueprint.clone();
+                                if !bp.is_empty() {
                                     let session_processor = self.session_processor.clone();
                                     let event_bus = self.event_bus.clone();
                                     let storage = self.storage.clone();
