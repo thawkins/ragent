@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_storage_integration.rs
 
 use ragent_core::message::Message;
 use ragent_core::storage::{Storage, deobfuscate_key, obfuscate_key};
@@ -301,7 +301,7 @@ fn test_obfuscation_produces_different_output() {
 
 #[test]
 fn test_deobfuscate_invalid_base64() {
-    let result = deobfuscate_key("not-valid-base64!!!");
+    let _result = deobfuscate_key("not-valid-base64!!!");
     assert_eq!(result, "", "Invalid base64 should return empty string");
 }
 

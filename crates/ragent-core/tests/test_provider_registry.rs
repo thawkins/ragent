@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_provider_registry.rs
 
 use ragent_core::provider::*;
 

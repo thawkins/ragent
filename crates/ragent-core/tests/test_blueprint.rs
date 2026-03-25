@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_blueprint.rs
 
 //! Tests for blueprint seeding including README copy, task_seed.json handling and spawn-prompts.md
 

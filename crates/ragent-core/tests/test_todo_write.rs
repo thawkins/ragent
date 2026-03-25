@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_todo_write.rs
 
 //! Tests for the `todo_write` tool.
 
@@ -66,7 +66,7 @@ async fn test_add_basic() {
     let storage = setup();
     let ctx = make_ctx(storage.clone());
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(json!({"action": "add", "title": "Fix bug"}), &ctx)
         .await
         .unwrap();
@@ -87,7 +87,7 @@ async fn test_add_with_status_and_description() {
     let storage = setup();
     let ctx = make_ctx(storage.clone());
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(
             json!({"action": "add", "title": "Deploy", "status": "blocked", "description": "Waiting on CI"}),
             &ctx,
@@ -167,7 +167,7 @@ async fn test_update_status() {
         .unwrap();
     let ctx = make_ctx(storage.clone());
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(
             json!({"action": "update", "id": "t1", "status": "done"}),
             &ctx,
@@ -271,7 +271,7 @@ async fn test_remove() {
         .unwrap();
     let ctx = make_ctx(storage.clone());
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(json!({"action": "remove", "id": "t1"}), &ctx)
         .await
         .unwrap();
@@ -318,7 +318,7 @@ async fn test_clear() {
         .unwrap();
     let ctx = make_ctx(storage.clone());
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(json!({"action": "clear"}), &ctx)
         .await
         .unwrap();
@@ -333,7 +333,7 @@ async fn test_clear_empty() {
     let storage = setup();
     let ctx = make_ctx(storage);
 
-    let result = TodoWriteTool
+    let _result = TodoWriteTool
         .execute(json!({"action": "clear"}), &ctx)
         .await
         .unwrap();

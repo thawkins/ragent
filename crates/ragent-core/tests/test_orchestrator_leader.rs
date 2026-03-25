@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_orchestrator_leader.rs
 
 //! Tests for in-process leader election and CoordinatorCluster (Task 5.2).
 
@@ -170,7 +170,7 @@ async fn test_cluster_start_job_routes_to_leader() {
         required_capabilities: vec!["w".to_string()],
         payload: "task".to_string(),
     };
-    let result = cluster.start_job_sync(desc).await.unwrap();
+    let _result = cluster.start_job_sync(desc).await.unwrap();
     assert!(result.contains("leader-resp:task"));
 }
 

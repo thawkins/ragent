@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_orchestrator_transport.rs
 
 //! Tests for the pluggable transport layer (Task 5.1):
 //! RemoteAgentDescriptor, HttpRouter (without live network), RouterComposite.
@@ -133,7 +133,7 @@ async fn test_composite_uses_first_router_on_success() {
         job_id: "j".to_string(),
         payload: "ping".to_string(),
     };
-    let result = composite.send("local-agent", msg).await.unwrap();
+    let _result = composite.send("local-agent", msg).await.unwrap();
     assert_eq!(result, "local:ping");
 }
 
@@ -156,7 +156,7 @@ async fn test_composite_falls_back_to_second_router() {
         job_id: "j".to_string(),
         payload: "hi".to_string(),
     };
-    let result = composite.send("fb-agent", msg).await.unwrap();
+    let _result = composite.send("fb-agent", msg).await.unwrap();
     assert_eq!(result, "fallback:hi");
 }
 
@@ -207,6 +207,6 @@ async fn test_coordinator_with_composite_router() {
         required_capabilities: vec!["cap".to_string()],
         payload: "work".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("comp:work"));
 }

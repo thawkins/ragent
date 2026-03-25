@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_session_resume.rs
 
 //! Tests for CLI session resume (TASK-007).
 //!
@@ -135,7 +135,7 @@ fn test_load_session_pushes_log_entry() {
 #[test]
 fn test_load_session_unknown_id_returns_error() {
     let (mut app, _mgr) = make_app_with_manager();
-    let result = app.load_session("nonexistent-session-id");
+    let _result = app.load_session("nonexistent-session-id");
 
     assert!(result.is_err(), "should fail for unknown session");
     let err = result.unwrap_err().to_string();

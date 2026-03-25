@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_reference_resolve.rs
 
 //! External tests for `ragent_core::reference::resolve`.
 
@@ -77,7 +77,7 @@ async fn test_resolve_invalid_docx_returns_error() {
     fs::write(&file_path, "not a docx").expect("write");
 
     let input = format!("see @{}", file_path.display());
-    let result = resolve_all_refs(&input, &dir).await;
+    let _result = resolve_all_refs(&input, &dir).await;
     assert!(result.is_err(), "invalid docx should return an error");
     cleanup(&dir);
 }
@@ -87,7 +87,7 @@ async fn test_resolve_missing_file() {
     let dir = make_temp_dir("missing");
     let input = "see @nonexistent_file_xyz.rs";
     // Missing file should return an error from resolve_all_refs
-    let result = resolve_all_refs(input, &dir).await;
+    let _result = resolve_all_refs(input, &dir).await;
     assert!(result.is_err(), "missing file should produce an error");
     cleanup(&dir);
 }

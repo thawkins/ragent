@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_slash_commands.rs
 
 //! Tests for TUI slash command parsing and dispatch (TASK-006).
 //!

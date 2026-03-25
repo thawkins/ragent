@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_teams.rs
 
 //! Unit + integration tests for Teams data layer and tools.
 //!
@@ -144,7 +144,7 @@ fn test_task_complete_wrong_agent_fails() {
     store.claim_next("tm-001").unwrap().unwrap();
 
     // tm-002 should not be able to complete a task owned by tm-001.
-    let result = store.complete("task-001", "tm-002");
+    let _result = store.complete("task-001", "tm-002");
     assert!(result.is_err(), "wrong agent should not complete task");
 }
 
@@ -598,7 +598,7 @@ async fn test_team_create_without_name_auto_generates_name() {
     let create = registry.get("team_create").unwrap();
     let lead_ctx = make_tool_ctx(project.clone(), "lead-001", None);
 
-    let out = create
+    let _out = create
         .execute(serde_json::json!({"project_local": true}), &lead_ctx)
         .await
         .unwrap();
@@ -660,7 +660,7 @@ async fn test_team_create_recovers_when_existing_dir_missing_config() {
     let create = registry.get("team_create").unwrap();
     let lead_ctx = make_tool_ctx(project.clone(), "lead-003", None);
 
-    let out = create
+    let _out = create
         .execute(
             serde_json::json!({"name":"tui-review","project_local": true}),
             &lead_ctx,
@@ -715,7 +715,7 @@ async fn test_new_task_blocked_when_team_context_active() {
         })),
     );
 
-    let out = new_task
+    let _out = new_task
         .execute(
             serde_json::json!({
                 "agent":"explore",
@@ -768,7 +768,7 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
         team_manager: None,
     };
 
-    let out = new_task
+    let _out = new_task
         .execute(
             serde_json::json!({
                 "agent":"explore",

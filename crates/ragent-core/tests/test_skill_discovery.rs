@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_skill_discovery.rs
 
 //! Phase 10.4: External tests for skill discovery.
 //!

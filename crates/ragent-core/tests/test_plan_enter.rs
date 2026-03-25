@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_plan_enter.rs
 
 //! Tests for the plan_enter tool.
 //!
@@ -91,7 +91,7 @@ async fn test_plan_enter_missing_task() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool.execute(json!({}), &ctx).await;
+    let _result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("task"), "Expected 'task' error, got: {msg}");
@@ -102,7 +102,7 @@ async fn test_plan_enter_empty_task() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool.execute(json!({"task": "   "}), &ctx).await;
+    let _result = tool.execute(json!({"task": "   "}), &ctx).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("empty"), "Expected 'empty' error, got: {msg}");
@@ -117,7 +117,7 @@ async fn test_plan_enter_success() {
 
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool
+    let _result = tool
         .execute(json!({"task": "Analyze the auth module"}), &ctx)
         .await;
 
@@ -156,7 +156,7 @@ async fn test_plan_enter_with_context() {
 
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool
+    let _result = tool
         .execute(
             json!({
                 "task": "Plan refactoring",
@@ -185,7 +185,7 @@ async fn test_plan_enter_without_context() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_enter").unwrap();
-    let result = tool.execute(json!({"task": "Simple analysis"}), &ctx).await;
+    let _result = tool.execute(json!({"task": "Simple analysis"}), &ctx).await;
 
     let output = result.unwrap();
     assert!(!output.content.contains("Context:"));

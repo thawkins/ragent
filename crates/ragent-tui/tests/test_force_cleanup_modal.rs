@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_force_cleanup_modal.rs
 
 use std::sync::Arc;
 

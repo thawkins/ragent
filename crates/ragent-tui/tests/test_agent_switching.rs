@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_agent_switching.rs
 
 //! Tests for TUI agent switching (TASK-005).
 //!

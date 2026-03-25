@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_skill_invocation.rs
 
 //! Phase 10.5: External tests for skill invocation.
 //!
@@ -45,7 +45,7 @@ fn make_forked_skill(name: &str, body: &str) -> SkillInfo {
 #[tokio::test]
 async fn test_invoke_simple_body() {
     let skill = make_skill("greet", "Hello, welcome to the project!");
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Hello, welcome to the project!");
@@ -56,7 +56,7 @@ async fn test_invoke_simple_body() {
 #[tokio::test]
 async fn test_invoke_with_argument_substitution() {
     let skill = make_skill("deploy", "Deploy $0 to $1");
-    let result = invoke_skill(&skill, "frontend staging", "sess-1", wd())
+    let _result = invoke_skill(&skill, "frontend staging", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Deploy frontend to staging");
@@ -65,7 +65,7 @@ async fn test_invoke_with_argument_substitution() {
 #[tokio::test]
 async fn test_invoke_with_all_args() {
     let skill = make_skill("run", "Execute: $ARGUMENTS");
-    let result = invoke_skill(&skill, "npm test --watch", "sess-1", wd())
+    let _result = invoke_skill(&skill, "npm test --watch", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Execute: npm test --watch");
@@ -74,7 +74,7 @@ async fn test_invoke_with_all_args() {
 #[tokio::test]
 async fn test_invoke_with_dynamic_context() {
     let skill = make_skill("info", "Version: !`echo v1.0.0`");
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Version: v1.0.0");
@@ -83,7 +83,7 @@ async fn test_invoke_with_dynamic_context() {
 #[tokio::test]
 async fn test_invoke_combined_args_and_context() {
     let skill = make_skill("combined", "File: $0 Date: !`echo 2026-01-01`");
-    let result = invoke_skill(&skill, "main.rs", "sess-1", wd())
+    let _result = invoke_skill(&skill, "main.rs", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "File: main.rs Date: 2026-01-01");
@@ -92,7 +92,7 @@ async fn test_invoke_combined_args_and_context() {
 #[tokio::test]
 async fn test_invoke_session_id_substitution() {
     let skill = make_skill("meta", "Session: ${RAGENT_SESSION_ID}");
-    let result = invoke_skill(&skill, "", "my-unique-session", wd())
+    let _result = invoke_skill(&skill, "", "my-unique-session", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Session: my-unique-session");
@@ -101,7 +101,7 @@ async fn test_invoke_session_id_substitution() {
 #[tokio::test]
 async fn test_invoke_empty_body() {
     let skill = make_skill("empty", "");
-    let result = invoke_skill(&skill, "ignored", "sess-1", wd())
+    let _result = invoke_skill(&skill, "ignored", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "");
@@ -110,7 +110,7 @@ async fn test_invoke_empty_body() {
 #[tokio::test]
 async fn test_invoke_no_args_needed() {
     let skill = make_skill("static", "Always the same output");
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.content, "Always the same output");
@@ -121,7 +121,7 @@ async fn test_invoke_no_args_needed() {
 #[tokio::test]
 async fn test_invoke_forked_metadata() {
     let skill = make_forked_skill("analyze", "Analyze $ARGUMENTS");
-    let result = invoke_skill(&skill, "the codebase", "sess-1", wd())
+    let _result = invoke_skill(&skill, "the codebase", "sess-1", wd())
         .await
         .expect("invoke");
 
@@ -134,7 +134,7 @@ async fn test_invoke_forked_metadata() {
 #[tokio::test]
 async fn test_invoke_non_forked_no_agent() {
     let skill = make_skill("normal", "Normal body");
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
 
@@ -148,7 +148,7 @@ async fn test_invoke_forked_default_agent() {
     skill.context = Some(SkillContext::Fork);
     // No agent specified — should use default
 
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert!(result.forked);
@@ -165,7 +165,7 @@ async fn test_invoke_with_allowed_tools() {
     let mut skill = make_skill("restricted", "Do stuff");
     skill.allowed_tools = vec!["bash".to_string(), "read".to_string()];
 
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert_eq!(result.allowed_tools, vec!["bash", "read"]);
@@ -174,7 +174,7 @@ async fn test_invoke_with_allowed_tools() {
 #[tokio::test]
 async fn test_invoke_no_tool_restrictions() {
     let skill = make_skill("unrestricted", "Do anything");
-    let result = invoke_skill(&skill, "", "sess-1", wd())
+    let _result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
     assert!(result.allowed_tools.is_empty());
@@ -188,7 +188,7 @@ async fn test_invocation_result_fields() {
     skill.allowed_tools = vec!["grep".to_string()];
     skill.argument_hint = Some("<pattern>".to_string());
 
-    let result = invoke_skill(&skill, "TODO", "sess-42", wd())
+    let _result = invoke_skill(&skill, "TODO", "sess-42", wd())
         .await
         .expect("invoke");
 
@@ -220,7 +220,7 @@ fn test_format_skill_message() {
 
 #[test]
 fn test_format_forked_result() {
-    let result = ragent_core::skill::invoke::ForkedSkillResult {
+    let _result = ragent_core::skill::invoke::ForkedSkillResult {
         skill_name: "analyze".to_string(),
         forked_session_id: "sess-fork-42".to_string(),
         response: "Found 3 issues".to_string(),

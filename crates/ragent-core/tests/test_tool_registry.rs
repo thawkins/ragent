@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_tool_registry.rs
 
 use ragent_core::tool::*;
 use serde_json::json;
@@ -246,7 +246,7 @@ async fn test_read_tool_execute() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(json!({"path": "test_read.txt"}), &ctx)
         .await
         .unwrap();
@@ -280,7 +280,7 @@ async fn test_read_tool_line_range() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(
             json!({"path": "test_range.txt", "start_line": 2, "end_line": 4}),
             &ctx,
@@ -321,7 +321,7 @@ async fn test_read_tool_rejects_inverted_line_range() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(
             json!({"path": "test_range.txt", "start_line": 10, "end_line": 3}),
             &ctx,
@@ -359,7 +359,7 @@ async fn test_read_tool_missing_file() {
         team_manager: None,
     };
 
-    let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
+    let _result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
     assert!(result.is_err());
 
     std::fs::remove_dir_all(&dir).ok();
@@ -414,7 +414,7 @@ async fn test_read_tool_large_file_section_map() {
     };
 
     // Read without line range → should get summary, not the whole file
-    let result = tool.execute(json!({"path": "big.rs"}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({"path": "big.rs"}), &ctx).await.unwrap();
 
     assert!(
         result.content.contains("Section Map"),
@@ -467,7 +467,7 @@ async fn test_read_tool_large_file_with_range_returns_full() {
     };
 
     // Read WITH a line range → should return those exact lines, no summary
-    let result = tool
+    let _result = tool
         .execute(
             json!({"path": "big.txt", "start_line": 50, "end_line": 60}),
             &ctx,
@@ -512,7 +512,7 @@ async fn test_read_tool_small_file_no_summary() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(json!({"path": "small.rs"}), &ctx)
         .await
         .unwrap();
@@ -548,7 +548,7 @@ async fn test_write_tool_execute() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(
             json!({"path": "output.txt", "content": "hello world"}),
             &ctx,
@@ -589,7 +589,7 @@ async fn test_list_tool_execute() {
         team_manager: None,
     };
 
-    let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
 
     assert!(result.content.contains("file1.txt"));
     assert!(result.content.contains("file2.rs"));
@@ -623,7 +623,7 @@ async fn test_glob_tool_execute() {
         team_manager: None,
     };
 
-    let result = tool
+    let _result = tool
         .execute(json!({"pattern": "**/*.rs"}), &ctx)
         .await
         .unwrap();

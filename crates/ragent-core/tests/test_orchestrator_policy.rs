@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_orchestrator_policy.rs
 
 //! Tests for policy-based conflict resolution and human-in-the-loop (Task 5.3).
 
@@ -137,7 +137,7 @@ fn test_policy_human_review_custom_fallback() {
 fn test_logging_fallback_format() {
     let fb = LoggingFallback;
     let responses = vec![("ag1".to_string(), "result1".to_string())];
-    let out = fb.on_conflict("jid", &responses);
+    let _out = fb.on_conflict("jid", &responses);
     assert!(out.contains("[human-review]"));
     assert!(out.contains("ag1"));
     assert!(out.contains("result1"));
@@ -171,7 +171,7 @@ async fn test_coordinator_with_policy_concat() {
         required_capabilities: vec!["cap".to_string()],
         payload: "work".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("A:work"));
     assert!(result.contains("B:work"));
 }
@@ -197,7 +197,7 @@ async fn test_coordinator_with_policy_first_success() {
         required_capabilities: vec!["cap".to_string()],
         payload: "query".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(
         result.contains("ok:query"),
         "expected first-success to skip error agent"
@@ -235,7 +235,7 @@ async fn test_coordinator_with_policy_consensus_met() {
         required_capabilities: vec!["cap".to_string()],
         payload: "question".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("consensus"));
     assert!(result.contains("the answer is 42"));
 }
@@ -256,7 +256,7 @@ async fn test_coordinator_with_human_review_policy() {
         required_capabilities: vec!["cap".to_string()],
         payload: "controversial task".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("[human-review]"));
 }
 
@@ -275,6 +275,6 @@ async fn test_coordinator_without_policy_uses_concat_default() {
         required_capabilities: vec!["cap".to_string()],
         payload: "data".to_string(),
     };
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("default:data"));
 }

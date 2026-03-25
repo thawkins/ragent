@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_parallel_tool_execution.rs
 
 //! Integration tests for parallel tool execution with concurrency limits.
 

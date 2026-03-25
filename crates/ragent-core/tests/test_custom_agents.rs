@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_custom_agents.rs
 
 //! Tests for the custom OASF agent loading system.
 //!
@@ -379,7 +379,7 @@ fn test_template_working_dir_substituted() {
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
 
     let working_dir = PathBuf::from("/tmp/test-project");
-    let result = build_system_prompt(&agent, &working_dir, "", None);
+    let _result = build_system_prompt(&agent, &working_dir, "", None);
 
     assert!(result.contains("/tmp/test-project"), "got: {result}");
     assert!(!result.contains("{{WORKING_DIR}}"), "variable not substituted: {result}");
@@ -395,7 +395,7 @@ fn test_template_file_tree_substituted() {
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
 
     let file_tree = "src/\n  main.rs\n  lib.rs";
-    let result = build_system_prompt(&agent, &PathBuf::from("/tmp"), file_tree, None);
+    let _result = build_system_prompt(&agent, &PathBuf::from("/tmp"), file_tree, None);
 
     assert!(result.contains("src/"), "got: {result}");
     assert!(result.contains("main.rs"), "got: {result}");
@@ -411,7 +411,7 @@ fn test_template_date_substituted() {
     );
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
 
-    let result = build_system_prompt(&agent, &PathBuf::from("/tmp"), "", None);
+    let _result = build_system_prompt(&agent, &PathBuf::from("/tmp"), "", None);
 
     assert!(!result.contains("{{DATE}}"), "variable not substituted: {result}");
     // Result should contain a date-like string (YYYY-MM-DD), possibly with trailing punctuation
@@ -435,7 +435,7 @@ fn test_template_no_duplicate_working_dir_section() {
     );
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
 
-    let result = build_system_prompt(&agent, &PathBuf::from("/tmp/proj"), "", None);
+    let _result = build_system_prompt(&agent, &PathBuf::from("/tmp/proj"), "", None);
 
     let count = result.matches("## Working Directory").count();
     assert_eq!(count, 0, "auto-section should be suppressed when template var used, got: {result}");
@@ -451,7 +451,7 @@ fn test_template_no_duplicate_file_tree_section() {
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
 
     let file_tree = "src/\n  main.rs";
-    let result = build_system_prompt(&agent, &PathBuf::from("/tmp"), file_tree, None);
+    let _result = build_system_prompt(&agent, &PathBuf::from("/tmp"), file_tree, None);
 
     let count = result.matches("## Project Structure").count();
     assert_eq!(count, 0, "auto-section should be suppressed when template var used, got: {result}");

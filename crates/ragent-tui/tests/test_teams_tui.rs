@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_teams_tui.rs
 
 //! TUI tests for Teams integration (M4-T9).
 //!

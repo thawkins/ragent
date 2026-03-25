@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_todo.rs
 
 //! Tests for the `todo_read` tool.
 //!
@@ -87,7 +87,7 @@ async fn test_todo_read_empty_list() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({}), &ctx).await.unwrap();
     assert!(result.content.contains("No TODO items found"));
     assert_eq!(result.metadata.as_ref().unwrap()["count"], 0);
 }
@@ -105,7 +105,7 @@ async fn test_todo_read_with_items() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({}), &ctx).await.unwrap();
     assert!(result.content.contains("2 items"));
     assert!(result.content.contains("Fix bug"));
     assert!(result.content.contains("Write tests"));
@@ -127,7 +127,7 @@ async fn test_todo_read_filter_pending() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool
+    let _result = tool
         .execute(json!({"status": "pending"}), &ctx)
         .await
         .unwrap();
@@ -153,7 +153,7 @@ async fn test_todo_read_filter_done() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({"status": "done"}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({"status": "done"}), &ctx).await.unwrap();
     assert!(result.content.contains("1 items"));
     assert!(result.content.contains("Write tests"));
     assert!(!result.content.contains("Fix bug"));
@@ -172,7 +172,7 @@ async fn test_todo_read_filter_all() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({"status": "all"}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({"status": "all"}), &ctx).await.unwrap();
     assert!(result.content.contains("2 items"));
 }
 
@@ -182,7 +182,7 @@ async fn test_todo_read_invalid_status() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({"status": "invalid"}), &ctx).await;
+    let _result = tool.execute(json!({"status": "invalid"}), &ctx).await;
     assert!(result.is_err());
     assert!(
         result
@@ -197,7 +197,7 @@ async fn test_todo_read_no_storage() {
     let ctx = make_ctx_no_storage();
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({}), &ctx).await;
+    let _result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
     assert!(
         result
@@ -221,7 +221,7 @@ async fn test_todo_read_session_isolation() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({}), &ctx).await.unwrap();
     assert!(result.content.contains("My task"));
     assert!(!result.content.contains("Other task"));
     assert_eq!(result.metadata.as_ref().unwrap()["count"], 1);
@@ -243,7 +243,7 @@ async fn test_todo_read_description_displayed() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool.execute(json!({}), &ctx).await.unwrap();
+    let _result = tool.execute(json!({}), &ctx).await.unwrap();
     assert!(result.content.contains("This is a detailed description"));
 }
 
@@ -257,7 +257,7 @@ async fn test_todo_read_empty_filter_message() {
     let ctx = make_ctx_with_storage(storage);
     let tool = TodoReadTool;
 
-    let result = tool
+    let _result = tool
         .execute(json!({"status": "pending"}), &ctx)
         .await
         .unwrap();

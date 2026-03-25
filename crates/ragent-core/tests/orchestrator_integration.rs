@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for orchestrator_integration.rs
 
 //! Integration tests for the orchestration layer.
 //!
@@ -314,7 +314,7 @@ async fn test_multi_capability_only_full_match_selected() {
         payload: "content".to_string(),
     };
 
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(
         result.contains("full:content"),
         "expected full-agent result"

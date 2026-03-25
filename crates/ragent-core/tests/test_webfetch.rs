@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_webfetch.rs
 
 use ragent_core::event::EventBus;
 use ragent_core::tool::webfetch::WebFetchTool;
@@ -58,7 +58,7 @@ fn test_webfetch_schema() {
 #[tokio::test]
 async fn test_webfetch_missing_url() {
     let ctx = make_ctx();
-    let result = tool().execute(json!({}), &ctx).await;
+    let _result = tool().execute(json!({}), &ctx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("url"));
 }
@@ -66,7 +66,7 @@ async fn test_webfetch_missing_url() {
 #[tokio::test]
 async fn test_webfetch_invalid_scheme() {
     let ctx = make_ctx();
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "url": "ftp://example.com" }), &ctx)
         .await;
     assert!(result.is_err());
@@ -81,7 +81,7 @@ async fn test_webfetch_invalid_scheme() {
 #[tokio::test]
 async fn test_webfetch_invalid_scheme_file() {
     let ctx = make_ctx();
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "url": "file:///etc/passwd" }), &ctx)
         .await;
     assert!(result.is_err());
@@ -157,7 +157,7 @@ async fn test_webfetch_plain_text() {
     let url = start_test_server(body, "text/plain").await;
 
     let ctx = make_ctx();
-    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
+    let _result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     assert!(result.content.contains("Hello from the test server!"));
     assert!(result.content.contains("Line 3"));
@@ -178,7 +178,7 @@ async fn test_webfetch_html_to_text() {
     let url = start_test_server(body, "text/html").await;
 
     let ctx = make_ctx();
-    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
+    let _result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     // Should contain the text content, not HTML tags
     assert!(result.content.contains("Title"));
@@ -193,7 +193,7 @@ async fn test_webfetch_html_raw_format() {
     let url = start_test_server(body, "text/html").await;
 
     let ctx = make_ctx();
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "url": url, "format": "raw" }), &ctx)
         .await
         .unwrap();
@@ -210,7 +210,7 @@ async fn test_webfetch_max_length_truncation() {
     let url = start_test_server(long, "text/plain").await;
 
     let ctx = make_ctx();
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "url": url, "max_length": 100 }), &ctx)
         .await
         .unwrap();
@@ -225,7 +225,7 @@ async fn test_webfetch_metadata() {
     let url = start_test_server(body, "text/plain").await;
 
     let ctx = make_ctx();
-    let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
+    let _result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     let meta = result.metadata.unwrap();
     assert_eq!(meta["status"], 200);
@@ -236,7 +236,7 @@ async fn test_webfetch_metadata() {
 #[tokio::test]
 async fn test_webfetch_connection_refused() {
     let ctx = make_ctx();
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "url": "http://127.0.0.1:1", "timeout": 2 }), &ctx)
         .await;
     assert!(result.is_err());
@@ -246,7 +246,7 @@ async fn test_webfetch_connection_refused() {
 async fn test_webfetch_http_error() {
     let url = start_error_server(404).await;
     let ctx = make_ctx();
-    let result = tool().execute(json!({ "url": url }), &ctx).await;
+    let _result = tool().execute(json!({ "url": url }), &ctx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("404"));
 }

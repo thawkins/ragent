@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_orchestrator.rs
 
 //! Unit tests for orchestrator primitives: AgentRegistry, InProcessRouter,
 //! Coordinator routing, aggregation strategies, and Metrics.
@@ -184,7 +184,7 @@ async fn test_router_delivers_message_to_agent() {
         job_id: "j1".to_string(),
         payload: "hello".to_string(),
     };
-    let result = router.send("echo-agent", msg).await.unwrap();
+    let _result = router.send("echo-agent", msg).await.unwrap();
     assert_eq!(result, "echo:hello");
 }
 
@@ -261,7 +261,7 @@ async fn test_coordinator_sync_aggregates_all_agents() {
         payload: "work".to_string(),
     };
 
-    let result = coord.start_job_sync(desc).await.unwrap();
+    let _result = coord.start_job_sync(desc).await.unwrap();
     assert!(result.contains("A:work") || result.contains("agent: a"));
     assert!(result.contains("B:work") || result.contains("agent: b"));
 }
@@ -329,7 +329,7 @@ async fn test_coordinator_first_success_picks_fast_agent() {
         payload: "do-it".to_string(),
     };
 
-    let result = coord.start_job_first_success(desc).await.unwrap();
+    let _result = coord.start_job_first_success(desc).await.unwrap();
     // Should return one agent's result (not both).
     assert!(result.contains("fast:") || result.contains("also-fast:"));
 }
@@ -355,7 +355,7 @@ async fn test_coordinator_first_success_skips_error_response() {
         payload: "query".to_string(),
     };
 
-    let result = coord.start_job_first_success(desc).await.unwrap();
+    let _result = coord.start_job_first_success(desc).await.unwrap();
     assert!(result.contains("good:query") || result.contains("agent: good-agent"));
 }
 

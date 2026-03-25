@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for stress_concurrent_file_ops.rs
 
 use anyhow::Result;
 use std::path::PathBuf;

@@ -1,4 +1,4 @@
-#![allow(missing_docs, unused_variables, unused_imports, dead_code, unused_mut)]
+//! Tests for test_office_common.rs
 
 //! Unit tests for office_common helpers.
 
@@ -52,6 +52,6 @@ fn test_truncate_output_respects_max_bytes() {
 #[test]
 fn test_truncate_output_no_truncate_when_small() {
     let base = "a".repeat(10);
-    let out = truncate_output(base.clone());
+    let _out = truncate_output(base.clone());
     assert_eq!(out, base);
 }
