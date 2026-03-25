@@ -66,7 +66,7 @@ impl Tool for TeamCreateTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
-        let store = match TeamStore::create(&name, &ctx.session_id, &ctx.working_dir, project_local) {
+        let mut store = match TeamStore::create(&name, &ctx.session_id, &ctx.working_dir, project_local) {
             Ok(store) => store,
             Err(e) if e.to_string().contains("already exists") => {
                 // Team already exists; try to load it and continue so that blueprint
@@ -93,19 +93,15 @@ impl Tool for TeamCreateTool {
         if let Some(bp) = input.get("blueprint").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
             // Locate blueprint directory: project-local .ragent/blueprints/teams/<bp> or ~/.ragent/blueprints/teams/<bp>
             let mut blueprint_dir: Option<std::path::PathBuf> = None;
-            // Walk up to find project .ragent
-            let mut cur = ctx.working_dir.as_path();
-            while let Some(parent) = cur.parent().or(Some(cur)) {
-                let candidate = parent.join(".ragent").join("blueprints").join("teams").join(bp);
+            // Walk up to find project .ragent (check the current dir, then parent, etc.)
+            let mut cur_opt = Some(ctx.working_dir.as_path());
+            while let Some(cur) = cur_opt {
+                let candidate = cur.join(".ragent").join("blueprints").join("teams").join(bp);
                 if candidate.is_dir() {
                     blueprint_dir = Some(candidate);
                     break;
                 }
-                if let Some(p) = cur.parent() {
-                    cur = p;
-                } else {
-                    break;
-                }
+                cur_opt = cur.parent();
             }
             // Fallback to global
             if blueprint_dir.is_none() {
@@ -179,7 +175,24 @@ impl Tool for TeamCreateTool {
                                     "agent_type": "general",
                                     "prompt": chunk
                                 });
-                                let _ = spawn_tool.execute(input, ctx).await;
+                                // Execute spawn; if TeamManager not present, team_spawn returns a pending status.
+                                if let Ok(out) = spawn_tool.execute(input.clone(), ctx).await {
+                                    if let Some(meta) = out.metadata {
+                                        if let Some(status) = meta.get("status").and_then(|v| v.as_str()) {
+                                            if status == "pending_manager" {
+                                                // Record a Spawning member so the team config reflects the queued teammate.
+                                                let agent_id = store.next_agent_id();
+                                                let member = crate::team::config::TeamMember::new(&teammate_name, &agent_id, "general");
+                                                let _ = store.add_member(member);
+                                            } else if status == "spawned" {
+                                                if let Some(agent_id_val) = meta.get("agent_id").and_then(|v| v.as_str()) {
+                                                    let member = crate::team::config::TeamMember::new(&teammate_name, agent_id_val, "general");
+                                                    let _ = store.add_member(member);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
