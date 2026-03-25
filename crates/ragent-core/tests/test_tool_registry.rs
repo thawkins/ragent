@@ -2,7 +2,7 @@
 
 use ragent_core::tool::*;
 use serde_json::json;
-use std::path::PathBuf;
+
 use std::sync::Arc;
 
 // ── Default registry ─────────────────────────────────────────────

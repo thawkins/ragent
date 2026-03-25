@@ -119,7 +119,7 @@ fn test_resolve_agent_with_config_overrides() {
 
 #[test]
 fn test_resolve_agent_config_permissions_override() {
-    use ragent_core::permission::{PermissionAction, PermissionRule};
+    use ragent_core::permission::PermissionAction;
 
     let config: Config = serde_json::from_str(
         r#"{
@@ -471,7 +471,7 @@ fn test_build_system_prompt_skills_order_after_agents_md() {
 
 #[test]
 fn test_resolve_agent_with_skills_config() {
-    use std::collections::HashMap;
+
 
     let mut config = Config::default();
     let mut agent_config = ragent_core::config::AgentConfig::default();

@@ -92,6 +92,7 @@ async fn test_elector_no_duplicate_events_when_leader_unchanged() {
 // ── CoordinatorCluster ───────────────────────────────────────────────────────
 
 /// Helper: build a Coordinator with one agent tagged `"work"`.
+#[allow(dead_code)]
 async fn make_coord_with_agent(tag: &'static str) -> Coordinator {
     let registry = AgentRegistry::new();
     let tag_s = tag.to_string();

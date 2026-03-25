@@ -1,7 +1,7 @@
 //! Tests for test_config_integration.rs
 
 use ragent_core::config::*;
-use ragent_core::permission::PermissionAction;
+
 
 
 // ── Config merging sequences ─────────────────────────────────────

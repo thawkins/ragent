@@ -203,7 +203,7 @@ async fn test_patch_with_fuzz() {
     assert!(result.is_err());
 
     // With fuzz=1, dropping outer context lines should work
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "patch": patch, "fuzz": 1 }), &ctx)
         .await
         .unwrap();
@@ -268,7 +268,7 @@ async fn test_patch_remove_lines() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let result = tool()
+    let _result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
