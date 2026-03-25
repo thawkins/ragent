@@ -74,7 +74,7 @@ async fn test_plan_exit_missing_summary() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_exit").unwrap();
-    let _result = tool.execute(json!({}), &ctx).await;
+    let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -88,7 +88,7 @@ async fn test_plan_exit_empty_summary() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_exit").unwrap();
-    let _result = tool.execute(json!({"summary": "   "}), &ctx).await;
+    let result = tool.execute(json!({"summary": "   "}), &ctx).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("empty"), "Expected 'empty' error, got: {msg}");
@@ -104,7 +104,7 @@ async fn test_plan_exit_success() {
     let registry = create_default_registry();
     let tool = registry.get("plan_exit").unwrap();
     let summary_text = "1. Refactor auth module\n2. Add tests\n3. Update docs";
-    let _result = tool.execute(json!({"summary": summary_text}), &ctx).await;
+    let result = tool.execute(json!({"summary": summary_text}), &ctx).await;
 
     assert!(result.is_ok());
     let output = result.unwrap();
@@ -135,7 +135,7 @@ async fn test_plan_exit_metadata_has_restore_flag() {
     let (ctx, _bus) = test_ctx();
     let registry = create_default_registry();
     let tool = registry.get("plan_exit").unwrap();
-    let _result = tool
+    let result = tool
         .execute(json!({"summary": "Done planning"}), &ctx)
         .await
         .unwrap();

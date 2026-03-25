@@ -135,7 +135,7 @@ fn test_load_session_pushes_log_entry() {
 #[test]
 fn test_load_session_unknown_id_returns_error() {
     let (mut app, _mgr) = make_app_with_manager();
-    let _result = app.load_session("nonexistent-session-id");
+    let result = app.load_session("nonexistent-session-id");
 
     assert!(result.is_err(), "should fail for unknown session");
     let err = result.unwrap_err().to_string();

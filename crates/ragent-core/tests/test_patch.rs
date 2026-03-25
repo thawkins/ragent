@@ -44,7 +44,7 @@ async fn test_patch_single_hunk() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -82,7 +82,7 @@ async fn test_patch_multi_hunk() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -122,7 +122,7 @@ async fn test_patch_multi_file() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -156,7 +156,7 @@ async fn test_patch_path_override() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch, "path": "target.txt" }), &ctx)
         .await
         .unwrap();
@@ -197,13 +197,13 @@ async fn test_patch_with_fuzz() {
 
     let ctx = make_ctx(dir.clone());
     // Without fuzz, this should fail
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch, "fuzz": 0 }), &ctx)
         .await;
     assert!(result.is_err());
 
     // With fuzz=1, dropping outer context lines should work
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch, "fuzz": 1 }), &ctx)
         .await
         .unwrap();
@@ -234,7 +234,7 @@ async fn test_patch_add_lines() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -268,7 +268,7 @@ async fn test_patch_remove_lines() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -285,7 +285,7 @@ async fn test_patch_empty_patch() {
     let dir = std::env::temp_dir().join("ragent_patch_8");
     let _ = std::fs::create_dir_all(&dir);
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": "just some text\n" }), &ctx)
         .await;
     assert!(result.is_err());
@@ -315,7 +315,7 @@ async fn test_patch_hunk_mismatch() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool().execute(json!({ "patch": patch }), &ctx).await;
+    let result = tool().execute(json!({ "patch": patch }), &ctx).await;
     assert!(result.is_err());
     // File should be unchanged
     assert_eq!(
@@ -341,7 +341,7 @@ async fn test_patch_nonexistent_file() {
 +new
 ";
 
-    let _result = tool().execute(json!({ "patch": patch }), &ctx).await;
+    let result = tool().execute(json!({ "patch": patch }), &ctx).await;
     assert!(result.is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -365,7 +365,7 @@ async fn test_patch_metadata() {
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();
@@ -420,7 +420,7 @@ diff --git a/file.txt b/file.txt
 ";
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(json!({ "patch": patch }), &ctx)
         .await
         .unwrap();

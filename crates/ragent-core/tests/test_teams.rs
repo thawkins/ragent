@@ -144,7 +144,7 @@ fn test_task_complete_wrong_agent_fails() {
     store.claim_next("tm-001").unwrap().unwrap();
 
     // tm-002 should not be able to complete a task owned by tm-001.
-    let _result = store.complete("task-001", "tm-002");
+    let result = store.complete("task-001", "tm-002");
     assert!(result.is_err(), "wrong agent should not complete task");
 }
 

@@ -83,7 +83,7 @@ async fn test_docx_write_and_read() {
     let registry = create_default_registry();
 
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool
+    let result = write_tool
         .execute(
             json!({
                 "path": "test.docx",
@@ -105,7 +105,7 @@ async fn test_docx_write_and_read() {
     assert!(dir.join("test.docx").exists());
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "test.docx", "format": "text"}), &ctx)
         .await
         .unwrap();
@@ -147,7 +147,7 @@ async fn test_docx_read_markdown_format() {
         .unwrap();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "heading.docx", "format": "markdown"}), &ctx)
         .await
         .unwrap();
@@ -183,7 +183,7 @@ async fn test_docx_read_json_format() {
         .unwrap();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "data.docx", "format": "json"}), &ctx)
         .await
         .unwrap();
@@ -222,7 +222,7 @@ async fn test_docx_info() {
         .unwrap();
 
     let info_tool = registry.get("office_info").unwrap();
-    let _result = info_tool
+    let result = info_tool
         .execute(json!({"path": "info.docx"}), &ctx)
         .await
         .unwrap();
@@ -247,7 +247,7 @@ async fn test_xlsx_write_and_read() {
     let registry = create_default_registry();
 
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool
+    let result = write_tool
         .execute(
             json!({
                 "path": "data.xlsx",
@@ -271,7 +271,7 @@ async fn test_xlsx_write_and_read() {
     assert!(dir.join("data.xlsx").exists());
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "data.xlsx", "format": "text"}), &ctx)
         .await
         .unwrap();
@@ -318,7 +318,7 @@ async fn test_xlsx_multiple_sheets() {
     let read_tool = registry.get("office_read").unwrap();
 
     // Read specific sheet by name
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "multi.xlsx", "sheet": "Beta"}), &ctx)
         .await
         .unwrap();
@@ -361,7 +361,7 @@ async fn test_xlsx_with_range() {
         .unwrap();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(
             json!({"path": "range.xlsx", "range": "A1:B2", "format": "text"}),
             &ctx,
@@ -404,7 +404,7 @@ async fn test_xlsx_typed_cells() {
         .unwrap();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "types.xlsx", "format": "text"}), &ctx)
         .await
         .unwrap();
@@ -443,7 +443,7 @@ async fn test_xlsx_info() {
         .unwrap();
 
     let info_tool = registry.get("office_info").unwrap();
-    let _result = info_tool
+    let result = info_tool
         .execute(json!({"path": "info.xlsx"}), &ctx)
         .await
         .unwrap();
@@ -466,7 +466,7 @@ async fn test_pptx_write_and_read() {
     let registry = create_default_registry();
 
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool
+    let result = write_tool
         .execute(
             json!({
                 "path": "presentation.pptx",
@@ -493,7 +493,7 @@ async fn test_pptx_write_and_read() {
     assert!(dir.join("presentation.pptx").exists());
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "presentation.pptx", "format": "text"}), &ctx)
         .await
         .unwrap();
@@ -532,7 +532,7 @@ async fn test_pptx_read_specific_slide() {
         .unwrap();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "slides.pptx", "slide": 2}), &ctx)
         .await
         .unwrap();
@@ -570,7 +570,7 @@ async fn test_pptx_info() {
         .unwrap();
 
     let info_tool = registry.get("office_info").unwrap();
-    let _result = info_tool
+    let result = info_tool
         .execute(json!({"path": "info.pptx"}), &ctx)
         .await
         .unwrap();
@@ -595,7 +595,7 @@ async fn test_read_nonexistent_file() {
     let registry = create_default_registry();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool
+    let result = read_tool
         .execute(json!({"path": "nonexistent.docx"}), &ctx)
         .await;
 
@@ -610,7 +610,7 @@ async fn test_read_missing_path_parameter() {
     let registry = create_default_registry();
 
     let read_tool = registry.get("office_read").unwrap();
-    let _result = read_tool.execute(json!({}), &ctx).await;
+    let result = read_tool.execute(json!({}), &ctx).await;
 
     assert!(result.is_err(), "Missing path parameter should fail");
     std::fs::remove_dir_all(&dir).ok();
@@ -623,7 +623,7 @@ async fn test_write_missing_content_parameter() {
     let registry = create_default_registry();
 
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool.execute(json!({"path": "test.docx"}), &ctx).await;
+    let result = write_tool.execute(json!({"path": "test.docx"}), &ctx).await;
 
     assert!(result.is_err(), "Missing content parameter should fail");
     std::fs::remove_dir_all(&dir).ok();
@@ -638,7 +638,7 @@ async fn test_unsupported_extension() {
     let read_tool = registry.get("office_read").unwrap();
     // Create a dummy file with wrong extension
     std::fs::write(dir.join("file.txt"), "not an office doc").unwrap();
-    let _result = read_tool.execute(json!({"path": "file.txt"}), &ctx).await;
+    let result = read_tool.execute(json!({"path": "file.txt"}), &ctx).await;
 
     assert!(result.is_err(), "Unsupported extension should fail");
     std::fs::remove_dir_all(&dir).ok();
@@ -651,7 +651,7 @@ async fn test_write_creates_parent_directories() {
     let registry = create_default_registry();
 
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool
+    let result = write_tool
         .execute(
             json!({
                 "path": "sub/dir/nested.docx",
@@ -678,7 +678,7 @@ async fn test_write_explicit_type_override() {
 
     // Write a docx but use explicit type parameter
     let write_tool = registry.get("office_write").unwrap();
-    let _result = write_tool
+    let result = write_tool
         .execute(
             json!({
                 "path": "doc.docx",

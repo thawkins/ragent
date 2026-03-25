@@ -314,7 +314,7 @@ async fn test_multi_capability_only_full_match_selected() {
         payload: "content".to_string(),
     };
 
-    let _result = coord.start_job_sync(desc).await.unwrap();
+    let result = coord.start_job_sync(desc).await.unwrap();
     assert!(
         result.contains("full:content"),
         "expected full-agent result"

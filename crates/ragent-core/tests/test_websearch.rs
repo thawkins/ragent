@@ -114,7 +114,7 @@ fn test_websearch_schema_has_num_results() {
 #[tokio::test]
 async fn test_websearch_missing_query() {
     let tool = websearch_tool();
-    let _result = tool.execute(json!({}), &test_ctx()).await;
+    let result = tool.execute(json!({}), &test_ctx()).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("query"), "Expected 'query' error, got: {msg}");
@@ -123,7 +123,7 @@ async fn test_websearch_missing_query() {
 #[tokio::test]
 async fn test_websearch_empty_query() {
     let tool = websearch_tool();
-    let _result = tool.execute(json!({"query": "   "}), &test_ctx()).await;
+    let result = tool.execute(json!({"query": "   "}), &test_ctx()).await;
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(msg.contains("empty"), "Expected 'empty' error, got: {msg}");
@@ -137,7 +137,7 @@ async fn test_websearch_no_api_key() {
         return;
     }
     let tool = websearch_tool();
-    let _result = tool
+    let result = tool
         .execute(json!({"query": "test search"}), &test_ctx())
         .await;
     assert!(result.is_err());

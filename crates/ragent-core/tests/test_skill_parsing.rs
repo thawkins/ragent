@@ -168,20 +168,20 @@ fn test_parse_body_with_yaml_like_content() {
 #[test]
 fn test_parse_no_frontmatter_delimiters() {
     let content = "Just plain text without any frontmatter\n";
-    let _result = parse(content, "no-fm");
+    let result = parse(content, "no-fm");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_parse_only_opening_delimiter() {
     let content = "---\ndescription: test\nNo closing delimiter\n";
-    let _result = parse(content, "unclosed");
+    let result = parse(content, "unclosed");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_parse_empty_string() {
-    let _result = parse("", "empty");
+    let result = parse("", "empty");
     assert!(result.is_err());
 }
 
@@ -196,21 +196,21 @@ fn test_parse_invalid_yaml_in_frontmatter() {
 #[test]
 fn test_parse_name_validation_uppercase() {
     let content = "---\nname: MySkill\n---\nBody\n";
-    let _result = parse(content, "myskill");
+    let result = parse(content, "myskill");
     assert!(result.is_err(), "uppercase names should be rejected");
 }
 
 #[test]
 fn test_parse_name_validation_spaces() {
     let content = "---\nname: \"my skill\"\n---\nBody\n";
-    let _result = parse(content, "my-skill");
+    let result = parse(content, "my-skill");
     assert!(result.is_err(), "names with spaces should be rejected");
 }
 
 #[test]
 fn test_parse_name_validation_special_chars() {
     let content = "---\nname: my_skill@v2\n---\nBody\n";
-    let _result = parse(content, "my-skill");
+    let result = parse(content, "my-skill");
     assert!(
         result.is_err(),
         "names with special chars should be rejected"

@@ -141,7 +141,7 @@ fn make_ctx() -> ToolContext {
 async fn test_cancel_task_no_task_manager() {
     let tool = ragent_core::tool::cancel_task::CancelTaskTool;
     let ctx = make_ctx();
-    let _result = tool.execute(json!({"task_id": "abc123"}), &ctx).await;
+    let result = tool.execute(json!({"task_id": "abc123"}), &ctx).await;
     assert!(result.is_err());
     assert!(
         result
@@ -155,7 +155,7 @@ async fn test_cancel_task_no_task_manager() {
 async fn test_cancel_task_missing_task_id() {
     let tool = ragent_core::tool::cancel_task::CancelTaskTool;
     let ctx = make_ctx();
-    let _result = tool.execute(json!({}), &ctx).await;
+    let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
     assert!(
         result
@@ -171,7 +171,7 @@ async fn test_cancel_task_missing_task_id() {
 async fn test_list_tasks_no_task_manager() {
     let tool = ragent_core::tool::list_tasks::ListTasksTool;
     let ctx = make_ctx();
-    let _result = tool.execute(json!({}), &ctx).await;
+    let result = tool.execute(json!({}), &ctx).await;
     assert!(result.is_err());
     assert!(
         result
@@ -185,7 +185,7 @@ async fn test_list_tasks_no_task_manager() {
 async fn test_list_tasks_missing_task_id_detail() {
     let tool = ragent_core::tool::list_tasks::ListTasksTool;
     let ctx = make_ctx();
-    let _result = tool.execute(json!({"task_id": "nonexistent"}), &ctx).await;
+    let result = tool.execute(json!({"task_id": "nonexistent"}), &ctx).await;
     // Without task_manager, this should fail
     assert!(result.is_err());
 }

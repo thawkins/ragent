@@ -170,7 +170,7 @@ async fn test_cluster_start_job_routes_to_leader() {
         required_capabilities: vec!["w".to_string()],
         payload: "task".to_string(),
     };
-    let _result = cluster.start_job_sync(desc).await.unwrap();
+    let result = cluster.start_job_sync(desc).await.unwrap();
     assert!(result.contains("leader-resp:task"));
 }
 

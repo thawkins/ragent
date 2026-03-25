@@ -89,7 +89,7 @@ async fn test_mcp_client_list_tools_empty_disabled() {
 #[tokio::test]
 async fn test_mcp_client_call_tool_not_connected() {
     let client = McpClient::new();
-    let _result = client
+    let result = client
         .call_tool("missing", "any_tool", serde_json::json!({}))
         .await;
 
@@ -106,7 +106,7 @@ async fn test_mcp_client_call_tool_not_connected() {
 #[tokio::test]
 async fn test_mcp_client_call_tool_by_name_not_found() {
     let client = McpClient::new();
-    let _result = client
+    let result = client
         .call_tool_by_name("nonexistent_tool", serde_json::json!({}))
         .await;
 
@@ -134,7 +134,7 @@ async fn test_mcp_client_call_tool_by_name_skips_disabled() {
         .await
         .unwrap();
 
-    let _result = client
+    let result = client
         .call_tool_by_name("any_tool", serde_json::json!({}))
         .await;
 
@@ -149,7 +149,7 @@ async fn test_mcp_client_call_tool_by_name_skips_disabled() {
 async fn test_mcp_client_connect_invalid_command() {
     let mut client = McpClient::new();
 
-    let _result = client
+    let result = client
         .connect(
             "bad-server",
             McpServerConfig {
@@ -174,7 +174,7 @@ async fn test_mcp_client_connect_invalid_command() {
 async fn test_mcp_client_connect_stdio_no_command() {
     let mut client = McpClient::new();
 
-    let _result = client
+    let result = client
         .connect(
             "no-cmd",
             McpServerConfig {
@@ -196,7 +196,7 @@ async fn test_mcp_client_connect_stdio_no_command() {
 async fn test_mcp_client_connect_http_no_url() {
     let mut client = McpClient::new();
 
-    let _result = client
+    let result = client
         .connect(
             "no-url",
             McpServerConfig {
@@ -217,7 +217,7 @@ async fn test_mcp_client_connect_http_no_url() {
 #[tokio::test]
 async fn test_mcp_client_disconnect_nonexistent() {
     let mut client = McpClient::new();
-    let _result = client.disconnect("nonexistent").await;
+    let result = client.disconnect("nonexistent").await;
     assert!(result.is_ok());
 }
 
@@ -226,7 +226,7 @@ async fn test_mcp_client_disconnect_nonexistent() {
 #[tokio::test]
 async fn test_mcp_client_disconnect_all_empty() {
     let mut client = McpClient::new();
-    let _result = client.disconnect_all().await;
+    let result = client.disconnect_all().await;
     assert!(result.is_ok());
 }
 
@@ -264,7 +264,7 @@ async fn test_mcp_client_list_tools_for_server_disabled() {
 #[tokio::test]
 async fn test_mcp_client_refresh_tools_empty() {
     let mut client = McpClient::new();
-    let _result = client.refresh_tools().await;
+    let result = client.refresh_tools().await;
     assert!(result.is_ok());
 }
 
@@ -284,7 +284,7 @@ async fn test_mcp_client_refresh_tools_skips_disabled() {
         .await
         .unwrap();
 
-    let _result = client.refresh_tools().await;
+    let result = client.refresh_tools().await;
     assert!(result.is_ok());
     assert!(client.list_tools().is_empty());
 }
@@ -294,7 +294,7 @@ async fn test_mcp_client_refresh_tools_skips_disabled() {
 #[tokio::test]
 async fn test_mcp_client_refresh_tools_for_server_not_connected() {
     let mut client = McpClient::new();
-    let _result = client.refresh_tools_for_server("nonexistent").await;
+    let result = client.refresh_tools_for_server("nonexistent").await;
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
     assert!(err_msg.contains("not connected"));

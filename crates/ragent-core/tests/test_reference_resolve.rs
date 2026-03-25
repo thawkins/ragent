@@ -77,7 +77,7 @@ async fn test_resolve_invalid_docx_returns_error() {
     fs::write(&file_path, "not a docx").expect("write");
 
     let input = format!("see @{}", file_path.display());
-    let _result = resolve_all_refs(&input, &dir).await;
+    let result = resolve_all_refs(&input, &dir).await;
     assert!(result.is_err(), "invalid docx should return an error");
     cleanup(&dir);
 }
@@ -87,7 +87,7 @@ async fn test_resolve_missing_file() {
     let dir = make_temp_dir("missing");
     let input = "see @nonexistent_file_xyz.rs";
     // Missing file should return an error from resolve_all_refs
-    let _result = resolve_all_refs(input, &dir).await;
+    let result = resolve_all_refs(input, &dir).await;
     assert!(result.is_err(), "missing file should produce an error");
     cleanup(&dir);
 }

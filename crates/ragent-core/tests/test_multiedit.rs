@@ -35,7 +35,7 @@ async fn test_multiedit_single_file_single_edit() {
     std::fs::write(&path, "Hello World\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [{
@@ -64,7 +64,7 @@ async fn test_multiedit_single_file_multiple_edits() {
     std::fs::write(&path, "fn foo() {}\nfn bar() {}\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [
@@ -92,7 +92,7 @@ async fn test_multiedit_multiple_files() {
     std::fs::write(dir.join("b.txt"), "bbb\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [
@@ -122,7 +122,7 @@ async fn test_multiedit_atomic_rollback_on_missing_match() {
     std::fs::write(dir.join("b.txt"), "keep\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [
@@ -154,7 +154,7 @@ async fn test_multiedit_atomic_rollback_on_duplicate_match() {
     std::fs::write(dir.join("a.txt"), "foo foo foo\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [
@@ -182,7 +182,7 @@ async fn test_multiedit_empty_edits_array() {
     let dir = std::env::temp_dir().join("ragent_multiedit_6");
     let _ = std::fs::create_dir_all(&dir);
     let ctx = make_ctx(dir.clone());
-    let _result = tool().execute(json!({ "edits": [] }), &ctx).await;
+    let result = tool().execute(json!({ "edits": [] }), &ctx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("empty"));
     let _ = std::fs::remove_dir_all(&dir);
@@ -193,7 +193,7 @@ async fn test_multiedit_missing_edits_param() {
     let dir = std::env::temp_dir().join("ragent_multiedit_7");
     let _ = std::fs::create_dir_all(&dir);
     let ctx = make_ctx(dir.clone());
-    let _result = tool().execute(json!({}), &ctx).await;
+    let result = tool().execute(json!({}), &ctx).await;
     assert!(result.is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -203,7 +203,7 @@ async fn test_multiedit_nonexistent_file() {
     let dir = std::env::temp_dir().join("ragent_multiedit_8");
     let _ = std::fs::create_dir_all(&dir);
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [{
@@ -229,7 +229,7 @@ async fn test_multiedit_metadata() {
     std::fs::write(dir.join("b.txt"), "world\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [
@@ -285,7 +285,7 @@ async fn test_multiedit_absolute_path() {
     std::fs::write(&path, "before\n").unwrap();
 
     let ctx = make_ctx(dir.clone());
-    let _result = tool()
+    let result = tool()
         .execute(
             json!({
                 "edits": [{
