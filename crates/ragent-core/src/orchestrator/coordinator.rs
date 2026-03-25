@@ -252,9 +252,9 @@ impl Coordinator {
                             .timeouts
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     } else {
-                        self.metrics
-                            .errors
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Defer counting errors until after collecting responses to
+                        // avoid double-counting when all agents fail.
+                        tracing::warn!(error = %err_str, "agent send error");
                     }
                 }
             }
