@@ -333,6 +333,7 @@ impl App {
             agent_stack: Vec::new(),
             pending_plan_task: None,
             pending_plan_restore: None,
+            pending_forcecleanup: None,
             is_processing: false,
             cancel_flag: None,
             auto_compact_in_progress: false,
@@ -3022,7 +3023,7 @@ impl App {
 | `/team status` | none | Show the currently active team in this session. |
 | `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
 | `/team create <name>` | required `name` | Create a new project-local team and set it active. |
-| `/team open <name>` | required `name` | Open an existing team and set it active. |
+
 | `/team close` | none | Close the active team in this session (does not delete on disk). |
 | `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
 | `/team message <teammate-name> <text>` | required `teammate-name`, required `text` | Send a mailbox message from lead to a teammate. |
@@ -3074,12 +3075,23 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                     "create" => {
                         if rest.is_empty() {
-                            self.status = "Usage: /team create <name>".to_string();
+                            self.status = "Usage: /team create <name> [blueprint]".to_string();
                             return;
                         }
+
+                        // Parse optional blueprint token
+                        let mut parts = rest.split_whitespace();
+                        let name = parts.next().unwrap_or("").to_string();
+                        let blueprint = parts.next().map(|s| s.to_string());
+
+                        if name.is_empty() {
+                            self.status = "Usage: /team create <name> [blueprint]".to_string();
+                            return;
+                        }
+
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let sid = self.session_id.clone().unwrap_or_default();
-                        match TeamStore::create(rest, &sid, &working_dir, true) {
+                        match TeamStore::create(&name, &sid, &working_dir, true) {
                             Ok(store) => {
                                 let name = store.config.name.clone();
                                 let team_dir = store.dir.clone();
@@ -3093,11 +3105,43 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     format!("🤝 Team '{}' created", name),
                                 );
                                 self.append_assistant_text(&format!(
-                                    "From: /team create\nTeam '{}' created.\n\n\
-                                     Use the `team_spawn` tool to add teammates.",
+                                    "From: /team create\nTeam '{}' created.\n\nUse the `team_spawn` tool to add teammates.",
                                     name
                                 ));
                                 self.status = format!("team: {}", name);
+
+                                // If blueprint provided, invoke the team_create tool to apply seeding asynchronously
+                                if let Some(bp) = blueprint {
+                                    let session_processor = self.session_processor.clone();
+                                    let event_bus = self.event_bus.clone();
+                                    let storage = self.storage.clone();
+                                    let lsp_manager = self.lsp_manager.clone();
+                                    let working_dir_clone = working_dir.clone();
+                                    let sid_clone = sid.clone();
+                                    let name_clone = name.clone();
+                                    tokio::spawn(async move {
+                                        let registry = ragent_core::tool::create_default_registry();
+                                        if let Some(tool) = registry.get("team_create") {
+                                            let input = serde_json::json!({
+                                                "name": name_clone,
+                                                "project_local": true,
+                                                "blueprint": bp,
+                                            });
+                                            let ctx = ragent_core::tool::ToolContext {
+                                                session_id: sid_clone.clone(),
+                                                working_dir: working_dir_clone.clone(),
+                                                event_bus: event_bus.clone(),
+                                                storage: Some(storage.clone()),
+                                                task_manager: None,
+                                                lsp_manager: lsp_manager.clone(),
+                                                active_model: None,
+                                                team_context: None,
+                                                team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                            };
+                                            let _ = tool.execute(input, &ctx).await;
+                                        }
+                                    });
+                                }
                             }
                             Err(e) => {
                                 self.status = format!("Failed to create team: {}", e);
@@ -3108,37 +3152,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                         }
                     }
-                    "open" => {
-                        if rest.is_empty() {
-                            self.status = "Usage: /team open <name>".to_string();
-                            return;
-                        }
-                        let working_dir = std::env::current_dir().unwrap_or_default();
-                        match TeamStore::load_by_name(rest, &working_dir) {
-                            Ok(store) => {
-                                let name = store.config.name.clone();
-                                let team_dir = store.dir.clone();
-                                self.team_members = store.config.members.clone();
-                                self.team_message_counts.clear();
-                                self.active_team = Some(store.config);
-                                self.show_teams = true;
-                                self.ensure_team_manager_for_team(&name, Some(team_dir));
-                                self.push_log(LogLevel::Info, format!("🤝 Team '{}' opened", name));
-                                self.append_assistant_text(&format!(
-                                    "From: /team open\nTeam '{}' opened.\n\nUse `/team status` to inspect teammates and tasks.",
-                                    name
-                                ));
-                                self.status = format!("team: {}", name);
-                            }
-                            Err(e) => {
-                                self.status = format!("Failed to open team: {}", e);
-                                self.push_log(
-                                    LogLevel::Error,
-                                    format!("team open failed for '{}': {}", rest, e),
-                                );
-                            }
-                        }
-                    }
+
                     "show" => {
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         if rest.is_empty() {
@@ -3559,15 +3573,41 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         // Confirm with the user before destructive operation.
                         let confirm_msg = "Are you sure you want to force-cleanup the active team (deactivate teammates and remove on-disk resources)? Press Enter to confirm or Esc to cancel.";
                         let args_lower = args.to_lowercase();
-                        if args_lower != "confirm" {
-                            self.append_assistant_text(&format!(
-                                "From: /team forcecleanup\n{}\n\nTo confirm, re-run: /team forcecleanup confirm",
-                                confirm_msg
-                            ));
-                            self.push_log(
-                                LogLevel::Info,
-                                "forcecleanup confirmation required".to_string(),
-                            );
+                        let confirmed = args_lower.split_whitespace().any(|s| s == "confirm");
+                        if !confirmed {
+                            // Show interactive confirmation modal state with active members listed.
+                            // Build list of active teammate names for display in modal.
+                            let active_names: Vec<String> = self
+                                .team_members
+                                .iter()
+                                .filter(|m| m.status != MemberStatus::Stopped)
+                                .map(|m| format!("{} ({})", m.name, m.agent_id))
+                                .collect();
+
+                            let team_name = self
+                                .active_team
+                                .as_ref()
+                                .map(|t| t.name.clone())
+                                .unwrap_or_else(|| "<unknown>".to_string());
+
+                            self.pending_forcecleanup = Some(PendingForceCleanup {
+                                team_name: team_name.clone(),
+                                active_members: active_names.clone(),
+                            });
+
+                            // Append assistant text instructing user to press Enter/Esc
+                            let mut msg = format!("From: /team forcecleanup\n{}\n\n", confirm_msg);
+                            if !active_names.is_empty() {
+                                msg.push_str("Active teammates:\n\n");
+                                for n in &active_names {
+                                    msg.push_str(&format!("  - {}\n", n));
+                                }
+                                msg.push_str("\n");
+                            }
+                            msg.push_str("Press Enter to confirm or Esc to cancel.");
+
+                            self.append_assistant_text(&msg);
+                            self.push_log(LogLevel::Info, "forcecleanup confirmation required (modal)".to_string());
                             self.status = "forcecleanup confirmation required".to_string();
                             return;
                         }
@@ -3584,7 +3624,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     for m in &mut store.config.members {
                                         if m.status != MemberStatus::Stopped {
                                             // Try to contact team manager to request shutdown if available
-                                            if let Some(tm) = self.session_processor.team_manager.get() {
+                                            if self.session_processor.team_manager.get().is_some() {
                                                 // best-effort: ignore errors
                                                 // Best-effort: request teammate to shutdown asynchronously.
                                                 // Fire-and-forget via tokio::spawn; ignore result.
@@ -3676,7 +3716,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     },
                     _ => {
                         self.status = format!(
-                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show [name]|create <name>|open <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
+                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show [name]|create <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
                             sub
                         );
                         self.push_log(
@@ -4782,6 +4822,21 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             LogLevel::Warn,
                             "User pressed ESC — halting agent".to_string(),
                         );
+                    }
+                }
+                InputAction::ConfirmForceCleanup => {
+                    if self.pending_forcecleanup.is_some() {
+                        // Clear pending modal state and invoke forcecleanup with confirm arg.
+                        self.pending_forcecleanup = None;
+                        self.execute_slash_command("/team forcecleanup confirm");
+                    }
+                }
+                InputAction::CancelForceCleanup => {
+                    if self.pending_forcecleanup.is_some() {
+                        self.pending_forcecleanup = None;
+                        self.append_assistant_text("From: /team forcecleanup\nForce-cleanup cancelled.");
+                        self.push_log(LogLevel::Info, "forcecleanup cancelled".to_string());
+                        self.status = "forcecleanup cancelled".to_string();
                     }
                 }
             }

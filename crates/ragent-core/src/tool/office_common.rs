@@ -103,13 +103,18 @@ pub fn truncate_output(text: String) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         text
     } else {
-        let truncated = &text[..MAX_OUTPUT_BYTES];
-        let boundary = truncated.rfind('\n').unwrap_or(MAX_OUTPUT_BYTES);
-        format!(
-            "{}\n\n... [Output truncated at {}KB. Use range/sheet/slide \
-             selection to read specific sections.]",
-            &text[..boundary],
+        // Prepare suffix message first so we can ensure final output is smaller
+        let suffix = format!(
+            "\n\n... [Output truncated at {}KB. Use range/sheet/slide selection to read specific sections.]",
             MAX_OUTPUT_BYTES / 1024
-        )
+        );
+        let truncated = &text[..MAX_OUTPUT_BYTES];
+        // Prefer cutting at the last newline, but ensure we leave room for the suffix
+        let max_body = MAX_OUTPUT_BYTES.saturating_sub(suffix.len() + 1);
+        let mut boundary = truncated.rfind('\n').unwrap_or(MAX_OUTPUT_BYTES);
+        if boundary > max_body {
+            boundary = max_body;
+        }
+        format!("{}{}", &text[..boundary], suffix)
     }
 }

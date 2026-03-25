@@ -94,7 +94,7 @@ fn build_task_rows<'a>(
             (Color::Cyan, Color::Cyan)
         };
 
-        let mut spans = vec![
+        let spans = vec![
             Span::styled("◦ ", Style::default().fg(dot_color)),
             Span::styled(format!("{:<10} ", tid), Style::default().fg(Color::DarkGray)),
             Span::styled(

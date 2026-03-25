@@ -31,6 +31,10 @@ impl Tool for TeamCreateTool {
                 "project_local": {
                     "type": "boolean",
                     "description": "If true, store team in [PROJECT]/.ragent/teams/; otherwise in ~/.ragent/teams/. Default: true"
+                },
+                "blueprint": {
+                    "type": "string",
+                    "description": "Optional blueprint name to seed the team from [PROJECT]/.ragent/blueprints/teams/<name> or ~/.ragent/blueprints/teams/<name>"
                 }
             },
             "required": ["name"]
@@ -65,24 +69,10 @@ impl Tool for TeamCreateTool {
         let store = match TeamStore::create(&name, &ctx.session_id, &ctx.working_dir, project_local) {
             Ok(store) => store,
             Err(e) if e.to_string().contains("already exists") => {
+                // Team already exists; try to load it and continue so that blueprint
+                // seeding can run against an existing team when requested.
                 match TeamStore::load_by_name(&name, &ctx.working_dir) {
-                    Ok(existing_store) => {
-                        // Team already exists: return a non-error ToolOutput with guidance
-                        // and structured metadata so callers (UI/agents) can handle it.
-                        return Ok(ToolOutput {
-                            content: format!(
-                                "Team '{}' already exists. Use team_open or /team open to reuse it.\nDirectory: {}",
-                                name,
-                                existing_store.dir.display()
-                            ),
-                            metadata: Some(json!({
-                                "team_name": name,
-                                "team_exists": true,
-                                "team_dir": existing_store.dir.to_string_lossy(),
-                                "project_local": project_local
-                            })),
-                        });
-                    }
+                    Ok(existing_store) => existing_store,
                     Err(load_err)
                         if load_err.to_string().contains("read")
                             && load_err.to_string().contains("config.json") =>
@@ -98,6 +88,104 @@ impl Tool for TeamCreateTool {
             }
             Err(e) => return Err(e),
         };
+
+        // If the caller provided a blueprint, apply it now.
+        if let Some(bp) = input.get("blueprint").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+            // Locate blueprint directory: project-local .ragent/blueprints/teams/<bp> or ~/.ragent/blueprints/teams/<bp>
+            let mut blueprint_dir: Option<std::path::PathBuf> = None;
+            // Walk up to find project .ragent
+            let mut cur = ctx.working_dir.as_path();
+            while let Some(parent) = cur.parent().or(Some(cur)) {
+                let candidate = parent.join(".ragent").join("blueprints").join("teams").join(bp);
+                if candidate.is_dir() {
+                    blueprint_dir = Some(candidate);
+                    break;
+                }
+                if let Some(p) = cur.parent() {
+                    cur = p;
+                } else {
+                    break;
+                }
+            }
+            // Fallback to global
+            if blueprint_dir.is_none() {
+                if let Some(home) = dirs::home_dir() {
+                    let candidate = home.join(".ragent").join("blueprints").join("teams").join(bp);
+                    if candidate.is_dir() {
+                        blueprint_dir = Some(candidate);
+                    }
+                }
+            }
+
+            if let Some(bdir) = blueprint_dir {
+                // If README.md exists in blueprint, copy it to team dir
+                let readme = bdir.join("README.md");
+                if readme.exists() {
+                    let _ = std::fs::create_dir_all(&store.dir);
+                    let dest = store.dir.join("README.md");
+                    let _ = std::fs::copy(&readme, &dest);
+                }
+
+                // If task_seed.json exists, parse and execute each seed
+                let seed = bdir.join("task_seed.json");
+                if seed.exists() {
+                    if let Ok(raw) = std::fs::read_to_string(&seed) {
+                        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&raw) {
+                            if let Some(items) = arr.as_array() {
+                                let registry = crate::tool::create_default_registry();
+                                for item in items {
+                                    if let Some(obj) = item.as_object() {
+                                        if let Some(tool_name) = obj.get("tool").and_then(|v| v.as_str()) {
+                                            let args = obj.get("args").cloned().unwrap_or(serde_json::json!({}));
+                                            // Ensure team_name is present for team tools
+                                            let mut args_obj = if args.is_object() { args } else { serde_json::json!({}) };
+                                            if args_obj.get("team_name").is_none() {
+                                                args_obj.as_object_mut().map(|m| m.insert("team_name".to_string(), serde_json::Value::String(name.clone())));
+                                            }
+                                            if let Some(tool) = registry.get(tool_name) {
+                                                let _ = tool.execute(args_obj, ctx).await;
+                                            }
+                                        } else {
+                                            // If no tool specified but task fields present, create a task directly
+                                            if obj.get("title").is_some() {
+                                                let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("untitled").to_string();
+                                                let id = store.next_task_id().unwrap_or_else(|_| format!("task-{}", chrono::Utc::now().timestamp_millis()));
+                                                let mut task = crate::team::task::Task::new(&id, &title);
+                                                if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
+                                                    task.description = desc.to_string();
+                                                }
+                                                let _ = store.add_task(task);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If spawn-prompts.md exists, run prompts with team_spawn
+                let prompts = bdir.join("spawn-prompts.md");
+                if prompts.exists() {
+                    if let Ok(raw) = std::fs::read_to_string(&prompts) {
+                        let chunks: Vec<&str> = raw.split("\n\n").map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                        let registry = crate::tool::create_default_registry();
+                        if let Some(spawn_tool) = registry.get("team_spawn") {
+                            for (i, chunk) in chunks.iter().enumerate() {
+                                let teammate_name = format!("auto-{}", i + 1);
+                                let input = serde_json::json!({
+                                    "team_name": name,
+                                    "teammate_name": teammate_name,
+                                    "agent_type": "general",
+                                    "prompt": chunk
+                                });
+                                let _ = spawn_tool.execute(input, ctx).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(ToolOutput {
             content: format!(

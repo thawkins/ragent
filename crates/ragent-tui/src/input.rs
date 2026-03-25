@@ -74,6 +74,10 @@ pub enum InputAction {
     SlashCommand(String),
     /// Cancel the currently running agent (ESC while processing).
     CancelAgent,
+    /// Confirm a pending forcecleanup modal (Enter -> confirm).
+    ConfirmForceCleanup,
+    /// Cancel a pending forcecleanup modal (Esc -> cancel).
+    CancelForceCleanup,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -168,6 +172,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             _ => None,
         };
+    }
+
+    // If a forcecleanup confirmation modal is active, intercept Enter/Esc
+    if app.pending_forcecleanup.is_some() {
+        match key.code {
+            KeyCode::Enter => return Some(InputAction::ConfirmForceCleanup),
+            KeyCode::Esc => return Some(InputAction::CancelForceCleanup),
+            _ => return None,
+        }
     }
 
     // If slash menu is active, intercept navigation keys

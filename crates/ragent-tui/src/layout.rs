@@ -267,6 +267,11 @@ fn render_home(frame: &mut Frame, app: &mut App) {
         render_mcp_discover_dialog(frame, app);
     }
 
+    // Force-cleanup confirmation modal overlay
+    if app.pending_forcecleanup.is_some() {
+        render_force_cleanup_dialog(frame, app);
+    }
+
     // Shortcuts help panel overlay
     if app.show_shortcuts {
         render_shortcuts_panel(frame);
@@ -1241,6 +1246,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
 
     if app.permission_pending.is_some() {
         render_permission_dialog(frame, app);
+    }
+
+    // Force-cleanup confirmation modal overlay
+    if app.pending_forcecleanup.is_some() {
+        render_force_cleanup_dialog(frame, app);
     }
 
     // Provider setup dialog overlay (if active, e.g. via /provider command)
@@ -2288,6 +2298,49 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
             .block(block)
             .alignment(Alignment::Center);
 
+        frame.render_widget(paragraph, area);
+    }
+}
+
+fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
+    let area = centered_rect(60, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    if let Some(ref pending) = app.pending_forcecleanup {
+        let mut lines: Vec<Line<'_>> = vec![
+            Line::from(Span::styled(
+                "Force-cleanup Confirmation",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(format!("Team: {}", pending.team_name)),
+            Line::from(""),
+        ];
+
+        if !pending.active_members.is_empty() {
+            lines.push(Line::from("Active teammates:"));
+            lines.push(Line::from(""));
+            for m in &pending.active_members {
+                lines.push(Line::from(format!("  - {}", m)));
+            }
+            lines.push(Line::from(""));
+        }
+
+        lines.push(Line::from(Span::styled(
+            "Enter confirm  Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Force-cleanup ")
+            .border_style(Style::default().fg(Color::Yellow));
+
+        let paragraph = Paragraph::new(lines)
+            .block(block)
+            .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
     }
 }

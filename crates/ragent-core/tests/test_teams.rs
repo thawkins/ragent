@@ -642,8 +642,8 @@ async fn test_team_create_existing_team_returns_error() {
         "error should mention existing team: {err_text}"
     );
     assert!(
-        err_text.contains("team_open") || err_text.contains("/team open"),
-        "error should direct user to open existing team: {err_text}"
+        err_text.contains("/team show"),
+        "error should direct user to list existing teams: {err_text}"
     );
 }
 

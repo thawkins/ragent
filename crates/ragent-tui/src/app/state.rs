@@ -22,6 +22,8 @@ use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
 use ragent_core::team::{TeamConfig, TeamMember};
 
+// Pending confirmation field is stored on App (defined in app.rs) as Option<PendingForceCleanup>.
+
 /// Returns `true` if `path` has a recognised image file extension.
 pub fn is_image_path(path: &std::path::Path) -> bool {
     matches!(
@@ -358,6 +360,15 @@ pub struct SlashMenuState {
     pub selected: usize,
     /// The filter text typed after `/` (e.g. `"mo"` for `/mo`).
     pub filter: String,
+}
+
+/// Pending confirmation for a destructive force-cleanup operation.
+#[derive(Debug, Clone)]
+pub struct PendingForceCleanup {
+    /// The name of the active team (for display).
+    pub team_name: String,
+    /// Active teammate display names (for modal listing).
+    pub active_members: Vec<String>,
 }
 
 /// State of the `/history` picker overlay.
@@ -703,6 +714,8 @@ pub struct App {
     /// Pending agent restore: summary from `AgentRestoreRequested`,
     /// consumed by `MessageEnd` to pop the agent stack and inject the summary.
     pub pending_plan_restore: Option<String>,
+    /// Pending confirmation for destructive force-cleanup modal.
+    pub pending_forcecleanup: Option<PendingForceCleanup>,
     /// Whether the agent is currently processing a message.
     pub is_processing: bool,
     /// Cancellation flag shared with the processor task; set to `true` on ESC.

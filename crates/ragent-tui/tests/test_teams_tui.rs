@@ -146,55 +146,6 @@ fn test_team_create_no_name_shows_usage() {
     );
 }
 
-// ── /team open ───────────────────────────────────────────────────────────────
-
-#[test]
-fn test_team_open_no_name_shows_usage() {
-    let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-
-    app.execute_slash_command("/team open");
-
-    assert!(
-        app.status.contains("Usage"),
-        "should show usage hint: {}",
-        app.status
-    );
-}
-
-#[test]
-fn test_team_open_loads_existing_team() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
-    let tmp = tempfile::tempdir().expect("tempdir");
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(tmp.path()).unwrap();
-    std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
-
-    // Create a team and add one member on disk.
-    let mut store = TeamStore::create("existing-team", "lead-session", tmp.path(), true)
-        .expect("create existing team");
-    store
-        .add_member(TeamMember::new("worker-a", "tm-001", "general"))
-        .expect("add member");
-
-    let mut app = make_app();
-    app.session_id = Some("s1".to_string());
-    app.execute_slash_command("/team open existing-team");
-
-    let _ = std::env::set_current_dir(original_dir);
-
-    assert_eq!(
-        app.active_team.as_ref().map(|t| t.name.as_str()),
-        Some("existing-team")
-    );
-    assert_eq!(app.team_members.len(), 1, "should load existing members");
-    assert!(app.show_teams, "teams panel should be visible");
-    assert_eq!(app.status, "team: existing-team");
-    assert!(
-        app.session_processor.team_manager.get().is_some(),
-        "TeamManager should be initialised after /team open"
-    );
-}
 
 // ── /team show ───────────────────────────────────────────────────────────────
 
