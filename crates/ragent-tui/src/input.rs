@@ -395,8 +395,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     match key.code {
-        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            // Shift+Enter: insert a literal newline without sending.
+        KeyCode::Enter
+            if key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            // Shift+Enter (Kitty protocol) or Alt+Enter (universal fallback):
+            // insert a literal newline without sending the message.
             app.clear_kb_selection();
             app.insert_char_at_cursor('\n');
             None

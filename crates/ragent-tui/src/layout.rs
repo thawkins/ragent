@@ -2280,7 +2280,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("@", "Mention a file — opens file picker"),
     ("/", "Slash command — opens command menu"),
     ("?", "Show this keybindings help panel"),
-    ("Shift+Enter", "Insert a newline (multiline input)"),
+    ("Shift+Enter / Alt+Enter", "Insert a newline (multiline input)"),
     ("Left/Right", "Move cursor within the input line"),
     ("Shift+Left/Right", "Extend/shrink keyboard selection"),
     ("Ctrl+Left/Right", "Move cursor by word"),

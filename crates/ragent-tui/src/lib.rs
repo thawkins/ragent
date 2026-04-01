@@ -20,7 +20,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self as ct_event, DisableMouseCapture, EnableMouseCapture, Event as CtEvent},
+    event::{
+        self as ct_event, DisableMouseCapture, EnableMouseCapture, Event as CtEvent,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -86,6 +89,16 @@ pub async fn run_tui(
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+    // Enable the Kitty keyboard protocol so terminals that support it will
+    // send distinct escape codes for Shift+Enter (vs plain Enter).
+    // `execute!` returns an error on unsupporting terminals; we ignore it so
+    // the TUI still works on xterm/gnome-terminal/etc.
+    let keyboard_enhanced = execute!(
+        stdout,
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    )
+    .is_ok();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -169,6 +182,21 @@ pub async fn run_tui(
             }
         }
 
+        // Check for completed /opt LLM results.
+        app.poll_pending_opt();
+
+        // Check for completed /swarm LLM decomposition results.
+        app.poll_pending_swarm();
+
+        // Unblock swarm tasks whose dependencies are satisfied.
+        app.poll_swarm_unblock();
+
+        // Check if active swarm has completed all tasks.
+        app.poll_swarm_completion();
+
+        // Flush dirty history to disk (non-blocking, debounced).
+        app.flush_history_if_due();
+
         terminal.draw(|frame| layout::render(frame, &mut app))?;
 
         tokio::select! {
@@ -198,14 +226,19 @@ pub async fn run_tui(
         }
     }
 
-    // Save history before exiting
-    if let Err(e) = app.save_history() {
-        tracing::warn!("Failed to save input history: {}", e);
+    // Final synchronous save if history was modified since last flush.
+    if app.history_dirty {
+        if let Err(e) = app.save_history() {
+            tracing::warn!("Failed to save input history: {}", e);
+        }
     }
 
     // Restore terminal — disable mouse capture first to stop generating
     // escape sequences, then drain any buffered events so they don't leak
     // into the shell after we leave raw mode.
+    if keyboard_enhanced {
+        let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    }
     execute!(terminal.backend_mut(), DisableMouseCapture)?;
     while ct_event::poll(std::time::Duration::ZERO)? {
         let _ = ct_event::read();
