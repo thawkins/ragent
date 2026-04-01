@@ -224,6 +224,8 @@ pub struct LogEntry {
     pub message: String,
     /// Session ID this log entry belongs to (for filtering by agent).
     pub session_id: Option<String>,
+    /// Agent ID that produced this log (for distinguishing teammates in multi-agent scenarios).
+    pub agent_id: Option<String>,
 }
 
 /// Which screen the TUI is currently showing.

@@ -458,7 +458,7 @@ impl App {
 
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
-            app.push_log(LogLevel::Warn, format!("[custom agents] {}", diag));
+            app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
 
         app
@@ -486,14 +486,14 @@ impl App {
                     let lines = text.lines().count();
                     self.append_assistant_text(&text);
                     self.status = "opt: done".to_string();
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("Finished /opt — {} lines output", lines),
                     );
                 }
                 Err(msg) => {
                     self.status = format!("⚠ opt failed: {}", msg);
-                    self.push_log(LogLevel::Warn, format!("opt error: {}", msg));
+                    self.push_log_no_agent(LogLevel::Warn, format!("opt error: {}", msg));
                 }
             }
         }
@@ -526,7 +526,7 @@ impl App {
                             "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
                             msg
                         ));
-                        self.push_log(LogLevel::Warn, format!("Swarm parse error: {}", msg));
+                        self.push_log_no_agent(LogLevel::Warn, format!("Swarm parse error: {}", msg));
                     }
                 }
             }
@@ -536,7 +536,7 @@ impl App {
                     "From: /swarm\n## ❌ Swarm Error\n\n{}\n",
                     msg
                 ));
-                self.push_log(LogLevel::Warn, format!("Swarm error: {}", msg));
+                self.push_log_no_agent(LogLevel::Warn, format!("Swarm error: {}", msg));
             }
         }
     }
@@ -629,13 +629,13 @@ impl App {
         if auto_triggered {
             self.auto_compact_failed = false;
             self.status = "compacting before send…".to_string();
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Warn,
                 "Auto-compaction triggered (context near limit)".to_string(),
             );
         } else {
             self.status = "compacting…".to_string();
-            self.push_log(LogLevel::Info, "Compaction started".to_string());
+            self.push_log_no_agent(LogLevel::Info, "Compaction started".to_string());
         }
 
         let processor = self.session_processor.clone();
@@ -700,7 +700,7 @@ impl App {
                 .iter()
                 .map(|r| r.raw.clone())
                 .collect();
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("resolving refs: {}", ref_names.join(", ")),
             );
@@ -720,7 +720,7 @@ impl App {
         } else {
             String::new()
         };
-        self.push_log(
+        self.push_log_no_agent(
             LogLevel::Info,
             format!("prompt sent{}: {}", model_tag, truncated),
         );
@@ -1522,7 +1522,7 @@ impl App {
             match TeamStore::load_by_name(team_name, &working_dir) {
                 Ok(store) => store.dir,
                 Err(e) => {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Warn,
                         format!("TeamManager init skipped: cannot load team '{team_name}': {e}"),
                     );
@@ -1551,7 +1551,7 @@ impl App {
         let manager = Arc::new(manager);
 
         if self.session_processor.team_manager.set(manager.clone()).is_ok() {
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("TeamManager initialised for team '{team_name}'"),
             );
@@ -1670,7 +1670,7 @@ impl App {
                 .as_deref()
                 .map(short_session_id)
                 .unwrap_or_default();
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Tool,
                 format!("[{short_sid}:{step}] {tool} {icon} (restored)"),
             );
@@ -1681,7 +1681,7 @@ impl App {
             self.cwd = session.directory.clone();
         }
 
-        self.push_log(
+        self.push_log_no_agent(
             LogLevel::Info,
             format!(
                 "Resumed session {} ({} messages)",
@@ -2312,7 +2312,7 @@ impl App {
             .split_once(char::is_whitespace)
             .map_or((stripped, ""), |(c, a)| (c, a.trim()));
         let start_lines = self.assistant_output_lines();
-        self.push_log(LogLevel::Info, format!("Executing /{} {}", cmd, args));
+        self.push_log_no_agent(LogLevel::Info, format!("Executing /{} {}", cmd, args));
 
         // Retain the raw slash command in input history so users can recall it later.
         self.add_to_history(raw.to_string());
@@ -2329,7 +2329,7 @@ impl App {
 
         let end_lines = self.assistant_output_lines();
         let added = end_lines.saturating_sub(start_lines);
-        self.push_log(
+        self.push_log_no_agent(
             LogLevel::Info,
             format!("Finished /{} {} — {} lines output", cmd, args, added),
         );
@@ -2408,7 +2408,7 @@ impl App {
                         self.agent_info = self.cycleable_agents[idx].clone();
                         self.agent_name = self.agent_info.name.clone();
                         self.status = format!("agent: {}", self.agent_name);
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
                                 "Switched to: {} ({})",
@@ -2433,7 +2433,7 @@ impl App {
                             args,
                             available.join(", ")
                         );
-                        self.push_log(LogLevel::Warn, format!("Unknown agent: {}", args));
+                        self.push_log_no_agent(LogLevel::Warn, format!("Unknown agent: {}", args));
                     }
                 }
             }
@@ -2499,12 +2499,12 @@ impl App {
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
                 self.status = "messages cleared".to_string();
-                self.push_log(LogLevel::Info, "Message history cleared".to_string());
+                self.push_log_no_agent(LogLevel::Info, "Message history cleared".to_string());
             }
             "browse_refresh" => {
                 self.refresh_project_files_cache();
                 self.status = format!("browse index refreshed ({})", self.project_files_cache_count);
-                self.push_log(
+                self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
                         "@ picker index refreshed ({} entries)",
@@ -2515,7 +2515,7 @@ impl App {
             "cancel" => {
                 if args.is_empty() {
                     self.status = "⚠ Please provide a task ID prefix: /cancel <id>".to_string();
-                    self.push_log(LogLevel::Warn, "No task ID provided".to_string());
+                    self.push_log_no_agent(LogLevel::Warn, "No task ID provided".to_string());
                     return;
                 }
 
@@ -2530,7 +2530,7 @@ impl App {
                         &task_id[..8.min(task_id.len())],
                         agent
                     );
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "Task cancelled: {}... ({})",
@@ -2540,7 +2540,7 @@ impl App {
                     );
                 } else {
                     self.status = format!("No task found with ID starting with '{}'", args);
-                    self.push_log(LogLevel::Warn, format!("Task not found: {}", args));
+                    self.push_log_no_agent(LogLevel::Warn, format!("Task not found: {}", args));
                 }
             }
             "compact" => {
@@ -2610,7 +2610,7 @@ impl App {
                     Some(m) => m,
                     None => {
                         self.status = format!("⚠ Unknown optimization method: {}", method_str);
-                        self.push_log(LogLevel::Warn, format!("opt: unknown method '{}'", method_str));
+                        self.push_log_no_agent(LogLevel::Warn, format!("opt: unknown method '{}'", method_str));
                         return;
                     }
                 };
@@ -2812,14 +2812,14 @@ impl App {
                     self.cycleable_agents = new_cycleable;
 
                     for d in &diags {
-                        self.push_log(LogLevel::Warn, format!("[reload agents] {}", d));
+                        self.push_log_no_agent(LogLevel::Warn, format!("[reload agents] {}", d));
                     }
                     report.push_str(&format!(
                         "✓ Agents reloaded — {} custom agent(s) (was {})\n",
                         self.custom_agent_defs.len(),
                         prev_count,
                     ));
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "reload agents: {} custom agent(s) loaded",
@@ -2837,11 +2837,11 @@ impl App {
                             self.selected_model =
                                 self.storage.get_setting("selected_model").ok().flatten();
                             report.push_str("✓ Config reloaded (ragent.json)\n");
-                            self.push_log(LogLevel::Info, "reload config: ragent.json reloaded".to_string());
+                            self.push_log_no_agent(LogLevel::Info, "reload config: ragent.json reloaded".to_string());
                         }
                         Err(e) => {
                             report.push_str(&format!("✗ Config reload failed: {}\n", e));
-                            self.push_log(LogLevel::Warn, format!("reload config failed: {}", e));
+                            self.push_log_no_agent(LogLevel::Warn, format!("reload config failed: {}", e));
                         }
                     }
                 }
@@ -2883,7 +2883,7 @@ impl App {
                                 self.mcp_servers.len(),
                                 prev,
                             ));
-                            self.push_log(
+                            self.push_log_no_agent(
                                 LogLevel::Info,
                                 format!(
                                     "reload mcp: {} server(s) in config",
@@ -2893,7 +2893,7 @@ impl App {
                         }
                         Err(e) => {
                             report.push_str(&format!("✗ MCP reload failed: {}\n", e));
-                            self.push_log(LogLevel::Warn, format!("reload mcp failed: {}", e));
+                            self.push_log_no_agent(LogLevel::Warn, format!("reload mcp failed: {}", e));
                         }
                     }
                 }
@@ -2905,7 +2905,7 @@ impl App {
                     report.push_str(
                         "✓ Skills will be reloaded from disk on next use (no cache to clear)\n",
                     );
-                    self.push_log(LogLevel::Info, "reload skills: confirmed (on-demand)".to_string());
+                    self.push_log_no_agent(LogLevel::Info, "reload skills: confirmed (on-demand)".to_string());
                 }
 
                 if !matches!(sub, "all" | "agents" | "config" | "mcp" | "skills") {
@@ -2924,7 +2924,7 @@ impl App {
             "resume" => {
                 if !self.agent_halted {
                     self.status = "Nothing to resume — agent was not halted".to_string();
-                    self.push_log(LogLevel::Warn, "Nothing to resume".to_string());
+                    self.push_log_no_agent(LogLevel::Warn, "Nothing to resume".to_string());
                     return;
                 }
                 if self.session_id.is_none() {
@@ -2941,7 +2941,7 @@ impl App {
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
                 self.status = "processing...".to_string();
-                self.push_log(LogLevel::Info, "Resuming halted agent".to_string());
+                self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
@@ -2985,7 +2985,7 @@ impl App {
                 } else {
                     self.agent_info.prompt = Some(args.to_string());
                     self.status = "system prompt updated".to_string();
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("System prompt set ({} chars)", args.len()),
                     );
@@ -3358,7 +3358,7 @@ impl App {
             "tasks" => {
                 if self.active_tasks.is_empty() {
                     self.status = "No active background tasks".to_string();
-                    self.push_log(LogLevel::Info, "No active tasks".to_string());
+                    self.push_log_no_agent(LogLevel::Info, "No active tasks".to_string());
                     return;
                 }
 
@@ -3720,7 +3720,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.team_message_counts.clear();
                                 self.show_teams = true;
                                 self.ensure_team_manager_for_team(&name, Some(team_dir));
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Info,
                                     format!("🤝 Team '{}' created", name),
                                 );
@@ -3784,7 +3784,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                             Err(e) => {
                                 self.status = format!("Failed to create team: {}", e);
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Error,
                                     format!("team create failed: {}", e),
                                 );
@@ -3872,7 +3872,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                             Err(e) => {
                                 self.status = format!("Failed to load team: {e}");
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Error,
                                     format!("team show failed for '{}': {}", rest, e),
                                 );
@@ -3890,7 +3890,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
                                 self.swarm_state = None;
                             }
-                            self.push_log(
+                            self.push_log_no_agent(
                                 LogLevel::Info,
                                 format!("🤝 Team '{}' closed for this session", team_name),
                             );
@@ -3940,7 +3940,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                             self.swarm_state = None;
                                         }
                                     }
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Info,
                                         format!("🗑️  Team '{}' deleted", rest),
                                     );
@@ -3952,7 +3952,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 }
                                 Err(e) => {
                                     self.status = format!("Failed to delete team: {e}");
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Error,
                                         format!("team delete failed for '{}': {}", rest, e),
                                     );
@@ -3960,7 +3960,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             },
                             Err(e) => {
                                 self.status = format!("Failed to load team: {e}");
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Error,
                                     format!("team delete failed for '{}': {}", rest, e),
                                 );
@@ -4160,7 +4160,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 );
                                                 match mb.push(msg) {
                                                     Ok(_) => {
-                                                        self.push_log(
+                                                        self.push_log_no_agent(
                                                             LogLevel::Info,
                                                             format!(
                                                                 "📨 lead → {name}: {text}"
@@ -4282,7 +4282,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 "From: /team clear\nCleared {} task(s) for team '{}'.",
                                                 cleared_count, team.name
                                             ));
-                                            self.push_log(
+                                            self.push_log_no_agent(
                                                 LogLevel::Info,
                                                 format!(
                                                     "🧹 Cleared {} task(s) from team '{}'",
@@ -4293,7 +4293,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         }
                                         Err(e) => {
                                             self.status = format!("Failed to clear tasks: {e}");
-                                            self.push_log(
+                                            self.push_log_no_agent(
                                                 LogLevel::Error,
                                                 format!("team clear failed for '{}': {}", team.name, e),
                                             );
@@ -4330,7 +4330,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     .collect();
 
                                 // Log a warning with the list of active teammates
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Warn,
                                     format!(
                                         "Cannot clean up team '{}': {} teammate(s) still active: {}",
@@ -4367,7 +4367,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 self.swarm_state = None;
                             }
                             if removed {
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Info,
                                     format!("🗑️  Team '{team_name}' cleaned up"),
                                 );
@@ -4375,7 +4375,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     "From: /team cleanup\nTeam '{team_name}' cleaned up."
                                 ));
                             } else {
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Warn,
                                     format!("Team '{team_name}' state cleared (dir not found)"),
                                 );
@@ -4426,7 +4426,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             msg.push_str("Press Enter to confirm or Esc to cancel.");
 
                             self.append_assistant_text(&msg);
-                            self.push_log(LogLevel::Info, "forcecleanup confirmation required (modal)".to_string());
+                            self.push_log_no_agent(LogLevel::Info, "forcecleanup confirmation required (modal)".to_string());
                             self.status = "forcecleanup confirmation required".to_string();
                             return;
                         }
@@ -4476,7 +4476,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     }
                                     // Persist best-effort
                                     if let Err(e) = store.save() {
-                                        self.push_log(
+                                        self.push_log_no_agent(
                                             LogLevel::Warn,
                                             format!("Failed to persist team member status before force cleanup: {}", e),
                                         );
@@ -4496,14 +4496,14 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     }
 
                                     if !deactivated.is_empty() {
-                                        self.push_log(
+                                        self.push_log_no_agent(
                                             LogLevel::Info,
                                             format!("Deactivated teammates: {}", deactivated.join(", ")),
                                         );
                                     }
 
                                     if removed {
-                                        self.push_log(
+                                        self.push_log_no_agent(
                                             LogLevel::Info,
                                             format!("🗑️  Team '{team_name}' force cleaned up"),
                                         );
@@ -4513,7 +4513,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         }
                                         self.append_assistant_text(&msg);
                                     } else {
-                                        self.push_log(
+                                        self.push_log_no_agent(
                                             LogLevel::Warn,
                                             format!("Team '{team_name}' state cleared (dir not found)"),
                                         );
@@ -4528,7 +4528,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 }
                                 Err(e) => {
                                     self.status = format!("Failed to force cleanup team: {}", e);
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Error,
                                         format!("forcecleanup failed for '{}': {}", team_name, e),
                                     );
@@ -4576,7 +4576,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             "Unknown /team subcommand '{}'. Usage: /team [help|status|show|create|close|delete|message|tasks|clear|cleanup|focus]",
                             sub
                         );
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Warn,
                             format!("unknown /team subcommand: {}", sub),
                         );
@@ -4634,7 +4634,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                     Err(e) => {
                         self.status = format!("Failed to read todos: {}", e);
-                        self.push_log(LogLevel::Error, format!("todo_list error: {}", e));
+                        self.push_log_no_agent(LogLevel::Error, format!("todo_list error: {}", e));
                     }
                 }
             }
@@ -4660,7 +4660,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = format!("YOLO mode {label}");
-                self.push_log(
+                self.push_log_no_agent(
                     if new_state { LogLevel::Warn } else { LogLevel::Info },
                     format!("YOLO mode {label}"),
                 );
@@ -4733,7 +4733,7 @@ Type `/swarm help` for more info.\n";
                         };
 
                         self.status = "⏳ swarm: decomposing goal…".to_string();
-                        self.push_log(LogLevel::Info, format!("Swarm: decomposing — {}", &full_prompt[..full_prompt.len().min(80)]));
+                        self.push_log_no_agent(LogLevel::Info, format!("Swarm: decomposing — {}", &full_prompt[..full_prompt.len().min(80)]));
 
                         if self.current_screen == ScreenMode::Home {
                             self.current_screen = ScreenMode::Chat;
@@ -4790,7 +4790,7 @@ Type `/swarm help` for more info.\n";
                 if let Some(skill) = registry.get(cmd) {
                     if !skill.user_invocable {
                         self.status = format!("Skill '{}' is not user-invocable", cmd);
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Warn,
                             format!("Skill /{} is not user-invocable", cmd),
                         );
@@ -4848,7 +4848,7 @@ Type `/swarm help` for more info.\n";
                     }
 
                     self.status = format!("invoking skill /{}…", cmd);
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("Invoking skill /{} with args: {}", cmd, args),
                     );
@@ -4924,7 +4924,7 @@ Type `/swarm help` for more info.\n";
                     });
                 } else {
                     self.status = format!("Unknown command: /{}", cmd);
-                    self.push_log(LogLevel::Warn, format!("Unknown command: /{}", cmd));
+                    self.push_log_no_agent(LogLevel::Warn, format!("Unknown command: /{}", cmd));
                 }
             }
         }
@@ -5337,7 +5337,7 @@ Type `/swarm help` for more info.\n";
                 );
                 if !text.is_empty() {
                     Self::set_clipboard(&text);
-                    self.push_log(LogLevel::Info, format!("Copied {} chars", text.len()));
+                    self.push_log_no_agent(LogLevel::Info, format!("Copied {} chars", text.len()));
                 }
                 return;
             }
@@ -5367,7 +5367,7 @@ Type `/swarm help` for more info.\n";
 
         if !text.is_empty() {
             Self::set_clipboard(&text);
-            self.push_log(LogLevel::Info, format!("Copied {} chars", text.len()));
+            self.push_log_no_agent(LogLevel::Info, format!("Copied {} chars", text.len()));
         }
     }
 
@@ -5472,7 +5472,7 @@ Type `/swarm help` for more info.\n";
 
             if let Some(path) = candidate {
                 if path.exists() && is_image_path(&path) {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("📎 Image attached from clipboard path: {}", path.display()),
                     );
@@ -5490,21 +5490,21 @@ Type `/swarm help` for more info.\n";
         if let Some(img_data) = img_result {
             match save_clipboard_image_to_temp(&img_data) {
                 Ok(path) => {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("📎 Image saved from clipboard: {}", path.display()),
                     );
                     self.pending_attachments.push(path);
                 }
                 Err(e) => {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Warn,
                         format!("Failed to save clipboard image: {e}"),
                     );
                 }
             }
         } else {
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 "No image data found in clipboard".to_string(),
             );
@@ -5651,7 +5651,7 @@ Type `/swarm help` for more info.\n";
                             self.input.clear();
                             self.input_cursor = 0;
                             self.history_index = None;
-                            self.push_log(
+                            self.push_log_no_agent(
                                 LogLevel::Info,
                                 format!("→ {} (focused): {}", member.name, &text[..text.len().min(60)]),
                             );
@@ -5883,7 +5883,7 @@ Type `/swarm help` for more info.\n";
                         self.agent_info = self.cycleable_agents[self.current_agent_index].clone();
                         self.agent_name = self.agent_info.name.clone();
                         self.status = format!("agent: {}", self.agent_name);
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Info,
                             format!(
                                 "Switched to: {} ({})",
@@ -5907,7 +5907,7 @@ Type `/swarm help` for more info.\n";
                     if let Some(ref flag) = self.cancel_flag {
                         flag.store(true, Ordering::Relaxed);
                         self.status = "halting agent…".to_string();
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Warn,
                             "User pressed ESC — halting agent".to_string(),
                         );
@@ -5924,7 +5924,7 @@ Type `/swarm help` for more info.\n";
                     if self.pending_forcecleanup.is_some() {
                         self.pending_forcecleanup = None;
                         self.append_assistant_text("From: /team forcecleanup\nForce-cleanup cancelled.");
-                        self.push_log(LogLevel::Info, "forcecleanup cancelled".to_string());
+                        self.push_log_no_agent(LogLevel::Info, "forcecleanup cancelled".to_string());
                         self.status = "forcecleanup cancelled".to_string();
                     }
                 }
@@ -5976,7 +5976,7 @@ Type `/swarm help` for more info.\n";
             self.agent_info = plan.clone();
             self.agent_name = "plan".to_string();
             self.status = format!("agent: plan (delegated from {})", prev_name);
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("plan delegation: {} → plan", prev_name),
             );
@@ -6013,7 +6013,7 @@ Type `/swarm help` for more info.\n";
                 }
             });
         } else {
-            self.push_log(LogLevel::Error, "plan agent not found".to_string());
+            self.push_log_no_agent(LogLevel::Error, "plan agent not found".to_string());
             // Pop the agent we just pushed since we can't delegate
             self.agent_stack.pop();
         }
@@ -6032,7 +6032,7 @@ Type `/swarm help` for more info.\n";
             self.agent_info = prev_agent;
             self.agent_name = to_name.clone();
             self.status = format!("agent: {}", to_name);
-            self.push_log(LogLevel::Info, format!("plan restore: plan → {}", to_name));
+            self.push_log_no_agent(LogLevel::Info, format!("plan restore: plan → {}", to_name));
 
             self.event_bus.publish(Event::AgentSwitched {
                 session_id: session_id.to_string(),
@@ -6052,7 +6052,7 @@ Type `/swarm help` for more info.\n";
             );
             self.force_new_message = true;
         } else {
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Error,
                 "plan_exit called but agent stack is empty".to_string(),
             );
@@ -6078,7 +6078,7 @@ Type `/swarm help` for more info.\n";
             Event::SessionCreated { ref session_id } => {
                 if self.session_id.is_none() {
                     self.session_id = Some(session_id.clone());
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "session created: {}",
@@ -6116,7 +6116,7 @@ Type `/swarm help` for more info.\n";
                         .insert(call_id.clone(), (short_sid.clone(), step as u32));
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Tool,
                         format!("[{short_sid}:{step}] tool call: {}", tool),
                     );
@@ -6137,7 +6137,7 @@ Type `/swarm help` for more info.\n";
                         .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     if let Some(err) = error {
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Error,
                             format!(
                                 "{}tool {} failed: {} ({}ms)",
@@ -6145,7 +6145,7 @@ Type `/swarm help` for more info.\n";
                             ),
                         );
                     } else {
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Tool,
                             format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
                         );
@@ -6160,7 +6160,7 @@ Type `/swarm help` for more info.\n";
                     self.is_processing = true;
                     self.agent_halted = false;
                     self.status = "processing...".to_string();
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "response started ({})",
@@ -6181,13 +6181,13 @@ Type `/swarm help` for more info.\n";
                     if *reason == FinishReason::Cancelled {
                         self.agent_halted = true;
                         self.status = "halted — /resume to continue".to_string();
-                        self.push_log(LogLevel::Warn, "Agent halted by user".to_string());
+                        self.push_log_no_agent(LogLevel::Warn, "Agent halted by user".to_string());
                     } else {
                         self.agent_halted = false;
                         self.status = "ready".to_string();
                     }
                     self.force_new_message = true;
-                    self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
+                    self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
 
                     // After compaction: replace session message history with just the summary.
                     // The summary is the last assistant message in self.messages.
@@ -6210,18 +6210,18 @@ Type `/swarm help` for more info.\n";
                                     }],
                                 );
                                 if let Err(e) = self.storage.delete_messages(&sid) {
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Warn,
                                         format!("Compaction: failed to clear messages: {e}"),
                                     );
                                 } else if let Err(e) = self.storage.create_message(&summary_msg) {
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Warn,
                                         format!("Compaction: failed to save summary: {e}"),
                                     );
                                 } else {
                                     self.messages = vec![summary_msg];
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Info,
                                         "Compaction: session history replaced with summary".to_string(),
                                     );
@@ -6244,7 +6244,7 @@ Type `/swarm help` for more info.\n";
 
                     if was_auto_compaction {
                         self.auto_compact_in_progress = false;
-                        self.push_log(LogLevel::Info, "Auto-compaction completed".to_string());
+                        self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
                         if let Some((queued_text, queued_images)) =
                             self.pending_send_after_compact.take()
                         {
@@ -6269,7 +6269,7 @@ Type `/swarm help` for more info.\n";
                         tool_call_id: None,
                     });
                     self.status = "awaiting permission".to_string();
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Warn,
                         format!("permission requested: {} — {}", permission, description),
                     );
@@ -6283,7 +6283,7 @@ Type `/swarm help` for more info.\n";
                 if self.is_current_session(session_id) {
                     self.permission_pending = None;
                     self.status = "processing...".to_string();
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("permission {}", if allowed { "granted" } else { "denied" }),
                     );
@@ -6296,7 +6296,7 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.agent_name = to.clone();
-                    self.push_log(LogLevel::Info, format!("agent switched: {} → {}", from, to));
+                    self.push_log_no_agent(LogLevel::Info, format!("agent switched: {} → {}", from, to));
                 }
             }
             Event::AgentSwitchRequested {
@@ -6306,7 +6306,7 @@ Type `/swarm help` for more info.\n";
                 ref context,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("agent switch requested → {} ({})", to, task),
                     );
@@ -6318,7 +6318,7 @@ Type `/swarm help` for more info.\n";
                 ref summary,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("agent restore requested ({} chars)", summary.len()),
                     );
@@ -6334,14 +6334,14 @@ Type `/swarm help` for more info.\n";
                         self.auto_compact_in_progress = false;
                         self.auto_compact_failed = true;
                         self.pending_send_after_compact = None;
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Warn,
                             "Auto-compaction failed; send blocked for this turn".to_string(),
                         );
                     }
                     self.compact_in_progress = false;
                     // Full details go to the log panel only
-                    self.push_log(LogLevel::Error, format!("agent error: {}", error));
+                    self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error));
                     // Clean summary for the status bar and chat panel
                     let summary = summarise_error(error);
                     self.status = format!("error: {}", summary);
@@ -6357,7 +6357,7 @@ Type `/swarm help` for more info.\n";
                     self.last_input_tokens = input_tokens;
                     self.token_usage.0 += input_tokens;
                     self.token_usage.1 += output_tokens;
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "tokens: +{}in +{}out (total {}in {}out)",
@@ -6372,7 +6372,7 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.quota_percent = Some(percent);
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("quota: {:.1}% used", percent),
                     );
@@ -6387,7 +6387,7 @@ Type `/swarm help` for more info.\n";
                     // The SessionProcessor increments the EventBus step at the start of
                     // each loop iteration; the first LLM request corresponds to step 1.
                     if self.event_bus.current_step(session_id) <= 1 {
-                        self.push_log(
+                        self.push_log_no_agent(
                             LogLevel::Info,
                             format!("tools sent: [{}]", tools.join(", ")),
                         );
@@ -6400,7 +6400,7 @@ Type `/swarm help` for more info.\n";
                 elapsed_ms,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log(LogLevel::Info, format!("model response ({elapsed_ms}ms): {text}"));
+                    self.push_log_no_agent(LogLevel::Info, format!("model response ({elapsed_ms}ms): {text}"));
                 }
             }
             Event::ToolCallArgs {
@@ -6424,17 +6424,17 @@ Type `/swarm help` for more info.\n";
                         let mut first = true;
                         for line in formatted.lines() {
                             if first {
-                                self.push_log(
+                                self.push_log_no_agent(
                                     LogLevel::Tool,
                                     format!("{}→ {} {}", step_tag, tool, line),
                                 );
                                 first = false;
                             } else {
-                                self.push_log(LogLevel::Tool, format!("  {}", line));
+                                self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
                             }
                         }
                     } else {
-                        self.push_log(LogLevel::Tool, format!("{}→ {}({})", step_tag, tool, args));
+                        self.push_log_no_agent(LogLevel::Tool, format!("{}→ {}({})", step_tag, tool, args));
                     }
                 }
             }
@@ -6474,7 +6474,7 @@ Type `/swarm help` for more info.\n";
                         .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
                     let icon = if success { "✓" } else { "✗" };
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Tool,
                         format!("{}← {} {} {}", step_tag, tool, icon, content),
                     );
@@ -6512,7 +6512,7 @@ Type `/swarm help` for more info.\n";
                     } else {
                         ("🔄", "Foreground")
                     };
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "{} {} task started: {} ({})",
@@ -6536,7 +6536,7 @@ Type `/swarm help` for more info.\n";
                         self.active_tasks.remove(idx);
                     }
                     let icon = if success { "✅" } else { "❌" };
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "{} Task completed ({}): {}",
@@ -6555,7 +6555,7 @@ Type `/swarm help` for more info.\n";
                     if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                         self.active_tasks.remove(idx);
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
                     );
@@ -6581,7 +6581,7 @@ Type `/swarm help` for more info.\n";
                     LspStatus::Disabled => "⚪",
                     LspStatus::Failed { .. } => "🔴",
                 };
-                self.push_log(
+                self.push_log_no_agent(
                     LogLevel::Info,
                     format!("{icon} LSP '{}' → {:?}", server_id, status),
                 );
@@ -6621,7 +6621,7 @@ Type `/swarm help` for more info.\n";
                         }
                     }
                     self.show_teams = true;
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
                             "🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"
@@ -6648,7 +6648,7 @@ Type `/swarm help` for more info.\n";
                         let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
                         counts.1 = counts.1.saturating_add(1);
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("📨 [{team_name}] {from} → {to}: {preview}"),
                     );
@@ -6674,7 +6674,7 @@ Type `/swarm help` for more info.\n";
                         .entry(to.clone())
                         .or_insert((0, 0));
                     to_counts.1 = to_counts.1.saturating_add(1);
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
                     );
@@ -6689,7 +6689,7 @@ Type `/swarm help` for more info.\n";
                     if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
                         m.status = MemberStatus::Idle;
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("💤 [{team_name}] Teammate {agent_id} is idle"),
                     );
@@ -6707,7 +6707,7 @@ Type `/swarm help` for more info.\n";
                         m.last_spawn_error = Some(error.clone());
                     }
                     let short_err = if error.len() > 80 { &error[..80] } else { error };
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Error,
                         format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
                     );
@@ -6724,7 +6724,7 @@ Type `/swarm help` for more info.\n";
                         m.status = MemberStatus::Working;
                         m.current_task_id = Some(task_id.clone());
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
                     );
@@ -6740,7 +6740,7 @@ Type `/swarm help` for more info.\n";
                     if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
                         m.current_task_id = None;
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
                     );
@@ -6759,7 +6759,7 @@ Type `/swarm help` for more info.\n";
                     if self.swarm_state.as_ref().is_some_and(|s| &s.team_name == team_name) {
                         self.swarm_state = None;
                     }
-                    self.push_log(
+                    self.push_log_no_agent(
                         LogLevel::Info,
                         format!("🗑️  Team '{team_name}' cleaned up"),
                     );
@@ -6779,7 +6779,7 @@ Type `/swarm help` for more info.\n";
 
             let _ = self.storage.set_setting("copilot_api_base", api_base);
             let _ = self.storage.delete_setting("provider_copilot_disabled");
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("Copilot authorised (api: {api_base})"),
             );
@@ -6802,16 +6802,23 @@ Type `/swarm help` for more info.\n";
     /// # use ragent_tui::App;
     /// # use ragent_tui::app::LogLevel;
           /// # fn example(app: &mut App) {
-          /// app.push_log(LogLevel::Info, "Session started".to_string());
+          /// app.push_log_no_agent(LogLevel::Info, "Session started".to_string());
           /// # }
           /// ```
-          pub fn push_log(&mut self, level: LogLevel, message: String) {
+          pub fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
               self.log_entries.push(LogEntry {
                   timestamp: chrono::Utc::now(),
                   level,
                   message,
                   session_id: self.session_id.clone(),
+                  agent_id,
               });
+          }
+
+          /// Helper: push log with no agent_id (for backwards compatibility during transition).
+          #[allow(dead_code)]
+          fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
+              self.push_log(level, message, None);
           }
 
     fn open_output_view_session(&mut self, session_id: String, label: String) {
@@ -6952,7 +6959,7 @@ Type `/swarm help` for more info.\n";
                             );
                             match mb.push(msg) {
                                 Ok(_) => {
-                                    self.push_log(
+                                    self.push_log_no_agent(
                                         LogLevel::Info,
                                         format!("📨 lead → {teammate_name}: {text}"),
                                     );
@@ -7011,7 +7018,7 @@ Type `/swarm help` for more info.\n";
                         task.description = st.description.clone();
                         task.depends_on = st.depends_on.clone();
                         if let Err(e) = task_store.add_task(task) {
-                            self.push_log(LogLevel::Warn, format!("Swarm: failed to add task {}: {e}", st.id));
+                            self.push_log_no_agent(LogLevel::Warn, format!("Swarm: failed to add task {}: {e}", st.id));
                         }
                     }
                 }
@@ -7055,7 +7062,7 @@ Type `/swarm help` for more info.\n";
             }
             Err(e) => {
                 self.status = format!("⚠ swarm: team creation failed: {e}");
-                self.push_log(LogLevel::Warn, format!("Swarm team creation failed: {e}"));
+                self.push_log_no_agent(LogLevel::Warn, format!("Swarm team creation failed: {e}"));
             }
         }
     }
@@ -7123,7 +7130,7 @@ Type `/swarm help` for more info.\n";
             }
 
             let status_label = if has_deps { "blocked (deps)" } else { "spawning" };
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("🐝 Swarm teammate: {} ({}) — {}", teammate_name, subtask.id, status_label),
             );
@@ -7267,7 +7274,7 @@ Type `/swarm help` for more info.\n";
             Swarm **{team_name}** has been shut down.\n"
         ));
         self.status = "swarm: cancelled".to_string();
-        self.push_log(LogLevel::Info, format!("Swarm cancelled: {team_name}"));
+        self.push_log_no_agent(LogLevel::Info, format!("Swarm cancelled: {team_name}"));
     }
 
     /// Check if any blocked swarm tasks can be unblocked now that deps have completed.
@@ -7366,7 +7373,7 @@ Type `/swarm help` for more info.\n";
                 .find(|t| t.id == *task_id)
                 .map(|t| t.depends_on.join(", "))
                 .unwrap_or_default();
-            self.push_log(
+            self.push_log_no_agent(
                 LogLevel::Info,
                 format!("🔓 Unblocking {} ({}) — deps [{}] all in {:?}", member_name, task_id, dep_info, all_completed),
             );
@@ -7499,7 +7506,7 @@ Type `/swarm help` for more info.\n";
 
         self.append_assistant_text(&output);
         self.status = format!("🎉 swarm complete: {team_name}");
-        self.push_log(LogLevel::Info, format!("Swarm complete: {team_name} — {completed}/{total} tasks done"));
+        self.push_log_no_agent(LogLevel::Info, format!("Swarm complete: {team_name} — {completed}/{total} tasks done"));
 
         if let Some(ref mut s) = self.swarm_state {
             s.completed = true;

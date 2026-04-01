@@ -1126,6 +1126,7 @@ fn start_copilot_device_flow_setup(app: &mut App) {
             "Copilot device flow started — enter code {} at {}",
             user_code, verification_uri
         ),
+        None,
     );
 
     app.provider_setup = Some(ProviderSetupStep::DeviceFlowPending {

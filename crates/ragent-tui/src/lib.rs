@@ -162,6 +162,7 @@ pub async fn run_tui(
                     app.push_log(
                         app::LogLevel::Warn,
                         format!("{n} events dropped (event bus lag)"),
+                        None,
                     );
                     // After Lagged, the receiver is reset — continue draining
                 }
@@ -178,7 +179,7 @@ pub async fn run_tui(
                 _ => app::LogLevel::Info,
             };
             if !record.message.is_empty() {
-                app.push_log(level, record.message);
+                app.push_log(level, record.message, None);
             }
         }
 
@@ -218,6 +219,7 @@ pub async fn run_tui(
                         app.push_log(
                             app::LogLevel::Warn,
                             format!("{n} events dropped (event bus lag)"),
+                            None,
                         );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {}

@@ -1472,18 +1472,11 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
           .clone()
           .or_else(|| app.session_id.clone());
 
-      // Filter log entries to the selected agent's session.
-      let filtered_entries: Vec<_> = app
-          .log_entries
-          .iter()
-          .filter(|entry| {
-              // Show entries matching the display session, or entries with no session_id set.
-              entry.session_id.as_ref() == display_session.as_ref()
-                  || (entry.session_id.is_none() && display_session == app.session_id)
-          })
-          .collect();
+      // Show all log entries from all sessions (not filtered by session).
+      // This allows viewing all agent activity in one view with agent_id labels.
+      let all_entries = &app.log_entries;
 
-      if filtered_entries.is_empty() {
+      if all_entries.is_empty() {
           app.log_max_scroll = 0;
           let empty = Paragraph::new(Line::from(Span::styled(
               "No log entries yet",
@@ -1493,26 +1486,28 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
           return;
       }
 
-      // Build lines from filtered log entries
-      let lines: Vec<Line> = filtered_entries
+      // Build lines from all log entries
+      let lines: Vec<Line> = all_entries
           .iter()
           .map(|entry| {
               let ts = entry.timestamp.format("%H:%M:%S");
-                              // If this is a compaction start/end/trigger message, render it in bright green
-                              let msg_lower = entry.message.to_lowercase();
-                              let is_compaction_highlight = msg_lower.contains("compaction") && (msg_lower.contains("started") || msg_lower.contains("completed") || msg_lower.contains("triggered"));
+              // If this is a compaction start/end/trigger message, render it in bright green
+              let msg_lower = entry.message.to_lowercase();
+              let is_compaction_highlight = msg_lower.contains("compaction") && (msg_lower.contains("started") || msg_lower.contains("completed") || msg_lower.contains("triggered"));
               
-                                              let (level_str, level_color) = if is_compaction_highlight {
-                                                  ("CMP", Color::LightGreen)
-                                              } else {
-                                                  match entry.level {
-                                                      LogLevel::Info => ("INF", Color::Blue),
-                                                      LogLevel::Tool => ("TUL", Color::Cyan),
-                                                      LogLevel::Warn => ("WRN", Color::Yellow),
-                                                      LogLevel::Error => ("ERR", Color::Red),
-                                                  }
-                                              };
-              Line::from(vec![
+              let (level_str, level_color) = if is_compaction_highlight {
+                  ("CMP", Color::LightGreen)
+              } else {
+                  match entry.level {
+                      LogLevel::Info => ("INF", Color::Blue),
+                      LogLevel::Tool => ("TUL", Color::Cyan),
+                      LogLevel::Warn => ("WRN", Color::Yellow),
+                      LogLevel::Error => ("ERR", Color::Red),
+                  }
+              };
+              
+              // Build agent_id span if present
+              let mut spans = vec![
                   Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
                   Span::styled(
                       format!("{level_str} "),
@@ -1520,10 +1515,21 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                           .fg(level_color)
                           .add_modifier(Modifier::BOLD),
                   ),
-                  Span::raw(&entry.message),
-              ])
+              ];
+              
+              // Add agent_id label if present
+              if let Some(agent_id) = &entry.agent_id {
+                  spans.push(Span::styled(
+                      format!("[{}] ", agent_id),
+                      Style::default().fg(Color::Magenta),
+                  ));
+              }
+              
+              spans.push(Span::raw(&entry.message));
+              Line::from(spans)
           })
           .collect();
+              
     // Cache plain-text content for text selection copy
     app.log_content_lines = lines
         .iter()
