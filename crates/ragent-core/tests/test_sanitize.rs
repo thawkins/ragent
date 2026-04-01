@@ -419,20 +419,20 @@ fn test_redact_api_key_long() {
 #[test]
 fn test_redact_many_mixed_secrets() {
     let input = concat!(
-        "sk-aaaaaaaaaaaaaaaaaaaaaaaaa ",
-        "Bearer FAKE_JWT_PAYLOAD_FOR_TESTS_here ",
-        "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ ",
-        "FAKE_AKIA_TOKEN_FOR_TESTS123 ",
-        "FAKE_XOXB_TOKEN_FOR_TESTS ",
-        "token=abcdefghijklmnop12345678"
+        "sk-test_aaaaaaaaaaaaaaaaaaaaaaaa ",
+        "Bearer test_FAKE_JWT_PAYLOAD_FOR_TESTS ",
+        "ghp_test_aBcDeFgHiJkLmNoPqRsTuVwXyZ ",
+        "AKIA_TEST_EXAMPLE123_TESTONLY ",
+        "xoxb_test_123456789012_abcdefghijklmnopqrst ",
+        "token=test_abcdefghijklmnop12345678"
     );
     let result = redact_secrets(input);
-    assert!(!result.contains("sk-aaa"), "sk- should be redacted");
-    assert!(!result.contains("eyJhbGci"), "JWT should be redacted");
+    assert!(!result.contains("sk-"), "sk- should be redacted");
+    assert!(!result.contains("Bearer"), "Bearer should be redacted");
     assert!(!result.contains("ghp_"), "GitHub token should be redacted");
-    assert!(!result.contains("AKIAIOSF"), "AWS key should be redacted");
-    assert!(!result.contains("xoxb-"), "Slack token should be redacted");
-    assert!(!result.contains("abcdefghijklmnop12345678"), "token= should be redacted");
+    assert!(!result.contains("AKIA_"), "AWS key should be redacted");
+    assert!(!result.contains("xoxb_"), "Slack token should be redacted");
+    assert!(!result.contains("token="), "token= should be redacted");
     assert!(result.matches("[REDACTED]").count() >= 5, "Should have at least 5 redactions");
 }
 
