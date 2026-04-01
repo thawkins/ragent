@@ -49,6 +49,9 @@ serde_yaml = { workspace = true }
 lsp-types = { workspace = true }
 url = { workspace = true }
 rand = { workspace = true }
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+ignore = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

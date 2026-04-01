@@ -95,6 +95,11 @@ regex = "1"
 base64 = "0.22"
 rand = "0.8"
 
+# ── ripgrep library crates ───────────────────────────────────────────────
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+
 # ── Clipboard / image ───────────────────────────────────────────────────
 arboard = "3"
 # default-features = false: only PNG codec — avoids pulling in gif, jpeg, tiff, etc.
