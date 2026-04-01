@@ -38,8 +38,10 @@ impl Tool for LibreWriteTool {
                     "description": "Path for the output file (created or overwritten)"
                 },
                 "content": {
-                    "type": "string",
-                    "description": "ODT/ODP: plain text content to write"
+                    "description": "ODT: structured content array or plain text string. \
+                        Array elements: {type:'paragraph'|'heading'|'bullet_list'|'ordered_list'|'code_block', text:'...', level:1-6, items:[...]}. \
+                        ODP: structured slides array [{title:'...', content:[...]}] or plain text (slides separated by blank lines). \
+                        Also accepted: object with 'paragraphs' or 'content' array key."
                 },
                 "rows": {
                     "type": "array",
@@ -86,7 +88,7 @@ impl Tool for LibreWriteTool {
         let libre_format = detect_format(&path)?;
 
         // Extract parameters before moving into spawn_blocking.
-        let content = input["content"].as_str().unwrap_or("").to_string();
+        let content = input["content"].clone();
         let rows: Vec<Vec<String>> = input["rows"]
             .as_array()
             .map(|arr| {
@@ -128,7 +130,105 @@ impl Tool for LibreWriteTool {
 
 // ── ODT ──────────────────────────────────────────────────────────────────────
 
-fn write_odt(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
+/// Normalised paragraph for ODT rendering.
+struct OdtPara {
+    text: String,
+    style: OdtStyle,
+}
+
+enum OdtStyle {
+    Normal,
+    Heading(u64),
+    ListBullet,
+    ListNumber,
+    Code,
+}
+
+/// Resolve the content `Value` into a flat list of `OdtPara`.
+///
+/// Accepts:
+/// - Plain string → one paragraph per line
+/// - Bare array / object with `content` or `paragraphs` key → structured elements
+fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
+    // Plain text fast path
+    if let Some(text) = content.as_str() {
+        return text
+            .lines()
+            .map(|l| OdtPara { text: l.to_owned(), style: OdtStyle::Normal })
+            .collect();
+    }
+
+    let elements: Vec<Value> = if let Some(arr) = content.as_array() {
+        arr.clone()
+    } else if let Some(arr) = content["paragraphs"].as_array() {
+        arr.clone()
+    } else if let Some(arr) = content["content"].as_array() {
+        arr.clone()
+    } else {
+        // Fallback: serialise to string
+        let s = content.to_string();
+        return s.lines().map(|l| OdtPara { text: l.to_owned(), style: OdtStyle::Normal }).collect();
+    };
+
+    let mut paras: Vec<OdtPara> = Vec::new();
+    for elem in &elements {
+        let elem_type = elem["type"].as_str().unwrap_or("paragraph");
+        match elem_type {
+            "heading" => {
+                let text = elem["text"].as_str().or_else(|| elem["heading"].as_str()).unwrap_or("");
+                let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
+                paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::Heading(level) });
+            }
+            "bullet_list" => {
+                if let Some(items) = elem["items"].as_array() {
+                    for item in items {
+                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::ListBullet });
+                    }
+                }
+            }
+            "ordered_list" | "numbered_list" => {
+                if let Some(items) = elem["items"].as_array() {
+                    for item in items {
+                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::ListNumber });
+                    }
+                }
+            }
+            "code_block" => {
+                paras.push(OdtPara {
+                    text: elem["text"].as_str().unwrap_or("").to_owned(),
+                    style: OdtStyle::Code,
+                });
+            }
+            _ => {
+                if elem["heading"].as_str().is_some() || elem["level"].as_u64().is_some() {
+                    let t = elem["heading"].as_str().or_else(|| elem["text"].as_str()).unwrap_or("");
+                    let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
+                    paras.push(OdtPara { text: t.to_owned(), style: OdtStyle::Heading(level) });
+                } else {
+                    let text = elem["text"].as_str().unwrap_or("");
+                    let style = match elem["style"].as_str().unwrap_or("Normal") {
+                        "Heading1" | "heading1" | "heading_1" => OdtStyle::Heading(1),
+                        "Heading2" | "heading2" | "heading_2" => OdtStyle::Heading(2),
+                        "Heading3" | "heading3" | "heading_3" => OdtStyle::Heading(3),
+                        "Heading4" | "heading4" | "heading_4" => OdtStyle::Heading(4),
+                        "Heading5" | "heading5" | "heading_5" => OdtStyle::Heading(5),
+                        "Heading6" | "heading6" | "heading_6" => OdtStyle::Heading(6),
+                        "ListBullet" | "listbullet" | "list_bullet" => OdtStyle::ListBullet,
+                        "ListNumber" | "listnumber" | "list_number" => OdtStyle::ListNumber,
+                        "Code" | "code" | "Preformatted" => OdtStyle::Code,
+                        _ => OdtStyle::Normal,
+                    };
+                    paras.push(OdtPara { text: text.to_owned(), style });
+                }
+            }
+        }
+    }
+    paras
+}
+
+fn write_odt(path: &Path, content: &Value, title: &str, author: &str) -> Result<()> {
     use std::io::Write;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -149,8 +249,9 @@ fn write_odt(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
     zip.start_file("meta.xml", opts)?;
     zip.write_all(odf_meta(title, author).as_bytes())?;
 
+    let paras = resolve_odt_paras(content);
     zip.start_file("content.xml", opts)?;
-    zip.write_all(odt_content(text).as_bytes())?;
+    zip.write_all(odt_content_structured(&paras).as_bytes())?;
 
     zip.start_file("styles.xml", opts)?;
     zip.write_all(odt_styles().as_bytes())?;
@@ -187,21 +288,41 @@ fn odf_meta(title: &str, author: &str) -> String {
     )
 }
 
-fn odt_content(text: &str) -> String {
-    let paras: String = text
-        .lines()
-        .map(|line| format!("    <text:p>{}</text:p>\n", xml_escape(line)))
-        .collect();
+fn odt_content_structured(paras: &[OdtPara]) -> String {
+    let body: String = paras.iter().map(|p| {
+        let escaped = xml_escape(&p.text);
+        match &p.style {
+            OdtStyle::Normal => format!("    <text:p text:style-name=\"Text_20_Body\">{escaped}</text:p>\n"),
+            OdtStyle::Heading(level) => format!("    <text:h text:style-name=\"Heading_20_{level}\" text:outline-level=\"{level}\">{escaped}</text:h>\n"),
+            OdtStyle::ListBullet => format!("    <text:p text:style-name=\"List_20_Bullet\">{escaped}</text:p>\n"),
+            OdtStyle::ListNumber => format!("    <text:p text:style-name=\"List_20_Number\">{escaped}</text:p>\n"),
+            OdtStyle::Code => format!("    <text:p text:style-name=\"Preformatted_20_Text\">{escaped}</text:p>\n"),
+        }
+    }).collect();
+
+    let styles = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>"#, "\n",
+        r#"<office:document-content"#, "\n",
+        r#"  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0""#, "\n",
+        r#"  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#, "\n",
+        r#"  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0""#, "\n",
+        r#"  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0">"#, "\n",
+        r#"  <office:automatic-styles>"#, "\n",
+        r#"    <style:style style:name="Text_20_Body" style:family="paragraph"><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_1" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.2in" fo:margin-bottom="0.1in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_2" style:family="paragraph"><style:text-properties fo:font-size="14pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.15in" fo:margin-bottom="0.08in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_3" style:family="paragraph"><style:text-properties fo:font-size="12pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_4" style:family="paragraph"><style:text-properties fo:font-size="11pt" fo:font-weight="bold" fo:font-style="italic"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_5" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-weight="bold"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Heading_20_6" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-style="italic"/></style:style>"#, "\n",
+        r#"    <style:style style:name="List_20_Bullet" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="List_20_Number" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#, "\n",
+        r#"    <style:style style:name="Preformatted_20_Text" style:family="paragraph"><style:text-properties style:font-name="Courier New" fo:font-size="10pt"/></style:style>"#, "\n",
+        r#"  </office:automatic-styles>"#, "\n",
+    );
+
     format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<office:document-content
-  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
-  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
-  <office:body>
-    <office:text>
-{paras}    </office:text>
-  </office:body>
-</office:document-content>"#
+        "{styles}  <office:body>\n    <office:text>\n{body}    </office:text>\n  </office:body>\n</office:document-content>"
     )
 }
 
@@ -240,7 +361,63 @@ fn write_ods(
 
 // ── ODP ──────────────────────────────────────────────────────────────────────
 
-fn write_odp(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
+struct OdpSlide {
+    title: String,
+    lines: Vec<String>,
+}
+
+fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
+    // Structured: array of slide objects [{title, content:[...]}]
+    if let Some(arr) = content.as_array() {
+        if arr.first().map(|v| v.is_object()).unwrap_or(false) {
+            return arr.iter().map(|s| {
+                let title = s["title"].as_str().unwrap_or("").to_owned();
+                let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
+                    c.iter().map(|item| {
+                        item.as_str()
+                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                            .to_owned()
+                    }).collect()
+                } else if let Some(t) = s["text"].as_str() {
+                    t.lines().map(str::to_owned).collect()
+                } else {
+                    Vec::new()
+                };
+                OdpSlide { title, lines }
+            }).collect();
+        }
+    }
+    // Object with slides key
+    if let Some(arr) = content["slides"].as_array() {
+        return arr.iter().map(|s| {
+            let title = s["title"].as_str().unwrap_or("").to_owned();
+            let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
+                c.iter().map(|item| {
+                    item.as_str()
+                        .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                        .to_owned()
+                }).collect()
+            } else if let Some(t) = s["text"].as_str() {
+                t.lines().map(str::to_owned).collect()
+            } else {
+                Vec::new()
+            };
+            OdpSlide { title, lines }
+        }).collect();
+    }
+    // Plain text: split on blank lines
+    let text = content.as_str().unwrap_or("");
+    text.split("\n\n")
+        .map(|block| {
+            let mut lines = block.lines();
+            let title = lines.next().unwrap_or("").to_owned();
+            let rest: Vec<String> = lines.map(str::to_owned).collect();
+            OdpSlide { title, lines: rest }
+        })
+        .collect()
+}
+
+fn write_odp(path: &Path, content: &Value, title: &str, author: &str) -> Result<()> {
     use std::io::Write;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -260,8 +437,9 @@ fn write_odp(path: &Path, text: &str, title: &str, author: &str) -> Result<()> {
     zip.start_file("meta.xml", opts)?;
     zip.write_all(odf_meta(title, author).as_bytes())?;
 
+    let slides = resolve_odp_slides(content);
     zip.start_file("content.xml", opts)?;
-    zip.write_all(odp_content(text).as_bytes())?;
+    zip.write_all(odp_content_structured(&slides).as_bytes())?;
 
     zip.start_file("styles.xml", opts)?;
     zip.write_all(odp_styles().as_bytes())?;
@@ -280,28 +458,30 @@ fn odp_manifest() -> String {
 </manifest:manifest>"#.to_string()
 }
 
-fn odp_content(text: &str) -> String {
-    // Split into slides on blank lines.
-    let slides: Vec<Vec<&str>> = text
-        .split("\n\n")
-        .map(|block| block.lines().collect())
-        .collect();
-
+fn odp_content_structured(slides: &[OdpSlide]) -> String {
     let mut slide_xml = String::new();
-    for (i, lines) in slides.iter().enumerate() {
-        let paras: String = lines
-            .iter()
-            .map(|l| {
-                format!(
-                    "        <draw:text-box><text:p>{}</text:p></draw:text-box>\n",
-                    xml_escape(l)
-                )
-            })
-            .collect();
+    for (i, slide) in slides.iter().enumerate() {
+        let title_xml = if !slide.title.is_empty() {
+            format!(
+                "      <draw:frame draw:name=\"Title\" presentation:class=\"title\" \
+                 svg:x=\"0.5in\" svg:y=\"0.5in\" svg:width=\"9in\" svg:height=\"1.2in\">\
+                 <draw:text-box><text:p><text:span text:style-name=\"bold\">{}</text:span></text:p></draw:text-box>\
+                 </draw:frame>\n",
+                xml_escape(&slide.title)
+            )
+        } else {
+            String::new()
+        };
+        let body_xml: String = slide.lines.iter().map(|l| {
+            format!(
+                "      <draw:frame presentation:class=\"body\" \
+                 svg:x=\"0.5in\" svg:y=\"2in\" svg:width=\"9in\" svg:height=\"5in\">\
+                 <draw:text-box><text:p>{}</text:p></draw:text-box></draw:frame>\n",
+                xml_escape(l)
+            )
+        }).collect();
         slide_xml.push_str(&format!(
-            r#"    <draw:page draw:name="Slide {n}" draw:master-page-name="Default">
-{paras}    </draw:page>
-"#,
+            "    <draw:page draw:name=\"Slide {n}\" draw:master-page-name=\"Default\">\n{title_xml}{body_xml}    </draw:page>\n",
             n = i + 1,
         ));
     }
@@ -312,6 +492,7 @@ fn odp_content(text: &str) -> String {
   xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
   xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
   xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+  xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"
   xmlns:presentation="urn:oasis:names:tc:opendocument:xmlns:presentation:1.0">
   <office:body>
     <office:presentation>
