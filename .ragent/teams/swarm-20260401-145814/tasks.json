@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Review current product and extract capabilities",
+      "description": "Perform a thorough review of the current product (the project in the current repository). Produce a machine-readable analysis file at target/temp/swarmout/product_review.md. The analysis must include: (1) Executive summary of what the product currently does (features, supported platforms, CLI/UI, APIs, integrations). (2) Detailed feature list organized by functional area (e.g., authentication, code generation, editor/IDE integrations, CLI commands, config, telemetry). For each feature include: brief description, relevant source files and line references (relative paths), current limitations/known bugs (if discoverable), and maturity (prototype / stable / missing tests). (3) Architecture overview: components, data flows, external dependencies, and deployment model. (4) Developer experience (how to build, run tests, extend) with exact commands. (5) Quick list of candidate missing features or rough ideas (bulleted) to be examined later. (6) A short, prioritized (High/Medium/Low) list of gaps compared to an ideal product. Ensure the file is saved at target/temp/swarmout/product_review.md and uses Markdown headings. Include a small JSON metadata block at the top with { \"reviewer\": \"<agent-id>\", \"date\": \"YYYY-MM-DD\", \"repo_path\": \".\" }. This task is independent and must not assume output from other tasks.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T14:58:14.525326359Z",
+      "claimed_at": "2026-04-01T14:59:23.168336824Z",
+      "completed_at": "2026-04-01T15:02:05.439392616Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze competitor: claude-code-sourcemap (local source)",
+      "description": "Analyze the competitor 'claude-code-sourcemap' whose source code is available at ../claude-code-sourcemap. Produce a detailed report saved to target/temp/swarmout/claude_analysis.md. The report must include: (1) concise product summary (purpose, target users). (2) Feature inventory — list and describe features with references to specific files, modules, functions, and code paths (use relative paths within ../claude-code-sourcemap). (3) Notable design/architecture decisions and third-party dependencies. (4) UX/CLI/API surface and example usage commands or code snippets. (5) Strengths and weaknesses compared to a typical product in this space. (6) Concrete feature ideas that could be adopted or adapted (with rationale). (7) Licensing, deployment model, and any security/privacy concerns obvious from code. (8) For each suggested feature, estimate implementation complexity (Small/Medium/Large), and suggest which product area it would map to in our product. Include a small JSON header with { \"analyzer\": \"<agent-id>\", \"source_path\": \"../claude-code-sourcemap\", \"date\": \"YYYY-MM-DD\" }. Save at target/temp/swarmout/claude_analysis.md. This task is independent and should only read ../claude-code-sourcemap and write its own output file.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T14:58:14.525744633Z",
+      "claimed_at": "2026-04-01T14:59:24.879452300Z",
+      "completed_at": "2026-04-01T15:02:05.440204615Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze competitor: copilot-cli",
+      "description": "Analyze the competitor 'copilot-cli' (assume public project/repo/documentation). Produce a detailed report saved to target/temp/swarmout/copilot_cli_analysis.md. The report must include: (1) product summary and main use cases. (2) Feature inventory with descriptions and where possible links/commands/examples showing how features work. (3) Integration points (IDEs, CI, cloud) and supported platforms. (4) Strengths, weaknesses, and notable UX patterns. (5) Feature ideas and capabilities that our product currently lacks that would be valuable to implement, with rationale. (6) For each idea provide rough implementation complexity (S/M/L) and priority (High/Med/Low). (7) Any notable business model / pricing / adoption tactics observed. Add metadata JSON header { \"analyzer\": \"<agent-id>\", \"target\": \"copilot-cli\", \"date\": \"YYYY-MM-DD\" }. Save at target/temp/swarmout/copilot_cli_analysis.md. This task is independent; do not depend on other agents' outputs.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T14:58:14.526346492Z",
+      "claimed_at": "2026-04-01T14:59:20.763173178Z",
+      "completed_at": "2026-04-01T14:59:20.763175045Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze competitor: OpenCode (local source ../opencode)",
+      "description": "Analyze the competitor 'OpenCode' whose repository is at ../opencode. Produce a thorough report saved to target/temp/swarmout/opencode_analysis.md. Include: (1) Product summary and intended audience. (2) Feature inventory with references to source files and code paths in ../opencode. (3) Architecture, deployment, and integration details. (4) Notable implementation techniques, algorithms, or data structures used. (5) Strengths and weaknesses and possible legal/licensing notes. (6) Suggested features or approaches our product could borrow, each with an estimated implementation size (S/M/L) and suggested priority. (7) Any opportunities for direct code reuse or interoperability with our product. Add metadata JSON header { \"analyzer\": \"<agent-id>\", \"source_path\": \"../opencode\", \"date\": \"YYYY-MM-DD\" }. Save file to target/temp/swarmout/opencode_analysis.md. Independent task.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T14:58:14.527262432Z",
+      "claimed_at": "2026-04-01T14:59:22.719661027Z",
+      "completed_at": "2026-04-01T14:59:22.719663310Z"
+    },
+    {
+      "id": "s5",
+      "title": "Analyze competitor: roocode",
+      "description": "Analyze the competitor 'roocode' (assume public project/repo/docs). Produce a detailed analysis saved to target/temp/swarmout/roocode_analysis.md. The analysis must include: (1) product summary and core differentiators. (2) Feature list and how the product is positioned. (3) UX/CLI/API details and example usage. (4) Strengths and weaknesses relative to common products in this space. (5) Practical feature ideas we should implement, with rationale and mapping to our product areas. (6) For each suggested feature provide complexity estimate (S/M/L), priority, and potential implementation risks. Include metadata JSON header { \"analyzer\": \"<agent-id>\", \"target\": \"roocode\", \"date\": \"YYYY-MM-DD\" }. Save at target/temp/swarmout/roocode_analysis.md. This task is independent.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T14:58:14.535983934Z",
+      "claimed_at": "2026-04-01T14:59:26.134482169Z",
+      "completed_at": "2026-04-01T14:59:26.134484307Z"
+    },
+    {
+      "id": "s6",
+      "title": "Synthesize SWARMOUT2.md with recommendations, milestones and tasks",
+      "description": "Create the final consolidated document target/temp/swarmout/SWARMOUT2.md. This task depends on the outputs from s1, s2, s3, s4, and s5. Read the five files at target/temp/swarmout/product_review.md, claude_analysis.md, copilot_cli_analysis.md, opencode_analysis.md, and roocode_analysis.md and produce a single Markdown document that includes: (A) Executive summary of findings and top 6 recommended feature additions with short justification. (B) A combined gap analysis matrix mapping competitor features to our product (table or bullet list). (C) For each recommended feature: detailed description, expected user value, acceptance criteria, technical notes (which components to modify and rough code locations), risk/assumptions, and implementation estimate (person-weeks). (D) A plan with Milestones and Tasks: break the overall work into 3-6 milestones (e.g., M1: Core integrations, M2: UX/CLI improvements, M3: Advanced capabilities, M4: Testing/QA/Telemetry, M5: Docs & Launch). For each milestone list concrete tasks (granular enough for a developer to start), estimated duration, priority, and suggested sequencing. (E) Suggested team composition/roles and parallelization strategy (which tasks can run in parallel). (F) A short timeline (Gantt-like) with milestones and dependencies. (G) A risk register and mitigation suggestions. (H) Conclude with recommended immediate next steps (first 4 tasks to start). Include an appendix that cites each competitor analysis and the product review used. Add a JSON metadata block at the top: { \"compiled_by\": \"<agent-id>\", \"date\": \"YYYY-MM-DD\", \"sources\": [\"product_review.md\",\"claude_analysis.md\",\"copilot_cli_analysis.md\",\"opencode_analysis.md\",\"roocode_analysis.md\"] }. Save the final document at target/temp/swarmout/SWARMOUT2.md. This task must declare depends_on: [\"s1\",\"s2\",\"s3\",\"s4\",\"s5\"].",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T14:58:14.537288170Z",
+      "claimed_at": "2026-04-01T15:01:54.781940353Z",
+      "completed_at": "2026-04-01T15:01:54.781941297Z"
+    }
+  ]
+}

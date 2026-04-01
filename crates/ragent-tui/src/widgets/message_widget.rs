@@ -516,6 +516,57 @@ pub(crate) fn tool_result_summary(
             let count = out.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!("{} found", pluralize(count, "diagnostic", "diagnostics")))
         }
+        "team_task_claim" => {
+            let claimed = out
+                .get("claimed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let already_in_progress = out
+                .get("already_in_progress")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let task_id = out
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            if already_in_progress {
+                Some(format!("already has task '{}'", task_id))
+            } else if claimed {
+                Some(format!("claimed task '{}'", task_id))
+            } else {
+                Some("no tasks available".to_string())
+            }
+        }
+        "team_task_complete" => {
+            let completed = out
+                .get("completed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let task_id = out
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            if completed {
+                Some(format!("completed task '{}'", task_id))
+            } else {
+                Some("task not found or already completed".to_string())
+            }
+        }
+        "team_idle" => {
+            let idle_blocked = out
+                .get("idle_blocked")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if idle_blocked {
+                let task_id = out
+                    .get("blocked_by_task")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                Some(format!("blocked by uncompleted task '{}'", task_id))
+            } else {
+                Some("marked idle".to_string())
+            }
+        }
         _ => None,
     }
 }
