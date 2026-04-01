@@ -715,19 +715,19 @@ impl App {
         );
 
         let mut agent = self.agent_info.clone();
-        // Inherit the globally-selected model only when the agent does not
-        // declare its own.  This lets `.md` profiles (and OASF records) pin a
-        // specific provider:model while still allowing model-less agents to
-        // fall back to the user's current selection.
-        if agent.model.is_none() {
-            if let Some(ref model_str) = self.selected_model
-                && let Some((provider, model)) = model_str.split_once('/')
-            {
-                agent.model = Some(ModelRef {
-                    provider_id: provider.to_string(),
-                    model_id: model.to_string(),
-                });
-            }
+        // Apply the globally-selected model when:
+        //   1. The agent has no model at all, OR
+        //   2. The agent's model was not explicitly pinned by a custom profile
+        //      (built-in agents carry an anthropic default that should be
+        //      overridden by the user's /provider selection).
+        if (!agent.model_pinned || agent.model.is_none())
+            && let Some(ref model_str) = self.selected_model
+            && let Some((provider, model)) = model_str.split_once('/')
+        {
+            agent.model = Some(ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model.to_string(),
+            });
         }
 
         let processor = self.session_processor.clone();

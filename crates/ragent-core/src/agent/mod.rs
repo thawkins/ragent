@@ -79,9 +79,17 @@ pub struct AgentInfo {
     /// Skill names this agent should preload into its prompt context.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Persistent memory scope for this agent.
+    #[serde(default)]
+    pub memory: crate::team::config::MemoryScope,
     /// Arbitrary key-value options forwarded to the provider.
     // TODO: Replace `Value` with typed agent option structs.
     pub options: HashMap<String, Value>,
+    /// When `true` the `model` field was explicitly set by a custom agent
+    /// profile and should not be overridden by the user's global provider
+    /// selection.  Built-in agents set this to `false` so `/provider` works.
+    #[serde(default)]
+    pub model_pinned: bool,
 }
 
 impl AgentInfo {
@@ -110,7 +118,9 @@ impl AgentInfo {
             permission: Vec::new(),
             max_steps: None,
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         }
     }
 }
@@ -160,7 +170,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: read_only_permissions(),
             max_steps: Some(1),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::from([("thinking".to_string(), json!("disabled"))]),
+            model_pinned: false,
         },
         AgentInfo {
             name: "general".to_string(),
@@ -184,7 +196,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: default_permissions(),
             max_steps: Some(500),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "build".to_string(),
@@ -207,7 +221,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: default_permissions(),
             max_steps: Some(500),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "plan".to_string(),
@@ -230,7 +246,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: read_only_permissions(),
             max_steps: Some(20),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "explore".to_string(),
@@ -253,7 +271,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: read_only_permissions(),
             max_steps: Some(500),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "title".to_string(),
@@ -274,7 +294,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: Vec::new(),
             max_steps: Some(1),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "summary".to_string(),
@@ -295,7 +317,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: Vec::new(),
             max_steps: Some(1),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
         AgentInfo {
             name: "compaction".to_string(),
@@ -317,7 +341,9 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             permission: Vec::new(),
             max_steps: Some(1),
             skills: Vec::new(),
+            memory: crate::team::config::MemoryScope::None,
             options: HashMap::new(),
+            model_pinned: false,
         },
     ]
 }

@@ -1,7 +1,8 @@
 //! Discovery and loading of custom OASF agent definitions.
 //!
-//! Custom agents are stored as `.json` files in two standard directories,
-//! searched in priority order (project-local wins over user-global):
+//! Custom agents are stored as `.json` (OASF) or `.md` (profile) files in two
+//! standard directories, searched in priority order (project-local wins over
+//! user-global):
 //!
 //! | Priority | Directory |
 //! |----------|-----------|
@@ -12,8 +13,11 @@
 //! `.ragent/` directory is found or the filesystem root is reached.
 //!
 //! Each `.json` file must contain a valid OASF agent record with at least one
-//! `ragent/agent/v1` module. Malformed files produce a non-fatal diagnostic
-//! string; the rest of the custom agents continue loading normally.
+//! `ragent/agent/v1` module. `.md` files use JSON frontmatter (between `---`
+//! delimiters) for metadata; the markdown body becomes the system prompt.
+//!
+//! Malformed files produce a non-fatal diagnostic string; the rest of the
+//! custom agents continue loading normally.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -89,9 +93,9 @@ pub fn find_project_agents_dir(working_dir: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Recursively scan `dir` for `.json` agent files and insert validated agents
-/// into `agents`. Existing entries are replaced when `is_project_local` is
-/// `true` (project-local wins).
+/// Recursively scan `dir` for `.json` and `.md` agent files and insert
+/// validated agents into `agents`. Existing entries are replaced when
+/// `is_project_local` is `true` (project-local wins).
 fn scan_dir(
     dir: &Path,
     is_project_local: bool,
@@ -121,11 +125,15 @@ fn scan_dir(
             scan_dir(&path, is_project_local, agents, diagnostics);
             continue;
         }
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
 
-        match load_agent_file(&path, is_project_local) {
+        let ext = path.extension().and_then(|e| e.to_str());
+        let loader: fn(&Path, bool) -> Result<CustomAgentDef, String> = match ext {
+            Some("json") => load_agent_file,
+            Some("md") => load_agent_profile,
+            _ => continue,
+        };
+
+        match loader(&path, is_project_local) {
             Ok(def) => {
                 let key = def.agent_info.name.clone();
                 // Project-local always wins; global only inserts if not already present.
@@ -159,6 +167,136 @@ fn load_agent_file(path: &Path, is_project_local: bool) -> Result<CustomAgentDef
         agent_info,
         is_project_local,
     })
+}
+
+// ── Markdown agent profiles (.md) ────────────────────────────────────────────
+
+/// JSON frontmatter fields for a `.md` agent profile.
+///
+/// The markdown body (everything after the closing `---`) becomes the
+/// system prompt.  All fields except `name` and `description` are
+/// optional and fall back to sensible defaults.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ProfileFrontmatter {
+    /// Agent name (kebab-case, no spaces).
+    name: String,
+    /// One-line description.
+    description: String,
+    /// `"primary"`, `"subagent"`, or `"all"` (default `"all"`).
+    mode: Option<String>,
+    /// Model in `"provider:model"` format.
+    model: Option<String>,
+    /// Max agentic-loop iterations.
+    max_steps: Option<u32>,
+    /// Sampling temperature (0.0–2.0).
+    temperature: Option<f32>,
+    /// Nucleus sampling (0.0–1.0).
+    top_p: Option<f32>,
+    /// Hide from user-visible agent picker.
+    hidden: Option<bool>,
+    /// Persistent memory scope: `"user"`, `"project"`, or omit for none.
+    memory: Option<String>,
+    /// Permission rules — same schema as OASF `ragent/agent/v1`.
+    permissions: Option<Vec<crate::agent::oasf::RagentPermissionRule>>,
+    /// Skill names to preload.
+    #[serde(default)]
+    skills: Vec<String>,
+    /// Arbitrary provider options.
+    options: Option<serde_json::Value>,
+}
+
+/// Parse a `.md` agent profile with JSON frontmatter and return a
+/// [`CustomAgentDef`].
+///
+/// Format:
+/// ```markdown
+/// ---
+/// {
+///   "name": "my-agent",
+///   "description": "Does useful things"
+/// }
+/// ---
+///
+/// You are a helpful agent that ...
+/// ```
+///
+/// # Errors
+///
+/// Returns a human-readable string when parsing or validation fails.
+fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgentDef, String> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("could not read file: {}", e))?;
+
+    let (frontmatter, body) = parse_json_frontmatter(&content)
+        .ok_or_else(|| "missing JSON frontmatter (expected --- delimiters)".to_string())?;
+
+    let fm: ProfileFrontmatter = serde_json::from_str(frontmatter)
+        .map_err(|e| format!("frontmatter JSON parse error: {}", e))?;
+
+    let system_prompt = body.trim().to_string();
+    if system_prompt.is_empty() {
+        return Err("markdown body (system_prompt) must not be empty".to_string());
+    }
+
+    // Build a RagentAgentPayload and reuse the existing validation path.
+    let payload = crate::agent::oasf::RagentAgentPayload {
+        system_prompt,
+        mode: fm.mode,
+        max_steps: fm.max_steps,
+        temperature: fm.temperature,
+        top_p: fm.top_p,
+        model: fm.model,
+        skills: fm.skills,
+        permissions: fm.permissions,
+        hidden: fm.hidden,
+        memory: fm.memory,
+        options: fm.options,
+    };
+
+    // Synthesise a minimal OASF record so the rest of the pipeline is happy.
+    let record = OasfAgentRecord {
+        name: fm.name.clone(),
+        description: fm.description.clone(),
+        version: "1.0.0".to_string(),
+        schema_version: "0.7.0".to_string(),
+        authors: Vec::new(),
+        created_at: None,
+        skills: Vec::new(),
+        domains: Vec::new(),
+        locators: Vec::new(),
+        modules: vec![crate::agent::oasf::OasfModule {
+            module_type: crate::agent::oasf::RAGENT_MODULE_TYPE.to_string(),
+            payload: serde_json::to_value(&payload).unwrap_or_default(),
+        }],
+    };
+
+    record_to_agent_info(&record, path).map(|agent_info| CustomAgentDef {
+        record,
+        source_path: path.to_path_buf(),
+        agent_info,
+        is_project_local,
+    })
+}
+
+/// Extract JSON frontmatter delimited by `---` lines from markdown text.
+///
+/// Returns `(frontmatter_json, body)` or `None` if delimiters are missing.
+fn parse_json_frontmatter(text: &str) -> Option<(&str, &str)> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+    // Skip past the opening "---" line.
+    let after_open = trimmed.strip_prefix("---")?.trim_start_matches(|c: char| c == '-');
+    let after_open = after_open.strip_prefix('\n').or_else(|| after_open.strip_prefix("\r\n"))?;
+    // Find the closing "---".
+    let close_pos = after_open.find("\n---")?;
+    let frontmatter = after_open[..close_pos].trim();
+    let rest_start = close_pos + 4; // skip "\n---"
+    // Skip any trailing dashes and newline on the closing delimiter.
+    let rest = after_open[rest_start..].trim_start_matches('-');
+    let body = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n")).unwrap_or(rest);
+    Some((frontmatter, body))
 }
 
 /// Validate an [`OasfAgentRecord`] and convert it to an [`AgentInfo`].
@@ -297,10 +435,24 @@ pub fn record_to_agent_info(
         .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
 
+    // ── Parse memory scope ──────────────────────────────────────────────────
+    let memory = match payload.memory.as_deref() {
+        Some("user") => crate::team::config::MemoryScope::User,
+        Some("project") => crate::team::config::MemoryScope::Project,
+        Some("none") | None => crate::team::config::MemoryScope::None,
+        Some(other) => {
+            return Err(format!(
+                "unknown memory scope '{}'; expected user, project, or none",
+                other
+            ));
+        }
+    };
+
     // ── Build AgentInfo ────────────────────────────────────────────────────
     // Store the raw system_prompt with template variables intact; substitution
     // happens at invocation time in build_system_prompt().
     let _ = source_path; // used only for error context by caller
+    let model_pinned = model.is_some();
     let agent_info = AgentInfo {
         name: record.name.clone(),
         description: record.description.clone(),
@@ -313,7 +465,9 @@ pub fn record_to_agent_info(
         permission,
         max_steps: Some(payload.max_steps.unwrap_or(100)),
         skills: payload.skills.clone(),
+        memory,
         options,
+        model_pinned,
     };
 
     Ok(agent_info)
