@@ -54,7 +54,7 @@ impl Tool for TeamTaskClaimTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TaskStore::open(&team_dir)?;
-        let claimed = store.claim_next(&agent_id)?;
+        let (claimed, already_had) = store.claim_next(&agent_id)?;
 
         match claimed {
             None => Ok(ToolOutput {
@@ -64,6 +64,22 @@ impl Tool for TeamTaskClaimTool {
                 metadata: Some(json!({
                     "team_name": team_name,
                     "claimed": false
+                })),
+            }),
+            Some(task) if already_had => Ok(ToolOutput {
+                content: format!(
+                    "⚠ You already have task '{}' in progress.\n\
+                     Title: {}\nDescription: {}\n\
+                     You must call `team_task_complete` for this task before claiming another.",
+                    task.id, task.title, task.description
+                ),
+                metadata: Some(json!({
+                    "team_name": team_name,
+                    "claimed": false,
+                    "already_in_progress": true,
+                    "task_id": task.id,
+                    "title": task.title,
+                    "agent_id": agent_id
                 })),
             }),
             Some(task) => Ok(ToolOutput {

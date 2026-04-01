@@ -117,6 +117,13 @@ impl TaskList {
         self.tasks.iter().find(|t| t.is_claimable(&done))
     }
 
+    /// Find the in-progress task currently owned by `agent_id`, if any.
+    pub fn in_progress_for<'a>(&'a self, agent_id: &str) -> Option<&'a Task> {
+        self.tasks.iter().find(|t| {
+            t.status == TaskStatus::InProgress && t.assigned_to.as_deref() == Some(agent_id)
+        })
+    }
+
     /// Find a task by ID, returning a mutable reference.
     pub fn get_mut(&mut self, task_id: &str) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|t| t.id == task_id)
@@ -169,8 +176,11 @@ impl TaskStore {
     ///
     /// Acquires an exclusive file lock, finds the first `Pending` task whose
     /// dependencies are all `Completed`, marks it `InProgress`, and releases
-    /// the lock.  Returns the claimed task, or `None` if no task is available.
-    pub fn claim_next(&self, agent_id: &str) -> Result<Option<Task>> {
+    /// the lock.  Returns `(Some(task), already_had)` where `already_had` is
+    /// `true` if the agent already owned an in-progress task (no new claim was
+    /// made) or `false` for a fresh claim.  Returns `(None, false)` when no
+    /// tasks are available.
+    pub fn claim_next(&self, agent_id: &str) -> Result<(Option<Task>, bool)> {
         // Open (or create) the file for read+write.
         let mut file = OpenOptions::new()
             .read(true)
@@ -193,6 +203,20 @@ impl TaskStore {
         };
 
         let done = list.completed_ids();
+
+        // Guard: if this agent already has an in-progress task, return it as-is
+        // so the tool can inform the agent to complete it before claiming another.
+        let already_in_progress = list
+            .tasks
+            .iter()
+            .find(|t| t.status == TaskStatus::InProgress && t.assigned_to.as_deref() == Some(agent_id))
+            .cloned();
+        if let Some(active) = already_in_progress {
+            file.unlock()?;
+            // Signal already-in-progress by returning (task, already_had)
+            return Ok((Some(active), true));
+        }
+
         let idx = list
             .tasks
             .iter()
@@ -205,10 +229,10 @@ impl TaskStore {
             let claimed = list.tasks[i].clone();
             Self::write_locked(&mut file, &list)?;
             file.unlock()?;
-            Ok(Some(claimed))
+            Ok((Some(claimed), false))
         } else {
             file.unlock()?;
-            Ok(None)
+            Ok((None, false))
         }
     }
 

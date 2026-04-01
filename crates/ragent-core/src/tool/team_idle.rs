@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{HookEvent, MemberStatus, TeamStore, find_team_dir, run_team_hook};
+use crate::team::{HookEvent, MemberStatus, TaskStore, TeamStore, find_team_dir, run_team_hook};
 use crate::team::manager::HookOutcome;
 
 /// Teammate notifies lead it has no more work (idle state).
@@ -62,6 +62,30 @@ impl Tool for TeamIdleTool {
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
+
+        // Guard: block idle if this agent still has InProgress tasks that aren't completed.
+        // This prevents teammates from going idle mid-task, which leaves tasks stuck.
+        {
+            let task_store = TaskStore::open(&team_dir)?;
+            let list = task_store.read()?;
+            if let Some(active) = list.in_progress_for(&agent_id) {
+                return Ok(ToolOutput {
+                    content: format!(
+                        "⚠ You cannot go idle while task '{}' is still in progress.\n\
+                         Title: {}\n\
+                         Call `team_task_complete` (task_id: '{}') first, then call \
+                         `team_task_claim` to pick up more work or `team_idle` once done.",
+                        active.id, active.title, active.id
+                    ),
+                    metadata: Some(json!({
+                        "team_name": team_name,
+                        "agent_id": agent_id,
+                        "blocked_by_task": active.id,
+                        "idle_blocked": true,
+                    })),
+                });
+            }
+        }
 
         // Run TeammateIdle hook before committing idle state.
         let hook_stdin = json!({
