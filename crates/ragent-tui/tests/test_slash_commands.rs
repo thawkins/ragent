@@ -1058,6 +1058,7 @@ fn test_output_view_team_member_without_session_uses_log_filter() {
         level: LogLevel::Info,
         message: "📨 [alpha] tm-001 → lead: done".to_string(),
         session_id: None,
+        agent_id: None,
     });
 
     app.output_view = Some(OutputViewState {

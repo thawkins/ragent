@@ -272,6 +272,9 @@ impl SessionProcessor {
                  4. **Pre-assign tasks.** When spawning, always include `task_id` parameter \
                     to pre-claim the work item on the teammate's behalf. This ensures they \
                     start with a claimed task and can focus on work instead of claiming.\n\
+                    **IMPORTANT:** Only spawn teammates for tasks that are claimable (no \
+                    unsatisfied dependencies). If a task has blockers, wait for its dependencies \
+                    to complete first, then spawn its teammate later.\n\
                  5. **Then wait.** After all spawns, call `team_wait` once to block until \
                     all teammates report idle or complete.\n\
                  6. **Synthesise.** Read each teammate's output and combine results yourself.\n\

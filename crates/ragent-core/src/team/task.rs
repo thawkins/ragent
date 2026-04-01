@@ -275,23 +275,6 @@ impl TaskStore {
             return Ok(already_claimed);
         }
 
-        // Task must be Pending and have all dependencies completed
-        if task.status != TaskStatus::Pending {
-            file.unlock()?;
-            return Err(anyhow!(
-                "task '{task_id}' is not pending (status: {:?})",
-                task.status
-            ));
-        }
-
-        // Check if dependencies are satisfied
-        if !task.is_claimable(&done) {
-            file.unlock()?;
-            return Err(anyhow!(
-                "task '{task_id}' cannot be claimed — it has unsatisfied dependencies"
-            ));
-        }
-
         // Task must not be assigned to a different agent
         if let Some(assigned_to) = &task.assigned_to {
             if assigned_to != agent_id {
@@ -301,6 +284,24 @@ impl TaskStore {
                     assigned_to, agent_id
                 ));
             }
+        }
+
+        // Task must be Pending (the only claimable status)
+        if task.status != TaskStatus::Pending {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' cannot be claimed (status: {:?}) — only Pending tasks can be claimed",
+                task.status
+            ));
+        }
+
+        // Check if dependencies are satisfied (if not, task appears "blocked" logically)
+        if !task.is_claimable(&done) {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' cannot be claimed — unsatisfied dependencies: {:?}",
+                task.depends_on
+            ));
         }
 
         task.status = TaskStatus::InProgress;

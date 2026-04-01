@@ -1,0 +1,92 @@
+{
+  "name": "swarm-20260401-160336",
+  "lead_session_id": "e39e553b-8c38-4ff2-b9d7-b48832f494f0",
+  "created_at": "2026-04-01T16:03:36.723709625Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "60c3c6a8-e372-4f2e-b64d-b48ad1548edd",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.732306473Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze claude-code competitor\n\n**Task ID:** s1\n**Title:** Analyze claude-code competitor\n\nPerform a detailed feature and architecture analysis of the competitor located at ../claude-code-sourcemap. Produce a standalone markdown report saved as target/temp/swarmout/claude_analysis.md. The report must include: (1) a concise summary of what claude-code does and its primary user workflows, (2) a detailed feature list (commands, UX flows, integrations, CLI/API endpoints), (3) implementation/architecture notes (languages, frameworks, notable modules, extensibility points), (4) strengths and weaknesses from a product and technical perspective, (5) features or behaviors that our product lacks but could benefit from (be specific), (6) suggested feature additions we could adopt (for each suggestion include priority: high/medium/low and a rough effort estimate: small/medium/large or hours), (7) any safety, licensing or integration concerns, and (8) a short machine-readable JSON summary at the bottom with name, top 5 features, and 3 suggested features. Do not modify other files. Ensure the report is self-contained and references source files/paths used during analysis where relevant.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "6e13b612-5345-4039-93ff-c591e94ca9cf",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.732996902Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze OpenCode competitor\n\n**Task ID:** s2\n**Title:** Analyze OpenCode competitor\n\nPerform a detailed feature and architecture analysis of the competitor located at ../opencode. Produce a standalone markdown report saved as target/temp/swarmout/opencode_analysis.md. The report must include: (1) short summary of OpenCode and user workflows, (2) exhaustive feature inventory (UI/CLI/API features), (3) architecture and key implementation details, (4) strengths and weaknesses, (5) explicit differences vs our product and features we should consider adding (with rationale), (6) prioritized suggestions (high/medium/low) with rough effort estimates (small/medium/large or hours), (7) compatibility, licensing or integration notes, and (8) a small machine-readable JSON summary with name, top features, and three recommended features. Reference specific source files when relevant. Keep the output self-contained at target/temp/swarmout/opencode_analysis.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "a593fdfe-7594-4737-9275-c9f1e5044dea",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.733720579Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze copilot-cli competitor\n\n**Task ID:** s3\n**Title:** Analyze copilot-cli competitor\n\nPerform a detailed feature and architecture analysis of copilot-cli (assume public sources / documentation). Produce target/temp/swarmout/copilotcli_analysis.md containing: (1) concise product summary and common workflows, (2) detailed feature list (including integrations, authentication, CLI UX), (3) architecture/implementation notes where available, (4) strengths/weaknesses, (5) features missing from our product that copilot-cli demonstrates (be specific), (6) prioritized suggested features to adopt with rough effort estimates (small/medium/large or hours), (7) any legal/usage or integration constraints, and (8) a JSON summary of top features and top three suggested features. Make the report self-contained and cite any docs or code references used.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "89525d91-ba5e-4e03-9811-f0f35583a55a",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.734832505Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze roocode competitor\n\n**Task ID:** s4\n**Title:** Analyze roocode competitor\n\nPerform a detailed feature and architecture analysis of roocode (assume available source/docs). Produce a standalone markdown report saved to target/temp/swarmout/roocode_analysis.md. Include: (1) product summary and target users, (2) detailed features and workflows, (3) architecture/implementation notes, (4) strengths and weaknesses, (5) feature gaps relative to our product and specific features to consider adding, (6) prioritized suggestions with effort estimates (small/medium/large or hours), (7) integration/privacy/licensing notes, and (8) a machine-readable JSON summary at the end listing the top features and top 3 recommended features. Reference any files or docs consulted. Keep the file self-contained.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "2c668613-86cb-4a75-8b2e-d51639ea28e9",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.736214823Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Review current product\n\n**Task ID:** s5\n**Title:** Review current product\n\nPerform a comprehensive review of our current product codebase and user-facing functionality (assume product source is available in the working directory). Produce target/temp/swarmout/product_review.md containing: (1) concise summary of the product purpose and target users, (2) feature inventory and current capabilities, (3) architecture and key implementation modules, (4) known limitations and technical debt, (5) features that competitors have which we currently lack (initial list), and (6) three highest-impact improvements to prioritize. Include a small JSON summary at the end with product name, top 10 features, and top 5 missing features. The review must be self-contained and cite files/paths examined.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "b7f43663-4865-4dcd-8531-11a653f8537a",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T16:03:36.737703958Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Synthesize SWARMOUT2.md with prioritized roadmap\n\n**Task ID:** s6\n**Title:** Synthesize SWARMOUT2.md with prioritized roadmap\n\nRead the five analysis files generated by s1-s5 in target/temp/swarmout: claude_analysis.md, opencode_analysis.md, copilotcli_analysis.md, roocode_analysis.md, and product_review.md. Synthesize them into a single document saved to target/temp/swarmout/SWARMOUT2.md. The document must: (1) summarize each competitor analysis in one paragraph, (2) list concrete feature additions recommended for our product (for each feature include: description, why we should add it, competitor inspiration reference, priority high/medium/low, estimated effort in days or hours, and rough acceptance criteria), (3) propose an implementation plan broken into Milestones (3-6 milestones) and for each milestone provide a list of tasks, owners/roles (e.g., frontend/backend/infra/UX), dependencies between tasks, and time estimates, (4) produce a prioritized backlog of features with rationale, (5) include a risk/mitigation section for key items, (6) include a short Gantt-style sequence or ordered list showing milestone sequencing, and (7) append a consolidated machine-readable JSON summary (features, priorities, milestone mapping, total estimated effort). Aggregation task depends on s1, s2, s3, s4, and s5 — do not proceed until those files exist. Place the final SWARMOUT2.md and the appended JSON in the same directory. Ensure the output is actionable for engineering (i.e., tasks are implementable and independent where possible).\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

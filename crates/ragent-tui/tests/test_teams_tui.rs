@@ -1016,6 +1016,7 @@ fn test_teams_panel_uses_task_log_fallback_for_steps() {
         level: LogLevel::Info,
         message: "tm-001 task-xyz started".to_string(),
         session_id: Some("lead-session-1".to_string()),
+        agent_id: None,
     });
     app.show_teams_window = true;
 

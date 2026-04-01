@@ -52,6 +52,8 @@ fn test_stream_event_serde_all_variants() {
 #[test]
 fn test_chat_request_serde() {
     let request = ChatRequest {
+        session_id: Some("test-session".into()),
+        request_id: Some("test-request".into()),
         model: "claude-sonnet-4-20250514".into(),
         messages: vec![
             ChatMessage {

@@ -108,17 +108,28 @@ impl Tool for TeamTaskClaimTool {
                 }),
                 Err(e) => {
                     let err_msg = e.to_string();
+                    
+                    // Check if this is a dependency issue (common for pre-assigned tasks)
+                    let is_dependency_issue = err_msg.contains("unsatisfied dependencies");
+                    let guidance = if is_dependency_issue {
+                        "\n\n**Tip:** This task has dependencies that aren't complete yet. \
+                         Wait for the prerequisite tasks to complete, then retry this claim."
+                    } else {
+                        ""
+                    };
+                    
                     Ok(ToolOutput {
                         content: format!(
-                            "Failed to claim task '{}': {}\n\
+                            "Failed to claim task '{}': {}{}\n\
                              If this task doesn't exist or is unavailable, check the task ID and try again.",
-                            task_id, err_msg
+                            task_id, err_msg, guidance
                         ),
                         metadata: Some(json!({
                             "team_name": team_name,
                             "claimed": false,
                             "task_id": task_id,
-                            "error": err_msg
+                            "error": err_msg,
+                            "blocked_by_dependencies": is_dependency_issue
                         })),
                     })
                 }

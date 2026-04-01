@@ -80,7 +80,7 @@ fn test_task_claim_basic() {
 
     store.add_task(make_task("task-001")).unwrap();
 
-    let claimed = store.claim_next("tm-001").unwrap();
+    let (claimed, _already_had) = store.claim_next("tm-001").unwrap();
     assert!(claimed.is_some());
     let t = claimed.unwrap();
     assert_eq!(t.id, "task-001");
@@ -89,7 +89,7 @@ fn test_task_claim_basic() {
     assert!(t.claimed_at.is_some());
 
     // No more tasks.
-    let second = store.claim_next("tm-002").unwrap();
+    let (second, _) = store.claim_next("tm-002").unwrap();
     assert!(second.is_none());
 }
 
@@ -105,11 +105,12 @@ fn test_task_dependency_blocks_claim() {
         .unwrap();
 
     // Claim task-001.
-    let first = store.claim_next("tm-001").unwrap().unwrap();
+    let (first_opt, _) = store.claim_next("tm-001").unwrap();
+    let first = first_opt.unwrap();
     assert_eq!(first.id, "task-001");
 
     // task-002 should be blocked (task-001 not yet complete).
-    let blocked = store.claim_next("tm-002").unwrap();
+    let (blocked, _) = store.claim_next("tm-002").unwrap();
     assert!(blocked.is_none(), "dependent task should not be claimable");
 }
 
@@ -125,11 +126,12 @@ fn test_task_complete_unblocks_dependent() {
         .unwrap();
 
     // Claim and complete task-001.
-    store.claim_next("tm-001").unwrap().unwrap();
-    store.complete("task-001", "tm-001").unwrap();
+    let (task_opt, _) = store.claim_next("tm-001").unwrap();
+    let task = task_opt.unwrap();
+    store.complete(&task.id, "tm-001").unwrap();
 
     // task-002 should now be claimable.
-    let unblocked = store.claim_next("tm-002").unwrap();
+    let (unblocked, _) = store.claim_next("tm-002").unwrap();
     assert!(unblocked.is_some());
     assert_eq!(unblocked.unwrap().id, "task-002");
 }
@@ -141,10 +143,11 @@ fn test_task_complete_wrong_agent_fails() {
     let store = TaskStore::open(&dir).unwrap();
 
     store.add_task(make_task("task-001")).unwrap();
-    store.claim_next("tm-001").unwrap().unwrap();
+    let (task_opt, _) = store.claim_next("tm-001").unwrap();
+    let task = task_opt.unwrap();
 
     // tm-002 should not be able to complete a task owned by tm-001.
-    let result = store.complete("task-001", "tm-002");
+    let result = store.complete(&task.id, "tm-002");
     assert!(result.is_err(), "wrong agent should not complete task");
 }
 
@@ -184,7 +187,10 @@ fn test_task_claim_concurrent() {
         .map(|h| h.join().expect("thread"))
         .collect();
 
-    let claims: Vec<_> = results.into_iter().flatten().collect();
+    let claims: Vec<_> = results
+        .into_iter()
+        .filter_map(|(opt, _)| opt)
+        .collect();
     assert_eq!(claims.len(), 1, "exactly one thread should claim the task");
 }
 

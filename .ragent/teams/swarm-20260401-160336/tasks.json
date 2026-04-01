@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze claude-code competitor",
+      "description": "Perform a detailed feature and architecture analysis of the competitor located at ../claude-code-sourcemap. Produce a standalone markdown report saved as target/temp/swarmout/claude_analysis.md. The report must include: (1) a concise summary of what claude-code does and its primary user workflows, (2) a detailed feature list (commands, UX flows, integrations, CLI/API endpoints), (3) implementation/architecture notes (languages, frameworks, notable modules, extensibility points), (4) strengths and weaknesses from a product and technical perspective, (5) features or behaviors that our product lacks but could benefit from (be specific), (6) suggested feature additions we could adopt (for each suggestion include priority: high/medium/low and a rough effort estimate: small/medium/large or hours), (7) any safety, licensing or integration concerns, and (8) a short machine-readable JSON summary at the bottom with name, top 5 features, and 3 suggested features. Do not modify other files. Ensure the report is self-contained and references source files/paths used during analysis where relevant.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:03:36.723954207Z",
+      "claimed_at": "2026-04-01T16:03:42.932320281Z",
+      "completed_at": "2026-04-01T16:06:02.292515437Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze OpenCode competitor",
+      "description": "Perform a detailed feature and architecture analysis of the competitor located at ../opencode. Produce a standalone markdown report saved as target/temp/swarmout/opencode_analysis.md. The report must include: (1) short summary of OpenCode and user workflows, (2) exhaustive feature inventory (UI/CLI/API features), (3) architecture and key implementation details, (4) strengths and weaknesses, (5) explicit differences vs our product and features we should consider adding (with rationale), (6) prioritized suggestions (high/medium/low) with rough effort estimates (small/medium/large or hours), (7) compatibility, licensing or integration notes, and (8) a small machine-readable JSON summary with name, top features, and three recommended features. Reference specific source files when relevant. Keep the output self-contained at target/temp/swarmout/opencode_analysis.md.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:03:36.724312571Z",
+      "claimed_at": "2026-04-01T16:03:45.551758977Z",
+      "completed_at": "2026-04-01T16:06:51.999995471Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze copilot-cli competitor",
+      "description": "Perform a detailed feature and architecture analysis of copilot-cli (assume public sources / documentation). Produce target/temp/swarmout/copilotcli_analysis.md containing: (1) concise product summary and common workflows, (2) detailed feature list (including integrations, authentication, CLI UX), (3) architecture/implementation notes where available, (4) strengths/weaknesses, (5) features missing from our product that copilot-cli demonstrates (be specific), (6) prioritized suggested features to adopt with rough effort estimates (small/medium/large or hours), (7) any legal/usage or integration constraints, and (8) a JSON summary of top features and top three suggested features. Make the report self-contained and cite any docs or code references used.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:03:36.724799150Z",
+      "claimed_at": "2026-04-01T16:03:47.820753851Z",
+      "completed_at": "2026-04-01T16:05:36.591957395Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze roocode competitor",
+      "description": "Perform a detailed feature and architecture analysis of roocode (assume available source/docs). Produce a standalone markdown report saved to target/temp/swarmout/roocode_analysis.md. Include: (1) product summary and target users, (2) detailed features and workflows, (3) architecture/implementation notes, (4) strengths and weaknesses, (5) feature gaps relative to our product and specific features to consider adding, (6) prioritized suggestions with effort estimates (small/medium/large or hours), (7) integration/privacy/licensing notes, and (8) a machine-readable JSON summary at the end listing the top features and top 3 recommended features. Reference any files or docs consulted. Keep the file self-contained.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:03:36.725358225Z",
+      "claimed_at": "2026-04-01T16:03:53.612186605Z",
+      "completed_at": "2026-04-01T16:05:33.402464888Z"
+    },
+    {
+      "id": "s5",
+      "title": "Review current product",
+      "description": "Perform a comprehensive review of our current product codebase and user-facing functionality (assume product source is available in the working directory). Produce target/temp/swarmout/product_review.md containing: (1) concise summary of the product purpose and target users, (2) feature inventory and current capabilities, (3) architecture and key implementation modules, (4) known limitations and technical debt, (5) features that competitors have which we currently lack (initial list), and (6) three highest-impact improvements to prioritize. Include a small JSON summary at the end with product name, top 10 features, and top 5 missing features. The review must be self-contained and cite files/paths examined.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:03:36.726232711Z",
+      "claimed_at": "2026-04-01T16:03:48.439723366Z",
+      "completed_at": "2026-04-01T16:05:33.636421038Z"
+    },
+    {
+      "id": "s6",
+      "title": "Synthesize SWARMOUT2.md with prioritized roadmap",
+      "description": "Read the five analysis files generated by s1-s5 in target/temp/swarmout: claude_analysis.md, opencode_analysis.md, copilotcli_analysis.md, roocode_analysis.md, and product_review.md. Synthesize them into a single document saved to target/temp/swarmout/SWARMOUT2.md. The document must: (1) summarize each competitor analysis in one paragraph, (2) list concrete feature additions recommended for our product (for each feature include: description, why we should add it, competitor inspiration reference, priority high/medium/low, estimated effort in days or hours, and rough acceptance criteria), (3) propose an implementation plan broken into Milestones (3-6 milestones) and for each milestone provide a list of tasks, owners/roles (e.g., frontend/backend/infra/UX), dependencies between tasks, and time estimates, (4) produce a prioritized backlog of features with rationale, (5) include a risk/mitigation section for key items, (6) include a short Gantt-style sequence or ordered list showing milestone sequencing, and (7) append a consolidated machine-readable JSON summary (features, priorities, milestone mapping, total estimated effort). Aggregation task depends on s1, s2, s3, s4, and s5 — do not proceed until those files exist. Place the final SWARMOUT2.md and the appended JSON in the same directory. Ensure the output is actionable for engineering (i.e., tasks are implementable and independent where possible).",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T16:03:36.727206506Z",
+      "claimed_at": "2026-04-01T16:07:33.338013667Z",
+      "completed_at": "2026-04-01T16:08:36.263909046Z"
+    }
+  ]
+}
