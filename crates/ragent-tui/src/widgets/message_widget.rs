@@ -294,6 +294,8 @@ pub(crate) fn tool_result_summary(
     cwd: &str,
 ) -> Option<String> {
     let out = output.as_ref()?;
+    // Convenience: count output lines from content when metadata has no explicit count.
+    // Tools that return structured metadata override this below.
     let line_count = out
         .get("lines")
         .or_else(|| out.get("line_count"))
@@ -357,12 +359,28 @@ pub(crate) fn tool_result_summary(
                 pluralize(files, "file", "files")
             ))
         }
-        "bash" => Some(format!("{}…", pluralize(line_count, "line", "lines"))),
-        "grep" => Some(format!(
-            "{} matched",
-            pluralize(line_count, "line", "lines")
-        )),
-        "glob" => Some(format!("{} found", pluralize(line_count, "file", "files"))),
+        "bash" => {
+            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
+            let timed_out = out.get("timeout").and_then(|v| v.as_bool()).unwrap_or(false);
+            if timed_out {
+                Some("timed out".to_string())
+            } else if let Some(code) = exit_code {
+                Some(format!("{}…  (exit {})", pluralize(line_count, "line", "lines"), code))
+            } else {
+                Some(format!("{}…", pluralize(line_count, "line", "lines")))
+            }
+        }
+        "grep" => {
+            let matches = out.get("matches").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let files = out.get("files_searched").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let truncated = out.get("truncated").and_then(|v| v.as_bool()).unwrap_or(false);
+            let trunc = if truncated { "+" } else { "" };
+            Some(format!("{}{} matched in {} searched", matches, trunc, pluralize(files, "file", "files")))
+        }
+        "glob" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "file", "files")))
+        }
         "list" => {
             let entries = out.get("entries").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let path = out.get("path").and_then(|v| v.as_str())
@@ -480,11 +498,23 @@ pub(crate) fn tool_result_summary(
                 Some(format!("timeout waiting for {} task(s)", count))
             }
         }
-        "lsp_definition" | "lsp_hover" | "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => {
-            Some(format!(
-                "{} results",
-                pluralize(line_count, "result", "results")
-            ))
+        "lsp_definition" | "lsp_references" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "location", "locations")))
+        }
+        "lsp_symbols" => {
+            let count = out.get("symbol_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let path = out.get("path").and_then(|v| v.as_str())
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!("{} in {}", pluralize(count, "symbol", "symbols"), path))
+        }
+        "lsp_hover" => {
+            Some(format!("{} of info", pluralize(line_count, "line", "lines")))
+        }
+        "lsp_diagnostics" => {
+            let count = out.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "diagnostic", "diagnostics")))
         }
         _ => None,
     }

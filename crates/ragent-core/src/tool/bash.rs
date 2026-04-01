@@ -165,6 +165,7 @@ impl Tool for BashTool {
                     content.push_str("\n... (output truncated)");
                 }
 
+                let line_count = content.lines().count();
                 Ok(ToolOutput {
                     content: format!(
                         "Exit code: {}\nDuration: {}ms\n\n{}",
@@ -173,6 +174,7 @@ impl Tool for BashTool {
                     metadata: Some(json!({
                         "exit_code": exit_code,
                         "duration_ms": elapsed_ms,
+                        "lines": line_count,
                     })),
                 })
             }
