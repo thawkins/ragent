@@ -41,9 +41,12 @@ impl Tool for OfficeWriteTool {
                     "enum": ["docx", "xlsx", "pptx"],
                     "description": "Document type (auto-detected from extension if omitted)"
                 },
+                "title": {
+                    "type": "string",
+                    "description": "Optional document title (docx only)"
+                },
                 "content": {
-                    "type": "object",
-                    "description": "Document content (structure depends on type)"
+                    "description": "Document content. For docx: either an array of paragraph/heading/list objects, or an object with a 'paragraphs' or 'content' array. Each item: {type:'paragraph'|'heading'|'bullet_list'|'code_block', text:'...', level:1-6, items:[...], style:'Normal'|'Heading1'|...}. For xlsx: {sheets:[{name,rows}]}. For pptx: {slides:[{title,content:[...]}]}."
                 }
             },
             "required": ["path", "content"]
@@ -119,72 +122,135 @@ impl Tool for OfficeWriteTool {
 
 /// Writes a Word document from structured JSON content.
 ///
-/// Expected content format:
-/// ```json
-/// { "paragraphs": [{ "text": "...", "style": "Heading1" }, ...] }
-/// ```
+/// Accepts several content shapes to accommodate different LLM outputs:
 ///
-/// # Arguments
+/// 1. Legacy object with `paragraphs` array:
+///    `{ "paragraphs": [{ "text": "...", "style": "Heading1" }] }`
 ///
-/// * `path` - Output file path.
-/// * `content` - JSON content describing the document.
+/// 2. Object with `content` array:
+///    `{ "content": [{ "type": "paragraph", "text": "..." }] }`
 ///
-/// # Returns
+/// 3. Bare array at the top level:
+///    `[{ "type": "heading", "text": "Title", "level": 1 }, ...]`
 ///
-/// `Ok(())` on success, or an error.
+/// Each element in the array is normalised to a set of paragraphs:
+/// - `{type: "paragraph", text}` / `{text, style: "Normal"}` → plain paragraph
+/// - `{type: "heading", text, level}` / `{heading, level}` / `{text, style: "HeadingN"}` → heading
+/// - `{type: "bullet_list", items: [...]}` → one bullet paragraph per item
+/// - `{type: "ordered_list", items: [...]}` → one numbered paragraph per item
+/// - `{type: "code_block", text}` → code-styled paragraph
 fn write_docx(path: &Path, content: &Value) -> Result<()> {
     use docx_rust::document::Paragraph;
     use docx_rust::formatting::{CharacterProperty, ParagraphProperty};
 
+    // ── Resolve the list of content elements ──────────────────────────────
+    let elements: Vec<Value> = if let Some(arr) = content.as_array() {
+        arr.clone()
+    } else if let Some(arr) = content["paragraphs"].as_array() {
+        arr.clone()
+    } else if let Some(arr) = content["content"].as_array() {
+        arr.clone()
+    } else {
+        bail!(
+            "docx content must be an array of elements, or an object with a \
+             'paragraphs' or 'content' array. \
+             Example: {{\"paragraphs\":[{{\"text\":\"Hello\",\"style\":\"Normal\"}}]}}"
+        );
+    };
+
+    // ── Normalise every element into owned (text, style_id) pairs ─────────
+    //
+    // We must collect these before creating `docx_rust::Docx` because the
+    // library stores &str references tied to the document's lifetime.
+    // Owning the strings here ensures they outlive the document builder.
+    struct ParaEntry {
+        text: String,
+        style_id: String, // empty = Normal (no explicit style)
+    }
+
+    let mut paras: Vec<ParaEntry> = Vec::new();
+
+    let style_canonical = |s: &str| -> String {
+        match s {
+            "Normal" | "normal" | "" => String::new(),
+            "Heading1" | "heading1" => "Heading1".to_owned(),
+            "Heading2" | "heading2" => "Heading2".to_owned(),
+            "Heading3" | "heading3" => "Heading3".to_owned(),
+            "Heading4" | "heading4" => "Heading4".to_owned(),
+            "Heading5" | "heading5" => "Heading5".to_owned(),
+            "Heading6" | "heading6" => "Heading6".to_owned(),
+            "ListBullet" | "listbullet" | "list_bullet" => "ListBullet".to_owned(),
+            "ListNumber" | "listnumber" | "list_number" => "ListNumber".to_owned(),
+            "Code" | "code" => "Code".to_owned(),
+            other => other.to_owned(),
+        }
+    };
+
+    for elem in &elements {
+        let elem_type = elem["type"].as_str().unwrap_or("paragraph");
+
+        match elem_type {
+            "heading" => {
+                let text = elem["text"].as_str().or_else(|| elem["heading"].as_str()).unwrap_or("");
+                let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
+                paras.push(ParaEntry { text: text.to_owned(), style_id: format!("Heading{level}") });
+            }
+            "bullet_list" => {
+                if let Some(items) = elem["items"].as_array() {
+                    for item in items {
+                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(ParaEntry { text: text.to_owned(), style_id: "ListBullet".to_owned() });
+                    }
+                }
+            }
+            "ordered_list" | "numbered_list" => {
+                if let Some(items) = elem["items"].as_array() {
+                    for item in items {
+                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(ParaEntry { text: text.to_owned(), style_id: "ListNumber".to_owned() });
+                    }
+                }
+            }
+            "code_block" => {
+                paras.push(ParaEntry {
+                    text: elem["text"].as_str().unwrap_or("").to_owned(),
+                    style_id: "Code".to_owned(),
+                });
+            }
+            _ => {
+                // "paragraph" or unknown — also handles legacy {heading, level} without "type"
+                if elem["heading"].as_str().is_some() || elem["level"].as_u64().is_some() {
+                    let heading_text = elem["heading"].as_str().or_else(|| elem["text"].as_str()).unwrap_or("");
+                    let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
+                    paras.push(ParaEntry { text: heading_text.to_owned(), style_id: format!("Heading{level}") });
+                } else {
+                    let text = elem["text"].as_str().unwrap_or("");
+                    let style = elem["style"].as_str().unwrap_or("Normal");
+                    paras.push(ParaEntry { text: text.to_owned(), style_id: style_canonical(style).to_owned() });
+                }
+            }
+        }
+    }
+
+    // ── Build the document ─────────────────────────────────────────────────
     let mut docx = docx_rust::Docx::default();
 
-    let paragraphs = content["paragraphs"]
-        .as_array()
-        .context("Missing 'paragraphs' array in docx content")?;
-
-    for para_def in paragraphs {
-        let text = para_def["text"].as_str().unwrap_or("");
-        let style = para_def["style"].as_str().unwrap_or("Normal");
-
-        let mut para = Paragraph::default();
-
-        let style_id = match style {
-            "Normal" | "normal" => None,
-            "Heading1" | "heading1" => Some("Heading1"),
-            "Heading2" | "heading2" => Some("Heading2"),
-            "Heading3" | "heading3" => Some("Heading3"),
-            "Heading4" | "heading4" => Some("Heading4"),
-            "Heading5" | "heading5" => Some("Heading5"),
-            "Heading6" | "heading6" => Some("Heading6"),
-            "ListBullet" | "listbullet" => Some("ListBullet"),
-            "ListNumber" | "listnumber" => Some("ListNumber"),
-            "Code" | "code" => Some("Code"),
-            other => Some(other),
+    for entry in &paras {
+        let sid: &str = &entry.style_id;
+        let mut para = if sid.is_empty() {
+            Paragraph::default()
+        } else {
+            Paragraph::default().property(ParagraphProperty::default().style_id(sid))
         };
 
-        if let Some(sid) = style_id {
-            para = para.property(ParagraphProperty::default().style_id(sid));
-        }
-
-        let segments = parse_inline_formatting(text);
-        for (seg_text, bold, italic, code) in segments {
-            let mut char_prop = CharacterProperty::default();
-            if bold {
-                char_prop = char_prop.bold(true);
-            }
-            if italic {
-                char_prop = char_prop.italics(true);
-            }
-            if code {
-                char_prop = char_prop.style_id("Code");
-            }
-
-            let run = docx_rust::document::Run::default()
-                .property(char_prop)
-                .push_text(seg_text);
+        for (seg_text, bold, italic, code) in parse_inline_formatting(&entry.text) {
+            let mut cp = CharacterProperty::default();
+            if bold { cp = cp.bold(true); }
+            if italic { cp = cp.italics(true); }
+            if code { cp = cp.style_id("Code"); }
+            let run = docx_rust::document::Run::default().property(cp).push_text(seg_text);
             para = para.push(run);
         }
-
         docx.document.push(para);
     }
 
