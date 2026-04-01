@@ -1,0 +1,11 @@
+[
+  {
+    "message_id": "49a32ea9-05a4-45c9-886e-6cc3951e973f",
+    "from": "tm-005",
+    "to": "tm-002",
+    "type": "message",
+    "content": "Hi tm-002 — I attempted to claim and complete task s5 (Competitor analysis: roocode) but team_task_claim returned no tasks and team_task_complete failed because s5 is assigned to you. I completed the report and wrote target/temp/swarmout/roocode_report.md and roocode_summary.json in target/temp/swarmout. Please let me know if you want me to transfer them or make changes. — swarm-s5",
+    "sent_at": "2026-04-01T15:19:12.983623122Z",
+    "read": true
+  }
+]

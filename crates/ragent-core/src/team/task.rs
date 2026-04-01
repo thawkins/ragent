@@ -236,6 +236,83 @@ impl TaskStore {
         }
     }
 
+    /// Claim a specific task by ID for the given agent.
+    ///
+    /// Unlike `claim_next()` which claims the next available task, this function
+    /// claims a specific task identified by `task_id`. Used when the lead has already
+    /// assigned a specific task to the teammate in the spawn prompt.
+    ///
+    /// Returns the claimed task, or an error if the task doesn't exist, is not
+    /// claimable (e.g., completed, blocked), or is already assigned to a different agent.
+    pub fn claim_specific(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)
+            .with_context(|| format!("open task store {}", self.path.display()))?;
+
+        file.lock_exclusive()?;
+
+        let mut raw = String::new();
+        file.read_to_string(&mut raw)?;
+        let mut list: TaskList = if raw.trim().is_empty() {
+            TaskList::default()
+        } else {
+            serde_json::from_str(&raw)?
+        };
+
+        let done = list.completed_ids();
+        let task = list
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow!("task '{task_id}' not found"))?;
+
+        // Check if task is already claimed by this agent (return as-is)
+        if task.status == TaskStatus::InProgress && task.assigned_to.as_deref() == Some(agent_id) {
+            let already_claimed = task.clone();
+            file.unlock()?;
+            return Ok(already_claimed);
+        }
+
+        // Task must be Pending and have all dependencies completed
+        if task.status != TaskStatus::Pending {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' is not pending (status: {:?})",
+                task.status
+            ));
+        }
+
+        // Check if dependencies are satisfied
+        if !task.is_claimable(&done) {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' cannot be claimed — it has unsatisfied dependencies"
+            ));
+        }
+
+        // Task must not be assigned to a different agent
+        if let Some(assigned_to) = &task.assigned_to {
+            if assigned_to != agent_id {
+                file.unlock()?;
+                return Err(anyhow!(
+                    "task '{task_id}' is already assigned to {}, not {}",
+                    assigned_to, agent_id
+                ));
+            }
+        }
+
+        task.status = TaskStatus::InProgress;
+        task.assigned_to = Some(agent_id.to_owned());
+        task.claimed_at = Some(Utc::now());
+        let claimed = task.clone();
+
+        Self::write_locked(&mut file, &list)?;
+        file.unlock()?;
+        Ok(claimed)
+    }
+
     /// Mark a task as `Completed`.  Unblocks dependents automatically (they
     /// become claimable on the next `claim_next` call).
     pub fn complete(&self, task_id: &str, agent_id: &str) -> Result<Task> {
@@ -321,6 +398,62 @@ impl TaskStore {
         Self::write_locked(&mut file, &list)?;
         file.unlock()?;
         Ok(())
+    }
+
+    /// Atomically pre-assign a pending task to an agent in InProgress state.
+    ///
+    /// Used when the lead spawns a teammate for a specific task — the lead
+    /// pre-assigns the task so that when the teammate calls `claim_next()`,
+    /// they retrieve their assigned task (not a different one).
+    ///
+    /// Returns error if task doesn't exist, is not Pending, or is already assigned.
+    pub fn pre_assign_task(&self, task_id: &str, agent_id: &str) -> Result<Task> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)
+            .with_context(|| format!("open task store {}", self.path.display()))?;
+
+        file.lock_exclusive()?;
+
+        let mut raw = String::new();
+        file.read_to_string(&mut raw)?;
+        let mut list: TaskList = if raw.trim().is_empty() {
+            TaskList::default()
+        } else {
+            serde_json::from_str(&raw)?
+        };
+
+        let task = list
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow!("task '{task_id}' not found"))?;
+
+        if task.status != TaskStatus::Pending {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' is not pending (status: {:?}); cannot pre-assign",
+                task.status
+            ));
+        }
+
+        if task.assigned_to.is_some() {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' is already assigned to {}",
+                task.assigned_to.as_ref().unwrap()
+            ));
+        }
+
+        task.status = TaskStatus::InProgress;
+        task.assigned_to = Some(agent_id.to_owned());
+        task.claimed_at = Some(Utc::now());
+        let assigned = task.clone();
+
+        Self::write_locked(&mut file, &list)?;
+        file.unlock()?;
+        Ok(assigned)
     }
 
     /// Update an existing task's status and/or assignment (used by `team_task_update`).

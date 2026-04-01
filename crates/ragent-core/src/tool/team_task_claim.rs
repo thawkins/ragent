@@ -16,9 +16,10 @@ impl Tool for TeamTaskClaimTool {
     }
 
     fn description(&self) -> &str {
-        "Atomically claim the next available task from the shared task list. \
+        "Claim a task to work on. Either claim the next available task (if no task_id provided), \
+         or claim a specific task by ID (if the lead assigned you to one). \
          Uses file locking to prevent race conditions between teammates. \
-         Returns the task details, or a message if no tasks are available."
+         Returns the task details, or a message if the task is unavailable."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -28,6 +29,11 @@ impl Tool for TeamTaskClaimTool {
                 "team_name": {
                     "type": "string",
                     "description": "Name of the team"
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": "Optional: specific task ID to claim. If provided, claims this task. \
+                                   If not provided, claims the next available task."
                 }
             },
             "required": ["team_name"]
@@ -73,55 +79,113 @@ impl Tool for TeamTaskClaimTool {
             );
         }
         
-        let (claimed, already_had) = store.claim_next(&agent_id)?;
-
-        match claimed {
-            None => Ok(ToolOutput {
-                content: "No tasks available to claim at this time. \
-                          All tasks are either in progress, completed, or blocked by dependencies."
-                    .to_string(),
-                metadata: Some(json!({
-                    "team_name": team_name,
-                    "claimed": false
-                })),
-            }),
-            Some(task) if already_had => Ok(ToolOutput {
-                content: format!(
-                    "⚠ You already have task '{}' in progress.\n\
-                     Title: {}\nDescription: {}\n\
-                     You must call `team_task_complete` for this task before claiming another.",
-                    task.id, task.title, task.description
-                ),
-                metadata: Some(json!({
-                    "team_name": team_name,
-                    "claimed": false,
-                    "already_in_progress": true,
-                    "task_id": task.id,
-                    "title": task.title,
-                    "agent_id": agent_id
-                })),
-            }),
-            Some(task) => Ok(ToolOutput {
-                content: format!(
-                    "Claimed task '{}'.\nTitle: {}\nDescription: {}\nDependencies: {}",
-                    task.id,
-                    task.title,
-                    task.description,
-                    if task.depends_on.is_empty() {
-                        "none".to_string()
-                    } else {
-                        task.depends_on.join(", ")
-                    }
-                ),
-                metadata: Some(json!({
-                    "team_name": team_name,
-                    "claimed": true,
-                    "task_id": task.id,
-                    "title": task.title,
-                    "description": task.description,
-                    "agent_id": agent_id
-                })),
-            }),
+        // Check if a specific task_id was requested
+        let specific_task_id = input.get("task_id").and_then(|v| v.as_str());
+        
+        if let Some(task_id) = specific_task_id {
+            // Claim a specific task by ID
+            match store.claim_specific(task_id, &agent_id) {
+                Ok(task) => Ok(ToolOutput {
+                    content: format!(
+                        "Claimed task '{}'.\nTitle: {}\nDescription: {}\nDependencies: {}",
+                        task.id,
+                        task.title,
+                        task.description,
+                        if task.depends_on.is_empty() {
+                            "none".to_string()
+                        } else {
+                            task.depends_on.join(", ")
+                        }
+                    ),
+                    metadata: Some(json!({
+                        "team_name": team_name,
+                        "claimed": true,
+                        "task_id": task.id,
+                        "title": task.title,
+                        "description": task.description,
+                        "agent_id": agent_id
+                    })),
+                }),
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    Ok(ToolOutput {
+                        content: format!(
+                            "Failed to claim task '{}': {}\n\
+                             If this task doesn't exist or is unavailable, check the task ID and try again.",
+                            task_id, err_msg
+                        ),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "claimed": false,
+                            "task_id": task_id,
+                            "error": err_msg
+                        })),
+                    })
+                }
+            }
+        } else {
+            // Claim the next available task
+            let (claimed, already_had) = store.claim_next(&agent_id)?;
+            
+            match claimed {
+                None => {
+                    // No unclaimed, unblocked tasks available
+                    Ok(ToolOutput {
+                        content: "No more tasks available. All tasks are either in progress, \
+                                  completed, or blocked by dependencies.\n\n\
+                                  Call `team_idle` to signal you are done and ready for reassignment."
+                            .to_string(),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "claimed": false,
+                            "ready_for_idle": true
+                        })),
+                    })
+                }
+                Some(task) if already_had => {
+                    // Agent already has a task in progress
+                    Ok(ToolOutput {
+                        content: format!(
+                            "⚠ You already have task '{}' in progress.\n\
+                             Title: {}\nDescription: {}\n\
+                             You must call `team_task_complete` for this task before claiming another.",
+                            task.id, task.title, task.description
+                        ),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "claimed": false,
+                            "already_in_progress": true,
+                            "task_id": task.id,
+                            "title": task.title,
+                            "agent_id": agent_id
+                        })),
+                    })
+                }
+                Some(task) => {
+                    // Successfully claimed a new task
+                    Ok(ToolOutput {
+                        content: format!(
+                            "Claimed task '{}'.\nTitle: {}\nDescription: {}\nDependencies: {}",
+                            task.id,
+                            task.title,
+                            task.description,
+                            if task.depends_on.is_empty() {
+                                "none".to_string()
+                            } else {
+                                task.depends_on.join(", ")
+                            }
+                        ),
+                        metadata: Some(json!({
+                            "team_name": team_name,
+                            "claimed": true,
+                            "task_id": task.id,
+                            "title": task.title,
+                            "description": task.description,
+                            "agent_id": agent_id
+                        })),
+                    })
+                }
+            }
         }
     }
 }
