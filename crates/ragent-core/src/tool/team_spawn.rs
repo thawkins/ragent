@@ -18,10 +18,12 @@ impl Tool for TeamSpawnTool {
     }
 
     fn description(&self) -> &str {
-        "Spawn one or more named teammate agent sessions within an existing team. \
-         Each teammate receives the team context and can claim tasks from the shared task list. \
-         After spawning all teammates, call `team_wait` to block until they finish their work \
-         before the lead proceeds. Do NOT use `wait_tasks` for teammates — use `team_wait`."
+        "Spawn a teammate agent session within an existing team. \
+         Each teammate receives the team context and works on a single, bounded task. \
+         CRITICAL: Spawn ONE teammate per independent work item — never assign a list of \
+         items to one teammate (context overflow). After spawning all teammates in the same \
+         response turn, call `team_wait` to block until they finish. \
+         Do NOT use `wait_tasks` for teammates — use `team_wait`."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -42,7 +44,7 @@ impl Tool for TeamSpawnTool {
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Initial task prompt for the teammate"
+                    "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item — never list multiple items. Keep under ~500 words; reference files by path rather than pasting content."
                 },
                 "model": {
                     "type": "string",

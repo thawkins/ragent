@@ -245,8 +245,42 @@ impl SessionProcessor {
             .map(|c| c.skill_dirs)
             .unwrap_or_default();
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-        let system_prompt =
+        let mut system_prompt =
             build_system_prompt(agent, &working_dir, &file_tree, Some(&skill_registry));
+
+        // Inject team-lead task distribution guidelines when this session is
+        // running as a team lead.  These rules help the LLM spawn a consistent
+        // number of teammates and avoid overloading a single teammate with an
+        // unbounded list of items — which causes context-window overflows.
+        if team_context_for_session.as_deref().map_or(false, |tc| tc.is_lead) {
+            system_prompt.push_str(
+                "\n## Team Lead — Task Distribution Rules\n\n\
+                 When you receive a request that involves a list of N independent items \
+                 (e.g. N competitors, N modules, N documents), ALWAYS spawn **exactly one \
+                 teammate per item** — never assign multiple items from the list to a single \
+                 teammate.\n\n\
+                 **Why:** Each teammate has a finite context window.  Assigning all items \
+                 to one teammate will overflow its context and cause it to fail.\n\n\
+                 **Rules:**\n\
+                 1. **Count first.** Before spawning, enumerate the items to process.\n\
+                 2. **One teammate per item.** Spawn one `team_spawn` call per item in the \
+                    same response turn (all in parallel).\n\
+                 3. **Bounded prompt per teammate.** Each teammate's `prompt` must reference \
+                    **only its one assigned item** — never a list.  Keep the prompt under \
+                    ~500 words; link to files rather than pasting large content.\n\
+                 4. **Then wait.** After all spawns, call `team_wait` once to block until \
+                    all teammates report idle or complete.\n\
+                 5. **Synthesise.** Read each teammate's output and combine results yourself.\n\n\
+                 **Example — analysing 3 competitors A, B, C:**\n\
+                 ```\n\
+                 team_spawn(teammate_name: \"analyst-A\", prompt: \"Analyse competitor A only …\")\n\
+                 team_spawn(teammate_name: \"analyst-B\", prompt: \"Analyse competitor B only …\")\n\
+                 team_spawn(teammate_name: \"analyst-C\", prompt: \"Analyse competitor C only …\")\n\
+                 team_wait()\n\
+                 ```\n\
+                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n",
+            );
+        }
 
         // 4. Build chat messages from history
         let history = self.session_manager.get_messages(session_id)?;
