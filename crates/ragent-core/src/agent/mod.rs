@@ -547,6 +547,76 @@ pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
 /// assert!(prompt.contains("You are a helpful assistant."));
 /// assert!(prompt.contains("/tmp/project"));
 /// ```
+
+/// Read git status from the working directory.
+/// Returns a formatted string with branch, status, and recent commits, or empty string on error.
+fn read_git_status(working_dir: &Path) -> String {
+    use std::process::Command;
+
+    let mut output = String::new();
+
+    // Get current branch
+    if let Ok(result) = Command::new("git")
+        .args(&["branch", "--show-current"])
+        .current_dir(working_dir)
+        .output()
+    {
+        if result.status.success() {
+            if let Ok(branch) = String::from_utf8(result.stdout) {
+                let branch = branch.trim();
+                if !branch.is_empty() {
+                    output.push_str(&format!("**Branch:** {}\n", branch));
+                }
+            }
+        }
+    }
+
+    // Get git status (short format)
+    if let Ok(result) = Command::new("git")
+        .args(&["status", "--short"])
+        .current_dir(working_dir)
+        .output()
+    {
+        if result.status.success() {
+            if let Ok(status) = String::from_utf8(result.stdout) {
+                let status = status.trim();
+                if !status.is_empty() {
+                    output.push_str("**Status:**\n```\n");
+                    output.push_str(status);
+                    output.push_str("\n```\n");
+                }
+            }
+        }
+    }
+
+    // Get recent commits (5 most recent, one line each)
+    if let Ok(result) = Command::new("git")
+        .args(&["log", "--oneline", "-n", "5"])
+        .current_dir(working_dir)
+        .output()
+    {
+        if result.status.success() {
+            if let Ok(commits) = String::from_utf8(result.stdout) {
+                let commits = commits.trim();
+                if !commits.is_empty() {
+                    output.push_str("**Recent Commits:**\n```\n");
+                    output.push_str(commits);
+                    output.push_str("\n```\n");
+                }
+            }
+        }
+    }
+
+    output
+}
+
+/// Read README.md from the working directory.
+/// Returns file contents or empty string if not found.
+fn read_readme(working_dir: &Path) -> String {
+    let readme_path = working_dir.join("README.md");
+    std::fs::read_to_string(&readme_path).unwrap_or_default()
+}
+
 pub fn build_system_prompt(
     agent: &AgentInfo,
     working_dir: &Path,
@@ -585,10 +655,16 @@ pub fn build_system_prompt(
             dt.format("%Y-%m-%d").to_string()
         };
 
+        // Prepare git status and README for injection
+        let git_status = read_git_status(working_dir);
+        let readme = read_readme(working_dir);
+
         let expanded = agent_prompt
             .replace("{{WORKING_DIR}}", &working_dir.display().to_string())
             .replace("{{FILE_TREE}}", file_tree)
             .replace("{{AGENTS_MD}}", &agents_md_content)
+            .replace("{{GIT_STATUS}}", &git_status)
+            .replace("{{README}}", &readme)
             .replace("{{DATE}}", &date_str);
         let _ = today; // suppress unused warning from the fallback path
 

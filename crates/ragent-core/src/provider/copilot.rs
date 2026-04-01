@@ -1688,6 +1688,8 @@ mod tests {
             max_tokens: None,
             system: None,
             options,
+            session_id: None,
+            request_id: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1715,6 +1717,8 @@ mod tests {
             max_tokens: None,
             system: None,
             options,
+            session_id: None,
+            request_id: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1743,6 +1747,8 @@ mod tests {
             max_tokens: None,
             system: None,
             options,
+            session_id: None,
+            request_id: None,
         };
 
         let body = client.build_request_body(&req, &[]);
