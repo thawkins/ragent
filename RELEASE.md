@@ -5,6 +5,14 @@
 ### Added
 - Input changes improvements
 - New OpenAI generic provider support
+- **CCGAP CC1 — Context & Safety Foundations:**
+  - Git status injection: `{{GIT_STATUS}}` template variable with branch, status, and recent commits
+  - README injection: `{{README}}` template variable reads from working directory
+  - Bash safety: Safe-command whitelist (git, pwd, tree, date, which) for fast-path validation
+  - Bash safety: Banned-command list (curl, wget, nc, telnet, axel, aria2c, lynx, w3m) blocks risky tools
+  - Bash safety: Directory-escape guard rejects `cd` to parent or absolute paths
+  - Bash syntax pre-check: `sh -n -c` validation (1s timeout) before execution
+  - Output truncation: Head+tail truncation (15k + 15k chars) for large bash outputs
 
 ### Carried from 0.1.0-alpha.19
 - Teams UX and lifecycle enhancements:
