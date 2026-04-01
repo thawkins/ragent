@@ -935,7 +935,9 @@ pub struct App {
                 self.input_history.clear();
                 for line in content.lines() {
                     if !line.is_empty() {
-                        self.input_history.push(line.to_string());
+                        // Unescape: literal "\n" → newline, "\\" → backslash
+                        let entry = line.replace("\\n", "\n").replace("\\\\", "\\");
+                        self.input_history.push(entry);
                     }
                 }
                 // Trim to 100 entries
@@ -961,7 +963,7 @@ pub struct App {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            let content = self.input_history.join("\n");
+            let content = history_entries_to_string(&self.input_history);
             std::fs::write(path, content)?;
             tracing::debug!("Saved {} history entries to {:?}", self.input_history.len(), path);
         }
@@ -986,7 +988,7 @@ pub struct App {
             return;
         };
         let path = path.clone();
-        let content = self.input_history.join("\n");
+        let content = history_entries_to_string(&self.input_history);
         let entry_count = self.input_history.len();
 
         tokio::task::spawn_blocking(move || {
@@ -1006,4 +1008,17 @@ pub struct App {
         self.history_dirty = false;
         self.history_save_deadline = None;
     }
+}
+
+/// Serialise history entries to a newline-separated string.
+///
+/// Each entry has its backslashes escaped (`\` → `\\`) and embedded newlines
+/// escaped (`\n` → `\n` literal two-char sequence) so that multiline entries
+/// survive a round-trip through the file format without being split.
+fn history_entries_to_string(entries: &[String]) -> String {
+    entries
+        .iter()
+        .map(|e| e.replace('\\', "\\\\").replace('\n', "\\n"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

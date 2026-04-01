@@ -1225,6 +1225,61 @@ impl App {
         self.assert_input_cursor_invariant();
     }
 
+    /// Returns `true` if the cursor is on the first logical line (no `\n` before it).
+    pub(crate) fn cursor_on_first_logical_line(&self) -> bool {
+        let byte = self.cursor_byte_pos();
+        !self.input[..byte].contains('\n')
+    }
+
+    /// Returns `true` if the cursor is on the last logical line (no `\n` after it).
+    pub(crate) fn cursor_on_last_logical_line(&self) -> bool {
+        let byte = self.cursor_byte_pos();
+        !self.input[byte..].contains('\n')
+    }
+
+    /// Move cursor up one logical line (split on `\n`), staying in the same column.
+    /// Does nothing if already on the first line.
+    pub(crate) fn cursor_move_up_logical_line(&mut self) {
+        let byte = self.cursor_byte_pos();
+        let before = &self.input[..byte];
+        let Some(nl_pos) = before.rfind('\n') else { return };
+
+        // Column (char count) within current line
+        let line_start_byte = nl_pos + 1;
+        let col = before[line_start_byte..].chars().count();
+
+        // Previous line spans from after its preceding '\n' (or 0) to nl_pos
+        let prev_line_start = before[..nl_pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let prev_line_len = before[prev_line_start..nl_pos].chars().count();
+
+        let target_col = col.min(prev_line_len);
+        let new_char = self.input[..prev_line_start].chars().count() + target_col;
+        self.set_cursor_char_index_clamped(new_char);
+    }
+
+    /// Move cursor down one logical line (split on `\n`), staying in the same column.
+    /// Does nothing if already on the last line.
+    pub(crate) fn cursor_move_down_logical_line(&mut self) {
+        let byte = self.cursor_byte_pos();
+        let after = &self.input[byte..];
+        let Some(nl_offset) = after.find('\n') else { return };
+
+        // Column within current line
+        let before = &self.input[..byte];
+        let line_start_byte = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let col = before[line_start_byte..].chars().count();
+
+        // Next line
+        let next_start = byte + nl_offset + 1;
+        let next_line = &self.input[next_start..];
+        let next_line_end = next_line.find('\n').unwrap_or(next_line.len());
+        let next_line_len = next_line[..next_line_end].chars().count();
+
+        let target_col = col.min(next_line_len);
+        let new_char = self.input[..next_start].chars().count() + target_col;
+        self.set_cursor_char_index_clamped(new_char);
+    }
+
     /// Return the `[start, end)` char-index range for the active keyboard
     /// selection, or `None` when no selection is active or when anchor equals
     /// cursor (zero-width selection).
@@ -5674,6 +5729,12 @@ Type `/swarm help` for more info.\n";
                     self.jump_output_view_end();
                 }
                 InputAction::HistoryUp => {
+                    // Within a multiline input, Up moves to the previous logical line.
+                    // Only navigate history when already on the first logical line.
+                    if self.history_index.is_none() && !self.cursor_on_first_logical_line() {
+                        self.cursor_move_up_logical_line();
+                        return;
+                    }
                     if self.input_history.is_empty() {
                         return;
                     }
@@ -5693,21 +5754,29 @@ Type `/swarm help` for more info.\n";
                     }
                     self.input_cursor = self.input_len_chars();
                 }
-                InputAction::HistoryDown => match self.history_index {
-                    Some(idx) if idx + 1 < self.input_history.len() => {
-                        let idx = idx + 1;
-                        self.history_index = Some(idx);
-                        self.input = self.input_history[idx].clone();
-                        self.input_cursor = self.input_len_chars();
+                InputAction::HistoryDown => {
+                    // Within a multiline input (while not browsing history), Down moves
+                    // to the next logical line before navigating history.
+                    if self.history_index.is_none() && !self.cursor_on_last_logical_line() {
+                        self.cursor_move_down_logical_line();
+                        return;
                     }
-                    Some(_) => {
-                        self.history_index = None;
-                        self.input = self.history_draft.clone();
-                        self.history_draft.clear();
-                        self.input_cursor = self.input_len_chars();
+                    match self.history_index {
+                        Some(idx) if idx + 1 < self.input_history.len() => {
+                            let idx = idx + 1;
+                            self.history_index = Some(idx);
+                            self.input = self.input_history[idx].clone();
+                            self.input_cursor = self.input_len_chars();
+                        }
+                        Some(_) => {
+                            self.history_index = None;
+                            self.input = self.history_draft.clone();
+                            self.history_draft.clear();
+                            self.input_cursor = self.input_len_chars();
+                        }
+                        None => {}
                     }
-                    None => {}
-                },
+                }
                 InputAction::MoveCursorLeft => {
                     // Standard: if selection active, jump to left boundary and clear.
                     if let Some((start, _)) = self.kb_selection_char_range() {
