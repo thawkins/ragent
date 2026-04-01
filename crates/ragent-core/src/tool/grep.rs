@@ -131,14 +131,17 @@ impl Tool for GrepTool {
         let pattern_owned = pattern.to_owned();
 
         tokio::task::spawn_blocking(move || {
-            // Build the walker with .gitignore / .ignore support
+            // Build the walker with .gitignore / .ignore support.
+            // Keep hidden(false) so dot-files like .eslintrc are searchable, but
+            // filter the .git directory itself to avoid searching VCS internals.
             let mut walk_builder = WalkBuilder::new(&search_path_bg);
             walk_builder
-                .hidden(false)   // include dot-files (gitignore still applies)
+                .hidden(false)
                 .git_ignore(true)
                 .git_global(true)
                 .git_exclude(true)
-                .ignore(true);
+                .ignore(true)
+                .filter_entry(|e| e.file_name() != ".git");
 
             // Apply include/exclude glob overrides
             if include_glob.is_some() || exclude_glob.is_some() {
@@ -288,3 +291,5 @@ fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
         working_dir.join(p)
     }
 }
+
+
