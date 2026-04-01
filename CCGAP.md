@@ -1,314 +1,893 @@
-# Claude Code → ragent Gap Analysis
+# CCGAP — Claude Code vs ragent Gap Analysis
 
-This document compares [Claude Code](https://github.com/anthropics/claude-code) (`../claude-code-sourcemap`)
-with ragent and identifies major functional gaps, then provides a prioritised milestone plan to reconcile them.
+> Generated: 2026-04-01  
+> Claude Code source: `../claude-code-sourcemap/src/` (TypeScript / Ink.js)  
+> ragent source: `crates/` (Rust / Ratatui)  
+> Note: wherever Claude Code uses `CLAUDE.md`, the ragent equivalent is `AGENTS.md`.
 
 ---
 
-## 1. Feature Comparison Matrix
+## Table of Contents
 
-### 1.1 Core Tools
+1. [Executive Summary](#1-executive-summary)
+2. [Feature-by-Feature Comparison](#2-feature-by-feature-comparison)
+   - 2.1 Context & System-Prompt Injection
+   - 2.2 Permission & Safety System
+   - 2.3 Slash Commands
+   - 2.4 Cost & Token Tracking
+   - 2.5 Multi-Agent Architecture
+   - 2.6 Compaction
+   - 2.7 Extended Thinking
+   - 2.8 LLM / Streaming
+   - 2.9 Input Handling & TUI
+   - 2.10 Auto-Updater
+   - 2.11 Tools Inventory
+3. [Priority Gap List](#3-priority-gap-list)
+4. [Reconciliation Plan — Milestones](#4-reconciliation-plan--milestones)
+5. [Features ragent Has That Claude Code Lacks](#5-features-ragent-has-that-claude-code-lacks)
 
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| Bash execution | ✅ BashTool | ✅ bash | — |
-| File read | ✅ FileReadTool | ✅ read | — |
-| File write (full overwrite) | ✅ FileWriteTool | ✅ write | — |
-| File edit (targeted diff) | ✅ FileEditTool | ✅ edit, multiedit, patch | ragent richer |
-| Glob file search | ✅ GlobTool | ✅ glob | — |
-| Grep content search | ✅ GrepTool | ✅ grep | — |
-| Directory listing | ✅ LSTool | ✅ list | — |
-| Web fetch | ❌ | ✅ webfetch | CC gap |
-| Web search | ❌ | ✅ websearch | CC gap |
-| **Think tool** (extended reasoning scratch-pad) | ✅ ThinkTool | ❌ | **ragent gap** |
-| **Architect tool** (plan-only sub-agent mode) | ✅ ArchitectTool | ❌ | **ragent gap** |
-| **Notebook read** (Jupyter .ipynb) | ✅ NotebookReadTool | ❌ | **ragent gap** |
-| **Notebook edit** (Jupyter .ipynb) | ✅ NotebookEditTool | ❌ | **ragent gap** |
-| **Memory read** (CLAUDE.md/project memory) | ✅ MemoryReadTool | ✅ team_memory_read | partial — different model |
-| **Memory write** (CLAUDE.md/project memory) | ✅ MemoryWriteTool | ✅ team_memory_write | partial — different model |
-| Office documents (docx/xlsx/pptx) | ❌ | ✅ office_write/read | CC gap |
-| LibreOffice (odt/ods/odp) | ❌ | ✅ libre_write/read | CC gap |
-| PDF read/write | ❌ | ✅ pdf_read/write | CC gap |
-| LSP tools (definition/hover/references/symbols/diagnostics) | ❌ | ✅ 5 LSP tools | CC gap |
-| Todo management | ❌ | ✅ todo | CC gap |
-| Plan/question tools | ❌ | ✅ plan, question | CC gap |
-| Task management (new/cancel/list/wait) | ❌ | ✅ 4 task tools | CC gap |
-| Team tools (spawn/message/status/broadcast/etc.) | ❌ | ✅ ~20 team tools | CC gap |
-| MCP tool integration | ✅ MCPTool | ✅ mcp | — |
+---
 
-### 1.2 Context & Memory
+## 1. Executive Summary
 
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| **CLAUDE.md auto-injection** — project config file auto-loaded as context | ✅ Full support; recursively finds all CLAUDE.md files in tree | ❌ ragent.json exists but not auto-injected into LLM context | **ragent gap** |
-| **Directory structure snapshot** — project file hierarchy injected at start | ✅ Injected as context section every conversation | ❌ | **ragent gap** |
-| **README.md auto-injection** — project readme added to context | ✅ | ❌ | **ragent gap** |
-| **Code style inference** — auto-detected from project and injected | ✅ Inferred via ripgrep patterns + stored in project config | ❌ | **ragent gap** |
-| **Custom context key-value pairs** — user-defined context sections | ✅ `setContext(key, value)` stored in project config | ❌ | **ragent gap** |
-| **Conversation compaction** (`/compact`) — summarise + reset context window | ✅ `/compact` command calls model to summarise then forks conversation | ❌ | **ragent gap** |
-| **Context window visualisation** (`/ctx-viz`) — breakdown by section/tool | ✅ Renders table of context sections with token estimates | ❌ | **ragent gap** |
-| **Extended thinking / thinking budget** | ✅ `getMaxThinkingTokens()` per model | ❌ | **ragent gap** |
-| Persistent agent memory | ✅ via CLAUDE.md (MemoryRead/Write are Anthropic-internal only) | ✅ T8 agent memory system | different model |
-| Session resume | ✅ ResumeConversation screen | ✅ session manager | — |
-| Snapshot / checkpoint | ❌ | ✅ snapshot system | CC gap |
-| @Reference resolution | ❌ | ✅ reference system | CC gap |
+Claude Code (CC) is Anthropic's TypeScript/React-Ink CLI agent for software engineering tasks.
+ragent is a Rust/Ratatui multi-provider agent framework with team/swarm capabilities.
 
-### 1.3 Slash Commands (TUI / CLI)
+**Shared strengths:** both are interactive terminal agents, both support tool use, permission
+prompting, session persistence, and multi-agent delegation.
 
-| Command | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| `/help` | ✅ | ✅ | — |
-| `/clear` | ✅ | ✅ | — |
-| `/compact` | ✅ summarise + compact | ✅ `/compact` + auto-compact near context limit | — |
-| `/init` | ✅ generate CLAUDE.md | ❌ | **ragent gap** |
-| `/doctor` | ✅ health check | ❌ | **ragent gap** |
-| `/review` | ✅ PR code review | ❌ | **ragent gap** |
-| `/pr-comments` | ✅ fetch GitHub PR comments | ❌ | **ragent gap** |
-| `/ctx-viz` | ✅ context window breakdown | ❌ | **ragent gap** |
-| `/cost` | ✅ show session cost | ❌ | **ragent gap** |
-| `/release-notes` | ✅ show version release notes | ❌ | **ragent gap** |
-| `/listen` | ✅ speech recognition (macOS only) | ❌ | **ragent gap** |
-| `/approvedTools` | ✅ list session-approved tools | ❌ | **ragent gap** |
-| `/terminal-setup` | ✅ iTerm2/VSCode Shift+Enter binding | ✅ built-in (kitty protocol) | similar |
-| `/memory` | ✅ CLAUDE.md management | partial | **ragent gap** |
-| `/lsp` | ❌ | ✅ shows LSP diagnostics | CC gap |
-| `/agents` | ❌ | ✅ | CC gap |
-| `/teams` | ❌ | ✅ | CC gap |
-| `/sessions` | ❌ | ✅ | CC gap |
+**Key ragent gaps vs CC:**
+- No deep project-context auto-injection (directory tree, README, code-style inference)
+- No `ThinkTool` (structured "scratchpad" reasoning step)
+- No `ArchitectTool` (dedicated planning sub-agent)
+- No safe-command whitelist for bash (no always-approved git status/diff/log)
+- No bash command-injection detection
+- No `/init` (generate AGENTS.md from codebase)
+- No `/doctor`, `/review`, `/pr-comments`, `/cost`, `/ctx-viz`, `/release-notes`
+- No per-model cost calculation displayed to the user
+- No extended-thinking / thinking-budget support
+
+**Key CC gaps vs ragent:**
+- Single provider only (Anthropic); ragent supports 5 providers
+- No team/swarm multi-agent system (only single-level AgentTool)
+- No LSP tools
+- No office document tools (docx, xlsx, odt, pdf…)
+- No skill / custom-agent profile system
+- No snapshot/checkpoint
+- No @Reference system
+- No HTTP server mode
+
+---
+
+## 2. Feature-by-Feature Comparison
+
+---
+
+### 2.1 Context & System-Prompt Injection
+
+#### Claude Code
+
+**Key file:** `src/context.ts`, `src/constants/prompts.ts`
+
+CC assembles a rich `getContext()` object (memoized) at conversation start and injects it into
+the system prompt as `<context name="…">…</context>` XML tags.
+
+Sections injected (in order):
+1. **User-defined key-value pairs** — stored in `~/.claude/projects/<hash>/config.json` under
+   `context`. Set via `setContext(key, value)` (e.g. from `/config` command).
+2. **Directory structure snapshot** — calls `LSTool` with a 1-second timeout to produce a file
+   tree, wrapped in the message: *"Below is a snapshot of this project's file structure at the
+   start of the conversation. This snapshot will NOT update during the conversation."*
+3. **Git status** — runs `git branch --show-current`, `git status --short`,
+   `git log --oneline -n 5`, and the last 5 commits by the user's email.
+   Formatted as a block with branch name, file changes, and recent commits.
+4. **Code style** — inferred once via `getCodeStyle()` (ripgrep patterns over the project),
+   then stored/cached in project config. Appended alongside any AGENTS.md content under a
+   combined section.
+5. **AGENTS.md files** — `getClaudeFiles()` uses ripgrep `--glob '**/AGENTS.md'` to find *all*
+   AGENTS.md files in the tree; injects a note listing their paths so the model knows to read
+   each one when working in those directories. It does **not** inline their content directly —
+   instead, the model is expected to use `FileReadTool` to load them.
+   The *root* AGENTS.md content is inlined via the code-style section.
+6. **README.md** — reads `{cwd}/README.md` if present; injected as a named context section.
+
+The full system prompt is: core sysprompt string + context sections as XML tags.
+
+`dontCrawlDirectory` flag in project config disables directory-structure and AGENTS.md scanning.
+
+#### ragent
+
+**Key file:** `crates/ragent-core/src/agent/mod.rs` (`build_system_prompt`),
+`crates/ragent-core/src/session/processor.rs`
+
+`build_system_prompt(agent, working_dir, file_tree, skills)` assembles the prompt in order:
+
+1. **Agent prompt / role** — the agent's custom `prompt` field with template variables substituted:
+   `{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`, `{{DATE}}`
+2. **Working directory** (if not already in template) — `## Working Directory\n{path}`
+3. **File tree** (if not already in template) — `## Project Structure\n\`\`\`{tree}\`\`\``
+4. **AGENTS.md** (if not already in template) — reads `{working_dir}/AGENTS.md` synchronously
+   and appends as `## Project Guidelines (AGENTS.md)\n{content}`. Only the **root** AGENTS.md
+   is read; subdirectory AGENTS.md files are not discovered.
+5. **Skills list** — from the skill registry, listed as `## Available Skills\n…`
+
+Then in `processor.rs`, the first message of a new session triggers an "AGENTS.md init exchange":
+if `AGENTS.md` exists, a synthetic user+assistant exchange is prepended:
+- User: `"AGENTS.md project guidelines have been loaded. [content]"`
+- Assistant: `"I've read the AGENTS.md file and will follow these guidelines."`
+
+**Not injected:** README.md, git status, code-style inference, directory snapshot (file tree
+comes from `ProcessorOptions.file_tree` passed in at startup).
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Directory snapshot at startup | ✅ via LSTool | ✅ via file_tree param (but static) | low |
+| Git status injection | ✅ branch + status + recent commits | ❌ | **HIGH** |
+| README.md injection | ✅ | ❌ | medium |
+| Recursive AGENTS.md discovery | ✅ lists all paths via ripgrep | ❌ root only | medium |
+| Code-style inference & caching | ✅ | ❌ | medium |
+| User-defined context key-values | ✅ `/config set key val` | ❌ | low |
+
+---
+
+### 2.2 Permission & Safety System
+
+#### Claude Code
+
+**Key files:** `src/permissions.ts`, `src/utils/commands.ts`,
+`src/components/permissions/toolUseOptions.ts`
+
+**Permission tiers:**
+1. **Always-allowed safe commands** — a hardcoded `Set` of exact strings:
+   `git status`, `git diff`, `git log`, `git branch`, `pwd`, `tree`, `date`, `which`.
+   These never prompt; they bypass the entire approval flow.
+2. **Exact-match approval** — if `allowedTools` includes `Bash(git commit -m "foo")` the exact
+   command is auto-approved.
+3. **Prefix-match approval** — if `allowedTools` includes `Bash(npm run:*)` then any command
+   starting with `npm run` is auto-approved.
+4. **Blanket approval** — if `allowedTools` includes `"Bash"` (no parens), all bash commands
+   are auto-approved.
+5. **Per-file session permissions** — `FileEdit`, `FileWrite`, and `NotebookEdit` require
+   per-file approval scoped to the session (not persisted to project config by default).
+6. **MCP server approval dialog** — first use of any MCP server triggers a dialog.
+
+**Command injection detection** (`src/utils/commands.ts`):
+- The `getCommandPrefix()` function sends a bash command to Claude Haiku via API to determine
+  its "safe prefix" (e.g. `npm run` for `npm run build`).
+- If the LLM returns `commandInjectionDetected: true`, the system falls back to exact-match
+  only — the command will be shown to the user and cannot be blanket-approved.
+- Patterns that trigger this: `$(...)`, `${...}`, backticks, semicolons concatenating unrelated
+  commands, etc.
+- Uses `shell-quote` library to split and analyse command structure.
+
+**Banned commands** (hardcoded in BashTool prompt, model instructed to refuse):
+`alias`, `curl`, `curlie`, `wget`, `axel`, `aria2c`, `nc`, `telnet`, `lynx`, `w3m`, `links`,
+`httpie`, `xh`, `http-prompt`, `chrome`, `firefox`, `safari`.
+
+**`--dangerously-skip-permissions`** flag bypasses all checks.
+
+#### ragent
+
+**Key files:** `crates/ragent-core/src/permission/mod.rs`,
+`crates/ragent-core/src/tool/bash.rs`, `crates/ragent-core/src/sanitize.rs`
+
+**Permission model:**
+- Each tool implements `permission_category() -> &str` (e.g. `"bash"`, `"edit"`, `"read"`).
+- `PermissionChecker` holds a `PermissionRuleset` — an ordered list of `PermissionRule` structs
+  `{ permission: Permission, pattern: String, action: PermissionAction }`.
+- `check(permission, path)` walks the rules in order; first match wins.
+  Actions: `Allow`, `Deny`, `Ask`.
+- Patterns are glob-style (`*` wildcard).
+- Default ruleset: `read/**` → Allow, `edit/**` → Ask, `bash/*` → Ask.
+- YOLO mode (`yolo::is_enabled()`) short-circuits to Allow for everything.
+- Permissions can be recorded as "always allow" for a pattern via
+  `record_always(permission, pattern)` — stored in session state only (not persisted to disk
+  across sessions).
+
+**No safe-command whitelist** — `git status`, `git diff`, etc. always prompt unless the user
+has previously approved them.
+
+**No command injection detection** — any bash string passes through as-is.
+
+**No banned command list** — the model is not instructed to refuse `curl`, `wget`, etc.
+
+**No blanket or prefix-match approval** — each rule is an exact glob pattern.
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Safe-command whitelist (no prompt for git status/diff etc.) | ✅ | ❌ | **HIGH** |
+| Command injection detection (LLM-assisted) | ✅ | ❌ | medium |
+| Banned command list | ✅ | ❌ | medium |
+| Prefix-match approval (`npm run:*`) | ✅ | ❌ | medium |
+| Blanket tool approval (`"Bash"`) | ✅ | ❌ | low |
+| Per-file session permissions | ✅ | partial (session only) | low |
+
+---
+
+### 2.3 Slash Commands
+
+#### Claude Code (18 commands)
+
+| Command | Type | Implementation |
+|---------|------|----------------|
+| `/help` | local-jsx | renders help screen |
+| `/clear` | local | clears messages, resets context caches |
+| `/compact` | local | calls Sonnet to summarise, forks conversation (see §2.6) |
+| `/init` | prompt | sends LLM a prompt asking it to create/improve AGENTS.md |
+| `/doctor` | local-jsx | renders `Doctor` screen (checks Node, npm, git, SSH, API key) |
+| `/cost` | local | returns `formatTotalCost()` string |
+| `/review` | prompt | asks LLM to run `gh pr view/diff` and produce review |
+| `/pr-comments` | prompt | asks LLM to run `gh api …/comments` and format them |
+| `/ctx-viz` | local | renders token-count table per context section |
+| `/release-notes` | local-jsx | shows release notes for current version |
+| `/listen` | local | activates speech recognition (macOS iTerm/Terminal only) |
+| `/approvedTools` | internal | lists session-approved tools |
+| `/terminal-setup` | local | prints Shift+Enter setup instructions for iTerm2/VSCode |
+| `/config` | local-jsx | renders config editing screen |
+| `/login` | local-jsx | triggers OAuth / API-key auth flow |
+| `/logout` | local | clears stored credentials |
+| `/onboarding` | local-jsx | shows project onboarding screen |
+| `/bug` | local-jsx | opens bug-report flow |
+
+#### ragent (40+ commands)
+
+Key commands (from `crates/ragent-tui/src/app.rs`):
+
+| Command | Notes |
+|---------|-------|
+| `/compact` | Calls `start_compaction()` (see §2.6) |
+| `/swarm [task]` | Fleet-style auto-decomposition and parallel execution |
+| `/agents` | List available agent profiles |
+| `/team` / `/teams` | Team management (spawn, list, status, send) |
+| `/skills` | List available skills |
+| `/lsp` | Show LSP diagnostics |
+| `/history` | Show/search conversation history |
+| `/sessions` | Session management (list, resume, archive) |
+| `/help` | Show help |
+| `/clear` | Clear conversation |
+| `/snapshot` | Save current session snapshot |
+| `/resume` | Resume a previous session |
+| `/yolo` | Toggle YOLO (skip-permissions) mode |
+
+#### Gap Summary
+
+| Command | CC | ragent | Priority |
+|---------|-----|--------|---------|
+| `/init` — generate AGENTS.md from codebase | ✅ | ❌ | **HIGH** |
+| `/doctor` — health-check diagnostics | ✅ | ❌ | **HIGH** |
+| `/cost` — show session cost | ✅ | ❌ | **HIGH** |
+| `/review` — AI-assisted PR review | ✅ | ❌ | medium |
+| `/pr-comments` — fetch+format GitHub PR comments | ✅ | ❌ | medium |
+| `/ctx-viz` — context window token breakdown | ✅ | ❌ | medium |
+| `/release-notes` — show version release notes | ✅ | ❌ | low |
+| `/listen` — speech input | ✅ (macOS only) | ❌ | low |
+| `/swarm` — parallel agent decomposition | ❌ | ✅ | CC gap |
+| `/team` / `/teams` | ❌ | ✅ | CC gap |
 | `/skills` | ❌ | ✅ | CC gap |
-
-### 1.4 Permission & Safety
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| Per-tool permission prompts | ✅ | ✅ | — |
-| YOLO / dangerouslySkipPermissions mode | ✅ | ✅ | — |
-| **Command injection detection** in bash permissions | ✅ Detects `${var}`, `$(...)` patterns; fails-closed | ❌ No injection detection | **ragent gap** |
-| **Safe command whitelist** (git status, diff, log...) | ✅ Always-allowed safe commands | ❌ | **ragent gap** |
-| **Command prefix matching** — approve entire `npm run` prefix | ✅ via `getCommandSubcommandPrefix()` | ❌ exact match only | **ragent gap** |
-| **Blanket tool approval** — approve all bash / all file writes at once | ✅ e.g. `allowedTools: ["Bash"]` | ❌ | **ragent gap** |
-| **Per-file session permissions** — FileEdit/Write require per-file approval | ✅ Session-scoped, not globally persistent | ✅ similar | — |
-| **MCP server approval dialog** — approve new MCP server on first use | ✅ | ✅ | — |
-| Project-level allowedTools config | ✅ | ✅ | — |
-| Per-session approved tools list | ✅ | ✅ | — |
-
-### 1.5 Cost & Telemetry
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| **Real-time cost tracking** (tokens → $) | ✅ Running total displayed; saved to project config | ❌ | **ragent gap** |
-| **Cost threshold warning dialog** | ✅ Prompts when session cost exceeds threshold | ❌ | **ragent gap** |
-| **Usage analytics / Statsig** | ✅ Feature flags + event telemetry | ❌ | **ragent gap** |
-| **Error reporting / Sentry** | ✅ SentryErrorBoundary | ❌ | **ragent gap** |
-| Token/usage display in TUI | ❌ | ✅ usage bar | CC gap |
-
-### 1.6 Authentication & Providers
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| **OAuth browser flow** for Anthropic auth | ✅ Full PKCE OAuth via local HTTP server | ❌ API key only | **ragent gap** |
-| Anthropic provider | ✅ | ✅ | — |
-| OpenAI provider | ❌ (via MCP workaround) | ✅ | CC gap |
-| Ollama (local models) | ❌ | ✅ | CC gap |
-| GitHub Copilot provider | ❌ | ✅ | CC gap |
-| Generic OpenAI-compatible provider | ❌ | ✅ | CC gap |
-| API key configuration | ✅ | ✅ | — |
-
-### 1.7 Git Integration
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| **Git-aware context injection** (status, branch, email) | ✅ Automatically injects git info into system prompt | ❌ | **ragent gap** |
-| **PR review slash command** | ✅ `/review` | ❌ | **ragent gap** |
-| **PR comments slash command** | ✅ `/pr-comments` | ❌ | **ragent gap** |
-| Uses `gh` CLI for PR operations | ✅ | ✅ (in bash tool) | — |
-
-### 1.8 Project Initialisation & Onboarding
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| **Project onboarding wizard** | ✅ First-run setup; prompts for API key; suggests /init | ❌ | **ragent gap** |
-| **`/init` — generate CLAUDE.md** | ✅ Analyses codebase; writes build/lint/test commands + code style | ❌ | **ragent gap** |
-| **`/doctor` — health check** | ✅ Checks API key, network, model access, MCP servers | ❌ | **ragent gap** |
-| **Auto-updater** | ✅ Checks for new npm package version | ❌ | **ragent gap** |
-
-### 1.9 UI / UX
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| UI framework | React + Ink (virtual DOM, JSX) | Ratatui (immediate mode, Rust) | different approach |
-| **Binary feedback** (👍/👎 on responses) | ✅ | ❌ | **ragent gap** |
-| **Message selector** (select/quote earlier messages) | ✅ | ❌ | **ragent gap** |
-| **Slash command typeahead** | ✅ Full typeahead with descriptions | ✅ Basic slash menu | ragent simpler |
-| Multiline input | ✅ (terminal-setup required on some terms) | ✅ Shift+Enter / Alt+Enter + kitty protocol | — |
-| Markdown rendering | ✅ | ✅ | — |
-| Theming | ✅ (dark/light) | ✅ | — |
-| Spinner / progress | ✅ | ✅ | — |
-
-### 1.10 Architecture
-
-| Feature | Claude Code | ragent | Gap |
-|---------|-------------|--------|-----|
-| Multi-agent team system | ❌ | ✅ Full team infrastructure | CC gap |
-| Swarm/orchestration | ❌ | ✅ orchestrator, swarm | CC gap |
-| Agent sub-spawning | ✅ AgentTool (single level) | ✅ Multi-level team spawn | ragent richer |
-| Server / API mode | ❌ | ✅ ragent-server (SSE/HTTP) | CC gap |
-| Skill / custom tool extension | ❌ | ✅ skill system + .md profiles | CC gap |
-| LSP integration | ❌ | ✅ | CC gap |
+| `/lsp` | ❌ | ✅ | CC gap |
+| `/snapshot` | ❌ | ✅ | CC gap |
 
 ---
 
-## 2. Priority Gaps Summary
+### 2.4 Cost & Token Tracking
 
-The gaps most valuable to close (from a user-experience and code-engineering-assistant perspective):
+#### Claude Code
 
-| # | Gap | Impact | Effort |
-|---|-----|--------|--------|
-| G1 | **ThinkTool** — dedicated reasoning scratch-pad | High | Low |
-| G2 | **CLAUDE.md / project memory auto-injection** | High | Medium |
-| G3 | **Conversation compaction (`/compact`)** | High | Medium |
-| G4 | **Cost tracking** (real-time $ display) | High | Medium |
-| G5 | **ArchitectTool** (plan-only sub-agent) | Medium | Medium |
-| G6 | **Git-aware context** (auto-inject git info) | Medium | Low |
-| G7 | **Command injection detection** in bash permissions | Medium | Low |
-| G8 | **Safe command whitelist** + prefix matching | Medium | Low |
-| G9 | **PR review / PR comments** slash commands | Medium | Low |
-| G10 | **Context window visualisation (`/ctx-viz`)** | Medium | Medium |
-| G11 | **`/init` — generate project config** | Medium | Medium |
-| G12 | **`/doctor` — health check** | Low | Low |
-| G13 | **Jupyter Notebook support** | Medium | High |
-| G14 | **Binary feedback** (👍/👎) | Low | Low |
-| G15 | **OAuth browser auth flow** | Low | High |
-| G16 | **Extended thinking / thinking budget** | Medium | Medium |
-| G17 | **Cost threshold warning** | Low | Low |
-| G18 | **Message selector** (quote earlier messages) | Low | Medium |
-| G19 | **Project onboarding wizard** | Low | Medium |
-| G20 | **Auto-updater** | Low | Medium |
+**Key file:** `src/cost-tracker.ts`
 
----
+Global mutable `STATE` object: `{ totalCost: number, totalAPIDuration: number, startTime }`.
+- `addToTotalCost(cost, duration)` called after every LLM response.
+- `formatTotalCost()` returns a chalk-grey multi-line string showing:
+  - `Total cost: $X.XXXX`
+  - `Total duration (API): Xm Xs`
+  - `Total duration (wall): Xm Xs`
+- On process exit, writes `lastCost`, `lastAPIDuration`, `lastDuration`, `lastSessionId` to
+  project config JSON.
+- `/cost` command just calls `formatTotalCost()` and prints it.
+- Cost-per-token values are baked into the model pricing table in the build.
 
-## 3. Reconciliation Plan
+#### ragent
 
-### Milestone CC1 — Quick Wins: Safety, Git Context & Cost Display
-*Prerequisites: none. All low-effort, high-impact.*
+**Key files:** `crates/ragent-core/src/session/processor.rs`,
+event bus `TokenUsage` event, `crates/ragent-tui/src/app.rs` token bar.
 
-**Tasks:**
+- `Event::TokenUsage { input_tokens, output_tokens, … }` published after each LLM response.
+- TUI subscribes and shows a live token count in the status bar.
+- **No cost calculation** — token counts are shown but not converted to USD.
+- **No session-end cost summary** printed on exit.
+- **No `/cost` command**.
 
-- **CC1.1** Add `ThinkTool` — a no-op tool that accepts a `thought` string parameter and returns it unchanged. Gives the LLM an explicit scratch-pad for chain-of-thought without emitting visible output. Register in default tool set.
-- **CC1.2** Add a safe-command whitelist to `BashTool` — always-allow short read-only commands (`git status`, `git diff`, `git log`, `git branch`, `pwd`, `ls`, `cat`, `tree`, `date`, `which`, `echo`) without prompting.
-- **CC1.3** Add command injection detection to `BashTool` permission check — detect `$(...)`, backtick substitution, `${var@...}` patterns; when detected, require exact-match approval (no prefix matching).
-- **CC1.4** Add bash command prefix matching — when a command like `npm run test` is approved, auto-approve future invocations of the same prefix rather than requiring re-approval each time.
-- **CC1.5** Auto-inject git context into system prompt — when CWD is a git repo, prepend a `<context name="git">` block with `git branch --show-current`, `git status --short`, author email. Mirrors CC's `getIsGit()` + git info injection.
-- **CC1.6** Add `/doctor` slash command — checks: API key set, provider reachable (single ping), MCP servers responding, history file readable. Outputs coloured pass/fail per check.
-- **CC1.7** Add cost tracking — track `input_tokens`, `output_tokens`, `cache_read_tokens` per LLM response; compute cost using per-model pricing table; display running total in status bar (e.g. `$0.0234 · 1,204 tok`).
-- **CC1.8** Add `/cost` slash command — show formatted session cost breakdown (model, tokens in/out, cache hits, $total, wall time, API time).
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Per-request cost calculation (USD) | ✅ | ❌ | **HIGH** |
+| Session-total cost display | ✅ | ❌ | **HIGH** |
+| `/cost` command | ✅ | ❌ | **HIGH** |
+| Live token display in TUI | partial (status bar) | ✅ | — |
+| Cost saved to project config | ✅ | ❌ | low |
 
 ---
 
-### Milestone CC2 — Project Memory & Context Management
-*Prerequisites: CC1 complete.*
+### 2.5 Multi-Agent Architecture
 
-**Tasks:**
+#### Claude Code — AgentTool
 
-- **CC2.1** Auto-inject `CLAUDE.md` — on session start, walk the CWD tree upward and collect all `CLAUDE.md` files (project root wins; subdirectory files noted). Inject content as `<context name="project_memory">` block in system prompt. Respect a max-bytes limit.
-- **CC2.2** Add `MemoryReadTool` — reads the project's `CLAUDE.md` (or `~/.config/ragent/CLAUDE.md` for global). Returns contents as tool output.
-- **CC2.3** Add `MemoryWriteTool` — appends or replaces a keyed section in the project's `CLAUDE.md`. Prompts for user approval (file:write permission).
-- **CC2.4** Add `/memory` slash command — shows current CLAUDE.md contents; offers to open editor.
-- **CC2.5** Implement `/compact` slash command — sends current conversation + `"Please summarise..."` prompt; on response, clears the message history and replaces it with an assistant message containing the summary. Preserves the summary in the session file.
-- **CC2.6** Add context window visualisation `/ctx-viz` — render a table showing: system prompt sections (by `<context name>` tag), each message role/size, tool results, estimated total tokens, percentage of model context limit used.
-- **CC2.7** Extended thinking budget — add per-model `max_thinking_tokens` table; when calling Anthropic Claude 3.5+ or Claude 4 models, include `thinking: {type: "enabled", budget_tokens: N}` in the request when budget is non-zero.
+**Key file:** `src/tools/AgentTool/AgentTool.tsx`
+
+CC has a single-level `AgentTool` that:
+1. Accepts a `{ prompt }` input.
+2. Creates a fresh message list `[createUserMessage(prompt)]`.
+3. Loads the same tools as the parent (minus `AgentTool` itself, to prevent nesting).
+4. Calls `getContext()` + `getAgentPrompt()` (same system prompt as parent).
+5. Runs a full `query()` loop (with streaming) until the sub-agent is done.
+6. Returns the final text as the tool result to the parent.
+7. The sub-agent has no persistent memory or inter-agent communication — it is
+   purely ephemeral, receives only the single `prompt`, and returns one response.
+8. Logs messages to a sidechain file (`logs/…-sidechain-N.jsonl`).
+
+Sub-agents **cannot** themselves spawn further sub-agents (AgentTool excluded from sub-agent
+tool list). Context window, cost, and permissions are all inherited from parent.
+
+#### CC — ArchitectTool (disabled by default)
+
+**Key file:** `src/tools/ArchitectTool/ArchitectTool.tsx`
+
+An experimental planning tool (`isEnabled()` returns `false` by default):
+- Accepts `{ prompt, context? }`.
+- Runs a separate LLM call with `ARCHITECT_SYSTEM_PROMPT` ("You are an expert software
+  architect…") using only filesystem exploration tools (no bash write, no edit).
+- Returns a structured implementation plan as text.
+- The parent agent can then execute the plan with full tools.
+
+#### ragent — Team System
+
+**Key files:** `crates/ragent-core/src/team/manager.rs`, `crates/ragent-core/src/team/mailbox.rs`,
+`crates/ragent-core/src/team/task.rs`, `crates/ragent-core/src/tool/team_*.rs`
+
+ragent has a full multi-agent team architecture:
+
+**Agent lifecycle:**
+- A "lead" session creates teammates via `team_create` / `team_spawn` tools.
+- Each teammate runs as an independent session (its own `Processor` with its own tool set,
+  permission set, model, and provider).
+- Teammates are persisted in `.ragent/teams/<team-name>/` directories.
+
+**Inter-agent communication — file-backed mailbox:**
+- Each agent has a mailbox directory on disk: `.ragent/teams/<name>/mailbox/<agent>/`.
+- Messages are JSON files written atomically; the receiver polls via `team_idle` or is woken
+  by a filesystem watch.
+- Supports peer-to-peer messaging (`team_send`) and broadcast.
+- The lead can route tasks; teammates can request help from each other.
+
+**Shared task list:**
+- `.ragent/teams/<name>/tasks.json` — a shared JSON array of tasks.
+- `team_task_create` adds tasks; `team_task_complete` marks them done.
+- Lead uses `team_status` to monitor progress.
+
+**Swarm / auto-decomposition (`/swarm`):**
+- Lead agent analyses the task, decomposes it into sub-tasks, spawns N teammates, assigns
+  tasks, and coordinates completion.
+- Teammates run in background TUI panes or as headless sessions.
+- Progress shown via `/swarm status` with a task table and dependency graph.
+
+**Per-teammate model override:**
+- Each teammate can be assigned a different provider+model combination.
+
+**Blueprint system:**
+- Team templates in `.ragent/blueprints/teams/` define spawn-prompts and task structures.
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Single sub-agent delegation | ✅ AgentTool | ✅ team_spawn + team tools | — |
+| Persistent teammates (survive session) | ❌ | ✅ | CC gap |
+| Inter-agent communication | ❌ | ✅ mailbox | CC gap |
+| Shared task list | ❌ | ✅ | CC gap |
+| Swarm / auto-decomposition | ❌ | ✅ `/swarm` | CC gap |
+| Per-teammate model override | ❌ | ✅ | CC gap |
+| ArchitectTool (planning sub-agent) | ✅ (disabled) | ❌ | medium |
+| Sub-agent nesting prevention | ✅ explicit | partial | low |
 
 ---
 
-### Milestone CC3 — ArchitectTool & Git Commands
-*Prerequisites: CC1 complete.*
+### 2.6 Compaction
 
-**Tasks:**
+#### Claude Code
 
-- **CC3.1** Add `ArchitectTool` — a tool that spawns a read-only sub-agent with no write tools; the sub-agent analyses the task and returns a structured plan (files to change, approach, risks). The parent agent receives the plan and can proceed to implement it. Register as optional/configurable tool.
-- **CC3.2** Add `/review` slash command — sends a prompt instructing the agent to: `gh pr list` (if no PR number given), `gh pr view <N>`, `gh pr diff <N>`, then synthesise a structured code review with sections for overview, quality, suggestions, risks.
-- **CC3.3** Add `/pr-comments` slash command — sends a prompt instructing the agent to fetch PR-level and review comments via `gh api`, format them by file/line, and present them to the user.
-- **CC3.4** Add `/init` slash command — sends a prompt instructing the agent to analyse the codebase (directory structure, existing config, CI files) and write or improve `CLAUDE.md` with: build/lint/test commands, code style, naming conventions, key directories.
+**Key file:** `src/commands/compact.ts`
+
+When user runs `/compact`:
+1. Gets the current full message list via `getMessagesGetter()()`.
+2. Appends a synthetic user message: *"Provide a detailed but concise summary of our
+   conversation above. Focus on information that would be helpful for continuing the
+   conversation, including what we did, what we're doing, which files we're working on,
+   and what we're going to do next."*
+3. Calls `querySonnet()` (the "slow and capable model") with the full context + summary request.
+4. Clears the terminal and message list.
+5. Forks the conversation with two synthetic messages:
+   - User: `"Use the /compact command to clear the conversation history, and start a new
+     conversation with the summary in context."`
+   - Assistant: the summary response.
+6. Clears the `getContext` and `getCodeStyle` memoize caches so they re-inject fresh.
+7. The summary response's token usage is zeroed (input=0) so the context-size warning resets.
+
+**No auto-compact** — CC only compacts on user request.
+
+#### ragent
+
+**Key files:** `crates/ragent-tui/src/app.rs` (`start_compaction`, `should_auto_compact_before_send`),
+`crates/ragent-core/src/agent/mod.rs` (compaction agent definition)
+
+When user runs `/compact` or auto-compact triggers:
+1. `start_compaction(auto_triggered)` is called.
+2. Resolves the built-in `"compaction"` agent: temperature=0.2, model=`claude-3-5-haiku-latest`
+   (Anthropic), max_steps=1, prompt:
+   *"You are a compaction agent. Summarize the conversation into a shorter representation that
+   preserves all important context, decisions, and state. Include file paths, key code changes,
+   and outstanding tasks."*
+3. Sends the current session messages to this agent.
+4. The summary replaces the session message history.
+
+**Auto-compact trigger** (`should_auto_compact_before_send`):
+- Checks token count approaching the model's context limit (configurable threshold).
+- Triggered before the next send, not mid-response.
+- Uses the same compaction flow but with `auto_triggered=true`.
+
+#### Key Differences
+
+| Item | CC | ragent |
+|------|----|--------|
+| Compaction model | Same "slow and capable" model as main | Haiku (hardcoded, cheaper) |
+| Auto-compact | ❌ manual only | ✅ auto-triggered near context limit |
+| Summary prompt focus | "what we did, what we're doing, which files, what next" | "decisions, state, file paths, key changes, outstanding tasks" |
+| Context cache reset after compact | ✅ clears memoize caches | ❌ caches not explicitly reset |
+| Token zeroing after compact | ✅ resets usage estimate | ❌ |
+| Model pinning | compaction uses same model as chat | compaction uses Haiku regardless of chat model |
+
+**ragent gap:** The compaction agent is hardcoded to `claude-3-5-haiku-latest` even if the user
+is using OpenAI or GitHub Copilot — this will fail if Anthropic credentials are unavailable.
+The compaction model should fall back to the current session provider/model.
 
 ---
 
-### Milestone CC4 — Jupyter Notebook Support
-*Prerequisites: none (independent).*
+### 2.7 Extended Thinking / ThinkTool
 
-**Tasks:**
+#### Claude Code
 
-- **CC4.1** Add `notebook_read` tool — reads a `.ipynb` JSON file and renders it as human-readable text: cell type (code/markdown), source, and (for code cells) outputs (stdout, stderr, display_data text). Returns formatted string.
-- **CC4.2** Add `notebook_edit` tool — accepts a notebook path, cell index, new source string, and optional cell type. Reads the `.ipynb` JSON, replaces or inserts the cell, writes back. Supports: edit cell, insert cell at index, delete cell, clear outputs.
-- **CC4.3** Register notebook tools in default tool set with `notebook_read` in read-only set.
-- **CC4.4** Add notebook format auto-detection — when `read` tool is called on a `.ipynb` file, delegate to `notebook_read` automatically.
+**ThinkTool** (`src/tools/ThinkTool/ThinkTool.tsx`):
+- A no-op "scratchpad" tool: the model calls it with a `thought` string to reason before acting.
+- Inspired by the tau-bench paper on chain-of-thought tool use.
+- The thought is displayed in the UI but not returned to the model — it's logged for visibility.
+- Prompt: *"Use the tool to think about something. It will not obtain new information or make
+  any changes to the repository, but just log the thought. Use it when complex reasoning or
+  brainstorming is needed."*
 
----
+**Extended thinking / budget** (`src/services/claude.ts`, `src/utils/thinking.ts`):
+- `getMaxThinkingTokens(messages)` computes a thinking budget per model.
+- Only enabled for the "ant" user type (`process.env.USER_TYPE === 'ant'`), i.e. Anthropic
+  internal users. Not exposed to external users.
+- When enabled, passes `thinking: { type: "enabled", budget_tokens: N }` to the API.
 
-### Milestone CC5 — UX: Feedback, Message Selection & Onboarding
-*Prerequisites: none (independent).*
+#### ragent
 
-**Tasks:**
+- **No ThinkTool** — the model cannot use a structured "scratchpad" step.
+- **No extended thinking support** — the provider abstraction does not pass thinking budget
+  parameters to Anthropic's API.
 
-- **CC5.1** Add binary feedback (👍/👎) — after each assistant response, display a subtle feedback prompt; capture rating; log locally to session file (and optionally to analytics). Accessible via keyboard shortcut (e.g. `+` / `-`).
-- **CC5.2** Add cost threshold warning — configurable `max_session_cost` in config; when exceeded, show a dismissible dialog asking if the user wants to continue or compact.
-- **CC5.3** Add message selector — allow user to press a key (e.g. `s`) to enter "select mode" in the message pane; navigate messages with arrows, press Enter to quote-reply (prepend `> <message excerpt>`).
-- **CC5.4** Add first-run onboarding — on first launch (no config, no API key), display a welcome screen that: explains ragent, prompts for API key or provider selection, offers to run `/init` on the current project. Store completion state in global config.
-- **CC5.5** Add auto-update check — on startup, check the crates.io (or GitHub releases) API for a newer ragent version; if found, show a non-blocking notice with the version number and update command.
+#### Gap Summary
 
----
-
-### Milestone CC6 — OAuth & Authentication
-*Prerequisites: none (independent, lower priority).*
-
-**Tasks:**
-
-- **CC6.1** Implement PKCE OAuth flow for Anthropic Console — spawn a local HTTP server on a random port; open browser to Anthropic OAuth URL; receive callback with authorization code; exchange for access token; store in global config.
-- **CC6.2** Add `--login` / `--logout` CLI flags and `/login` slash command.
-- **CC6.3** Account info display — show logged-in account email in TUI status bar when authenticated via OAuth.
-- **CC6.4** Token refresh — handle expired access tokens; silently refresh using stored refresh token before each API call.
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| ThinkTool (scratchpad reasoning) | ✅ | ❌ | **HIGH** |
+| Extended thinking budget (Anthropic) | ✅ (ANT-internal) | ❌ | low (internal only) |
 
 ---
 
-## 4. Features ragent Has That Claude Code Lacks
+### 2.8 LLM / Streaming
 
-For completeness, these are significant ragent capabilities not present in Claude Code:
+#### Claude Code
+
+**Key files:** `src/services/claude.ts`, `src/query.ts`
+
+- Uses `@anthropic-ai/sdk` directly; streams via `client.messages.stream()`.
+- Handles `thinking` and `redacted_thinking` block types (filtered out before tool parsing).
+- Tool results are appended as new user messages and the loop continues until no more tool calls.
+- `normalizeMessagesForAPI()` strips ephemeral fields before each API call.
+- Models tracked: `haiku` (fast), `sonnet` (slow-and-capable), with dynamic model resolution
+  via `getSlowAndCapableModel()`.
+- Single provider: Anthropic only (+ Bedrock/Vertex as config options).
+
+#### ragent
+
+**Key files:** `crates/ragent-core/src/session/processor.rs`,
+`crates/ragent-core/src/provider/`
+
+- Provider abstraction trait `Provider` with implementations for:
+  Anthropic, OpenAI, GitHub Copilot, Ollama, Generic OpenAI-compatible.
+- Streaming via `futures::Stream<Item = StreamEvent>`.
+- Tool calls accumulated from stream deltas, executed in parallel where possible.
+- `Event::TokenUsage` published to event bus after each response.
+- Model selected via `ModelRef { provider_id, model_id }` — can differ per agent.
+- No thinking/extended-thinking support in provider abstraction.
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Multiple providers | ❌ Anthropic only | ✅ 5 providers | CC gap |
+| Extended thinking API params | ✅ (ANT-only) | ❌ | low |
+| Parallel tool execution | ❌ sequential | ✅ | CC gap |
+
+---
+
+### 2.9 Input Handling & TUI
+
+#### Claude Code
+
+**Key files:** `src/components/` (React/Ink), `src/history.ts`
+
+- Built with React + Ink.js — rendered as React components to the terminal.
+- Input: Ink's `TextInput` component; Shift+Enter handled via iTerm2/VSCode terminal integration
+  (the `/terminal-setup` command configures the terminal to send a specific escape sequence).
+- History: stored in `~/.claude/history` as a plain newline-delimited file.
+  Multiline entries stored with literal `\n` characters; retrieval recreates them.
+- No TUI layout panels — output scrolls vertically in the terminal.
+- Context window visualisation via `/ctx-viz` shows token counts per section in a table.
+
+#### ragent
+
+**Key files:** `crates/ragent-tui/src/app.rs`, `crates/ragent-tui/src/app/state.rs`
+
+- Built with Ratatui — full TUI with multiple panels (input, message view, output, log, status bar).
+- Shift+Enter inserts a newline into the input field (via Kitty keyboard protocol).
+- Multiline history: entries persisted with `\` → `\\` and `\n` → literal `\n` escaping;
+  loaded with reverse unescaping. Navigation aware of logical lines (Up/Down moves within
+  multiline entries before jumping to previous/next history entry).
+- Keyboard shortcuts: Ctrl+A (select all), Ctrl+X (cut), Ctrl+C (copy), Ctrl+V (paste),
+  Ctrl+Left/Right (word navigation), Shift+arrow (character selection), Shift+Enter (newline).
+- Multiple TUI panels: message view, tool output panel, log panel, teammate strip.
+- `/ctx-viz` equivalent: no; token count shown in status bar only.
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| `/ctx-viz` token breakdown table | ✅ | ❌ | medium |
+| Full TUI panel layout | ❌ | ✅ | CC gap |
+| Multiline input with correct history | ✅ | ✅ | — |
+| Kitty keyboard protocol | ❌ | ✅ | CC gap |
+
+---
+
+### 2.10 Auto-Updater
+
+#### Claude Code
+
+**Key file:** `src/utils/autoUpdater.ts`
+
+- On startup, checks `statsig` dynamic config `tengu_version_config` for a minimum required
+  version. If current version is below minimum, prints an error and calls `process.exit(1)`.
+- Periodic background update check: tries `npm install -g @anthropic-ai/claude-code@latest`.
+- Uses a lock file (`.update.lock`) with 5-minute timeout to prevent concurrent updates.
+- `AutoUpdaterStatus` state flows through: `idle` → `checking` → `installing` → `success/failed`.
+- On update success, notifies user and suggests restarting.
+- `assertMinVersion()` exported and called at app startup.
+
+#### ragent
+
+- **No auto-updater** — installed as a Rust binary; updates must be done manually via
+  `cargo install` or distro package manager.
+- No minimum-version enforcement from server config.
+
+#### Gap Summary
+
+| Item | CC | ragent | Priority |
+|------|----|--------|----------|
+| Auto-update on startup | ✅ npm-based | ❌ | low |
+| Minimum-version enforcement | ✅ Statsig | ❌ | low |
+| Update lock file | ✅ | ❌ | low |
+
+---
+
+### 2.11 Tools Inventory
+
+#### Claude Code (16 tools)
+
+| Tool | Notes |
+|------|-------|
+| `BashTool` | Shell execution; banned-command list; injection detection |
+| `FileReadTool` | Read file with line-range support |
+| `FileWriteTool` | Create/overwrite files (requires session permission per file) |
+| `FileEditTool` | Edit existing files (diff-style; requires session permission per file) |
+| `GlobTool` | File pattern matching |
+| `GrepTool` | Regex content search |
+| `LSTool` | Directory listing |
+| `AgentTool` | Launch ephemeral sub-agent |
+| **`ArchitectTool`** | Planning sub-agent (disabled by default) |
+| **`ThinkTool`** | Scratchpad reasoning step |
+| `NotebookReadTool` | Read Jupyter notebook cells |
+| `NotebookEditTool` | Edit Jupyter notebook cells |
+| `MCPTool` | Model Context Protocol tool bridge |
+| `MemoryReadTool` | Read persistent memory (ANT-internal only) |
+| `MemoryWriteTool` | Write persistent memory (ANT-internal only) |
+| `StickerRequestTool` | Anthropic-internal sticker requests |
+
+#### ragent (53 tools, grouped)
+
+| Group | Tools |
+|-------|-------|
+| File ops | read, write, create, edit, glob, grep, ls, file_ops |
+| Execution | bash, background_bash |
+| Code intelligence | lsp_definition, lsp_hover, lsp_references, lsp_symbols, lsp_diagnostics |
+| Web | webfetch, websearch |
+| Planning | todo, plan, new_task, wait_tasks |
+| Documents | office_read, office_write, libreoffice_read, libreoffice_write, pdf_read, pdf_write, csv_read |
+| Background agents | background_agent, wait_agent, cancel_task, list_tasks |
+| Team coordination | team_create, team_spawn, team_send, team_status, team_idle, team_task_create, team_task_complete, team_list, team_join, team_leave, team_chat, team_broadcast, team_assign, team_wait, team_cancel, team_heartbeat, team_config, team_checkpoint |
+| MCP | mcp (bridge) |
+
+#### Gap Summary
+
+| Tool | CC | ragent | Priority |
+|------|----|--------|----------|
+| `ThinkTool` | ✅ | ❌ | **HIGH** |
+| `ArchitectTool` | ✅ (disabled) | ❌ | medium |
+| `NotebookReadTool` | ✅ | ❌ | medium |
+| `NotebookEditTool` | ✅ | ❌ | medium |
+| LSP tools | ❌ | ✅ | CC gap |
+| Office/PDF document tools | ❌ | ✅ | CC gap |
+| Team coordination tools | ❌ | ✅ | CC gap |
+| Background agent tools | ❌ | ✅ | CC gap |
+| Websearch | ❌ | ✅ | CC gap |
+
+---
+
+## 3. Priority Gap List
+
+Ranked by impact × implementation effort:
+
+| ID | Gap | Impact | Effort |
+|----|-----|--------|--------|
+| G01 | `ThinkTool` — scratchpad reasoning | High | Low |
+| G02 | Safe-command whitelist (git status/diff/log/branch, pwd, tree) | High | Low |
+| G03 | `/cost` command + per-request USD cost calculation | High | Medium |
+| G04 | `/init` — generate AGENTS.md from codebase | High | Low |
+| G05 | `/doctor` — health-check diagnostics | High | Low |
+| G06 | Git status auto-injection into system prompt | High | Low |
+| G07 | Compaction model fallback (use session provider, not hardcoded Haiku) | High | Low |
+| G08 | Recursive AGENTS.md discovery (list all paths like CC does) | Medium | Low |
+| G09 | README.md auto-injection into system prompt | Medium | Low |
+| G10 | `/review` — AI-assisted PR code review | Medium | Low |
+| G11 | `/pr-comments` — fetch + format GitHub PR comments | Medium | Low |
+| G12 | `/ctx-viz` — context window token breakdown | Medium | Medium |
+| G13 | Bash command injection detection | Medium | Medium |
+| G14 | Banned-command list (curl/wget/nc etc.) | Medium | Low |
+| G15 | Prefix-match permission approval (`npm run:*`) | Medium | Medium |
+| G16 | `ArchitectTool` — planning sub-agent | Medium | Medium |
+| G17 | Code-style inference and caching | Medium | High |
+| G18 | `NotebookReadTool` + `NotebookEditTool` | Medium | High |
+| G19 | Auto-updater | Low | Medium |
+| G20 | User-defined context key-value pairs (`/config set`) | Low | Low |
+
+---
+
+## 4. Reconciliation Plan — Milestones
+
+---
+
+### Milestone CC1 — Quick Wins (Low Effort / High Value)
+
+**Goal:** Add the most-impactful CC features that require minimal new infrastructure.
+
+#### Tasks
+
+**CC1-T1: ThinkTool**
+- Add `think` tool to `crates/ragent-core/src/tool/`.
+- Input: `{ thought: String }`. Output: empty string (no side effects).
+- Returns `ToolResult::text("")` — thought is emitted as a `ToolCall` event so the TUI
+  can display it.
+- Add to all agent tool registries by default.
+
+**CC1-T2: Safe-command whitelist for bash**
+- In `crates/ragent-core/src/tool/bash.rs`, before the permission check, match the
+  command string against a `SAFE_COMMANDS` set:
+  `["git status", "git diff", "git log", "git branch", "git branch --show-current",
+    "pwd", "tree", "date", "which"]`
+- If matched exactly, return `PermissionAction::Allow` without consulting the checker.
+
+**CC1-T3: Git status injection into system prompt**
+- In `build_system_prompt()` (`agent/mod.rs`), add a call to a new
+  `collect_git_context(working_dir) -> String` function.
+- Run: `git branch --show-current`, `git status --short`, `git log --oneline -n 5`.
+- Format as a `## Git Status` section and append to the prompt.
+- Skip gracefully if `working_dir` is not a git repository.
+
+**CC1-T4: README.md injection**
+- In `build_system_prompt()`, check for `{working_dir}/README.md`.
+- If present, read (truncate to ~4000 chars) and append as `## README\n{content}`.
+
+**CC1-T5: Recursive AGENTS.md discovery**
+- In `build_system_prompt()`, after injecting the root AGENTS.md, use `walkdir` (or
+  `ignore` crate) to find all `**/AGENTS.md` files under `working_dir`.
+- Append a note listing discovered paths (do not inline — keep consistent with CC approach).
+
+**CC1-T6: `/init` command**
+- Add `"init"` slash command in `app.rs`.
+- Sends a user message: *"Please analyse this codebase and create an AGENTS.md file
+  containing: 1. Build/lint/test commands. 2. Code style guidelines. 3. Key architectural
+  decisions. If there is already an AGENTS.md, improve it."*
+- Let the model use its file tools to complete the task.
+
+**CC1-T7: `/doctor` command**
+- Add `"doctor"` slash command.
+- Checks: `cargo --version`, `rustc --version`, `git --version`, `gh --version`,
+  active provider connectivity (send a minimal ping message), disk space, and
+  whether `AGENTS.md` exists in the working directory.
+- Display results in the TUI output panel.
+
+**CC1-T8: Compaction model fallback**
+- Change `start_compaction()` to use the current session's `ModelRef` instead of
+  hardcoding `claude-3-5-haiku-latest`.
+- If the current model is non-Anthropic, either use the same model, or add a
+  `compaction_model` field to `ragent.json` / agent config.
+
+---
+
+### Milestone CC2 — Cost Tracking & Context Visibility
+
+**Goal:** Give users visibility into how much the session costs and what's in the context.
+
+#### Tasks
+
+**CC2-T1: Per-model pricing table**
+- Add a `ModelPricing { input_per_mtok: f64, output_per_mtok: f64 }` lookup table
+  in `crates/ragent-core/src/provider/`.
+- Cover: all major Anthropic models, GPT-4o/mini, Copilot (show tokens only, no USD),
+  Ollama (show tokens only, $0 cost).
+
+**CC2-T2: Cost accumulator**
+- Add `SessionCost { total_input_tokens: u64, total_output_tokens: u64, total_usd: f64 }`
+  to session state.
+- Update on every `Event::TokenUsage` using the pricing table.
+
+**CC2-T3: `/cost` command**
+- Add `"cost"` slash command in `app.rs`.
+- Displays: total input tokens, total output tokens, estimated total cost in USD,
+  wall-clock session duration, API response time.
+
+**CC2-T4: Session-end cost summary**
+- On clean exit, print a one-line cost summary to stdout (similar to CC).
+
+**CC2-T5: `/ctx-viz` command**
+- Parse the assembled system prompt into sections (by `##` headings).
+- Estimate token count per section (use `tiktoken` or a byte/4 approximation).
+- Render a table in the TUI output panel:
+  `Section | Chars | ~Tokens`
+
+---
+
+### Milestone CC3 — Permission & Safety Hardening
+
+**Goal:** Match CC's safety model for bash command handling.
+
+#### Tasks
+
+**CC3-T1: Banned-command list**
+- In `bash.rs`, reject commands that start with any banned executable:
+  `curl`, `wget`, `nc`, `netcat`, `telnet`, `aria2c`, `axel`, `lynx`, `w3m`.
+- Return a clear `ToolError` explaining the ban.
+- Allow override via `ragent.json` `allowBannedCommands: true` if user explicitly opts in.
+
+**CC3-T2: Prefix-match approval**
+- Extend `PermissionRule.pattern` to support trailing `:*` syntax meaning
+  "command starts with this prefix".
+- Example rule: `bash: npm run:* → Allow`.
+- Update `PermissionChecker.check()` accordingly.
+
+**CC3-T3: Command injection heuristic detection**
+- Add a static heuristic check in `bash.rs` before permission evaluation:
+  scan for `$(`, `` ` ``, `${`, `eval `, `exec `.
+- If found, downgrade any blanket-allow to Ask and log a warning in the TUI.
+- (Full LLM-based detection like CC is optional stretch goal.)
+
+**CC3-T4: Blanket tool approval**
+- Allow `"Bash"` (no pattern) in the `allowedTools` list to mean "approve all bash".
+- Map to a wildcard rule `bash: * → Allow` in the checker.
+
+---
+
+### Milestone CC4 — Git & PR Integration Commands
+
+**Goal:** Add CC's git-integration slash commands.
+
+#### Tasks
+
+**CC4-T1: `/review` command**
+- Add `"review [PR_NUMBER]"` slash command.
+- If no PR number, runs `gh pr list` and shows results.
+- If PR number given, asks the LLM to run `gh pr view <N>` and `gh pr diff <N>`
+  then produce a structured code review.
+
+**CC4-T2: `/pr-comments` command**
+- Add `"pr-comments [PR_NUMBER]"` slash command.
+- Asks LLM to call `gh api /repos/{owner}/{repo}/issues/{N}/comments` and
+  `/repos/{owner}/{repo}/pulls/{N}/comments`, format and display all comments.
+
+---
+
+### Milestone CC5 — ArchitectTool & Enhanced Planning
+
+**Goal:** Add structured planning capabilities.
+
+#### Tasks
+
+**CC5-T1: ArchitectTool**
+- Add an `architect` tool to `crates/ragent-core/src/tool/`.
+- Input: `{ prompt: String, context: Option<String> }`.
+- Launches a sub-agent with a system prompt focused on architecture:
+  *"You are an expert software architect. Your role is to analyse technical requirements
+  and produce clear, actionable implementation plans."*
+- Sub-agent has access only to read-only tools (grep, glob, read, ls).
+- Returns the implementation plan as text.
+- Disabled by default; enabled via `ragent.json` `enableArchitectTool: true`.
+
+**CC5-T2: Code-style inference**
+- After `/init`, or on first session startup if AGENTS.md is absent, run a background
+  task to infer code style from the project (look for `.editorconfig`, `rustfmt.toml`,
+  `clippy.toml`, `package.json` style fields, etc.).
+- Cache in `ragent.json` `codeStyle` field; inject into system prompt.
+
+---
+
+### Milestone CC6 — Jupyter Notebook Support
+
+**Goal:** Add Jupyter notebook tools to match CC.
+
+#### Tasks
+
+**CC6-T1: `notebook_read` tool**
+- Read `.ipynb` files; parse JSON and return cells as structured text with cell type
+  (markdown/code), source, and outputs.
+
+**CC6-T2: `notebook_edit` tool**
+- Edit individual cells in `.ipynb` files (update source, add/remove cells).
+- Requires per-file session permission (same as `edit`).
+
+---
+
+## 5. Features ragent Has That Claude Code Lacks
+
+For completeness — significant ragent capabilities not present in Claude Code:
 
 | Feature | ragent | Notes |
 |---------|--------|-------|
-| **Multi-provider support** | Anthropic, OpenAI, Ollama, Copilot, Generic OpenAI | CC is Anthropic-only |
-| **Multi-agent team system** | Spawn, task distribution, mailbox, swarm | CC has only single-level AgentTool |
-| **Orchestrator / swarm** | Policy-driven multi-agent coordination; `/swarm` auto-decomposes work | No CC equivalent |
-| **Auto-compact + context limit awareness** | Auto-triggers compaction before hard context limit | CC requires manual `/compact` |
+| **Multi-provider support** | Anthropic, OpenAI, GitHub Copilot, Ollama, Generic OpenAI | CC is Anthropic-only |
+| **Multi-agent team system** | Full mesh — spawn, mailbox, task list, swarm | CC has only single-level ephemeral AgentTool |
+| **`/swarm` auto-decomposition** | Policy-driven parallel multi-agent work | No CC equivalent |
+| **Auto-compact** | Triggers before context limit; no user action needed | CC requires manual `/compact` |
 | **LSP tools** | definition, hover, references, symbols, diagnostics | No CC equivalent |
 | **Office document tools** | docx/xlsx/pptx read+write | No CC equivalent |
 | **LibreOffice tools** | odt/ods/odp read+write | No CC equivalent |
 | **PDF tools** | pdf_read, pdf_write | No CC equivalent |
 | **HTTP server mode** | ragent-server (SSE/REST API) | No CC equivalent |
-| **Skill system** | .md custom tool profiles | No CC equivalent |
-| **Snapshot / checkpoint** | Save and restore agent state | No CC equivalent |
-| **@Reference system** | `@file`, `@url`, `@symbol` in prompts | No CC equivalent |
-| **Custom agent profiles** | .md format with provider/model pinning | No CC equivalent |
-| **Todo / task tools** | todo, plan, new_task, wait_tasks | No CC equivalent |
-| **Web search** | websearch tool | No CC equivalent |
-| **Token usage bar** | Live token display in TUI | No CC equivalent |
-| **Offline / local LLM** | Full Ollama support | CC requires Anthropic account |
-| **Per-teammate model override** | Each team member can use a different provider/model | No CC equivalent |
+| **Skill system** | `.md` custom tool profiles with dynamic context injection | No CC equivalent |
+| **Snapshot/checkpoint** | Save and restore full agent state | No CC equivalent |
+| **@Reference system** | `@file`, `@url`, `@symbol` inline in prompts | No CC equivalent |
+| **Custom agent profiles** | `.md` format with provider/model pinning per agent | No CC equivalent |
+| **Per-teammate model override** | Each team member uses a different provider/model | No CC equivalent |
+| **Todo/task tools** | todo, plan, new_task, wait_tasks | No CC equivalent |
+| **Websearch tool** | Built-in web search | No CC equivalent |
+| **Live token bar** | Real-time token count in TUI status bar | No CC equivalent |
+| **Offline/local LLM** | Full Ollama support | CC requires Anthropic account |
+| **Parallel tool execution** | Multiple tool calls run concurrently | CC is sequential |
+| **Background bash** | Long-running shell commands in background | No CC equivalent |
 
 ---
 
-## 5. Effort Estimates
-
-| Milestone | Gaps closed | Estimated effort |
-|-----------|-------------|-----------------|
-| CC1 — Safety, Git, Cost | G1, G6, G7, G8, G12 (partial G4) | ~3–5 days |
-| CC2 — Memory & Context | G2, G3, G10, G16 | ~5–8 days |
-| CC3 — Architect & Git Commands | G5, G9, G11 | ~3–5 days |
-| CC4 — Notebook Support | G13 | ~3–5 days |
-| CC5 — UX Improvements | G14, G17, G18, G19, G20 | ~5–8 days |
-| CC6 — OAuth | G15 | ~3–5 days |
-
-**Total estimated effort: ~22–36 developer-days**
-
----
-
-*Generated: 2026-04-01 by ragent gap analysis comparing claude-code-sourcemap and ragent source trees.*
+*End of CCGAP.md*
