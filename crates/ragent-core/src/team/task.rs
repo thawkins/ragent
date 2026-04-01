@@ -264,6 +264,26 @@ impl TaskStore {
         };
 
         let done = list.completed_ids();
+
+        // Guard: if this agent already has a different in-progress task, reject the claim
+        // This prevents an agent from claiming multiple tasks simultaneously
+        let other_in_progress = list
+            .tasks
+            .iter()
+            .find(|t| {
+                t.status == TaskStatus::InProgress
+                    && t.assigned_to.as_deref() == Some(agent_id)
+                    && t.id != task_id
+            })
+            .cloned();
+        if let Some(other) = other_in_progress {
+            file.unlock()?;
+            return Err(anyhow!(
+                "agent {} already has task '{}' in progress; must complete it before claiming '{}'",
+                agent_id, other.id, task_id
+            ));
+        }
+
         let task = list
             .get_mut(task_id)
             .ok_or_else(|| anyhow!("task '{task_id}' not found"))?;

@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Product codebase review and baseline summary",
+      "description": "Perform a comprehensive review of the current product repository (the project you were given). Produce a concise baseline report describing: architecture, major features, supported CLI/GUI commands, public APIs, key modules, plugin/extension points, existing automation/tests, current UX/workflow, known limitations, and any TODOs or open issues in the repo. Produce a machine- and human-readable summary file at target/temp/swarmout/product_summary.md that includes: (1) a short executive summary, (2) a feature list (bullet points), (3) a capability vs. expectation gap list (what's missing compared to a modern developer-assistant tool), and (4) a list of code locations to modify for new features (files, classes, functions). Include measured or estimated complexity/effort for each missing capability (Tiny/Small/Medium/Large). Output any logs or intermediate artifacts to target/temp/swarmout/product_review.log. This task is independent and does not rely on other tasks.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:38:12.848948547Z",
+      "claimed_at": "2026-04-01T16:38:23.589196768Z",
+      "completed_at": "2026-04-01T16:41:15.365591565Z"
+    },
+    {
+      "id": "s2",
+      "title": "Competitor analysis: ClaudeCode (../claude-code-sourcemap)",
+      "description": "Analyze the competitor 'claudecode' using the local source at ../claude-code-sourcemap. If that path is not present, attempt to locate a local equivalent; if still missing, fetch the public repo/docs. Produce a detailed analysis file at target/temp/swarmout/claude_analysis.md containing: (1) feature inventory (what it does end-to-end), (2) architecture and key technical approaches, (3) unique or differentiating features, (4) UX/workflow patterns (CLI, prompts, integrations), (5) shortcomings or constraints, (6) security/privacy model, and (7) a feature-by-feature comparison table with our product (columns: feature, claude present?, ours present?, gap). For each feature missing from our product, add an estimated implementation difficulty (Tiny/Small/Medium/Large), priority (Low/Med/High), and suggested implementation notes. Save any reproduced artifacts (screenshots, readme snippets, code references) under target/temp/swarmout/claude_artifacts/.",
+      "status": "inprogress",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:38:12.849096038Z",
+      "claimed_at": "2026-04-01T16:38:22.689565826Z",
+      "completed_at": null
+    },
+    {
+      "id": "s3",
+      "title": "Competitor analysis: Copilot CLI",
+      "description": "Analyze the 'copilot-cli' competitor. First look for a local copy; if not found, use public documentation and the official repo. Produce target/temp/swarmout/copilot_cli_analysis.md containing: (1) features and capabilities (especially CLI workflows), (2) integrations (editors, repos, cloud), (3) UX patterns and command parameters, (4) how it handles prompts, completions, and code actions, (5) key strengths and weaknesses, (6) list of features that would be valuable for our product (with rationale), and (7) a comparison table versus our product. For each recommended feature, provide estimated effort, priority, and an outline of implementation steps (what modules to change, APIs to add). Place any supplementary artifacts under target/temp/swarmout/copilot_cli_artifacts/.",
+      "status": "inprogress",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:38:12.849339378Z",
+      "claimed_at": "2026-04-01T16:38:23.685139933Z",
+      "completed_at": null
+    },
+    {
+      "id": "s4",
+      "title": "Competitor analysis: OpenCode (../opencode)",
+      "description": "Analyze the 'OpenCode' source located at ../opencode (or fetch public sources if absent). Produce a report at target/temp/swarmout/opencode_analysis.md that documents: (1) features and unique capabilities, (2) internal architecture, (3) automation and developer workflows, (4) compatibility/integration strategy, (5) security/privacy and licensing notes, (6) features our product lacks that OpenCode provides, and (7) recommended feature ideas inspired by OpenCode with effort and priority estimates. Include a direct compare table (feature vs presence in OpenCode vs our product). Place extracted code references or screenshots in target/temp/swarmout/opencode_artifacts/.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:38:12.849506946Z",
+      "claimed_at": "2026-04-01T16:38:21.380487157Z",
+      "completed_at": "2026-04-01T16:43:17.312305052Z"
+    },
+    {
+      "id": "s5",
+      "title": "Competitor analysis: Roocode",
+      "description": "Independently analyze the competitor 'roocode'. If a local repository is available, use it; otherwise rely on public docs, README, and demos. Create target/temp/swarmout/roocode_analysis.md covering: (1) core features and user flows, (2) notable product differentiators, (3) limitations and trade-offs, (4) feature set that overlaps with our product and gaps where roocode leads, and (5) recommended features we should adopt (with estimated effort and priority). Provide a comparison table versus our product. Save any collected references to target/temp/swarmout/roocode_artifacts/.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T16:38:12.849741508Z",
+      "claimed_at": "2026-04-01T16:38:31.246997332Z",
+      "completed_at": "2026-04-01T16:41:24.881762275Z"
+    },
+    {
+      "id": "s6",
+      "title": "Compose SWARMOUT2.md: suggested features, milestones and implementation plan",
+      "description": "Using the outputs from product_summary.md and all competitor analyses (claude_analysis.md, copilot_cli_analysis.md, opencode_analysis.md, roocode_analysis.md) generate a consolidated document target/temp/swarmout/SWARMOUT2.md. This document must: (1) summarize high-value missing features (prioritized), (2) include a feature matrix showing which competitor provides which feature, (3) give for each recommended feature: description, user story, acceptance criteria, estimated effort, priority, and implementation notes, (4) produce a milestone-driven roadmap with 3-6 milestones (short-term quick wins, medium-term foundational work, long-term differentiators), (5) break each milestone into concrete tasks (developer tasks, test tasks, docs, QA), with estimated time and suggested assignees/roles, and (6) include risk notes and monitoring/metrics to validate feature success. Put any intermediate merged artifacts under target/temp/swarmout/merged_artifacts/. This task depends on s1, s2, s3, s4, and s5 — consume their files from target/temp/swarmout. Ensure final SWARMOUT2.md is well-structured and ready to hand to an implementation team.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T16:38:12.850160880Z",
+      "claimed_at": null,
+      "completed_at": null
+    }
+  ]
+}
