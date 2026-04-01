@@ -364,8 +364,12 @@ pub(crate) fn tool_result_summary(
         )),
         "glob" => Some(format!("{} found", pluralize(line_count, "file", "files"))),
         "list" => {
-            let item_label = if line_count == 1 { "entry" } else { "entries" };
-            Some(format!("{} {}", line_count, item_label))
+            let entries = out.get("entries").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let path = out.get("path").and_then(|v| v.as_str())
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            let label = if entries == 1 { "entry" } else { "entries" };
+            Some(format!("{} {} in {}", entries, label, path))
         }
         "webfetch" => {
             let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);

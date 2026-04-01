@@ -72,9 +72,13 @@ impl Tool for ListTool {
         lines.push(format!("{}/", dir.display()));
         list_recursive(&dir, "", 0, max_depth, &mut lines)?;
 
+        let entry_count = lines.len().saturating_sub(1); // exclude the header line
         Ok(ToolOutput {
             content: lines.join("\n"),
-            metadata: None,
+            metadata: Some(serde_json::json!({
+                "entries": entry_count,
+                "path": dir.display().to_string(),
+            })),
         })
     }
 }
