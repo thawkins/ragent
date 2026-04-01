@@ -287,6 +287,26 @@ impl SessionProcessor {
                  prompt contains patterns like \"1.\", \"2.\", \"- Item\", or \"and\" joining multiple \
                  items, the spawn will fail. This is intentional — it forces correct distribution.\n\n",
             );
+        } else if team_context_for_session.is_some() {
+            // Inject teammate workflow guidelines when this session is running as a teammate.
+            system_prompt.push_str(
+                "\n## Teammate — Task Workflow\n\n\
+                 You are a member of a team. Always follow this workflow:\n\n\
+                 **CRITICAL:** Before starting any work:\n\
+                 1. Call `team_task_claim` to claim your assigned task. This returns the task ID \
+                    and details.\n\
+                 2. Perform the work described in the task.\n\
+                 3. Call `team_task_complete(task_id)` with the task ID you claimed in step 1 — \
+                    **never guess or try to complete a different task**.\n\
+                 4. Call `team_idle` to signal you are done and ready for new assignments.\n\n\
+                 **Do NOT:**\n\
+                 - Start work without calling `team_task_claim` first\n\
+                 - Try to complete a task without its task_id\n\
+                 - Complete a task that you did not claim\n\
+                 - Go idle while you still have an uncompleted task assigned to you\n\n\
+                 If `team_task_claim` returns \"already has task\", complete that task first \
+                 (step 3–4 above), then call `team_task_claim` again.\n\n",
+            );
         }
 
         // 4. Build chat messages from history

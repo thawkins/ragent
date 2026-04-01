@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Review current product",
+      "description": "Perform a comprehensive review of the current product codebase and user-facing behavior. Actions and deliverables:\n- Inspect the repository in the current working directory (and any obvious sibling folders) to locate the product source, README, docs, config, CLI or UI code.\n- Produce a concise technical summary (architecture, main components, data flow), a features list (what is implemented and how it works), and usage notes (CLI commands, UI flows, limitations, known bugs or UX pain points).\n- Identify gaps and missing features compared to a modern AI-assisted coding CLI/service (e.g., authentication, session management, language support, extensions, plugin system, codegen/sourcemap handling, offline support, telemetry/analytics, error handling, tests, CI/CD workflows).\n- For each gap or limitation, add a short rationale and a rough implementation complexity estimate (Small/Medium/Large) and a priority suggestion (High/Medium/Low).\n- Save outputs as Markdown files in target/temp/swarmout: product_review.md (detailed review), product_features_list.md (concise bullet list), and product_gaps.csv (CSV with columns: gap_id,description,priority,complexity,notes).\nNotes: write clearly so other agents can consume these outputs. If parts of the codebase or docs are missing, document what could not be found and why.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:11:05.042473635Z",
+      "claimed_at": "2026-04-01T15:11:53.136108726Z",
+      "completed_at": "2026-04-01T15:15:15.666764403Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze competitor: ClaudeCode (../claude-code-sourcemap)",
+      "description": "Perform a focused competitor analysis of ClaudeCode using the local source at ../claude-code-sourcemap. Actions and deliverables:\n- Read the repository at ../claude-code-sourcemap thoroughly (README, source files, docs, tests). Identify core features, supported workflows, strengths, weaknesses, unique capabilities (e.g., sourcemap handling, language support, integrations).\n- Summarize architecture, key modules, deployment options, UX (CLI/UI), and any integration points (APIs, plugins).\n- Extract a list of features that our product currently lacks but ClaudeCode provides, and mark which are high-impact and feasible to implement.\n- Provide recommended features inspired by ClaudeCode, including implementation notes, estimated complexity (Small/Medium/Large), and priority.\n- Save outputs as Markdown: analysis_claudecode.md and suggested_features_claudecode.csv (columns: feature_id,feature,benefit,complexity,priority,implementation_notes).\n- If the local path is missing or incomplete, document what could not be read and fallback to reading any available docs in repo; report uncertainties.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:11:05.042842607Z",
+      "claimed_at": "2026-04-01T15:12:04.668363819Z",
+      "completed_at": "2026-04-01T15:15:15.667362853Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze competitor: copilot-cli",
+      "description": "Perform a competitor analysis for copilot-cli. Actions and deliverables:\n- Attempt to find a local repository at ../copilot-cli. If present, analyze README, source, and docs. If not present, try to locate any docs or manifests in sibling folders; if no local source exists, perform an analysis based on available local docs and best-effort public knowledge (explicitly mark assumptions and uncertainties).\n- Identify copilot-cli's core features, UX patterns, integrations (e.g., editor/IDE integration, chat, prompt templates, auth), pricing/operational model (if known), and technical approach.\n- List actionable features that would be valuable to implement in our product inspired by copilot-cli, with implementation notes and complexity/priority estimates.\n- Save outputs as Markdown: analysis_copilot-cli.md and suggested_features_copilot-cli.csv (columns: feature_id,feature,benefit,complexity,priority,implementation_notes).\n- Clearly annotate any assumptions made due to missing local source material.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:11:05.043340373Z",
+      "claimed_at": "2026-04-01T15:12:02.535944877Z",
+      "completed_at": "2026-04-01T15:12:02.535946893Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze competitor: OpenCode (../opencode)",
+      "description": "Perform a competitor analysis of OpenCode using the local source at ../opencode. Actions and deliverables:\n- Read the repository at ../opencode (README, source, docs, examples). Identify primary features, architecture, extensibility points, and notable implementation patterns.\n- Highlight any unique functionality or UX that differentiates OpenCode (e.g., plugin architecture, language model integrations, debugging or code navigation features).\n- Produce a list of features OpenCode has that our product lacks, with rationale, estimated complexity, and priority.\n- Produce recommended features or improvements inspired by OpenCode, with implementation notes.\n- Save outputs as: analysis_opencode.md and suggested_features_opencode.csv (feature_id,feature,benefit,complexity,priority,implementation_notes).\n- If the repo or expected files are missing, document what could not be inspected and the fallback assumptions.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:11:05.044152820Z",
+      "claimed_at": "2026-04-01T15:12:24.238702908Z",
+      "completed_at": "2026-04-01T15:12:24.238704770Z"
+    },
+    {
+      "id": "s5",
+      "title": "Analyze competitor: Roocode",
+      "description": "Perform a competitor analysis for Roocode. Actions and deliverables:\n- Attempt to find a local repository at ../roocode or other local docs. If local source is not present, use any available local information; otherwise conduct a best-effort analysis based on public knowledge and explicitly state assumptions/uncertainties.\n- Identify Roocode's core features, target users, strengths, weaknesses, and any distinctive technical or UX approaches.\n- List features from Roocode that would be strategic for our product to adopt, with implementation notes and complexity/priority estimates.\n- Save outputs as: analysis_roocode.md and suggested_features_roocode.csv (feature_id,feature,benefit,complexity,priority,implementation_notes).\n- Document any missing artifacts and assumptions made during analysis.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:11:05.052981585Z",
+      "claimed_at": "2026-04-01T15:11:50.904008926Z",
+      "completed_at": "2026-04-01T15:11:50.904011656Z"
+    },
+    {
+      "id": "s6",
+      "title": "Create SWARMOUT2.md: consolidated recommendations and implementation plan",
+      "description": "Consolidate the product review and all four competitor analyses into a single strategic document SWARMOUT2.md. This task depends on s1, s2, s3, s4, s5. Actions and deliverables:\n- Read the outputs produced by s1, s2, s3, s4, s5 (product_review.md, analysis_*.md, and their suggested_features_*.csv files) located in target/temp/swarmout.\n- Synthesize a prioritized list of feature additions (aggregated, de-duplicated) with a short justification for each (market/technical/user impact) and an estimated complexity and priority.\n- Produce a multi-phase implementation plan with Milestones (e.g., MVP, v1, v2), and under each milestone list concrete tasks, owners (roles rather than people), acceptance criteria, estimated effort per task (in story points or person-days), dependencies between tasks, and suggested timelines.\n- Include risk assessment, key technical decisions, and a migration/compatibility plan if new features impact existing workflows.\n- Produce a high-level Gantt-style milestone schedule (textual) and a CSV tasks_plan.csv with columns: milestone,task_id,task_description,owner_role,est_effort,dependencies,acceptance_criteria.\n- Save the final consolidated Markdown as target/temp/swarmout/SWARMOUT2.md along with tasks_plan.csv. Ensure the top of SWARMOUT2.md includes a short executive summary and a table of contents.\nNotes: if any required inputs from s1-s5 are missing at runtime, clearly mark which analyses were incomplete and proceed with best-effort consolidation, annotating uncertainties.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T15:11:05.054145648Z",
+      "claimed_at": "2026-04-01T15:15:01.064266374Z",
+      "completed_at": "2026-04-01T15:15:01.064267413Z"
+    }
+  ]
+}
