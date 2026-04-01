@@ -35,6 +35,7 @@ use ragent_core::{
 };
 
 use crate::sse::event_to_sse;
+use prompt_opt::{Completer, OptMethod, optimize};
 
 /// Shared application state passed to every Axum handler.
 #[derive(Clone)]
@@ -50,7 +51,9 @@ pub struct AppState {
     /// Bearer token required for authenticating incoming API requests.
     pub auth_token: String,
     /// Per-client rate limiter tracking request counts and window timestamps.
-    pub rate_limiter: Arc<std::sync::Mutex<HashMap<String, (u32, Instant)>>>,
+    /// Uses `tokio::sync::Mutex` to avoid blocking the async runtime.
+    /// Entries older than 120 seconds are evicted on access.
+    pub rate_limiter: Arc<tokio::sync::Mutex<HashMap<String, (u32, Instant)>>>,
     /// Optional in-process coordinator for orchestration features.
     pub coordinator: Option<ragent_core::orchestrator::Coordinator>,
 }
@@ -108,6 +111,7 @@ pub fn router(state: AppState) -> Router {
             get(get_task).delete(cancel_task),
         )
         .route("/events", get(events_stream))
+        .route("/opt", post(prompt_opt_handler))
         // Orchestration endpoints (Milestone 3 — Task 3.1)
         .route("/orchestrator/metrics", get(orch_metrics))
         .route("/orchestrator/start", post(orch_start))
@@ -147,18 +151,10 @@ async fn auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match auth_header {
-        Some(header) => {
-            if header.starts_with("Bearer ") {
-                let provided = &header["Bearer ".len()..];
-                if constant_time_eq(provided, &state.auth_token) {
-                    next.run(request).await
-                } else {
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(serde_json::json!({ "error": "unauthorized" })),
-                    )
-                    .into_response()
-                }
+        Some(header) if header.len() > 7 && header[..7].eq_ignore_ascii_case("Bearer ") => {
+            let provided = &header[7..];
+            if constant_time_eq(provided, &state.auth_token) {
+                next.run(request).await
             } else {
                 (
                     StatusCode::UNAUTHORIZED,
@@ -230,12 +226,13 @@ struct CreateSessionRequest {
     directory: String,
 }
 
+#[tracing::instrument(skip(state, body))]
 async fn create_session(
     State(state): State<AppState>,
     Json(body): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
     let path = std::path::Path::new(&body.directory);
-    let canonical = match std::fs::canonicalize(path) {
+    let canonical = match tokio::fs::canonicalize(path).await {
         Ok(p) => p,
         Err(e) => {
             return (
@@ -245,7 +242,11 @@ async fn create_session(
                 .into_response();
         }
     };
-    if !canonical.is_dir() {
+    let is_dir = tokio::fs::metadata(&canonical)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+    if !is_dir {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "Path is not a directory" })),
@@ -312,19 +313,23 @@ struct SendMessageRequest {
     content: String,
 }
 
+#[tracing::instrument(skip(state, body), fields(session_id = %id))]
 async fn send_message(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<SendMessageRequest>,
 ) -> Response {
     {
-        let mut limiter = match state.rate_limiter.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "internal server error: rate limiter lock poisoned").into_response();
-            }
-        };
+        let mut limiter = state.rate_limiter.lock().await;
         let now = Instant::now();
+
+        // Evict stale entries older than 120 seconds to bound memory.
+        const EVICTION_WINDOW_SECS: u64 = 120;
+        const MAX_ENTRIES: usize = 10_000;
+        if limiter.len() > MAX_ENTRIES {
+            limiter.retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < EVICTION_WINDOW_SECS);
+        }
+
         let entry = limiter.entry(id.clone()).or_insert((0, now));
         if now.duration_since(entry.1).as_secs() >= 60 {
             *entry = (1, now);
@@ -385,6 +390,7 @@ async fn send_message(
         .into_response()
 }
 
+#[tracing::instrument(skip(state), fields(session_id = %id))]
 async fn abort_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -445,6 +451,7 @@ async fn reply_permission(
     Json(serde_json::json!({ "ok": true }))
 }
 
+#[tracing::instrument(skip(state))]
 async fn events_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures::Stream<Item = Result<SseEvent, std::convert::Infallible>>> {
@@ -571,6 +578,7 @@ struct TaskResponse {
     background: bool,
 }
 
+#[tracing::instrument(skip(state, body), fields(session_id = %session_id))]
 async fn spawn_task(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -697,6 +705,148 @@ async fn cancel_task(
     }
 }
 
+/// `POST /opt` — apply a prompt optimization method via the configured LLM.
+///
+/// Request body: `{ "method": "<name>", "prompt": "<text>", "provider": "<id>", "model": "<id>" }`
+///
+/// `provider` and `model` are optional; when absent the handler returns an
+/// error asking the caller to supply them.  The canonical method names are
+/// the lower-snake-case variants returned by [`OptMethod::all`]; common aliases
+/// (e.g. `costar`, `co-star`, `q*`) are also accepted.
+///
+/// Returns: `{ "method": "<name>", "result": "<optimized prompt>" }`
+#[derive(Deserialize)]
+struct PromptOptRequest {
+    method: String,
+    prompt: String,
+    /// Provider id (e.g. `"anthropic"`).  Required when the server has no default.
+    provider: Option<String>,
+    /// Model id (e.g. `"claude-sonnet-4-20250514"`).  Required when no default.
+    model: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PromptOptResponse {
+    method: String,
+    result: String,
+}
+
+/// Implements [`Completer`] for the HTTP server by constructing an LLM client
+/// from the [`AppState`]'s storage (for the API key) and a fresh
+/// [`ragent_core::provider::ProviderRegistry`].
+struct ServerCompleter {
+    storage: Arc<Storage>,
+    provider_id: String,
+    model_id: String,
+}
+
+#[async_trait::async_trait]
+impl Completer for ServerCompleter {
+    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
+        use anyhow::Context as _;
+        use futures::StreamExt as _;
+        use ragent_core::{
+            llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent},
+            provider::ProviderRegistry,
+        };
+
+        let api_key = self
+            .storage
+            .get_provider_auth(&self.provider_id)
+            .context("reading API key")?
+            .unwrap_or_default();
+
+        let registry = ProviderRegistry::new();
+        let provider = registry
+            .get(&self.provider_id)
+            .with_context(|| format!("provider '{}' not found", self.provider_id))?;
+
+        let client = provider
+            .create_client(&api_key, None, &Default::default())
+            .await
+            .context("creating LLM client")?;
+
+        let request = ChatRequest {
+            model: self.model_id.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text(user.to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: Some(system.to_string()),
+            options: Default::default(),
+        };
+
+        let mut stream = client.chat(request).await.context("starting LLM stream")?;
+        let mut result = String::new();
+        while let Some(event) = stream.next().await {
+            if let StreamEvent::TextDelta { text } = event {
+                result.push_str(&text);
+            }
+        }
+        Ok(result)
+    }
+}
+
+async fn prompt_opt_handler(
+    State(state): State<AppState>,
+    Json(body): Json<PromptOptRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let input = body.prompt.trim();
+    if input.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "prompt must not be empty");
+    }
+
+    let method = match OptMethod::from_str(&body.method) {
+        Some(m) => m,
+        None => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                format!("unknown optimization method: {}", body.method),
+            );
+        }
+    };
+
+    let provider_id = match body.provider {
+        Some(p) => p,
+        None => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "provider field is required (e.g. \"anthropic\")",
+            );
+        }
+    };
+    let model_id = match body.model {
+        Some(m) => m,
+        None => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "model field is required (e.g. \"claude-sonnet-4-20250514\")",
+            );
+        }
+    };
+
+    let completer = ServerCompleter {
+        storage: Arc::clone(&state.storage),
+        provider_id,
+        model_id,
+    };
+
+    match optimize(method, input, &completer).await {
+        Ok(result) => serialize_response(
+            PromptOptResponse {
+                method: body.method,
+                result,
+            },
+            "prompt_opt",
+        ),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 /// Helper to build standardized error JSON response bodies.
 fn error_response(
     status: StatusCode,
@@ -767,83 +917,5 @@ fn task_entry_to_response(entry: ragent_core::task::TaskEntry, background: bool)
 }
 
 fn event_matches_session(event: &Event, session_id: &str) -> bool {
-    match event {
-        Event::SessionCreated { session_id: sid }
-        | Event::SessionUpdated { session_id: sid }
-        | Event::MessageStart {
-            session_id: sid, ..
-        }
-        | Event::TextDelta {
-            session_id: sid, ..
-        }
-        | Event::ReasoningDelta {
-            session_id: sid, ..
-        }
-        | Event::ToolCallStart {
-            session_id: sid, ..
-        }
-        | Event::ToolCallEnd {
-            session_id: sid, ..
-        }
-        | Event::MessageEnd {
-            session_id: sid, ..
-        }
-        | Event::PermissionRequested {
-            session_id: sid, ..
-        }
-        | Event::PermissionReplied {
-            session_id: sid, ..
-        }
-        | Event::AgentSwitched {
-            session_id: sid, ..
-        }
-        | Event::AgentSwitchRequested {
-            session_id: sid, ..
-        }
-        | Event::AgentRestoreRequested {
-            session_id: sid, ..
-        }
-        | Event::AgentError {
-            session_id: sid, ..
-        }
-        | Event::TokenUsage {
-            session_id: sid, ..
-        }
-        | Event::ToolsSent {
-            session_id: sid, ..
-        }
-        | Event::ModelResponse {
-            session_id: sid, ..
-        }
-        | Event::ToolCallArgs {
-            session_id: sid, ..
-        }
-        | Event::ToolResult {
-            session_id: sid, ..
-        }
-        | Event::SessionAborted {
-            session_id: sid, ..
-        }
-        | Event::QuotaUpdate {
-            session_id: sid, ..
-        }
-        | Event::SubagentStart {
-            session_id: sid, ..
-        }
-        | Event::SubagentComplete {
-            session_id: sid, ..
-        }
-        | Event::SubagentCancelled {
-            session_id: sid, ..
-        } => sid == session_id,
-        Event::TeammateSpawned { session_id: sid, .. }
-        | Event::TeammateMessage { session_id: sid, .. }
-        | Event::TeammateIdle { session_id: sid, .. }
-        | Event::TeamTaskClaimed { session_id: sid, .. }
-        | Event::TeamTaskCompleted { session_id: sid, .. }
-        | Event::TeamCleanedUp { session_id: sid, .. } => sid == session_id,
-        Event::McpStatusChanged { .. } => false,
-        Event::CopilotDeviceFlowComplete { .. } => false,
-        Event::LspStatusChanged { .. } => false,
-    }
+    event.session_id() == Some(session_id)
 }

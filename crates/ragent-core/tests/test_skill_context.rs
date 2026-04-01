@@ -65,23 +65,25 @@ async fn test_inject_command_with_working_dir() {
 
 #[tokio::test]
 async fn test_inject_failing_command_shows_error() {
-    let result = inject_dynamic_context("Out: !`exit 1`", wd())
+    // `false` is on the allowlist and always exits with status 1.
+    let result = inject_dynamic_context("Out: !`false`", wd())
         .await
         .expect("should succeed");
     assert!(
-        result.contains("[error") || result.contains("Out:"),
+        result.contains("[command failed:") || result.contains("Out:"),
         "Should handle failing command gracefully: {result}"
     );
 }
 
 #[tokio::test]
 async fn test_inject_nonexistent_command() {
+    // Not on the allowlist — should be rejected.
     let result = inject_dynamic_context("Out: !`__nonexistent_command_12345__`", wd())
         .await
         .expect("should succeed");
     assert!(
-        result.contains("[error") || result.contains("Out:"),
-        "Should handle nonexistent command: {result}"
+        result.contains("[command rejected:") || result.contains("Out:"),
+        "Should handle rejected command: {result}"
     );
 }
 

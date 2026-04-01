@@ -55,6 +55,8 @@ pub mod team_cleanup;
 pub mod team_create;
 pub mod team_idle;
 pub mod team_message;
+pub mod team_memory_read;
+pub mod team_memory_write;
 pub mod team_read_messages;
 pub mod team_shutdown_ack;
 pub mod team_shutdown_teammate;
@@ -65,6 +67,7 @@ pub mod team_task_claim;
 pub mod team_task_complete;
 pub mod team_task_create;
 pub mod team_task_list;
+pub mod team_wait;
 pub mod wait_tasks;
 pub mod webfetch;
 pub mod websearch;
@@ -112,13 +115,17 @@ pub struct TeamContext {
 #[async_trait::async_trait]
 pub trait TeamManagerInterface: Send + Sync {
     /// Spawn a new teammate session and return its agent ID.
+    ///
+    /// `teammate_model` is an optional per-teammate model override. When `None`,
+    /// the teammate inherits `lead_model` (the lead session's active model).
     async fn spawn_teammate(
         &self,
         team_name: &str,
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
-        active_model: Option<&crate::agent::ModelRef>,
+        teammate_model: Option<&crate::agent::ModelRef>,
+        lead_model: Option<&crate::agent::ModelRef>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String>;
 }
@@ -326,7 +333,7 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 31);
+/// assert_eq!(registry.list().len(), 53);
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -374,6 +381,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_create::TeamCreateTool));
     registry.register(Arc::new(team_idle::TeamIdleTool));
     registry.register(Arc::new(team_message::TeamMessageTool));
+    registry.register(Arc::new(team_memory_read::TeamMemoryReadTool));
+    registry.register(Arc::new(team_memory_write::TeamMemoryWriteTool));
     registry.register(Arc::new(team_read_messages::TeamReadMessagesTool));
     registry.register(Arc::new(team_shutdown_ack::TeamShutdownAckTool));
     registry.register(Arc::new(team_shutdown_teammate::TeamShutdownTeammateTool));
@@ -384,5 +393,6 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_task_complete::TeamTaskCompleteTool));
     registry.register(Arc::new(team_task_create::TeamTaskCreateTool));
     registry.register(Arc::new(team_task_list::TeamTaskListTool));
+    registry.register(Arc::new(team_wait::TeamWaitTool));
     registry
 }

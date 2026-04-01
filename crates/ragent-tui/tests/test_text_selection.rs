@@ -423,12 +423,12 @@ fn test_output_view_overlay_renders_tool_calls_for_non_current_session() {
     }
 
     assert!(
-        all_text.contains("TOOL"),
-        "output overlay should include tool lines, got:\n{all_text}"
-    );
-    assert!(
         all_text.contains("Bash") || all_text.contains("bash"),
         "output overlay should include tool name, got:\n{all_text}"
+    );
+    assert!(
+        all_text.contains("echo hi"),
+        "output overlay should include tool input summary, got:\n{all_text}"
     );
 }
 

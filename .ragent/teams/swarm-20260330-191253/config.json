@@ -1,0 +1,105 @@
+{
+  "name": "swarm-20260330-191253",
+  "lead_session_id": "6a72495e-019f-45f0-bd0c-ac6de2adc31f",
+  "created_at": "2026-03-30T19:12:53.844924350Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "22db10c9-e1f4-48db-a95d-a87cfccc5b0d",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.862038124Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze current product capabilities and architecture\n\n**Task ID:** s1\n**Title:** Analyze current product capabilities and architecture\n\nConduct a comprehensive review of the existing product codebase, documentation, and features. Document: 1) Core functionalities and capabilities, 2) Target use cases and user workflows, 3) Technical architecture and key components, 4) Current limitations or pain points observed in the code/docs, 5) Unique value propositions. Output should be a detailed analysis that serves as the baseline for comparison.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "eff66906-1864-43d6-ac09-5fc55177ff8f",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.862694811Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Research and document Claude Code features and capabilities\n\n**Task ID:** s2\n**Title:** Research and document Claude Code features and capabilities\n\nResearch Claude Code (Anthropic's coding assistant) thoroughly. Document: 1) Key features and capabilities, 2) User interface and interaction patterns, 3) Integration points and workflows, 4) Unique differentiators, 5) Known strengths and weaknesses based on public information, reviews, and documentation. Focus on features that would be relevant for competitive analysis.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "1f61b613-71cd-4c52-9675-626f55f81f5a",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.863339053Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Research and document GitHub Copilot CLI features and capabilities\n\n**Task ID:** s3\n**Title:** Research and document GitHub Copilot CLI features and capabilities\n\nResearch GitHub Copilot CLI thoroughly. Document: 1) Key features and capabilities, 2) Command-line interface patterns and user experience, 3) Integration with development workflows, 4) Shell and terminal features, 5) Unique differentiators and strengths. Focus on CLI-specific features and developer experience aspects that would inform competitive positioning.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "00bc3853-e387-4efb-88ca-afee593df0c4",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.864105852Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Research and document Roo Code features and capabilities\n\n**Task ID:** s4\n**Title:** Research and document Roo Code features and capabilities\n\nResearch Roo Code (or Roo Cline) thoroughly. Document: 1) Key features and capabilities, 2) User interface and interaction models, 3) Autonomous coding capabilities and agent behaviors, 4) Integration patterns and tool usage, 5) Unique differentiators and innovative features. Focus on aspects that represent emerging trends in AI coding assistants.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "414d3bf9-2bf5-41ea-a697-226b76322ceb",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.865244880Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Perform gap analysis and identify missing features\n\n**Task ID:** s5\n**Title:** Perform gap analysis and identify missing features\n\nUsing the outputs from s1, s2, s3, and s4, conduct a comprehensive gap analysis. Identify: 1) Features present in competitors but missing from our product, 2) Features where competitors have superior implementations, 3) Emerging capabilities that represent market trends, 4) User experience improvements observed in competitor products, 5) Integration opportunities we're missing. Prioritize gaps by impact (high/medium/low) and implementation complexity (high/medium/low). Create a structured list of recommended feature additions with rationale for each.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "f6572a52-5a36-42a3-9f7f-7609d3491952",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.866530434Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Generate implementation plan with milestones and tasks\n\n**Task ID:** s6\n**Title:** Generate implementation plan with milestones and tasks\n\nBased on the gap analysis from s5 and the current product understanding from s1, create a detailed implementation plan. Structure it with: 1) Strategic phases/milestones (e.g., Phase 1: Core Feature Parity, Phase 2: Differentiation, Phase 3: Innovation), 2) For each milestone: specific features to implement, estimated effort/complexity, dependencies between features, success criteria, 3) Detailed task breakdowns for each feature (technical tasks, testing requirements, documentation needs), 4) Recommended sequencing based on user value and technical dependencies. Format as a clear roadmap with timelines if possible.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s7",
+      "agent_id": "tm-007",
+      "session_id": "498d8f64-1268-4f12-b8f4-1e2d08d817b4",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-03-30T19:12:53.867968232Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Compile SWARMOUT.md document with all findings and recommendations\n\n**Task ID:** s7\n**Title:** Compile SWARMOUT.md document with all findings and recommendations\n\nCreate the final SWARMOUT.md document by synthesizing outputs from all previous tasks (s1-s6). Structure the document with: 1) Executive Summary of findings, 2) Current Product Assessment (from s1), 3) Competitive Landscape Analysis (from s2, s3, s4), 4) Gap Analysis and Feature Recommendations (from s5) - organized by priority, 5) Implementation Plan with Milestones and Tasks (from s6) - presented as an actionable roadmap, 6) Conclusion with strategic recommendations. Ensure the document is well-formatted in markdown, easy to navigate, and provides clear actionable insights for stakeholders.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s7\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

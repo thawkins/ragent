@@ -27,62 +27,102 @@ missing_docs = "warn"
 unsafe_code = "deny"
 
 [workspace.dependencies]
+# ── Internal crates ───────────────────────────────────────────────────────
 ragent-core = { path = "crates/ragent-core" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
 
+# ── Hashing / file-locking ───────────────────────────────────────────────
 num_cpus = "1.16"
 sha2 = "0.10"
 blake3 = "1.4"
 fs2 = "0.4"
 
+# ── Async runtime ────────────────────────────────────────────────────────
+# "full" is intentional: the binary uses fs, net, process, signal, rt-multi-thread.
 tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }   # sync → BroadcastStream
+async-stream = "0.3"
+pin-project-lite = "0.2"
+bytes = "1"
+
+# ── Serialization ────────────────────────────────────────────────────────
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+
+# ── Error handling ───────────────────────────────────────────────────────
 anyhow = "1"
 thiserror = "2"
+
+# ── Logging / tracing ───────────────────────────────────────────────────
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# ── Identity / time ─────────────────────────────────────────────────────
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-async-trait = "0.1"
+
+# ── HTTP client ──────────────────────────────────────────────────────────
+# default-features = false avoids native-tls; rustls-tls is pure-Rust and auditable.
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# ── Database ─────────────────────────────────────────────────────────────
+# "bundled" compiles SQLite from source — no system libsqlite3 dependency.
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+# ── CLI ──────────────────────────────────────────────────────────────────
 clap = { version = "4", features = ["derive"] }
+
+# ── Web framework (Axum) ────────────────────────────────────────────────
 axum = { version = "0.8", features = ["macros"] }
 axum-extra = { version = "0.10", features = ["typed-header"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# ── TUI ──────────────────────────────────────────────────────────────────
 ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
 crossterm = "0.28"
+
+# ── File / path / text ──────────────────────────────────────────────────
 globset = "0.4"
+dirs = "6"
 html2text = "0.16"
 similar = "2"
-tokio-stream = { version = "0.1", features = ["sync"] }
-async-stream = "0.3"
-futures = "0.3"
-dirs = "6"
-pin-project-lite = "0.2"
-bytes = "1"
 regex = "1"
 base64 = "0.22"
 rand = "0.8"
+
+# ── Clipboard / image ───────────────────────────────────────────────────
 arboard = "3"
+# default-features = false: only PNG codec — avoids pulling in gif, jpeg, tiff, etc.
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# ── Hardware / IPMI ──────────────────────────────────────────────────────
 rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+
+# ── Document format support ─────────────────────────────────────────────
 docx-rust = "0.1"
 calamine = "0.34"
 rust_xlsxwriter = "0.94"
 ooxmlsdk = "0.3"
+# default-features = false: only deflate — avoids bzip2, zstd, lzma, aes.
 zip = { version = "7", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.39", features = ["serialize"] }
 spreadsheet-ods = "1.0"
+# default-features = false: only text_layout + raster formats needed.
 printpdf = { version = "0.9", default-features = false, features = ["text_layout", "png", "jpeg"] }
 pdf-extract = "0.10"
 lopdf = "0.39"
-serde_yaml = "0.9"
+
+# ── LSP client ───────────────────────────────────────────────────────────
 lsp-types = "0.97"
 url = "2"
+
+# ── Benchmarking ─────────────────────────────────────────────────────────
+criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bin]]
 name = "ragent"

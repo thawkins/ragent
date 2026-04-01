@@ -953,6 +953,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "criterion"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2b12d017a929603d80db1831cd3a24082f8137ce19c69e6447f54f5fc8d692f"
+dependencies = [
+ "anes",
+ "cast",
+ "ciborium",
+ "clap 4.5.60",
+ "criterion-plot",
+ "is-terminal",
+ "itertools 0.10.5",
+ "num-traits",
+ "once_cell",
+ "oorandom",
+ "plotters",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "tinytemplate",
+ "walkdir",
+]
+
+[[package]]
 name = "criterion-plot"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2054,6 +2080,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "is-terminal"
+version = "0.4.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
+dependencies = [
+ "hermit-abi 0.5.2",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3027,6 +3064,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prompt_opt"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "ptr_meta"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3222,6 +3269,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ragent-code"
+version = "0.1.0"
+
+[[package]]
 name = "ragent-core"
 version = "0.1.0-alpha.20"
 dependencies = [
@@ -3233,7 +3284,7 @@ dependencies = [
  "bytes",
  "calamine",
  "chrono",
- "criterion",
+ "criterion 0.4.0",
  "dirs",
  "docx-rust",
  "fs2",
@@ -3248,6 +3299,7 @@ dependencies = [
  "pin-project-lite",
  "printpdf",
  "quick-xml 0.39.2",
+ "rand 0.8.5",
  "regex",
  "reqwest 0.12.28",
  "rmcp",
@@ -3276,13 +3328,17 @@ version = "0.1.0-alpha.20"
 dependencies = [
  "anyhow",
  "async-stream",
+ "async-trait",
  "axum",
  "axum-extra",
  "chrono",
+ "criterion 0.4.0",
  "futures",
+ "prompt_opt",
  "ragent-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tower",
@@ -3297,12 +3353,16 @@ version = "0.1.0-alpha.20"
 dependencies = [
  "anyhow",
  "arboard",
+ "async-trait",
  "chrono",
+ "criterion 0.5.1",
  "crossterm",
  "dirs",
+ "fs2",
  "futures",
  "html2text",
  "image",
+ "prompt_opt",
  "pulldown-cmark",
  "ragent-core",
  "rand 0.8.5",

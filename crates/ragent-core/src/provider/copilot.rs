@@ -237,7 +237,10 @@ impl Provider for CopilotProvider {
         let client = CopilotClient {
             token: auth.token,
             base_url: auth.base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         };
         Ok(Box::new(client))
     }
@@ -452,31 +455,35 @@ impl LlmClient for CopilotClient {
         tracing::info!(url = %url, model = %request.model, "copilot chat request");
         let body = self.build_request_body(&request, &request.tools);
 
-        let response = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("content-type", "application/json")
-            .header("editor-version", "vscode/1.96.0")
-            .header("editor-plugin-version", "copilot-chat/0.24.0")
-            .header("user-agent", "GitHubCopilotChat/0.24.0")
-            .header("copilot-integration-id", "vscode-chat")
-            .header("openai-organization", "github-copilot")
-            .header("openai-intent", "conversation-panel")
-            .header("x-github-api-version", "2023-07-07")
-            .json(&body)
-            .send()
-            .await
-            .context("Failed to connect to GitHub Copilot API")?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(90),
+            self.http
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.token))
+                .header("content-type", "application/json")
+                .header("editor-version", "vscode/1.96.0")
+                .header("editor-plugin-version", "copilot-chat/0.24.0")
+                .header("user-agent", "GitHubCopilotChat/0.24.0")
+                .header("copilot-integration-id", "vscode-chat")
+                .header("openai-organization", "github-copilot")
+                .header("openai-intent", "conversation-panel")
+                .header("x-github-api-version", "2023-07-07")
+                .json(&body)
+                .send(),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("HTTP 408: Copilot API request timed out after 90s"))?
+        .context("Failed to connect to GitHub Copilot API")?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
             tracing::error!(status = %status, body = %error_body, "copilot chat error");
-            // Extract a clean message from the JSON error response if possible
-            let clean_msg =
-                parse_api_error_message(&error_body).unwrap_or_else(|| format!("HTTP {status}"));
-            bail!("{clean_msg}");
+            // Extract a clean message from the JSON error response if possible.
+            // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
+            let detail =
+                parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
+            bail!("HTTP {}: {}", status.as_u16(), detail);
         }
 
         let rate_limit_event =
@@ -929,7 +936,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 
     // Check the cache first
     {
-        let cache = SESSION_TOKEN_CACHE.lock().unwrap();
+        let cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.as_ref() {
             let now = chrono::Utc::now().timestamp();
             if cached.source_hash == source_hash
@@ -978,7 +985,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 
     // Cache the new session token (including discovered API base)
     {
-        let mut cache = SESSION_TOKEN_CACHE.lock().unwrap();
+        let mut cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
         *cache = Some(CachedSessionToken {
             token: body.token.clone(),
             expires_at: body.expires_at,
@@ -1379,7 +1386,7 @@ fn plan_label_from_api_base(api_base: &str) -> String {
 /// }
 /// ```
 pub fn cached_copilot_plan() -> Option<String> {
-    let cache = SESSION_TOKEN_CACHE.lock().unwrap();
+    let cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cached = cache.as_ref()?;
     let api_base = cached.api_base.as_deref()?;
     Some(plan_label_from_api_base(api_base))

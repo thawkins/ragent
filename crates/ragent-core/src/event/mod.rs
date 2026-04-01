@@ -307,6 +307,17 @@ pub enum Event {
         /// Agent ID of the idle teammate.
         agent_id: String,
     },
+    /// A teammate failed after exhausting all retries.
+    TeammateFailed {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the failed teammate.
+        agent_id: String,
+        /// Error description.
+        error: String,
+    },
     /// A teammate claimed a task from the shared task list.
     TeamTaskClaimed {
         /// Lead session ID.
@@ -335,6 +346,23 @@ pub enum Event {
         session_id: String,
         /// Name of the team that was cleaned up.
         team_name: String,
+    },
+    /// A teammate sent a direct message to another teammate (peer-to-peer).
+    ///
+    /// Published instead of `TeammateMessage` when neither the sender nor the
+    /// recipient is `"lead"`, so the lead and TUI are aware of cross-team
+    /// communication without being in the loop.
+    TeammateP2PMessage {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Sender's agent ID.
+        from: String,
+        /// Recipient's agent ID.
+        to: String,
+        /// First 200 chars of message content (preview).
+        preview: String,
     },
 
     // ── LSP lifecycle events ─────────────────────────────────────────────
@@ -394,9 +422,11 @@ impl Event {
             Self::TeammateSpawned { .. } => "TeammateSpawned",
             Self::TeammateMessage { .. } => "TeammateMessage",
             Self::TeammateIdle { .. } => "TeammateIdle",
+            Self::TeammateFailed { .. } => "TeammateFailed",
             Self::TeamTaskClaimed { .. } => "TeamTaskClaimed",
             Self::TeamTaskCompleted { .. } => "TeamTaskCompleted",
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
+            Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::LspStatusChanged { .. } => "LspStatusChanged",
         }
     }
@@ -436,9 +466,11 @@ impl Event {
             | Self::TeammateSpawned { session_id, .. }
             | Self::TeammateMessage { session_id, .. }
             | Self::TeammateIdle { session_id, .. }
+            | Self::TeammateFailed { session_id, .. }
             | Self::TeamTaskClaimed { session_id, .. }
             | Self::TeamTaskCompleted { session_id, .. }
-            | Self::TeamCleanedUp { session_id, .. } => Some(session_id.as_str()),
+            | Self::TeamCleanedUp { session_id, .. }
+            | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::LspStatusChanged { .. } => None,

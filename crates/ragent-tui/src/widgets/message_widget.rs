@@ -294,7 +294,11 @@ pub(crate) fn tool_result_summary(
     cwd: &str,
 ) -> Option<String> {
     let out = output.as_ref()?;
-    let line_count = out.get("line_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let line_count = out
+        .get("lines")
+        .or_else(|| out.get("line_count"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
     match tool {
         "read" => {
             let summarised = out

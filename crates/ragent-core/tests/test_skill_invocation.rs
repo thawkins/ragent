@@ -73,7 +73,8 @@ async fn test_invoke_with_all_args() {
 
 #[tokio::test]
 async fn test_invoke_with_dynamic_context() {
-    let skill = make_skill("info", "Version: !`echo v1.0.0`");
+    let mut skill = make_skill("info", "Version: !`echo v1.0.0`");
+    skill.allow_dynamic_context = true;
     let result = invoke_skill(&skill, "", "sess-1", wd())
         .await
         .expect("invoke");
@@ -82,7 +83,8 @@ async fn test_invoke_with_dynamic_context() {
 
 #[tokio::test]
 async fn test_invoke_combined_args_and_context() {
-    let skill = make_skill("combined", "File: $0 Date: !`echo 2026-01-01`");
+    let mut skill = make_skill("combined", "File: $0 Date: !`echo 2026-01-01`");
+    skill.allow_dynamic_context = true;
     let result = invoke_skill(&skill, "main.rs", "sess-1", wd())
         .await
         .expect("invoke");

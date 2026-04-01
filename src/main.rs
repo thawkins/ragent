@@ -131,6 +131,7 @@ enum Commands {
         #[command(subcommand)]
         command: SessionCommands,
     },
+
     /// Configure provider authentication
     Auth {
         /// Provider name
@@ -233,6 +234,23 @@ async fn main() -> Result<()> {
     let db_path = data_dir().join("ragent.db");
     let storage = Arc::new(Storage::open(&db_path)?);
 
+    // Seed the secret registry from stored provider credentials so that
+    // redact_secrets() can mask them by exact match in all log output.
+    if let Err(e) = storage.seed_secret_registry() {
+        tracing::warn!(error = %e, "Failed to seed secret registry from database");
+    }
+
+    // Also seed from well-known environment variables.
+    for var in [
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GENERIC_OPENAI_API_KEY",
+        "OLLAMA_API_KEY",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            ragent_core::sanitize::register_secret(&val);
+        }
+    }
     // Create event bus
     let event_bus = Arc::new(EventBus::new(2048));
 
@@ -352,7 +370,7 @@ async fn main() -> Result<()> {
                 storage,
                 session_processor,
                 auth_token,
-                rate_limiter: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                rate_limiter: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 coordinator: Some(coordinator),
             };
             ragent_server::start_server(&addr, state).await?;

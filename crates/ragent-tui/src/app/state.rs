@@ -850,6 +850,9 @@ pub struct App {
     pub cancel_flag: Option<Arc<AtomicBool>>,
     /// True while an automatic pre-send compaction run is active.
     pub auto_compact_in_progress: bool,
+    /// True while any compaction run (manual or auto) is active.
+    /// Used to trigger message-history replacement when the LLM finishes.
+    pub compact_in_progress: bool,
     /// Set when an auto-compaction run returns an error.
     pub auto_compact_failed: bool,
     /// User message queued while auto-compaction runs: `(text, image_paths)`.

@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 ragent-core = { workspace = true }
+prompt_opt = { path = "../prompt_opt" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,4 +23,13 @@ tokio-stream = { workspace = true }
 async-stream = { workspace = true }
 futures = { workspace = true }
 chrono = { workspace = true }
+async-trait = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+criterion = "0.4"
+tempfile = "3.5"
+
+[[bench]]
+name = "bench_sse"
+harness = false

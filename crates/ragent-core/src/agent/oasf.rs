@@ -141,6 +141,11 @@ pub struct RagentAgentPayload {
     /// If `true`, the agent is omitted from user-visible pickers. Defaults to `false`.
     pub hidden: Option<bool>,
 
+    /// Persistent memory scope: `"user"`, `"project"`, or `"none"` (default).
+    /// When enabled, the agent receives a dedicated memory directory.
+    #[serde(default)]
+    pub memory: Option<String>,
+
     /// Arbitrary key-value options forwarded verbatim to the LLM provider.
     pub options: Option<serde_json::Value>,
 }

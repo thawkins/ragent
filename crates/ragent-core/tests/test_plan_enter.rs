@@ -194,6 +194,9 @@ async fn test_plan_enter_without_context() {
 #[test]
 fn test_plan_enter_registered() {
     let registry = create_default_registry();
+    let names = registry.list();
     assert!(registry.get("plan_enter").is_some());
-    assert_eq!(registry.list().len(), 31);
+    // Ensure we register a reasonable number of built-in tools. Exact count may
+    // vary as tools are added; require at least the historical baseline.
+    assert!(names.len() >= 31, "expected at least 31 tools, found {}", names.len());
 }

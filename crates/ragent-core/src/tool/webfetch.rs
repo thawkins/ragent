@@ -14,7 +14,7 @@ pub struct WebFetchTool;
 
 const DEFAULT_MAX_LENGTH: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
-const MAX_REDIRECTS: usize = 10;
+const MAX_REDIRECTS: usize = 5;
 const TEXT_WIDTH: usize = 120;
 const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 

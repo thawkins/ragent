@@ -66,6 +66,9 @@ struct SkillFrontmatter {
     /// Arbitrary key-value metadata (Anthropic Agent Skills spec).
     #[serde(default)]
     metadata: HashMap<String, String>,
+    /// Whether this skill allows `!`command`` dynamic context injection.
+    #[serde(rename = "allow-dynamic-context", default)]
+    allow_dynamic_context: bool,
 }
 
 fn default_true() -> bool {
@@ -173,6 +176,7 @@ pub fn parse_skill_md(
         license: frontmatter.license,
         compatibility: frontmatter.compatibility,
         metadata: frontmatter.metadata,
+        allow_dynamic_context: frontmatter.allow_dynamic_context,
         source_path: source_path.to_path_buf(),
         skill_dir,
         scope,

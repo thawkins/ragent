@@ -56,17 +56,24 @@ async fn test_session_processor_errors_when_model_missing() {
         .to_string()
         .contains("has no model configured"));
 
-    let ev = timeout(Duration::from_secs(1), rx.recv())
-        .await
-        .expect("timeout waiting for event")
-        .expect("failed to receive event");
-    match ev {
-        Event::AgentError { session_id, error } => {
-            assert_eq!(session_id, session.id);
-            assert!(error.contains("has no model configured"));
+    // Consume events until AgentError is observed (MessageStart may arrive first).
+    let mut found = false;
+    for _ in 0..4 {
+        let ev = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timeout waiting for event")
+            .expect("failed to receive event");
+        match ev {
+            Event::AgentError { session_id, error } => {
+                assert_eq!(session_id, session.id);
+                assert!(error.contains("has no model configured"));
+                found = true;
+                break;
+            }
+            _ => continue,
         }
-        _ => panic!("expected AgentError event"),
     }
+    assert!(found, "expected AgentError event but none received");
 }
 
 #[tokio::test]
@@ -113,15 +120,22 @@ async fn test_session_processor_errors_when_provider_missing() {
         .to_string()
         .contains("Provider 'missing' not found"));
 
-    let ev = timeout(Duration::from_secs(1), rx.recv())
-        .await
-        .expect("timeout waiting for event")
-        .expect("failed to receive event");
-    match ev {
-        Event::AgentError { session_id, error } => {
-            assert_eq!(session_id, session.id);
-            assert!(error.contains("Provider 'missing' not found"));
+    // Consume events until AgentError is observed (MessageStart may arrive first).
+    let mut found = false;
+    for _ in 0..4 {
+        let ev = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("timeout waiting for event")
+            .expect("failed to receive event");
+        match ev {
+            Event::AgentError { session_id, error } => {
+                assert_eq!(session_id, session.id);
+                assert!(error.contains("Provider 'missing' not found"));
+                found = true;
+                break;
+            }
+            _ => continue,
         }
-        _ => panic!("expected AgentError event"),
     }
+    assert!(found, "expected AgentError event but none received");
 }

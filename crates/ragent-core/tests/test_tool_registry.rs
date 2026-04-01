@@ -48,6 +48,8 @@ fn test_default_registry_has_all_tools() {
         "team_cleanup",
         "team_create",
         "team_idle",
+        "team_memory_read",
+        "team_memory_write",
         "team_message",
         "team_read_messages",
         "team_shutdown_ack",
@@ -59,6 +61,7 @@ fn test_default_registry_has_all_tools() {
         "team_task_complete",
         "team_task_create",
         "team_task_list",
+        "team_wait",
         "todo_read",
         "todo_write",
         "wait_tasks",
@@ -125,7 +128,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 52);
+    assert_eq!(defs.len(), 55);
 
     for def in &defs {
         assert!(

@@ -27,6 +27,8 @@ pub mod provider;
 pub mod reference;
 /// Input sanitization and secret redaction utilities.
 pub mod sanitize;
+/// Process resource limits — bounded concurrency for child process spawns.
+pub mod resource;
 pub mod session;
 /// Skill discovery, loading, argument substitution, and invocation.
 pub mod skill;
@@ -37,3 +39,5 @@ pub mod task;
 /// Agent team coordination — shared task list, mailboxes, and team config.
 pub mod team;
 pub mod tool;
+/// YOLO mode — bypass all command validation and tool restrictions.
+pub mod yolo;

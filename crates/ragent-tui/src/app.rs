@@ -422,6 +422,7 @@ impl App {
             is_processing: false,
             cancel_flag: None,
             auto_compact_in_progress: false,
+            compact_in_progress: false,
             auto_compact_failed: false,
             pending_send_after_compact: None,
                           agent_halted: false,
@@ -601,24 +602,28 @@ impl App {
         let compaction_agent = ragent_core::agent::resolve_agent("compaction", &Default::default())
             .unwrap_or_else(|_| self.agent_info.clone());
 
-        // Override model to match current selection
+        // Use the current session's provider/model for compaction so it works
+        // with any provider (Copilot, OpenAI, Ollama, etc.), not just Anthropic.
+        // Priority: selected_model setting → current agent_info model → built-in Haiku.
         let mut agent = compaction_agent;
-        if let Some(ref model_str) = self.selected_model
-            && let Some((provider, model)) = model_str.split_once('/')
-        {
-            agent.model = Some(ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model.to_string(),
-            });
+        let resolved_model = self
+            .selected_model
+            .as_deref()
+            .and_then(|s| s.split_once('/'))
+            .map(|(p, m)| ModelRef { provider_id: p.to_string(), model_id: m.to_string() })
+            .or_else(|| self.agent_info.model.clone());
+        if let Some(model_ref) = resolved_model {
+            agent.model = Some(model_ref);
         }
 
         let summary_prompt =
             "Summarise the conversation so far into a concise representation that \
              preserves all important context, decisions, code changes, file paths, \
-             and outstanding tasks. Output only the summary."
+             and outstanding tasks. Output only the summary — no preamble."
                 .to_string();
 
         self.auto_compact_in_progress = auto_triggered;
+        self.compact_in_progress = true;
         if auto_triggered {
             self.auto_compact_failed = false;
             self.status = "compacting before send…".to_string();
@@ -639,7 +644,10 @@ impl App {
                 .await
             {
                 Ok(_) => {
-                    tracing::info!(session_id = %sid, "Compaction completed");
+                    tracing::info!(session_id = %sid, "Compaction LLM call completed");
+                    // Signal the TUI to replace the session history with the summary.
+                    // The actual replacement is performed in the Event::MessageEnd handler
+                    // when was_auto_compaction is true (or after MessageEnd for manual compact).
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Compaction failed");
@@ -652,6 +660,7 @@ impl App {
         });
         true
     }
+
 
     fn dispatch_user_message(
         &mut self,
@@ -6178,6 +6187,49 @@ Type `/swarm help` for more info.\n";
                     self.force_new_message = true;
                     self.push_log(LogLevel::Info, format!("response finished ({reason:?})"));
 
+                    // After compaction: replace session message history with just the summary.
+                    // The summary is the last assistant message in self.messages.
+                    if self.compact_in_progress && *reason != FinishReason::Cancelled {
+                        self.compact_in_progress = false;
+                        let summary_text = self
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|m| m.role == Role::Assistant)
+                            .map(|m| m.text_content());
+                        if let Some(summary) = summary_text {
+                            if !summary.trim().is_empty() {
+                                let sid = session_id.clone();
+                                let summary_msg = Message::new(
+                                    &sid,
+                                    Role::Assistant,
+                                    vec![MessagePart::Text {
+                                        text: format!("[Conversation compacted]\n\n{}", summary),
+                                    }],
+                                );
+                                if let Err(e) = self.storage.delete_messages(&sid) {
+                                    self.push_log(
+                                        LogLevel::Warn,
+                                        format!("Compaction: failed to clear messages: {e}"),
+                                    );
+                                } else if let Err(e) = self.storage.create_message(&summary_msg) {
+                                    self.push_log(
+                                        LogLevel::Warn,
+                                        format!("Compaction: failed to save summary: {e}"),
+                                    );
+                                } else {
+                                    self.messages = vec![summary_msg];
+                                    self.push_log(
+                                        LogLevel::Info,
+                                        "Compaction: session history replaced with summary".to_string(),
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        self.compact_in_progress = false;
+                    }
+
                     // Handle pending plan delegation: switch agent and auto-send task
                     if let Some((task, context)) = self.pending_plan_task.take() {
                         self.execute_plan_delegation(session_id, task, context);
@@ -6285,6 +6337,7 @@ Type `/swarm help` for more info.\n";
                             "Auto-compaction failed; send blocked for this turn".to_string(),
                         );
                     }
+                    self.compact_in_progress = false;
                     // Full details go to the log panel only
                     self.push_log(LogLevel::Error, format!("agent error: {}", error));
                     // Clean summary for the status bar and chat panel

@@ -4,7 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{MemberStatus, TeamStore, find_team_dir};
+use crate::team::{HookEvent, MemberStatus, TeamStore, find_team_dir, run_team_hook};
+use crate::team::manager::HookOutcome;
 
 /// Teammate notifies lead it has no more work (idle state).
 pub struct TeamIdleTool;
@@ -62,6 +63,39 @@ impl Tool for TeamIdleTool {
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
+        // Run TeammateIdle hook before committing idle state.
+        let hook_stdin = json!({
+            "team_name": team_name,
+            "agent_id": agent_id,
+            "summary": summary
+        })
+        .to_string();
+        let outcome = run_team_hook(&team_dir, HookEvent::TeammateIdle, Some(&hook_stdin)).await;
+
+        if let HookOutcome::Feedback(feedback) = outcome {
+            // Hook rejected idle — keep teammate working.
+            {
+                let mut store = TeamStore::load(&team_dir)?;
+                if let Some(member) = store.config.member_by_id_mut(&agent_id) {
+                    member.status = MemberStatus::Working;
+                }
+                store.save()?;
+            }
+            return Ok(ToolOutput {
+                content: format!(
+                    "TeammateIdle hook rejected idle for '{agent_id}'. \
+                     Feedback: {feedback}\n\
+                     Please address the feedback and try again."
+                ),
+                metadata: Some(json!({
+                    "team_name": team_name,
+                    "agent_id": agent_id,
+                    "hook_rejected": true,
+                    "feedback": feedback
+                })),
+            });
+        }
+
         // Mark the member as idle.
         {
             let mut store = TeamStore::load(&team_dir)?;
@@ -72,8 +106,6 @@ impl Tool for TeamIdleTool {
             store.save()?;
         }
 
-        // Hook execution is implemented in M3 (TeamManager).
-        // For now, log the idle event and return.
         Ok(ToolOutput {
             content: format!(
                 "Teammate '{agent_id}' is now idle in team '{team_name}'.\n\

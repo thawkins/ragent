@@ -4,6 +4,49 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+use crate::agent::ModelRef;
+
+/// Persistent memory scope for an agent or teammate.
+///
+/// When set, the agent receives a dedicated memory directory where it can
+/// persist notes, findings, and context across sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryScope {
+    /// No persistent memory (default).
+    #[default]
+    None,
+    /// User-global: `~/.ragent/agent-memory/<agent-name>/`.
+    User,
+    /// Project-local: `<project>/.ragent/agent-memory/<agent-name>/`.
+    Project,
+}
+
+/// Resolve the memory directory for a given agent name and scope.
+///
+/// Returns `None` when `scope` is [`MemoryScope::None`].
+/// The directory is **not** created — callers should create it on first write.
+pub fn resolve_memory_dir(
+    scope: MemoryScope,
+    agent_name: &str,
+    working_dir: &Path,
+) -> Option<PathBuf> {
+    match scope {
+        MemoryScope::None => Option::None,
+        MemoryScope::User => {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            Some(home.join(".ragent").join("agent-memory").join(agent_name))
+        }
+        MemoryScope::Project => Some(
+            working_dir
+                .join(".ragent")
+                .join("agent-memory")
+                .join(agent_name),
+        ),
+    }
+}
 
 /// Overall lifecycle state of a team.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -31,10 +74,14 @@ pub enum MemberStatus {
     Idle,
     /// Submitted a plan; awaiting lead approval.
     PlanPending,
+    /// Waiting for dependency tasks to complete before spawning.
+    Blocked,
     /// Graceful shutdown in progress (awaiting `team_shutdown_ack`).
     ShuttingDown,
     /// Session has terminated.
     Stopped,
+    /// Spawn or startup failed; see `last_spawn_error` for details.
+    Failed,
 }
 
 /// Plan approval state for a teammate that has submitted a plan.
@@ -50,6 +97,33 @@ pub enum PlanStatus {
     Approved,
     /// Lead rejected the plan.
     Rejected,
+}
+
+/// Lifecycle event that can trigger a quality-gate hook.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HookEvent {
+    /// Fires when a teammate reports idle (no more tasks).
+    TeammateIdle,
+    /// Fires when a new task is added to the shared task list.
+    TaskCreated,
+    /// Fires when a task is marked as completed.
+    TaskCompleted,
+}
+
+/// A single quality-gate hook: an event trigger paired with a shell command.
+///
+/// When the matching `event` fires, the `command` is executed as a shell
+/// command.  Exit codes follow the quality-gate protocol:
+///
+/// - **Exit 0** → allow the action.
+/// - **Exit 2** → reject / send feedback (stdout is returned to the agent).
+/// - **Other** → log a warning, allow the action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HookEntry {
+    /// The lifecycle event that triggers this hook.
+    pub event: HookEvent,
+    /// Shell command to run when the event fires.
+    pub command: String,
 }
 
 /// Describes one teammate within a team.
@@ -71,6 +145,21 @@ pub struct TeamMember {
     pub plan_status: PlanStatus,
     /// When this member was added to the team.
     pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub last_spawn_error: Option<String>,
+    /// Initial prompt sent to this teammate when spawned.  Stored so that the
+    /// reconcile loop can replay it if the manager was unavailable at blueprint
+    /// seeding time.
+    #[serde(default)]
+    pub spawn_prompt: Option<String>,
+    /// Optional per-teammate model override. When set, the teammate uses this
+    /// model instead of inheriting the lead's active model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<ModelRef>,
+    /// Persistent memory scope for this teammate.  When not `None`, a memory
+    /// directory is created and `MEMORY.md` is injected into the system prompt.
+    #[serde(default)]
+    pub memory_scope: MemoryScope,
 }
 
 impl TeamMember {
@@ -85,6 +174,10 @@ impl TeamMember {
             current_task_id: None,
             plan_status: PlanStatus::None,
             created_at: Utc::now(),
+            last_spawn_error: None,
+            spawn_prompt: None,
+            model_override: None,
+            memory_scope: MemoryScope::None,
         }
     }
 }
@@ -98,6 +191,9 @@ pub struct TeamSettings {
     pub require_plan_approval: bool,
     /// If `true`, teammates automatically claim the next available task when idle.
     pub auto_claim_tasks: bool,
+    /// Quality-gate hooks that fire at team lifecycle points.
+    #[serde(default)]
+    pub hooks: Vec<HookEntry>,
 }
 
 impl Default for TeamSettings {
@@ -106,6 +202,7 @@ impl Default for TeamSettings {
             max_teammates: 8,
             require_plan_approval: false,
             auto_claim_tasks: true,
+            hooks: Vec::new(),
         }
     }
 }

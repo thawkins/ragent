@@ -3,15 +3,22 @@
 //! Each agent (lead and each teammate) has a dedicated mailbox file at
 //! `mailbox/{agent-id}.json` inside the team directory.  Messages are
 //! appended by senders and drained by the recipient.
+//!
+//! A global [`MailboxNotifierRegistry`] allows poll loops to be woken
+//! instantly when a message is pushed, instead of relying solely on
+//! periodic polling (see Milestone T6).
 
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fs2::FileExt as _;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 // ── Message type ─────────────────────────────────────────────────────────────
@@ -80,11 +87,56 @@ impl MailboxMessage {
     }
 }
 
+// ── Mailbox notifier registry ────────────────────────────────────────────────
+
+type NotifyKey = (PathBuf, String);
+
+/// Process-wide registry that maps `(team_dir, agent_id)` to a
+/// [`tokio::sync::Notify`] handle.  When [`Mailbox::push`] writes a
+/// message it calls [`signal_notifier`] so that the recipient's poll
+/// loop wakes immediately instead of waiting for the fallback interval.
+fn notifier_map() -> &'static RwLock<HashMap<NotifyKey, Arc<Notify>>> {
+    static MAP: OnceLock<RwLock<HashMap<NotifyKey, Arc<Notify>>>> = OnceLock::new();
+    MAP.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Register a [`Notify`] handle for the given agent so that
+/// [`Mailbox::push`] can wake its poll loop.
+pub fn register_notifier(team_dir: &Path, agent_id: &str, notify: Arc<Notify>) {
+    let key: NotifyKey = (team_dir.to_path_buf(), agent_id.to_string());
+    if let Ok(mut map) = notifier_map().write() {
+        map.insert(key, notify);
+    }
+}
+
+/// Remove a previously registered notifier (called on teammate shutdown).
+pub fn deregister_notifier(team_dir: &Path, agent_id: &str) {
+    let key: NotifyKey = (team_dir.to_path_buf(), agent_id.to_string());
+    if let Ok(mut map) = notifier_map().write() {
+        map.remove(&key);
+    }
+}
+
+/// Wake the poll loop for `agent_id` if a notifier is registered.
+fn signal_notifier(team_dir: &Path, agent_id: &str) {
+    let key: NotifyKey = (team_dir.to_path_buf(), agent_id.to_string());
+    if let Ok(map) = notifier_map().read() {
+        if let Some(notify) = map.get(&key) {
+            notify.notify_one();
+        }
+    }
+}
+
 // ── Mailbox ───────────────────────────────────────────────────────────────────
 
 /// File-backed per-agent mailbox stored at `mailbox/{agent-id}.json`.
+///
+/// Stores the `team_dir` and `agent_id` so that [`Self::push`] can
+/// signal the in-process notifier after writing.
 pub struct Mailbox {
     path: PathBuf,
+    team_dir: PathBuf,
+    agent_id: String,
 }
 
 impl Mailbox {
@@ -94,7 +146,11 @@ impl Mailbox {
         fs::create_dir_all(&dir)
             .with_context(|| format!("create mailbox dir {}", dir.display()))?;
         let path = dir.join(format!("{agent_id}.json"));
-        Ok(Self { path })
+        Ok(Self {
+            path,
+            team_dir: team_dir.to_path_buf(),
+            agent_id: agent_id.to_string(),
+        })
     }
 
     /// Read all messages from the mailbox without modifying it.
@@ -121,6 +177,9 @@ impl Mailbox {
     }
 
     /// Append a message to the mailbox (acquires an exclusive lock).
+    ///
+    /// After writing, signals the in-process [`Notify`] handle (if
+    /// registered) so the recipient's poll loop wakes immediately.
     pub fn push(&self, message: MailboxMessage) -> Result<()> {
         let mut file = OpenOptions::new()
             .read(true)
@@ -143,6 +202,10 @@ impl Mailbox {
         messages.push(message);
         Self::write_locked(&mut file, &messages)?;
         file.unlock()?;
+
+        // Wake the recipient's poll loop if one is registered.
+        signal_notifier(&self.team_dir, &self.agent_id);
+
         Ok(())
     }
 

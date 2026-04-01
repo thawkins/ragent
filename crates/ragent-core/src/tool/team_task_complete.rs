@@ -4,7 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{TaskStore, find_team_dir};
+use crate::team::{HookEvent, TaskStatus, TaskStore, find_team_dir, run_team_hook};
+use crate::team::manager::HookOutcome;
 
 /// Marks a task as completed by the calling agent.
 pub struct TeamTaskCompleteTool;
@@ -63,6 +64,39 @@ impl Tool for TeamTaskCompleteTool {
 
         let store = TaskStore::open(&team_dir)?;
         let task = store.complete(task_id, &agent_id)?;
+
+        // Run TaskCompleted hook with task metadata on stdin.
+        let hook_stdin = json!({
+            "team_name": team_name,
+            "task_id": task.id,
+            "title": task.title,
+            "description": task.description,
+            "completed_by": agent_id,
+            "completed_at": task.completed_at.map(|t| t.to_rfc3339())
+        })
+        .to_string();
+        let outcome = run_team_hook(&team_dir, HookEvent::TaskCompleted, Some(&hook_stdin)).await;
+
+        if let HookOutcome::Feedback(feedback) = outcome {
+            // Hook rejected completion — revert task to InProgress.
+            let _ = store.update_task(task_id, |t| {
+                t.status = TaskStatus::InProgress;
+                t.completed_at = None;
+            });
+            return Ok(ToolOutput {
+                content: format!(
+                    "TaskCompleted hook rejected completion of task '{task_id}'. \
+                     Feedback: {feedback}\n\
+                     Task reverted to in-progress. Please address the feedback and complete again."
+                ),
+                metadata: Some(json!({
+                    "team_name": team_name,
+                    "task_id": task_id,
+                    "hook_rejected": true,
+                    "feedback": feedback
+                })),
+            });
+        }
 
         Ok(ToolOutput {
             content: format!(

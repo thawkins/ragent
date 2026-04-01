@@ -46,8 +46,12 @@ impl Tool for TeamStatusTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TeamStore::load(&team_dir)?;
-        let task_store = TaskStore::open(&team_dir)?;
-        let task_list = task_store.read()?;
+
+        // Task store is supplementary — don't fail the whole report if
+        // tasks.json is missing or corrupt.
+        let task_list = TaskStore::open(&team_dir)
+            .and_then(|ts| ts.read())
+            .unwrap_or_default();
 
         let total_tasks = task_list.tasks.len();
         let done_tasks = task_list
@@ -81,9 +85,11 @@ impl Tool for TeamStatusTool {
                 MemberStatus::Working => "🔄",
                 MemberStatus::Idle => "⏸",
                 MemberStatus::PlanPending => "📋",
+                MemberStatus::Blocked => "🔒",
                 MemberStatus::ShuttingDown => "🛑",
                 MemberStatus::Stopped => "⬛",
                 MemberStatus::Spawning => "🚀",
+                MemberStatus::Failed => "❌",
             };
             let task_info = m
                 .current_task_id

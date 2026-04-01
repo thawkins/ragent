@@ -595,8 +595,10 @@ fn test_load_custom_agents_non_json_files_ignored() {
     let agents_dir = tmp.path().join(".ragent").join("agents");
     std::fs::create_dir_all(&agents_dir).unwrap();
 
+    // .yaml files are still ignored (not a supported extension).
     std::fs::write(agents_dir.join("agent.yaml"), "name: something").unwrap();
-    std::fs::write(agents_dir.join("README.md"), "# docs").unwrap();
+    // .txt files are also ignored.
+    std::fs::write(agents_dir.join("notes.txt"), "some notes").unwrap();
 
     let (agents, diagnostics) = load_custom_agents(tmp.path());
     assert!(agents.is_empty());

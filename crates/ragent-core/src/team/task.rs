@@ -148,6 +148,9 @@ impl TaskStore {
         }
         let raw = fs::read_to_string(&self.path)
             .with_context(|| format!("read {}", self.path.display()))?;
+        if raw.trim().is_empty() {
+            return Ok(TaskList::default());
+        }
         serde_json::from_str(&raw)
             .with_context(|| format!("parse {}", self.path.display()))
     }
@@ -224,18 +227,36 @@ impl TaskStore {
 
         let mut raw = String::new();
         file.read_to_string(&mut raw)?;
-        let mut list: TaskList = serde_json::from_str(&raw)
-            .with_context(|| "parse tasks.json")?;
+        let mut list: TaskList = if raw.trim().is_empty() {
+            TaskList::default()
+        } else {
+            serde_json::from_str(&raw)
+                .with_context(|| "parse tasks.json")?
+        };
 
+        let available_ids: Vec<String> = list.tasks.iter()
+            .map(|t| format!("{} ({})", t.id, t.title))
+            .collect();
         let task = list
             .get_mut(task_id)
-            .ok_or_else(|| anyhow!("task {task_id} not found"))?;
+            .ok_or_else(|| anyhow!(
+                "task '{task_id}' not found. Available tasks: [{}]",
+                available_ids.join(", ")
+            ))?;
 
+        // Auto-claim if the task is pending/unclaimed, rather than rejecting
         if task.assigned_to.as_deref() != Some(agent_id) {
-            file.unlock()?;
-            return Err(anyhow!(
-                "task {task_id} is not assigned to agent {agent_id}"
-            ));
+            if task.status == TaskStatus::Pending || task.assigned_to.is_none() {
+                task.assigned_to = Some(agent_id.to_owned());
+                task.claimed_at = Some(Utc::now());
+                task.status = TaskStatus::InProgress;
+            } else {
+                let current_owner = task.assigned_to.as_deref().unwrap_or("unknown");
+                file.unlock()?;
+                return Err(anyhow!(
+                    "task {task_id} is assigned to agent {current_owner}, not {agent_id}"
+                ));
+            }
         }
         task.status = TaskStatus::Completed;
         task.completed_at = Some(Utc::now());
@@ -295,17 +316,63 @@ impl TaskStore {
 
         let mut raw = String::new();
         file.read_to_string(&mut raw)?;
-        let mut list: TaskList = serde_json::from_str(&raw)
-            .with_context(|| "parse tasks.json")?;
+        let mut list: TaskList = if raw.trim().is_empty() {
+            TaskList::default()
+        } else {
+            serde_json::from_str(&raw)
+                .with_context(|| "parse tasks.json")?
+        };
 
+        let available_ids: Vec<String> = list.tasks.iter()
+            .map(|t| format!("{} ({})", t.id, t.title))
+            .collect();
         let task = list
             .get_mut(task_id)
-            .ok_or_else(|| anyhow!("task {task_id} not found"))?;
+            .ok_or_else(|| anyhow!(
+                "task '{task_id}' not found. Available tasks: [{}]",
+                available_ids.join(", ")
+            ))?;
         f(task);
         let updated = task.clone();
 
         Self::write_locked(&mut file, &list)?;
         file.unlock()?;
         Ok(updated)
+    }
+
+    /// Remove a task from the store by ID.
+    ///
+    /// Used by the `TaskCreated` quality-gate hook to reject a newly created
+    /// task.  Returns the removed task, or an error if the ID is not found.
+    pub fn remove_task(&self, task_id: &str) -> Result<Task> {
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)
+            .with_context(|| format!("open task store {}", self.path.display()))?;
+
+        file.lock_exclusive()?;
+
+        let mut raw = String::new();
+        file.read_to_string(&mut raw)?;
+        let mut list: TaskList = if raw.trim().is_empty() {
+            TaskList::default()
+        } else {
+            serde_json::from_str(&raw)
+                .with_context(|| "parse tasks.json")?
+        };
+
+        let pos = list
+            .tasks
+            .iter()
+            .position(|t| t.id == task_id)
+            .ok_or_else(|| anyhow!("task '{task_id}' not found"))?;
+        let removed = list.tasks.remove(pos);
+
+        Self::write_locked(&mut file, &list)?;
+        file.unlock()?;
+        Ok(removed)
     }
 }

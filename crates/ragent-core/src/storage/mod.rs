@@ -8,25 +8,143 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 use crate::message::{Message, MessagePart, Role};
 
-/// Fixed key used for XOR-based obfuscation of API keys.
-///
-/// **Note:** This is simple obfuscation, *not* encryption. It prevents
-/// casual inspection of keys stored on disk but will not withstand a
-/// determined attacker. For production use, consider a keyring-based
-/// solution (e.g., `keyring` crate or OS-level credential storage).
+/// Fixed key used for legacy XOR-based obfuscation (v1 format).
 const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
+
+/// Version prefix for the new encryption format.
+const ENCRYPT_V2_PREFIX: &str = "v2:";
+
+/// Nonce length in bytes for v2 encryption.
+const NONCE_LEN: usize = 16;
+
+/// Machine-local encryption key derived from system identity.
+///
+/// Uses blake3 key derivation with username + home directory as input material.
+/// This ties the encrypted data to the current machine/user, preventing
+/// credential theft by simply copying the database file.
+static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
+    let username = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "ragent-default-user".to_string());
+
+    let home = dirs::home_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "ragent-default-home".to_string());
+
+    let input = format!("{username}:{home}");
+    blake3::derive_key("ragent credential encryption v2", input.as_bytes())
+});
+
+/// Encrypts an API key using blake3-derived keystream with a random nonce.
+///
+/// Returns a `v2:` prefixed base64 string containing `nonce || ciphertext`.
+/// The encryption key is derived from the current machine identity, so the
+/// ciphertext can only be decrypted on the same machine by the same user.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::storage::{encrypt_key, decrypt_key};
+///
+/// let encrypted = encrypt_key("sk-secret-key");
+/// assert!(encrypted.starts_with("v2:"));
+/// assert_ne!(encrypted, "sk-secret-key");
+/// let recovered = decrypt_key(&encrypted);
+/// assert_eq!(recovered, "sk-secret-key");
+/// ```
+pub fn encrypt_key(key: &str) -> String {
+    use rand::Rng;
+    let mut nonce = [0u8; NONCE_LEN];
+    rand::thread_rng().fill(&mut nonce);
+
+    let keystream = generate_keystream(&nonce, key.len());
+    let ciphertext: Vec<u8> = key
+        .as_bytes()
+        .iter()
+        .zip(keystream.iter())
+        .map(|(p, k)| p ^ k)
+        .collect();
+
+    let mut payload = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+    payload.extend_from_slice(&nonce);
+    payload.extend_from_slice(&ciphertext);
+
+    format!("{ENCRYPT_V2_PREFIX}{}", STANDARD.encode(&payload))
+}
+
+/// Decrypts an API key encrypted with [`encrypt_key`].
+///
+/// Also handles legacy v1 (XOR-obfuscated) format for backward compatibility.
+/// Returns the original key, or an empty string if decoding fails.
+///
+/// # Examples
+///
+/// ```
+/// use ragent_core::storage::{encrypt_key, decrypt_key};
+///
+/// let encrypted = encrypt_key("my-api-key");
+/// let recovered = decrypt_key(&encrypted);
+/// assert_eq!(recovered, "my-api-key");
+/// ```
+pub fn decrypt_key(encoded: &str) -> String {
+    if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
+        // v2 format: blake3-derived keystream
+        let Ok(payload) = STANDARD.decode(v2_data) else {
+            return String::new();
+        };
+        if payload.len() < NONCE_LEN {
+            return String::new();
+        }
+        let (nonce, ciphertext) = payload.split_at(NONCE_LEN);
+        let keystream = generate_keystream(
+            nonce.try_into().unwrap_or(&[0u8; NONCE_LEN]),
+            ciphertext.len(),
+        );
+        let plaintext: Vec<u8> = ciphertext
+            .iter()
+            .zip(keystream.iter())
+            .map(|(c, k)| c ^ k)
+            .collect();
+        String::from_utf8(plaintext).unwrap_or_default()
+    } else {
+        // Legacy v1 format: repeating-key XOR
+        deobfuscate_key_v1(encoded)
+    }
+}
+
+/// Generates a keystream of the given length using blake3 in XOF mode.
+fn generate_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
+    let mut hasher = blake3::Hasher::new_keyed(&*MACHINE_KEY);
+    hasher.update(nonce);
+    let mut output = vec![0u8; len];
+    let mut reader = hasher.finalize_xof();
+    reader.fill(&mut output);
+    output
+}
+
+/// Legacy v1 obfuscation — kept for reading old database entries.
+fn deobfuscate_key_v1(encoded: &str) -> String {
+    let Ok(xored) = STANDARD.decode(encoded) else {
+        return String::new();
+    };
+    let bytes: Vec<u8> = xored
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
+        .collect();
+    String::from_utf8(bytes).unwrap_or_default()
+}
 
 /// Obfuscates an API key using repeating-key XOR and base64 encoding.
 ///
-/// This is *not* encryption — it only prevents plaintext keys from
-/// appearing in the database. A keyring-based solution is recommended
-/// for production use.
+/// **Deprecated:** Use [`encrypt_key`] instead. This function is retained
+/// for backward compatibility with tests and migration scenarios.
 ///
 /// # Examples
 ///
@@ -38,23 +156,13 @@ const OBFUSCATION_KEY: &[u8] = b"ragent-obfuscation-key-v1";
 /// assert_ne!(obfuscated, "sk-secret-key");
 /// ```
 pub fn obfuscate_key(key: &str) -> String {
-    let xored: Vec<u8> = key
-        .as_bytes()
-        .iter()
-        .enumerate()
-        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
-        .collect();
-    STANDARD.encode(&xored)
+    encrypt_key(key)
 }
 
 /// Reverses [`obfuscate_key`], recovering the original API key.
 ///
-/// Returns the original key, or an empty string if decoding fails.
-///
-/// # Errors
-///
-/// This function does not return errors via `Result`. If base64 decoding fails
-/// or the decoded bytes are not valid UTF-8, it returns an empty string.
+/// **Deprecated:** Use [`decrypt_key`] instead. This function handles both
+/// v1 (legacy XOR) and v2 (blake3 encrypted) formats.
 ///
 /// # Examples
 ///
@@ -66,15 +174,7 @@ pub fn obfuscate_key(key: &str) -> String {
 /// assert_eq!(recovered, "my-api-key");
 /// ```
 pub fn deobfuscate_key(encoded: &str) -> String {
-    let Ok(xored) = STANDARD.decode(encoded) else {
-        return String::new();
-    };
-    let bytes: Vec<u8> = xored
-        .iter()
-        .enumerate()
-        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
-        .collect();
-    String::from_utf8(bytes).unwrap_or_default()
+    decrypt_key(encoded)
 }
 
 /// SQLite-backed storage for sessions, messages, and provider credentials.
@@ -524,6 +624,35 @@ impl Storage {
         Ok(())
     }
 
+    /// Deletes all messages for a session.  Used by compaction to clear the
+    /// message history before inserting a summary message.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    /// use ragent_core::message::Message;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_session("sess-1", "/tmp/project").unwrap();
+    /// storage.create_message(&Message::user_text("sess-1", "hello")).unwrap();
+    /// let deleted = storage.delete_messages("sess-1").unwrap();
+    /// assert_eq!(deleted, 1);
+    /// assert!(storage.get_messages("sess-1").unwrap().is_empty());
+    /// ```
+    pub fn delete_messages(&self, session_id: &str) -> Result<usize> {
+        let conn = lock_conn!(self)?;
+        let n = conn.execute(
+            "DELETE FROM messages WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(n)
+    }
+
     // ── Provider Auth ─────────────────────────────────────────────
 
     /// Stores or replaces the API key for the given provider.
@@ -549,6 +678,8 @@ impl Storage {
              VALUES (?1, ?2, ?3)",
             params![provider_id, obfuscated, now],
         )?;
+        // Register in the in-memory secret registry for exact-match redaction.
+        crate::sanitize::register_secret(api_key);
         Ok(())
     }
 
@@ -569,6 +700,10 @@ impl Storage {
     /// assert!(storage.get_provider_auth("anthropic").unwrap().is_none());
     /// ```
     pub fn delete_provider_auth(&self, provider_id: &str) -> Result<()> {
+        // Unregister the secret before deleting from DB.
+        if let Ok(Some(key)) = self.get_provider_auth(provider_id) {
+            crate::sanitize::unregister_secret(&key);
+        }
         let conn = lock_conn!(self)?;
         conn.execute(
             "DELETE FROM provider_auth WHERE provider_id = ?1",
@@ -596,10 +731,50 @@ impl Storage {
     pub fn get_provider_auth(&self, provider_id: &str) -> Result<Option<String>> {
         let conn = lock_conn!(self)?;
         let mut stmt = conn.prepare("SELECT api_key FROM provider_auth WHERE provider_id = ?1")?;
-        let key = stmt
+        let encoded = stmt
             .query_row(params![provider_id], |row| row.get::<_, String>(0))
             .optional()?;
-        Ok(key.map(|k| deobfuscate_key(&k)))
+
+        match encoded {
+            Some(ref enc) if !enc.starts_with(ENCRYPT_V2_PREFIX) => {
+                // Auto-migrate legacy v1 to v2 encryption.
+                let plaintext = deobfuscate_key_v1(enc);
+                if !plaintext.is_empty() {
+                    let v2 = encrypt_key(&plaintext);
+                    let now = Utc::now().to_rfc3339();
+                    let _ = conn.execute(
+                        "UPDATE provider_auth SET api_key = ?1, updated_at = ?2 \
+                         WHERE provider_id = ?3",
+                        params![v2, now, provider_id],
+                    );
+                }
+                Ok(Some(plaintext))
+            }
+            Some(enc) => Ok(Some(decrypt_key(&enc))),
+            None => Ok(None),
+        }
+    }
+
+    /// Seeds the global secret registry with all stored provider credentials.
+    ///
+    /// Call this once at startup so that [`crate::sanitize::redact_secrets`]
+    /// can perform exact-match redaction on known secrets.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
+    pub fn seed_secret_registry(&self) -> Result<()> {
+        let keys: Vec<String> = {
+            let conn = lock_conn!(self)?;
+            let mut stmt = conn.prepare("SELECT api_key FROM provider_auth")?;
+            stmt.query_map([], |row| row.get::<_, String>(0))?
+                .filter_map(|r| r.ok())
+                .map(|encoded| deobfuscate_key(&encoded))
+                .filter(|k| !k.is_empty())
+                .collect()
+        };
+        crate::sanitize::seed_secrets(keys.into_iter());
+        Ok(())
     }
 
     // ── Settings (key-value) ──────────────────────────────────────

@@ -4,7 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{Task, TeamStore, find_team_dir};
+use crate::team::{HookEvent, Task, TaskStore, TeamStore, find_team_dir, run_team_hook};
+use crate::team::manager::HookOutcome;
 
 /// Adds a new task to the team's shared task list (lead-only).
 pub struct TeamTaskCreateTool;
@@ -84,10 +85,39 @@ impl Tool for TeamTaskCreateTool {
         let task_id = store.next_task_id()?;
 
         let mut task = Task::new(&task_id, title);
-        task.description = description;
+        task.description = description.clone();
         task.depends_on = depends_on.clone();
 
         store.add_task(task)?;
+
+        // Run TaskCreated hook with task metadata on stdin.
+        let hook_stdin = json!({
+            "team_name": team_name,
+            "task_id": task_id,
+            "title": title,
+            "description": description,
+            "depends_on": depends_on
+        })
+        .to_string();
+        let outcome = run_team_hook(&team_dir, HookEvent::TaskCreated, Some(&hook_stdin)).await;
+
+        if let HookOutcome::Feedback(feedback) = outcome {
+            // Hook rejected creation — remove the task.
+            let task_store = TaskStore::open(&team_dir)?;
+            let _ = task_store.remove_task(&task_id);
+            return Ok(ToolOutput {
+                content: format!(
+                    "TaskCreated hook rejected task '{task_id}'. \
+                     Feedback: {feedback}"
+                ),
+                metadata: Some(json!({
+                    "team_name": team_name,
+                    "task_id": task_id,
+                    "hook_rejected": true,
+                    "feedback": feedback
+                })),
+            });
+        }
 
         Ok(ToolOutput {
             content: format!(

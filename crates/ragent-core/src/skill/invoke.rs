@@ -81,8 +81,12 @@ pub async fn invoke_skill(
     // 1. Substitute argument placeholders
     let substituted = substitute_args(&skill.body, args, session_id, &skill.skill_dir);
 
-    // 2. Execute dynamic context injection
-    let content = inject_dynamic_context(&substituted, working_dir).await?;
+    // 2. Execute dynamic context injection only when the skill opts in.
+    let content = if skill.allow_dynamic_context {
+        inject_dynamic_context(&substituted, working_dir).await?
+    } else {
+        substituted
+    };
 
     Ok(SkillInvocation {
         skill_name: skill.name.clone(),
@@ -277,6 +281,7 @@ mod tests {
             license: None,
             compatibility: None,
             metadata: HashMap::new(),
+            allow_dynamic_context: false,
             source_path: PathBuf::from(format!("/skills/{name}/SKILL.md")),
             skill_dir: PathBuf::from(format!("/skills/{name}")),
             scope: SkillScope::Project,
@@ -299,7 +304,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_invoke_with_dynamic_context() {
-        let skill = test_skill("info", "Version: !`echo 1.0.0`");
+        let mut skill = test_skill("info", "Version: !`echo 1.0.0`");
+        skill.allow_dynamic_context = true;
         let result = invoke_skill(&skill, "", "s1", Path::new("/tmp"))
             .await
             .expect("should invoke");
@@ -309,7 +315,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_invoke_with_args_and_context() {
-        let skill = test_skill("deploy", "Deploy $0 at !`date +%Y`");
+        let mut skill = test_skill("deploy", "Deploy $0 at !`date +%Y`");
+        skill.allow_dynamic_context = true;
         let result = invoke_skill(&skill, "staging", "s1", Path::new("/tmp"))
             .await
             .expect("should invoke");
@@ -345,6 +352,18 @@ mod tests {
             Some("anthropic:claude-haiku")
         );
         assert_eq!(result.allowed_tools, vec!["read", "grep"]);
+    }
+
+    #[tokio::test]
+    async fn test_invoke_skips_dynamic_context_when_disabled() {
+        // Default allow_dynamic_context is false — commands should NOT execute.
+        let skill = test_skill("info", "Version: !`echo 1.0.0`");
+        assert!(!skill.allow_dynamic_context);
+        let result = invoke_skill(&skill, "", "s1", Path::new("/tmp"))
+            .await
+            .expect("should invoke");
+        // The !`echo 1.0.0` pattern remains unprocessed.
+        assert_eq!(result.content, "Version: !`echo 1.0.0`");
     }
 
     #[tokio::test]

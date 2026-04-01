@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tracing::{debug, warn};
 
 use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
@@ -30,10 +30,26 @@ use crate::config::Config;
 use crate::event::{Event, EventBus};
 use crate::session::processor::SessionProcessor;
 use crate::team::config::{MemberStatus, PlanStatus};
-use crate::team::mailbox::{Mailbox, MailboxMessage, MessageType};
+use crate::team::mailbox::{Mailbox, MailboxMessage, MessageType, register_notifier, deregister_notifier};
 use crate::team::store::TeamStore;
 use crate::team::TeamMember;
 use crate::tool::TeamManagerInterface;
+
+/// Check if an error message indicates a permanent (non-retryable) API error.
+///
+/// Matches HTTP 4xx errors (except 429 Too Many Requests and 408 Timeout)
+/// where retrying won't help (e.g. 401 Unauthorized, 403 Forbidden, 404 Not Found).
+fn is_permanent_api_error(error_msg: &str) -> bool {
+    // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
+    if let Some(rest) = error_msg.strip_prefix("HTTP ") {
+        if let Some(code_str) = rest.split(':').next().or_else(|| rest.split_whitespace().next()) {
+            if let Ok(code) = code_str.trim().parse::<u16>() {
+                return (400..500).contains(&code) && code != 429 && code != 408;
+            }
+        }
+    }
+    false
+}
 
 // ── System prompt addition for teammate sessions ──────────────────────────────
 
@@ -43,17 +59,21 @@ use crate::tool::TeamManagerInterface;
 /// - `{{TEAM_NAME}}` — name of the team
 /// - `{{TEAMMATE_NAME}}` — this teammate's friendly name
 /// - `{{AGENT_ID}}` — this teammate's agent ID (e.g. `"tm-001"`)
-/// - `{{TEAMMATE_LIST}}` — comma-separated list of other teammate names
+/// - `{{TEAMMATE_ROSTER}}` — list of other teammates with names and agent IDs
 pub fn build_team_prompt_addition(
     team_name: &str,
     teammate_name: &str,
     agent_id: &str,
-    teammate_list: &[String],
+    teammate_roster: &[(String, String)],
 ) -> String {
-    let others = if teammate_list.is_empty() {
+    let others = if teammate_roster.is_empty() {
         "none yet".to_string()
     } else {
-        teammate_list.join(", ")
+        teammate_roster
+            .iter()
+            .map(|(name, id)| format!("{name} ({id})"))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
 
     format!(
@@ -76,19 +96,96 @@ If you receive a `shutdown_request` message, finish your current step cleanly an
 
 If `require_plan_approval` is enabled, call `team_submit_plan` before starting
 implementation and wait for a `plan_approved` mailbox reply.
+
+### Peer collaboration
+
+You can message other teammates directly using `team_message` when you have findings to
+share, need to coordinate on overlapping work, or want to challenge each other's
+assumptions. Use the agent ID from the roster above as the `to` parameter. For example:
+`team_message(team_name: "{team_name}", to: "<agent-id>", content: "...")`.
+
+Prefer peer messaging when:
+- You discover something that affects another teammate's task.
+- You need input or a second opinion before proceeding.
+- You want to share intermediate results to avoid duplicated effort.
 "#,
     )
 }
 
 fn apply_teammate_model_override(
     agent: &mut AgentInfo,
-    active_model: Option<&crate::agent::ModelRef>,
+    teammate_model: Option<&crate::agent::ModelRef>,
+    lead_model: Option<&crate::agent::ModelRef>,
 ) {
-    if let Some(m) = active_model {
-        // Force teammates onto the lead's active provider/model to avoid
-        // silent startup failures when built-in teammate defaults reference
-        // an unconfigured provider.
+    // Priority: per-teammate model > lead's active model > agent definition default.
+    if let Some(m) = teammate_model {
         agent.model = Some(m.clone());
+    } else if let Some(m) = lead_model {
+        agent.model = Some(m.clone());
+    }
+}
+
+// ── Persistent memory injection ────────────────────────────────────────────────
+
+/// Maximum number of lines to inject from `MEMORY.md`.
+const MEMORY_MAX_LINES: usize = 200;
+/// Maximum bytes to inject from `MEMORY.md`.
+const MEMORY_MAX_BYTES: usize = 25 * 1024; // 25 KB
+
+/// Load the persistent-memory prompt block for an agent.
+///
+/// If `MEMORY.md` exists in `mem_dir`, its content is read (truncated to
+/// [`MEMORY_MAX_LINES`] lines / [`MEMORY_MAX_BYTES`] bytes) and wrapped in
+/// a labelled section.  The block also tells the agent where its memory
+/// directory lives so it can use `team_memory_read` / `team_memory_write`.
+///
+/// Returns an empty string when memory is unavailable.
+fn load_memory_block(mem_dir: &Path) -> String {
+    let memory_file = mem_dir.join("MEMORY.md");
+    let content = if memory_file.is_file() {
+        match std::fs::read_to_string(&memory_file) {
+            Ok(raw) => {
+                let mut taken = 0usize;
+                let truncated: String = raw
+                    .lines()
+                    .take(MEMORY_MAX_LINES)
+                    .take_while(|line| {
+                        taken += line.len() + 1; // +1 for newline
+                        taken <= MEMORY_MAX_BYTES
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                truncated
+            }
+            Err(e) => {
+                tracing::warn!(path = %memory_file.display(), error = %e, "Failed to read MEMORY.md");
+                String::new()
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    let dir_display = mem_dir.display();
+    let preamble = format!(
+        "\n\n## Persistent Memory\n\
+         \n\
+         Your memory directory: `{dir_display}`\n\
+         Use `team_memory_read` to read files and `team_memory_write` to write files in this directory.\n\
+         Write important findings, decisions, and context to `MEMORY.md` so you can recall them in future sessions.\n"
+    );
+    if content.is_empty() {
+        format!(
+            "{preamble}\n\
+             _No prior memory found — this is your first session.  Start writing notes to `MEMORY.md`._\n"
+        )
+    } else {
+        format!(
+            "{preamble}\n\
+             ### Prior Memory (MEMORY.md)\n\
+             \n\
+             {content}\n"
+        )
     }
 }
 
@@ -108,33 +205,84 @@ pub enum HookOutcome {
 /// - Exit 0 → `HookOutcome::Allow`
 /// - Exit 2 → `HookOutcome::Feedback(stdout)`
 /// - Other → log warning, allow
-pub async fn run_hook(command: &str, args: &[String]) -> HookOutcome {
-    let output = tokio::process::Command::new(command)
-        .args(args)
-        .output()
-        .await;
+///
+/// If `stdin_data` is `Some`, it is piped to the child process on stdin.
+pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) -> HookOutcome {
+    let mut child_cmd = tokio::process::Command::new(command);
+    child_cmd.args(args);
 
-    match output {
+    if stdin_data.is_some() {
+        child_cmd.stdin(std::process::Stdio::piped());
+    }
+    child_cmd.stdout(std::process::Stdio::piped());
+    child_cmd.stderr(std::process::Stdio::piped());
+
+    let child = child_cmd.spawn();
+
+    match child {
         Err(e) => {
             warn!(command, error = %e, "Hook failed to execute");
             HookOutcome::Allow
         }
-        Ok(out) => match out.status.code() {
-            Some(0) => HookOutcome::Allow,
-            Some(2) => {
-                let feedback = String::from_utf8_lossy(&out.stdout).into_owned();
-                HookOutcome::Feedback(feedback)
+        Ok(mut child_proc) => {
+            // Write stdin data if provided.
+            if let Some(data) = stdin_data {
+                if let Some(mut stdin) = child_proc.stdin.take() {
+                    use tokio::io::AsyncWriteExt;
+                    let _ = stdin.write_all(data.as_bytes()).await;
+                    drop(stdin);
+                }
             }
-            Some(code) => {
-                warn!(command, code, "Hook returned unexpected exit code; allowing");
-                HookOutcome::Allow
+
+            match child_proc.wait_with_output().await {
+                Err(e) => {
+                    warn!(command, error = %e, "Hook failed to complete");
+                    HookOutcome::Allow
+                }
+                Ok(out) => match out.status.code() {
+                    Some(0) => HookOutcome::Allow,
+                    Some(2) => {
+                        let feedback = String::from_utf8_lossy(&out.stdout).into_owned();
+                        HookOutcome::Feedback(feedback)
+                    }
+                    Some(code) => {
+                        warn!(command, code, "Hook returned unexpected exit code; allowing");
+                        HookOutcome::Allow
+                    }
+                    None => {
+                        warn!(command, "Hook terminated by signal; allowing");
+                        HookOutcome::Allow
+                    }
+                },
             }
-            None => {
-                warn!(command, "Hook terminated by signal; allowing");
-                HookOutcome::Allow
-            }
-        },
+        }
     }
+}
+
+/// Look up and run a quality-gate hook for the given event in a team's settings.
+///
+/// Returns `HookOutcome::Allow` if no hook is configured for this event.
+/// The `stdin_json` parameter is piped to the hook process as stdin (useful for
+/// passing task metadata to `TaskCreated` / `TaskCompleted` hooks).
+pub async fn run_team_hook(
+    team_dir: &Path,
+    event: crate::team::config::HookEvent,
+    stdin_json: Option<&str>,
+) -> HookOutcome {
+    let store = match TeamStore::load(team_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(error = %e, "Cannot load team store for hook lookup");
+            return HookOutcome::Allow;
+        }
+    };
+
+    let hook = store.config.settings.hooks.iter().find(|h| h.event == event);
+    let Some(hook) = hook else {
+        return HookOutcome::Allow;
+    };
+
+    run_hook(&hook.command, &[], stdin_json).await
 }
 
 // ── TeamManager ───────────────────────────────────────────────────────────────
@@ -151,6 +299,8 @@ struct TeammateHandle {
     cancel: Arc<AtomicBool>,
     /// Cancel flag for the mailbox polling task.
     poll_cancel: Arc<AtomicBool>,
+    /// Notify handle for push-based mailbox wakeup.
+    notify: Arc<Notify>,
 }
 
 /// Manages the runtime lifecycle of all teammates in one team.
@@ -174,6 +324,9 @@ pub struct TeamManager {
     poll_interval: Duration,
     /// Serialises spawn operations to avoid concurrent config read/write races.
     spawn_lock: Arc<Mutex<()>>,
+    /// The lead's active model — teammates inherit this when spawned via
+    /// the reconcile loop (where no ToolContext model is available).
+    pub active_model: Option<crate::agent::ModelRef>,
 }
 
 impl TeamManager {
@@ -194,7 +347,77 @@ impl TeamManager {
             event_bus,
             poll_interval: Duration::from_millis(500),
             spawn_lock: Arc::new(Mutex::new(())),
+            active_model: None,
         }
+    }
+
+    /// Reconcile any members recorded on-disk with `Spawning` status by
+    /// attempting to spawn them now that the TeamManager exists.
+    ///
+    /// This runs in a background tokio task and will call `spawn_teammate_internal`
+    /// for each queued member. Prompts are not persisted by blueprints, so an
+    /// empty prompt is used for reconciliation spawns.
+    pub fn reconcile_spawning_members(self: Arc<Self>) {
+        let manager = Arc::clone(&self);
+        tokio::spawn(async move {
+            tracing::info!(team = %manager.team_name, "Reconciling spawning members from config");
+            // Retry loop: sometimes blueprint seeding races with TeamManager init.
+            // Attempt reconciliation multiple times with short delays to catch
+            // members that are written slightly after the manager appears.
+            const ATTEMPTS: usize = 10;
+            for attempt in 1..=ATTEMPTS {
+                tracing::debug!(team = %manager.team_name, attempt, "Reconcile attempt");
+                match TeamStore::load(&manager.team_dir) {
+                    Ok(store) => {
+                        // Collect candidates to spawn, then drop the lock before spawning.
+                        let to_spawn: Vec<(String, String, String, Option<crate::agent::ModelRef>)> = {
+                            let existing_handles = manager.handles.read().await;
+                            store.config.members.iter()
+                                .filter(|m| m.status == crate::team::config::MemberStatus::Spawning)
+                                .filter(|m| {
+                                    if m.session_id.is_some() {
+                                        tracing::debug!(team = %manager.team_name, teammate = %m.name, "Skipping queued teammate: already has session_id");
+                                        return false;
+                                    }
+                                    if existing_handles.contains_key(&m.agent_id) {
+                                        tracing::debug!(team = %manager.team_name, teammate = %m.name, agent_id = %m.agent_id, "Skipping queued teammate: handle already exists");
+                                        return false;
+                                    }
+                                    true
+                                })
+                                .map(|m| (m.name.clone(), m.agent_type.clone(), m.spawn_prompt.clone().unwrap_or_default(), m.model_override.clone()))
+                                .collect()
+                        }; // handles read lock dropped here
+
+                        if to_spawn.is_empty() {
+                            tracing::info!(team = %manager.team_name, attempt, "No queued spawning members found; reconciliation complete");
+                            break;
+                        }
+                        for (name, agent_type, spawn_prompt, member_model) in to_spawn {
+                            tracing::info!(team = %manager.team_name, teammate = %name, "Attempting to spawn queued teammate (attempt: {})", attempt);
+                            // Use the lead session's working directory (project root),
+                            // not team_dir, so teammates resolve relative paths correctly.
+                            let lead_wd = manager
+                                .processor
+                                .session_manager
+                                .get_session(&manager.lead_session_id)
+                                .ok()
+                                .flatten()
+                                .map(|s| s.directory.clone())
+                                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                            match manager.spawn_teammate_internal(&name, &agent_type, &spawn_prompt, member_model.as_ref(), manager.active_model.as_ref(), &lead_wd).await {
+                                Ok(agent_id) => tracing::info!(team = %manager.team_name, teammate = %name, agent_id = %agent_id, "Successfully reconciled queued teammate"),
+                                Err(e) => tracing::warn!(team = %manager.team_name, teammate = %name, error = %e, "Failed to spawn queued teammate"),
+                            }
+                        }
+                    }
+                    Err(e) => tracing::warn!(team = %manager.team_name, error = %e, "Cannot load team store to reconcile spawning members"),
+                }
+                // Short backoff between attempts (~1s total for 10 attempts)
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            tracing::info!(team = %manager.team_name, "Reconciliation task finished after attempts");
+        });
     }
 
     // ── Spawn ────────────────────────────────────────────────────────────
@@ -212,48 +435,63 @@ impl TeamManager {
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
-        active_model: Option<&crate::agent::ModelRef>,
+        teammate_model: Option<&crate::agent::ModelRef>,
+        lead_model: Option<&crate::agent::ModelRef>,
         working_dir: &Path,
     ) -> Result<String> {
         let _guard = self.spawn_lock.lock().await;
 
-        // Allocate agent ID and update config.
-        let agent_id = {
-            let mut store = TeamStore::load(&self.team_dir)?;
+        // ── Single config load: allocate agent ID ──────────────────────────
+        let mut store = TeamStore::load(&self.team_dir)?;
+        let agent_id = if let Some(existing) = store.config.member_by_name(teammate_name) {
+            tracing::debug!(team = %self.team_name, teammate = %teammate_name, agent_id = %existing.agent_id, "Reusing existing member record for spawn");
+            existing.agent_id.clone()
+        } else {
             let id = store.next_agent_id();
+            tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_id = %id, "Allocating new agent id and recording Spawning member");
             let mut member = TeamMember::new(teammate_name, &id, agent_type);
             member.status = MemberStatus::Spawning;
+            member.model_override = teammate_model.cloned();
             store.add_member(member)?;
             id
         };
+        // Persist now so external tools (e.g., team_create) see the member.
+        store.save()?;
+        drop(store);
 
         // Create isolated child session.
+        tracing::info!(team = %self.team_name, agent_id = %agent_id, "Creating child session for teammate");
         let child_session = self
             .processor
             .session_manager
             .create_session(working_dir.to_path_buf())?;
         let child_sid = child_session.id.clone();
 
-        // Update config with child session ID + set Working.
-        {
+        // ── Single config reload: update session, build roster, read memory ─
+        let (teammate_roster, memory_scope) = {
             let mut store = TeamStore::load(&self.team_dir)?;
             if let Some(m) = store.config.member_by_id_mut(&agent_id) {
                 m.session_id = Some(child_sid.clone());
                 m.status = MemberStatus::Working;
+                tracing::info!(team = %self.team_name, teammate = %m.name, agent_id = %agent_id, session_id = %child_sid, "Updated team config with session id and Working status");
+            } else {
+                tracing::warn!(team = %self.team_name, agent_id = %agent_id, "Could not find member by id when updating session info");
             }
-            store.save()?;
-        }
-
-        // Build teammate roster (other members).
-        let teammate_list: Vec<String> = {
-            let store = TeamStore::load(&self.team_dir)?;
-            store
+            let roster: Vec<(String, String)> = store
                 .config
                 .members
                 .iter()
                 .filter(|m| m.agent_id != agent_id)
-                .map(|m| m.name.clone())
-                .collect()
+                .map(|m| (m.name.clone(), m.agent_id.clone()))
+                .collect();
+            let mem_scope = store
+                .config
+                .member_by_id(&agent_id)
+                .map(|m| m.memory_scope)
+                .unwrap_or(super::config::MemoryScope::None);
+            store.save()?;
+            tracing::debug!(team = %self.team_name, agent_id = %agent_id, "Team config saved after session assignment");
+            (roster, mem_scope)
         };
 
         // Resolve agent and augment system prompt.
@@ -261,20 +499,52 @@ impl TeamManager {
         let mut agent = resolve_agent_with_customs(agent_type, &config, working_dir)
             .unwrap_or_else(|_| AgentInfo::new(agent_type, "Teammate agent"));
         agent.mode = AgentMode::Subagent;
-        apply_teammate_model_override(&mut agent, active_model);
+        apply_teammate_model_override(&mut agent, teammate_model, lead_model);
+
+        // Ensure the agent has a model configured. Some custom agent names may
+        // not resolve to a configured model; fall back to the built-in "general"
+        // agent's model to avoid immediate startup failures in the agent loop.
+        if agent.model.is_none() {
+            if let Ok(default_agent) = crate::agent::resolve_agent("general", &config) {
+                agent.model = default_agent.model;
+                tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_type = %agent_type, "No model on agent; falling back to 'general' model");
+            }
+        }
 
         let team_addition = build_team_prompt_addition(
             &self.team_name,
             teammate_name,
             &agent_id,
-            &teammate_list,
+            &teammate_roster,
         );
         // Append the team context block to the agent's system prompt.
         let base = agent.prompt.as_deref().unwrap_or("");
         agent.prompt = Some(format!("{base}\n{team_addition}"));
 
+        // ── Persistent memory injection ────────────────────────────────────
+        // Resolve memory scope: member-level config (from blueprint) takes
+        // priority, then the agent profile's setting, then None.
+        let effective_scope = if memory_scope != super::config::MemoryScope::None {
+            memory_scope
+        } else {
+            agent.memory
+        };
+        if let Some(mem_dir) = super::config::resolve_memory_dir(
+            effective_scope,
+            teammate_name,
+            working_dir,
+        ) {
+            let memory_block = load_memory_block(&mem_dir);
+            let current = agent.prompt.as_deref().unwrap_or("");
+            agent.prompt = Some(format!("{current}\n{memory_block}"));
+        }
+
         let cancel = Arc::new(AtomicBool::new(false));
         let poll_cancel = Arc::new(AtomicBool::new(false));
+        let notify = Arc::new(Notify::new());
+
+        // Register notifier so Mailbox::push() can wake this agent's poll loop.
+        register_notifier(&self.team_dir, &agent_id, Arc::clone(&notify));
 
         // Register handle.
         self.handles.write().await.insert(
@@ -285,25 +555,114 @@ impl TeamManager {
                               _child_session_id: child_sid.clone(),
                               cancel: cancel.clone(),
                               poll_cancel: poll_cancel.clone(),
+                              notify: Arc::clone(&notify),
                           },        );
 
-        // Start agent loop in background.
+        // Start agent loop in background. Capture agent_id and team_dir for error persistence.
         let proc = Arc::clone(&self.processor);
         let child_sid_clone = child_sid.clone();
         let agent_clone = agent.clone();
         let prompt_owned = prompt.to_string();
         let cancel_clone = cancel.clone();
+        let agent_id_clone = agent_id.clone();
+        let team_dir_clone = self.team_dir.clone();
+        let team_name_clone = self.team_name.clone();
+        let lead_sid_clone = self.lead_session_id.clone();
+        let event_bus_clone = self.event_bus.clone();
         tokio::spawn(async move {
-            if let Err(e) = proc
-                .process_message(&child_sid_clone, &prompt_owned, &agent_clone, cancel_clone)
-                .await
-            {
-                warn!(child_session = %child_sid_clone, error = %e, "Teammate agent loop error");
+            // Retry with linear backoff for transient API errors (e.g. rate limits).
+            const MAX_RETRIES: u32 = 3;
+            let mut last_error = String::new();
+            for attempt in 0..=MAX_RETRIES {
+                if attempt > 0 {
+                    let backoff = std::time::Duration::from_millis(500 * attempt as u64);
+                    tracing::info!(
+                        team = %team_name_clone,
+                        agent_id = %agent_id_clone,
+                        attempt,
+                        backoff_ms = backoff.as_millis() as u64,
+                        "Retrying teammate agent loop after transient failure"
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+
+                match proc
+                    .process_message(&child_sid_clone, &prompt_owned, &agent_clone, cancel_clone.clone())
+                    .await
+                {
+                    Ok(_msg) => {
+                        // Teammate finished its initial prompt — mark as Idle.
+                        tracing::info!(
+                            team = %team_name_clone,
+                            agent_id = %agent_id_clone,
+                            "Teammate finished initial prompt; marking idle"
+                        );
+                        if let Ok(mut store) = TeamStore::load(&team_dir_clone) {
+                            if let Some(m) = store.config.member_by_id_mut(&agent_id_clone) {
+                                m.status = crate::team::config::MemberStatus::Idle;
+                                m.current_task_id = None;
+                            }
+                            let _ = store.save();
+                        }
+                        event_bus_clone.publish(Event::TeammateIdle {
+                            session_id: lead_sid_clone,
+                            team_name: team_name_clone,
+                            agent_id: agent_id_clone,
+                        });
+                        return; // success — exit the retry loop
+                    }
+                    Err(e) => {
+                        last_error = format!("{}", e);
+                        warn!(
+                            child_session = %child_sid_clone,
+                            error = %last_error,
+                            attempt,
+                            max_retries = MAX_RETRIES,
+                            "Teammate agent loop error"
+                        );
+
+                        // Don't retry permanent errors (4xx except 429 Too Many Requests).
+                        if is_permanent_api_error(&last_error) {
+                            tracing::error!(
+                                team = %team_name_clone,
+                                agent_id = %agent_id_clone,
+                                "Permanent API error — skipping remaining retries"
+                            );
+                            break;
+                        }
+                    }
+                }
             }
+
+            // All retries exhausted or permanent error — persist failure.
+            tracing::error!(
+                team = %team_name_clone,
+                agent_id = %agent_id_clone,
+                "Teammate agent loop failed after {} retries",
+                MAX_RETRIES
+            );
+            match TeamStore::load(&team_dir_clone) {
+                Ok(mut store) => {
+                    if let Some(m) = store.config.member_by_id_mut(&agent_id_clone) {
+                        m.status = crate::team::config::MemberStatus::Failed;
+                        m.last_spawn_error = Some(last_error.clone());
+                    }
+                    if let Err(se) = store.save() {
+                        warn!(error = %se, "Failed to save team config after spawn error");
+                    }
+                }
+                Err(se) => warn!(error = %se, "Failed to load team store to persist spawn error"),
+            }
+            event_bus_clone.publish(Event::TeammateFailed {
+                session_id: lead_sid_clone,
+                team_name: team_name_clone,
+                agent_id: agent_id_clone,
+                error: last_error,
+            });
         });
 
         // Start mailbox polling loop.
-        self.start_poll_loop(agent_id.clone(), poll_cancel);
+        self.start_poll_loop(agent_id.clone(), poll_cancel, notify);
 
         // Publish TeammateSpawned event.
         self.event_bus.publish(Event::TeammateSpawned {
@@ -320,7 +679,11 @@ impl TeamManager {
 
     /// Start a tokio background task that polls `agent_id`'s mailbox and
     /// publishes events when new messages arrive.
-    fn start_poll_loop(&self, agent_id: String, cancel: Arc<AtomicBool>) {
+    ///
+    /// Uses `tokio::select!` to wake on either:
+    /// - `notify.notified()` — instant push from [`Mailbox::push`], or
+    /// - `sleep(poll_interval)` — fallback for external writers.
+    fn start_poll_loop(&self, agent_id: String, cancel: Arc<AtomicBool>, notify: Arc<Notify>) {
         let team_dir = self.team_dir.clone();
         let team_name = self.team_name.clone();
         let lead_session_id = self.lead_session_id.clone();
@@ -332,7 +695,13 @@ impl TeamManager {
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
-                tokio::time::sleep(interval).await;
+
+                // Wait for a push notification or the fallback interval.
+                tokio::select! {
+                    _ = notify.notified() => {}
+                    _ = tokio::time::sleep(interval) => {}
+                }
+
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
@@ -379,8 +748,13 @@ impl TeamManager {
         if let Some(handle) = handles.get(agent_id) {
             handle.cancel.store(true, Ordering::Relaxed);
             handle.poll_cancel.store(true, Ordering::Relaxed);
+            // Wake the poll loop so it sees the cancel flag immediately.
+            handle.notify.notify_one();
         }
         drop(handles);
+
+        // Deregister the notifier now that this agent is shutting down.
+        deregister_notifier(&self.team_dir, agent_id);
 
         // Push shutdown_request to mailbox (in case the agent loop has not
         // yet terminated and checks its mailbox).
@@ -448,22 +822,60 @@ mod tests {
     use crate::agent::{AgentInfo, ModelRef};
 
     #[test]
-    fn test_apply_teammate_model_override_uses_active_model() {
+    fn test_teammate_model_takes_priority_over_lead() {
         let mut agent = AgentInfo::new("explore", "test");
         agent.model = Some(ModelRef {
             provider_id: "anthropic".to_string(),
             model_id: "claude-3-5-haiku-latest".to_string(),
         });
 
-        let active = ModelRef {
+        let teammate = ModelRef {
+            provider_id: "openai".to_string(),
+            model_id: "gpt-4o".to_string(),
+        };
+        let lead = ModelRef {
             provider_id: "copilot".to_string(),
             model_id: "claude-sonnet-4.6".to_string(),
         };
-        apply_teammate_model_override(&mut agent, Some(&active));
+        apply_teammate_model_override(&mut agent, Some(&teammate), Some(&lead));
+
+        let model = agent.model.expect("model set");
+        assert_eq!(model.provider_id, "openai");
+        assert_eq!(model.model_id, "gpt-4o");
+    }
+
+    #[test]
+    fn test_lead_model_used_when_no_teammate_model() {
+        let mut agent = AgentInfo::new("explore", "test");
+        agent.model = Some(ModelRef {
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-3-5-haiku-latest".to_string(),
+        });
+
+        let lead = ModelRef {
+            provider_id: "copilot".to_string(),
+            model_id: "claude-sonnet-4.6".to_string(),
+        };
+        apply_teammate_model_override(&mut agent, None, Some(&lead));
 
         let model = agent.model.expect("model set");
         assert_eq!(model.provider_id, "copilot");
         assert_eq!(model.model_id, "claude-sonnet-4.6");
+    }
+
+    #[test]
+    fn test_agent_default_preserved_when_no_overrides() {
+        let mut agent = AgentInfo::new("explore", "test");
+        agent.model = Some(ModelRef {
+            provider_id: "anthropic".to_string(),
+            model_id: "claude-3-5-haiku-latest".to_string(),
+        });
+
+        apply_teammate_model_override(&mut agent, None, None);
+
+        let model = agent.model.expect("model set");
+        assert_eq!(model.provider_id, "anthropic");
+        assert_eq!(model.model_id, "claude-3-5-haiku-latest");
     }
 }
 
@@ -477,14 +889,16 @@ impl TeamManagerInterface for TeamManager {
         teammate_name: &str,
         agent_type: &str,
         prompt: &str,
-        active_model: Option<&crate::agent::ModelRef>,
+        teammate_model: Option<&crate::agent::ModelRef>,
+        lead_model: Option<&crate::agent::ModelRef>,
         working_dir: &Path,
     ) -> Result<String> {
         self.spawn_teammate_internal(
             teammate_name,
             agent_type,
             prompt,
-            active_model,
+            teammate_model,
+            lead_model,
             working_dir,
         )
             .await
@@ -509,6 +923,15 @@ fn publish_message_event(
                 session_id: lead_session_id.to_string(),
                 team_name: team_name.to_string(),
                 agent_id: msg.from.clone(),
+            });
+        }
+        _ if msg.from != "lead" && msg.to != "lead" => {
+            event_bus.publish(Event::TeammateP2PMessage {
+                session_id: lead_session_id.to_string(),
+                team_name: team_name.to_string(),
+                from: msg.from.clone(),
+                to: msg.to.clone(),
+                preview,
             });
         }
         _ => {

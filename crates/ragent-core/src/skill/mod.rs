@@ -125,6 +125,11 @@ pub struct SkillInfo {
     /// Arbitrary key-value metadata (Anthropic Agent Skills spec).
     #[serde(default)]
     pub metadata: HashMap<String, String>,
+    /// Whether this skill allows `!`command`` dynamic context injection.
+    /// Defaults to `false` — skills must opt in explicitly via
+    /// `allow_dynamic_context: true` in the YAML frontmatter.
+    #[serde(default)]
+    pub allow_dynamic_context: bool,
     /// Absolute path to the `SKILL.md` file this skill was loaded from.
     #[serde(skip)]
     pub source_path: PathBuf,
@@ -175,6 +180,7 @@ impl SkillInfo {
             license: None,
             compatibility: None,
             metadata: HashMap::new(),
+            allow_dynamic_context: false,
             source_path: PathBuf::new(),
             skill_dir: PathBuf::new(),
             scope: SkillScope::Project,

@@ -1,0 +1,51 @@
+# cargo-deny configuration for ragent.
+# See https://embarkstudios.github.io/cargo-deny/ for full documentation.
+
+[advisories]
+# Fail CI on any known vulnerability.
+vulnerability = "deny"
+# Warn on unmaintained crates but don't block.
+unmaintained = "warn"
+# Warn on crates yanked from crates.io.
+yanked = "warn"
+# Allow advisories to be ignored temporarily with an expiry note.
+ignore = []
+
+[licenses]
+# Only allow these license families.
+unlicensed = "deny"
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "OpenSSL",
+    "MPL-2.0",
+]
+# Some crates use dual MIT/Apache-2.0 licensing.
+copyleft = "warn"
+
+# ring uses a custom ISC-style license.
+[[licenses.clarify]]
+name = "ring"
+expression = "ISC AND MIT AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+# Warn on multiple versions of the same crate (common in large trees).
+multiple-versions = "warn"
+# Deny wildcard dependencies in workspace crates.
+wildcards = "deny"
+
+[sources]
+# Only allow crates from crates.io and local paths.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -510,7 +510,7 @@ async fn test_team_lifecycle_with_tools() {
 
     create
         .execute(
-            serde_json::json!({"name":"lifecycle","project_local":true}),
+            serde_json::json!({"name":"lifecycle","blueprint":"test","project_local":true}),
             &lead_ctx,
         )
         .await
@@ -599,7 +599,7 @@ async fn test_team_create_without_name_auto_generates_name() {
     let lead_ctx = make_tool_ctx(project.clone(), "lead-001", None);
 
     let out = create
-        .execute(serde_json::json!({"project_local": true}), &lead_ctx)
+        .execute(serde_json::json!({"blueprint": "test", "project_local": true}), &lead_ctx)
         .await
         .unwrap();
     let meta = out.metadata.expect("metadata");
@@ -609,8 +609,8 @@ async fn test_team_create_without_name_auto_generates_name() {
         .expect("team_name")
         .to_string();
     assert!(
-        team_name.starts_with("team-"),
-        "expected auto-generated team name, got: {team_name}"
+        team_name.starts_with("test-"),
+        "expected auto-generated team name starting with blueprint prefix, got: {team_name}"
     );
     assert_eq!(meta.get("auto_named").and_then(|v: &serde_json::Value| v.as_bool()), Some(true));
 
@@ -631,21 +631,19 @@ async fn test_team_create_existing_team_returns_error() {
     let create = registry.get("team_create").unwrap();
     let lead_ctx = make_tool_ctx(project.clone(), "lead-002", None);
 
-    let err = create
+    // team_create gracefully recovers when the team already exists (loads
+    // the existing store and re-applies the blueprint).
+    let out = create
         .execute(
-            serde_json::json!({"name":"existing-team","project_local": true}),
+            serde_json::json!({"name":"existing-team","blueprint":"test","project_local": true}),
             &lead_ctx,
         )
         .await
-        .expect_err("should fail when team already exists");
-    let err_text = err.to_string();
-    assert!(
-        err_text.contains("already exists"),
-        "error should mention existing team: {err_text}"
-    );
-    assert!(
-        err_text.contains("/team show"),
-        "error should direct user to list existing teams: {err_text}"
+        .expect("team_create should succeed on existing team");
+    let meta = out.metadata.expect("metadata");
+    assert_eq!(
+        meta.get("team_name").and_then(|v: &serde_json::Value| v.as_str()),
+        Some("existing-team")
     );
 }
 
@@ -662,7 +660,7 @@ async fn test_team_create_recovers_when_existing_dir_missing_config() {
 
     let out = create
         .execute(
-            serde_json::json!({"name":"tui-review","project_local": true}),
+            serde_json::json!({"name":"tui-review","blueprint":"test","project_local": true}),
             &lead_ctx,
         )
         .await
@@ -687,7 +685,7 @@ async fn test_hook_exit_2_feedback_blocks_idle() {
     )
     .unwrap();
 
-    let outcome = run_hook("bash", &[script.to_string_lossy().to_string()]).await;
+    let outcome = run_hook("bash", &[script.to_string_lossy().to_string()], None).await;
     match outcome {
         HookOutcome::Feedback(msg) => {
             assert!(msg.contains("idle blocked"), "unexpected feedback: {msg}");

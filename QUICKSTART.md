@@ -807,7 +807,8 @@ Type `/` in the input to open an autocomplete menu:
 | `/provider_reset` | Reset provider credentials |
 | `/quit` | Exit ragent |
 | `/system <prompt>` | Override system prompt |
-| `/tools` | List built-in and MCP tools |
+| `/opt help` | Show prompt optimization method table |
+| `/opt <method> <prompt>` | Optimize prompt with named method |
 
 ### Key Bindings
 

@@ -14,9 +14,6 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 use tracing::{debug, warn};
 
-/// Maximum number of tools that can execute in parallel
-const MAX_PARALLEL_TOOLS: usize = 5;
-
 use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
@@ -56,6 +53,19 @@ pub struct SessionProcessor {
 }
 
 impl SessionProcessor {
+    /// Run a blocking storage operation on a dedicated thread to avoid
+    /// stalling the Tokio runtime.
+    async fn storage_op<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(&crate::storage::Storage) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let storage = self.session_manager.storage().clone();
+        tokio::task::spawn_blocking(move || f(&storage))
+            .await
+            .map_err(|e| anyhow::anyhow!("storage task panicked: {e}"))?
+    }
+
     /// Processes a user message within an agent session.
     ///
     /// Persists the user message, then enters an agentic loop that streams
@@ -119,8 +129,11 @@ impl SessionProcessor {
         agent: &AgentInfo,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
-        // 1. Store user message
-        self.session_manager.storage().create_message(&user_msg)?;
+        // 1. Store user message (off async thread)
+        {
+            let msg = user_msg.clone();
+            self.storage_op(move |s| s.create_message(&msg)).await?;
+        }
 
         self.event_bus.publish(Event::MessageStart {
             session_id: session_id.to_string(),
@@ -160,7 +173,7 @@ impl SessionProcessor {
         };
 
         // Try to get API key from environment or storage
-        let api_key = match self.resolve_api_key(&model_ref.provider_id) {
+        let api_key = match self.resolve_api_key(&model_ref.provider_id).await {
             Ok(k) => k,
             Err(e) => {
                 let err = e.to_string();
@@ -172,28 +185,28 @@ impl SessionProcessor {
         // For Copilot, pass the stored plan-specific API base URL
         let base_url = match model_ref.provider_id.as_str() {
             "copilot" => self
-                .session_manager
-                .storage()
-                .get_setting("copilot_api_base")
+                .storage_op(|s| Ok(s.get_setting("copilot_api_base").ok().flatten()))
+                .await
                 .ok()
                 .flatten(),
             "generic_openai" => {
                 let cfg = crate::config::Config::load().ok();
-                self.session_manager
-                    .storage()
-                    .get_setting("generic_openai_api_base")
-                    .ok()
-                    .flatten()
-                    .filter(|s| !s.trim().is_empty())
-                    .or_else(|| {
-                        cfg.and_then(|c| c.provider.get("generic_openai").cloned())
-                            .and_then(|p| p.api.and_then(|a| a.base_url))
-                    })
-                    .or_else(|| {
-                        std::env::var("GENERIC_OPENAI_API_BASE")
-                            .ok()
-                            .filter(|s| !s.trim().is_empty())
-                    })
+                self.storage_op(|s| {
+                    Ok(s.get_setting("generic_openai_api_base").ok().flatten())
+                })
+                .await
+                .ok()
+                .flatten()
+                .filter(|s: &String| !s.trim().is_empty())
+                .or_else(|| {
+                    cfg.and_then(|c| c.provider.get("generic_openai").cloned())
+                        .and_then(|p| p.api.and_then(|a| a.base_url))
+                })
+                .or_else(|| {
+                    std::env::var("GENERIC_OPENAI_API_BASE")
+                        .ok()
+                        .filter(|s| !s.trim().is_empty())
+                })
             }
             _ => None,
         };
@@ -201,7 +214,7 @@ impl SessionProcessor {
         tracing::info!(
             provider = %model_ref.provider_id,
             model = %model_ref.model_id,
-            api_base = ?base_url,
+            api_base = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
             "creating LLM client"
         );
 
@@ -246,9 +259,13 @@ impl SessionProcessor {
         // so we check for the absence of any assistant messages instead.
         // The init exchange is display-only: it streams to the TUI but is
         // NOT added to chat_messages so the actual LLM call isn't confused.
+        // Skip for subagent/teammate sessions — the guidelines are already
+        // embedded in the system prompt and the extra LLM round-trip adds
+        // significant latency to team operations.
         let has_tools = agent.max_steps.map_or(true, |s| s > 1);
         let has_prior_exchange = history.iter().any(|m| m.role == Role::Assistant);
-        if !has_prior_exchange && has_tools {
+        let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
+        if !has_prior_exchange && has_tools && !is_subagent {
             let agents_md_path = working_dir.join("AGENTS.md");
             if agents_md_path.is_file() {
                 let init_text = "AGENTS.md project guidelines have been loaded. \
@@ -320,6 +337,17 @@ impl SessionProcessor {
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut agent_switch_requested = false;
 
+        // Pre-create a placeholder assistant message so that partial progress
+        // is visible in the output view (e.g. teammate inspection) even before
+        // the agent loop finishes.  We update it incrementally after each step.
+        let assistant_msg_id = {
+            let placeholder = Message::new(session_id, Role::Assistant, vec![]);
+            self.session_manager
+                .storage()
+                .create_message(&placeholder)?;
+            placeholder.id
+        };
+
         loop {
             self.event_bus
                 .set_step(session_id, self.event_bus.current_step(session_id) + 1);
@@ -336,11 +364,12 @@ impl SessionProcessor {
             // Check if the user cancelled (e.g. pressed ESC)
             if cancel_flag.load(Ordering::Relaxed) {
                 warn!("Agent loop cancelled by user at step {}", step);
-                // Save partial progress
-                let assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
+                // Save partial progress (update the pre-created placeholder).
+                let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
+                assistant_msg.id = assistant_msg_id;
                 self.session_manager
                     .storage()
-                    .create_message(&assistant_msg)?;
+                    .update_message(&assistant_msg)?;
                 self.event_bus.publish(Event::MessageEnd {
                     session_id: session_id.to_string(),
                     message_id: assistant_msg.id.clone(),
@@ -517,18 +546,16 @@ impl SessionProcessor {
                 });
             }
 
-            // Execute tool calls in parallel (max 5 concurrent)
+            // Execute tool calls in parallel, bounded by tool semaphore
             let mut tool_result_parts: Vec<ContentPart> = Vec::new();
             
-            // Process in chunks of MAX_PARALLEL_TOOLS
-            for chunk in tool_calls.chunks(MAX_PARALLEL_TOOLS) {
-                let mut futures = Vec::new();
-                
-                for tc in chunk {
-                    let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
-                        warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
-                        json!({})
-                    });
+            let mut futures = Vec::new();
+            
+            for tc in &tool_calls {
+                let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
+                    warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
+                    json!({})
+                });
 
                     assistant_content_parts.push(ContentPart::ToolUse {
                         id: tc.id.clone(),
@@ -557,8 +584,11 @@ impl SessionProcessor {
                     let event_bus = self.event_bus.clone();
                     let session_id_str = session_id.to_string();
                     
-                    // Spawn each tool execution as a future
+                    // Spawn each tool execution as a future — the tool semaphore
+                    // inside the spawned task bounds concurrency.
                     let fut = tokio::spawn(async move {
+                        let _permit = crate::resource::acquire_tool_permit().await
+                            .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
                         let start = Instant::now();
                         
                         let result = registry
@@ -571,8 +601,23 @@ impl SessionProcessor {
                         let duration_ms = start.elapsed().as_millis() as u64;
 
                         let (output_value, error) = match &result {
-                            Ok(output) => (Some(json!(output.content)), None),
-                            Err(e) => (None, Some(e.to_string())),
+                            Ok(output) => {
+                                // Merge metadata into the output value so the
+                                // renderer can access line counts, summaries, etc.
+                                let val = match &output.metadata {
+                                    Some(meta) if meta.is_object() => {
+                                        let mut obj = meta.clone();
+                                        obj.as_object_mut().unwrap().insert(
+                                            "content".to_string(),
+                                            json!(output.content),
+                                        );
+                                        obj
+                                    }
+                                    _ => json!({ "content": output.content }),
+                                };
+                                (Some(val), None)
+                            }
+                            Err(e) => (None, Some(format!("{:#}", e))),
                         };
 
                         let status = if result.is_ok() {
@@ -638,47 +683,41 @@ impl SessionProcessor {
                     futures.push(fut);
                 }
 
-                // Wait for this chunk to complete
-                let results = futures::future::join_all(futures).await;
-                
-                // Process results in order
-                for result in results {
-                    match result {
-                        Ok((tc, input, status, output_value, error, duration_ms, result_content, tool_metadata)) => {
-                            assistant_parts.push(MessagePart::ToolCall {
-                                tool: tc.name.clone(),
-                                call_id: tc.id.clone(),
-                                state: ToolCallState {
-                                    status,
-                                    input,
-                                    output: output_value,
-                                    error,
-                                    duration_ms: Some(duration_ms),
-                                },
-                            });
+            // Wait for all tool calls to complete (concurrency bounded by semaphore)
+            let results = futures::future::join_all(futures).await;
+            
+            // Process results in order
+            for result in results {
+                match result {
+                    Ok((tc, input, status, output_value, error, duration_ms, result_content, tool_metadata)) => {
+                        assistant_parts.push(MessagePart::ToolCall {
+                            tool: tc.name.clone(),
+                            call_id: tc.id.clone(),
+                            state: ToolCallState {
+                                status,
+                                input,
+                                output: output_value,
+                                error,
+                                duration_ms: Some(duration_ms),
+                            },
+                        });
 
-                            tool_result_parts.push(ContentPart::ToolResult {
-                                tool_use_id: tc.id.clone(),
-                                content: result_content,
-                            });
+                        tool_result_parts.push(ContentPart::ToolResult {
+                            tool_use_id: tc.id.clone(),
+                            content: result_content,
+                        });
 
-                            // Check if a tool requested an agent switch or restore
-                            if let Some(meta) = tool_metadata.as_ref() {
-                                if meta.get("agent_switch").is_some() || meta.get("agent_restore").is_some() {
-                                    agent_switch_requested = true;
-                                    break;
-                                }
+                        // Check if a tool requested an agent switch or restore
+                        if let Some(meta) = tool_metadata.as_ref() {
+                            if meta.get("agent_switch").is_some() || meta.get("agent_restore").is_some() {
+                                agent_switch_requested = true;
+                                break;
                             }
-                        },
-                        Err(e) => {
-                            warn!(error = %e, "Tool execution task panicked");
                         }
+                    },
+                    Err(e) => {
+                        warn!(error = %e, "Tool execution task panicked");
                     }
-                }
-                
-                // If agent switch was requested, stop processing further chunks
-                if agent_switch_requested {
-                    break;
                 }
             }
 
@@ -729,13 +768,25 @@ impl SessionProcessor {
                     });
                 }
             }
+
+            // Persist intermediate progress so that output inspectors (e.g.
+            // the teammate output overlay) can show steps while the agent is
+            // still running.  Fire-and-forget on a blocking thread.
+            {
+                let mut interim =
+                    Message::new(session_id, Role::Assistant, assistant_parts.clone());
+                interim.id = assistant_msg_id.clone();
+                let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+            }
         }
 
-        // 6. Store assistant message
-        let assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
-        self.session_manager
-            .storage()
-            .create_message(&assistant_msg)?;
+        // 6. Final save of assistant message (update the pre-created placeholder).
+        let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
+        assistant_msg.id = assistant_msg_id;
+        {
+            let msg = assistant_msg.clone();
+            self.storage_op(move |s| s.update_message(&msg)).await?;
+        }
 
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),
@@ -746,7 +797,7 @@ impl SessionProcessor {
         Ok(assistant_msg)
     }
 
-    fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
+    async fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
         // Ollama does not require an API key for local servers
         if provider_id == "ollama" {
             return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
@@ -756,7 +807,10 @@ impl SessionProcessor {
         // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
             // DB first — device flow tokens stored here work for copilot_internal/v2/token
-            if let Ok(Some(key)) = self.session_manager.storage().get_provider_auth("copilot") {
+            if let Ok(Some(key)) = self
+                .storage_op(|s| s.get_provider_auth("copilot"))
+                .await
+            {
                 if !key.is_empty() {
                     return Ok(key);
                 }
@@ -765,6 +819,7 @@ impl SessionProcessor {
             if let Some(token) =
                 crate::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
             {
+                crate::sanitize::register_secret(&token);
                 return Ok(token);
             }
             bail!(
@@ -790,13 +845,12 @@ impl SessionProcessor {
         }
 
         // Check the database for a stored API key
-        if let Ok(Some(key)) = self
-            .session_manager
-            .storage()
-            .get_provider_auth(provider_id)
         {
-            if !key.is_empty() {
-                return Ok(key);
+            let pid = provider_id.to_string();
+            if let Ok(Some(key)) = self.storage_op(move |s| s.get_provider_auth(&pid)).await {
+                if !key.is_empty() {
+                    return Ok(key);
+                }
             }
         }
 

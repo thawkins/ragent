@@ -18,7 +18,38 @@ pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
-const DENIED_PATTERNS: &[&str] = &["rm -rf /", "mkfs", "dd if=", ":(){ :|:&};:", "> /dev/sd"];
+const DENIED_PATTERNS: &[&str] = &[
+    // Destructive filesystem operations
+    "rm -rf /",
+    "rm -r -f /",
+    "rm -fr /",
+    "rm -Rf /",
+    "rmdir /",
+    // Disk / partition destruction
+    "mkfs",
+    "dd if=",
+    "wipefs",
+    "shred /dev",
+    // Device writes
+    "> /dev/sd",
+    "> /dev/nvme",
+    "> /dev/vd",
+    // Fork bomb
+    ":(){ :|:&};:",
+    // Privilege escalation
+    "chmod -R 777 /",
+    "chown -R",
+    // Network exfiltration of sensitive files
+    "curl.*etc/shadow",
+    "wget.*etc/shadow",
+    // History / credential file theft
+    ".bash_history",
+    ".ssh/id_",
+    // Kernel modifications
+    "insmod",
+    "modprobe -r",
+    "sysctl -w",
+];
 
 #[async_trait::async_trait]
 impl Tool for BashTool {
@@ -66,15 +97,31 @@ impl Tool for BashTool {
             .context("Missing required 'command' parameter")?;
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
-        tracing::info!(command = %command, working_dir = %ctx.working_dir.display(), "Executing bash command");
+        tracing::info!(
+            command = %crate::sanitize::redact_secrets(command),
+            working_dir = %ctx.working_dir.display(),
+            "Executing bash command"
+        );
 
         for pattern in DENIED_PATTERNS {
             if command.contains(pattern) {
-                bail!(
-                    "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
-                );
+                if crate::yolo::is_enabled() {
+                    tracing::warn!(pattern, "YOLO mode: allowing denied pattern");
+                } else {
+                    bail!(
+                        "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
+                    );
+                }
             }
         }
+
+        // Reject commands that use encoding/eval tricks to bypass the denylist.
+        if !crate::yolo::is_enabled() {
+            validate_no_obfuscation(command)?;
+        }
+
+        // Acquire a process-spawn permit to bound concurrency.
+        let _permit = crate::resource::acquire_process_permit().await?;
 
         let start = Instant::now();
 
@@ -142,4 +189,32 @@ impl Tool for BashTool {
             }),
         }
     }
+}
+
+/// Rejects commands that attempt to bypass the denylist via encoding,
+/// eval, or dynamic variable expansion tricks.
+fn validate_no_obfuscation(command: &str) -> Result<()> {
+    // base64 decode piped into shell
+    if command.contains("base64") && (command.contains("| bash") || command.contains("| sh")) {
+        bail!("Command rejected: base64-decode-to-shell pattern detected.");
+    }
+
+    // Python/perl one-liners executing encoded payloads
+    if (command.contains("python") || command.contains("perl"))
+        && (command.contains("exec(") || command.contains("eval("))
+    {
+        bail!("Command rejected: dynamic eval/exec in scripting language.");
+    }
+
+    // $'\xNN' hex escape sequences used to build commands
+    if command.contains("$'\\x") {
+        bail!("Command rejected: hex escape sequence obfuscation detected.");
+    }
+
+    // Prevent `eval` with variable expansion that could hide intent
+    if command.contains("eval ") && command.contains("$(") {
+        bail!("Command rejected: eval with command substitution detected.");
+    }
+
+    Ok(())
 }

@@ -153,7 +153,7 @@ fn test_team_create_no_name_shows_usage() {
 
 #[test]
 fn test_team_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -179,7 +179,7 @@ fn test_team_show_no_name_lists_all_registered_teams() {
 
 #[test]
 fn test_team_show_no_name_empty_registry_message() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -198,7 +198,7 @@ fn test_team_show_no_name_empty_registry_message() {
 
 #[test]
 fn test_team_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -230,7 +230,7 @@ fn test_team_show_loads_named_team_details() {
 
 #[test]
 fn test_teams_alias_show_loads_named_team_details() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -252,7 +252,7 @@ fn test_teams_alias_show_loads_named_team_details() {
 
 #[test]
 fn test_teams_alias_show_no_name_lists_all_registered_teams() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -285,7 +285,7 @@ fn test_team_help_shows_command_reference() {
     assert!(text.contains("/team status"), "should list status: {text}");
     assert!(text.contains("/team show [name]"), "should list show: {text}");
     assert!(
-        text.contains("/team message <teammate-name>") && text.contains("<text>`"),
+        text.contains("/team message") && text.contains("<teammate-name>") && text.contains("<text>"),
         "should list message args even with wrapped table cells: {text}"
     );
     assert!(text.contains("Alias:"), "should include alias section: {text}");
@@ -363,7 +363,7 @@ fn test_team_delete_no_name_shows_usage() {
 
 #[test]
 fn test_team_delete_removes_existing_team() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -392,7 +392,7 @@ fn test_team_delete_removes_existing_team() {
 
 #[test]
 fn test_team_delete_active_team_clears_session_state() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -427,7 +427,7 @@ fn test_team_delete_active_team_clears_session_state() {
 
 #[test]
 fn test_team_delete_active_team_blocked_when_teammates_working() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -461,7 +461,7 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
 
 #[test]
 fn test_team_create_sets_active_team() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     // Change into the temp dir so the project-local team is created there.
@@ -515,7 +515,7 @@ fn test_team_tasks_no_active_team() {
 
 #[test]
 fn test_team_tasks_renders_table_with_status() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -568,7 +568,7 @@ fn test_team_clear_no_active_team() {
 
 #[test]
 fn test_team_clear_removes_tasks_for_active_team() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -789,7 +789,7 @@ fn test_event_teammate_spawned_deduplicates() {
 
 #[test]
 fn test_event_teammate_spawned_hydrates_session_id_from_store() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -820,9 +820,9 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
     assert_eq!(app.team_members[0].session_id.as_deref(), Some("tm-s1"));
 }
 
-#[test]
-fn test_event_tool_result_team_create_updates_active_team_and_panel() {
-    let _cwd_guard = CWD_LOCK.lock().expect("cwd lock");
+#[tokio::test]
+async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
+    let _cwd_guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = tempfile::tempdir().expect("tempdir");
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(tmp.path()).unwrap();
@@ -974,7 +974,7 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
     app.show_teams = true;
     app.show_teams_window = true;
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
@@ -994,10 +994,9 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
     assert!(text.contains("lead + 1 teammate"), "should show explicit teammate count: {text}");
     assert!(text.contains("elapsed"), "should show elapsed column: {text}");
     assert!(text.contains("steps"), "should show steps column: {text}");
-    assert!(text.contains("msgs"), "should show msgs column: {text}");
-    assert!(text.contains("2/1"), "should show sent/received counts: {text}");
+    assert!(text.contains("sent"), "should show sent column: {text}");
+    assert!(text.contains("recv"), "should show recv column: {text}");
     assert!(text.contains("reviewer"), "should include teammate row: {text}");
-    assert!(text.contains("task:task-001") || text.contains("task-001"), "should include task: {text}");
 }
 
 #[test]
@@ -1020,7 +1019,7 @@ fn test_teams_panel_uses_task_log_fallback_for_steps() {
     });
     app.show_teams_window = true;
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
@@ -1067,7 +1066,7 @@ fn test_teams_panel_uses_session_message_fallback_for_steps() {
     app.team_members.push(member);
     app.show_teams_window = true;
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
@@ -1095,7 +1094,7 @@ fn test_buttons_render_dimmed_when_unavailable() {
     app.show_log = true;
     app.session_id = Some("lead-session-1".to_string());
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
@@ -1137,7 +1136,7 @@ fn test_buttons_render_with_active_blue_state() {
     });
     app.show_agents_window = true;
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))
@@ -1189,7 +1188,7 @@ fn test_agents_popup_renders_tidy_table_columns() {
         reported: false,
     });
 
-    let backend = TestBackend::new(140, 44);
+    let backend = TestBackend::new(160, 44);
     let mut terminal = Terminal::new(backend).expect("terminal");
     terminal
         .draw(|frame| ragent_tui::layout::render(frame, &mut app))

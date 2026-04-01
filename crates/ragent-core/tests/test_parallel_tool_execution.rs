@@ -158,8 +158,6 @@ async fn test_sequential_execution_with_agent_switch() {
 
 #[test]
 fn test_max_parallel_tools_constant() {
-    // Verify the constant is set correctly
-    // This is a compile-time check that the constant exists
-    const MAX_PARALLEL_TOOLS: usize = 5;
-    assert_eq!(MAX_PARALLEL_TOOLS, 5);
+    // Verify the concurrency limit matches expectation
+    assert_eq!(ragent_core::resource::MAX_CONCURRENT_TOOLS, 5);
 }

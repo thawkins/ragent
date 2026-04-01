@@ -43,11 +43,14 @@ async fn test_team_create_applies_blueprint_readme_tasks_and_spawn() {
         { "title": "Seed Task", "description": "from blueprint" },
         { "tool": "team_task_create", "args": { "title": "Tool Created", "description": "via tool" } }
     ]);
-    std::fs::write(bp_dir.join("task_seed.json"), serde_json::to_string(&seed).unwrap()).unwrap();
+    std::fs::write(bp_dir.join("task-seed.json"), serde_json::to_string(&seed).unwrap()).unwrap();
 
-    // spawn-prompts.md with two prompts
-    let prompts = "You are a helper agent that greets.\n\nYou are a helper agent that lists files.";
-    std::fs::write(bp_dir.join("spawn-prompts.md"), prompts).unwrap();
+    // spawn-prompts.json with two entries invoking team_spawn
+    let spawn_entries = serde_json::json!([
+        { "tool": "team_spawn", "args": { "prompt": "You are a helper agent that greets." }},
+        { "tool": "team_spawn", "args": { "prompt": "You are a helper agent that lists files." }}
+    ]);
+    std::fs::write(bp_dir.join("spawn-prompts.json"), serde_json::to_string(&spawn_entries).unwrap()).unwrap();
 
     let registry = create_default_registry();
     let create = registry.get("team_create").expect("team_create tool");

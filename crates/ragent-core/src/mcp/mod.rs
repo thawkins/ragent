@@ -11,6 +11,7 @@
 pub mod discovery;
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use rmcp::ServiceExt;
@@ -20,11 +21,113 @@ use rmcp::transport::ConfigureCommandExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::process::Command;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 
 use crate::config::{McpServerConfig, McpTransport};
 
 pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
+
+// ── MCP config validation ────────────────────────────────────────────────────
+
+/// Shell metacharacters that must not appear in MCP stdio command strings.
+const SHELL_METACHARACTERS: &[char] = &['|', ';', '&', '$', '`', '(', ')', '{', '}', '<', '>'];
+
+/// Maximum number of concurrent MCP server connections.
+///
+/// Prevents resource exhaustion from spawning too many child processes.
+const MAX_CONCURRENT_MCP_CONNECTIONS: usize = 8;
+
+/// Semaphore limiting concurrent MCP process spawns.
+static MCP_SPAWN_SEMAPHORE: std::sync::LazyLock<Semaphore> =
+    std::sync::LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_MCP_CONNECTIONS));
+
+/// Validate an MCP server configuration before connecting.
+///
+/// For **stdio** transports:
+/// - The `command` field must be present and non-empty.
+/// - If the command contains a path separator, the path must exist on disk.
+/// - Shell metacharacters (`| ; & $ \` ( ) { } < >`) are rejected to prevent
+///   command injection.
+/// - Arguments are checked for shell metacharacters as well.
+///
+/// For **HTTP/SSE** transports:
+/// - The `url` field must be present and begin with `http://` or `https://`.
+///
+/// # Errors
+///
+/// Returns a descriptive error if validation fails.
+pub fn validate_mcp_config(id: &str, config: &McpServerConfig) -> anyhow::Result<()> {
+    if crate::yolo::is_enabled() {
+        tracing::warn!(id, "YOLO mode: skipping MCP config validation");
+        return Ok(());
+    }
+    match config.type_ {
+        McpTransport::Stdio => {
+            let command_str = config.command.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("[{id}] stdio transport requires a 'command' field")
+            })?;
+
+            let trimmed = command_str.trim();
+            if trimmed.is_empty() {
+                anyhow::bail!("[{id}] stdio command must not be empty");
+            }
+
+            // Reject shell metacharacters in the command itself.
+            if let Some(ch) = trimmed.chars().find(|c| SHELL_METACHARACTERS.contains(c)) {
+                anyhow::bail!(
+                    "[{id}] stdio command contains disallowed shell metacharacter '{ch}'"
+                );
+            }
+
+            // If the command looks like a path, verify it exists.
+            if trimmed.contains('/') || trimmed.contains('\\') {
+                let path = Path::new(trimmed);
+                if !path.exists() {
+                    anyhow::bail!(
+                        "[{id}] stdio command path '{}' does not exist",
+                        path.display()
+                    );
+                }
+            }
+
+            // Validate arguments don't contain shell metacharacters.
+            for (i, arg) in config.args.iter().enumerate() {
+                if let Some(ch) = arg.chars().find(|c| SHELL_METACHARACTERS.contains(c)) {
+                    anyhow::bail!(
+                        "[{id}] stdio argument {i} contains disallowed shell metacharacter '{ch}'"
+                    );
+                }
+            }
+
+            tracing::info!(
+                server_id = id,
+                command = %crate::sanitize::redact_secrets(command_str),
+                "MCP stdio config validated"
+            );
+        }
+        McpTransport::Http | McpTransport::Sse => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("[{id}] HTTP/SSE transport requires a 'url' field")
+            })?;
+
+            let trimmed = url.trim();
+            if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+                anyhow::bail!(
+                    "[{id}] HTTP/SSE url must start with http:// or https://, got: '{}'",
+                    &trimmed[..trimmed.len().min(60)]
+                );
+            }
+
+            tracing::info!(
+                server_id = id,
+                url = %crate::sanitize::redact_secrets(url),
+                "MCP HTTP/SSE config validated"
+            );
+        }
+    }
+
+    Ok(())
+}
 
 /// Connection status of an MCP server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,6 +249,14 @@ impl McpClient {
             return Ok(());
         }
 
+        // Validate config before attempting connection.
+        validate_mcp_config(id, &config)?;
+
+        // Acquire a spawn permit to limit concurrent MCP connections.
+        let _permit = MCP_SPAWN_SEMAPHORE.acquire().await.map_err(|_| {
+            anyhow::anyhow!("MCP spawn semaphore closed")
+        })?;
+
         match self.connect_inner(id, &config).await {
             Ok((service, tools)) => {
                 let tool_defs: Vec<McpToolDef> = tools
@@ -236,7 +347,7 @@ impl McpClient {
 
                     tracing::info!(
                         server_id = id,
-                        command = command_str,
+                        command = %crate::sanitize::redact_secrets(command_str),
                         "Spawning stdio MCP server"
                     );
                     ().serve(transport).await?
@@ -248,7 +359,7 @@ impl McpClient {
 
                     let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url);
 
-                    tracing::info!(server_id = id, url, "Connecting to HTTP MCP server");
+                    tracing::info!(server_id = id, url = %crate::sanitize::redact_secrets(url), "Connecting to HTTP MCP server");
                     ().serve(transport).await?
                 }
             };

@@ -118,7 +118,7 @@ fn test_registry_has_list_tasks() {
 #[test]
 fn test_registry_total_tool_count() {
     let registry = create_default_registry();
-    assert_eq!(registry.list().len(), 52);
+    assert_eq!(registry.list().len(), 55);
 }
 
 // ── cancel_task tool ───────────────────────────────────────────

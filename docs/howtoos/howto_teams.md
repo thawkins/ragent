@@ -5,8 +5,10 @@ This guide is a practical, end-to-end manual for using the Teams capability in `
 It covers:
 
 - Team concepts and data layout
+- Blueprints — pre-built team templates
 - TUI command workflows
 - Tool-driven workflows
+- Work context delegation
 - Example operating patterns
 - Configuration and file examples
 - Troubleshooting and safe cleanup
@@ -20,6 +22,8 @@ Teams let one lead session coordinate multiple teammate agents with:
 - Shared task queue (`tasks.json`)
 - Per-member mailbox messaging
 - Persistent team configuration (`config.json`)
+- Blueprint-based team templates with auto-spawning
+- Work context propagation — teammates know exactly what code to target
 
 Use Teams when you want parallel execution (for example: API/UI/tests split, or security/perf/test review swarms) while keeping one lead in control.
 
@@ -40,6 +44,7 @@ Typical structure:
     feature-squad/
       config.json
       tasks.json
+      README.md
       mailbox/
         tm-001.ndjson
         tm-002.ndjson
@@ -49,28 +54,112 @@ Key files:
 
 - `config.json`: team metadata, members, settings, lifecycle state
 - `tasks.json`: shared task list and status
+- `README.md`: team documentation (copied from blueprint if used)
 - `mailbox/*.ndjson`: teammate/lead messages
 
 ---
 
-## 3) Quick start in the TUI
+## 3) Blueprints
 
-### Create or open a team
+Blueprints are pre-built team templates that define which teammates to spawn and what seed tasks to create. When you create a team with a blueprint, all teammates are spawned automatically with their role-specific prompts.
+
+### Blueprint storage locations
+
+Blueprints are searched in priority order:
+
+1. **Project-local:** `[PROJECT]/.ragent/blueprints/teams/<name>/`
+2. **Global:** `~/.ragent/blueprints/teams/<name>/`
+
+### Blueprint directory structure
 
 ```text
-/team create feature-squad
-/team open feature-squad
+.ragent/blueprints/teams/code-review/
+  README.md              # Team description (copied to team directory)
+  spawn-prompts.json     # Teammate definitions with role-specific prompts
+  task-seed.json         # Initial tasks seeded on team creation
 ```
 
-`/team create` only creates new teams. If `feature-squad` already exists, use `/team open feature-squad` to reuse it.
+### spawn-prompts.json format
+
+Defines teammates to auto-spawn when the team is created:
+
+```json
+[
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "security-reviewer",
+    "agent_type": "general",
+    "prompt": "Perform a focused security review of the codebase..."
+  },
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "test-reviewer",
+    "agent_type": "general",
+    "prompt": "Review test coverage and identify gaps..."
+  }
+]
+```
+
+### task-seed.json format
+
+Defines initial tasks created when the team is set up:
+
+```json
+[
+  {
+    "tool": "team_task_create",
+    "input": {
+      "title": "Audit authentication boundaries",
+      "description": "Confirm session/auth checks protect privileged actions."
+    }
+  }
+]
+```
+
+Both `"input"` and `"args"` keys are supported for tool arguments.
+
+### Browsing installed blueprints
+
+Use the `/team blueprint` slash command:
+
+```text
+/team blueprint              # List all installed blueprints
+/team blueprint code-review  # Show detailed summary of a specific blueprint
+```
+
+The list view shows a table with blueprint name, scope (project/global), teammate count, task count, and description. The detail view shows the full README, teammate table (name, type, prompt), seed tasks table (title, description), and usage instructions.
+
+---
+
+## 4) Quick start in the TUI
+
+### Create a team from a blueprint (recommended)
+
+```text
+/team create code-review
+```
+
+This creates a team using the `code-review` blueprint, auto-spawns all defined teammates with their prompts, and seeds the initial task list. The blueprint parameter is required.
+
+When the LLM calls `team_create`, it should **always pass a `context` parameter** with the user's specific request — which files/directories to review, what to produce, and where to write output. This context is prepended to every teammate's spawn prompt so they know exactly what to work on.
+
+### Wait for teammates to finish
+
+After creation, the lead should call `team_wait` to block until all teammates complete their initial work. Do **not** use `wait_tasks` for teammates — that only tracks `new_task` sub-agents.
 
 ### Inspect team state
 
 ```text
-/team
-/team status
-/team tasks
+/team                 # Same as /team status
+/team status          # Show active team with member table
+/team tasks           # Show shared task list
+/team show            # List all registered teams
+/team show myteam     # Show details for a specific team
 ```
+
+### View teammate output
+
+In the Teams panel, click the `[T]` button next to a teammate to open their output view. This shows all tool calls, results, and messages in the same rich format as the primary Messages panel — including inline diffs, result summaries, and reasoning blocks.
 
 ### Message teammates
 
@@ -89,49 +178,64 @@ Key files:
 
 ---
 
-## 4) Complete slash command reference
+## 5) Complete slash command reference
 
-Supported `/team` commands:
+| Command | Arguments | Description |
+|---|---|---|
+| `/team help` | none | Show command reference table. |
+| `/team status` | none | Show the currently active team in this session. |
+| `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
+| `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
+| `/team close` | none | Close the active team in this session (does not delete on disk). |
+| `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
+| `/team blueprint [name]` | optional `name` | List all installed blueprints, or show details of a specific blueprint. |
+| `/team message <teammate-name> <text>` | required `teammate-name`, `text` | Send a mailbox message from lead to a teammate. |
+| `/team tasks` | none | Show the task table for the active team. |
+| `/team clear` | none | Clear/remove the active team task list file. |
+| `/team cleanup` | none | Clean up the active team (requires no working teammates). |
 
-- `/team` (defaults to status)
-- `/team status`
-- `/team create <name>`
-- `/team open <name>`
-- `/team close`
-- `/team delete <name>`
-- `/team message <teammate-name> <text>`
-- `/team tasks`
-- `/team clear`
-- `/team cleanup`
-
-Behavior notes:
-
-- `/team close` clears team context for the current TUI session, but keeps files.
-- `/team clear` removes the current active team task list (`tasks.json`).
-- `/team delete <name>` removes the team directory from disk.
-- `/team tasks` renders a table with `ID`, `Title`, `Status`, `Assignee`.
+Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams blueprint`).
 
 ---
 
-## 5) Tool-based workflow (lead + teammates)
+## 6) Tool-based workflow (lead + teammates)
 
 Teams are fully operable via tools. TUI commands are convenience wrappers.
 
-### 5.1 Create team
+### 6.1 Create team with context
 
 ```json
 {
   "tool": "team_create",
   "input": {
-    "name": "feature-squad",
+    "blueprint": "code-review",
+    "context": "Review the crates/ragent-server directory for security issues, test coverage gaps, and performance problems. Write findings to crates/ragent-server/COMPLIANCE.md",
     "project_local": true
   }
 }
 ```
 
-If the team already exists, `team_create` returns an error; use `/team open <name>` for reopening.
+The `context` parameter is critical — it tells every auto-spawned teammate **exactly what code** to target. Without it, teammates only receive their generic role prompt from the blueprint.
 
-### 5.2 Spawn teammates
+If the team already exists, `team_create` gracefully recovers and re-applies the blueprint.
+
+### 6.2 Wait for teammates
+
+After `team_create` spawns all teammates, call `team_wait` immediately:
+
+```json
+{
+  "tool": "team_wait",
+  "input": {
+    "team_name": "code-review-20260329-13-10-25",
+    "timeout_secs": 300
+  }
+}
+```
+
+This blocks until all teammates become idle. **Do NOT use `wait_tasks`** — that only tracks `new_task` sub-agents, not team members.
+
+### 6.3 Spawn additional teammates (manual)
 
 ```json
 {
@@ -145,9 +249,9 @@ If the team already exists, `team_create` returns an error; use `/team open <nam
 }
 ```
 
-Repeat for additional teammates (for example `ui-builder`, `test-owner`).
+Note: When using blueprints, teammates are spawned automatically — do NOT re-spawn them manually.
 
-### 5.3 Create tasks
+### 6.4 Create tasks
 
 ```json
 {
@@ -161,24 +265,120 @@ Repeat for additional teammates (for example `ui-builder`, `test-owner`).
 }
 ```
 
-### 5.4 Claim and complete tasks (teammate sessions)
+### 6.5 Claim and complete tasks (teammate sessions)
 
 - Claim next available task: `team_task_claim`
 - Complete claimed task: `team_task_complete`
 
-### 5.5 Check status and communicate
+### 6.6 Check status and communicate
 
-- `team_status`
-- `team_task_list`
-- `team_message`
-- `team_read_messages`
-- `team_broadcast`
+- `team_status` — Full team report with member states and task summary
+- `team_task_list` — List all tasks with status
+- `team_message` — Send direct message to a teammate
+- `team_read_messages` — Read inbox messages
+- `team_broadcast` — Send message to all teammates
 
 ---
 
-## 6) Example operation playbooks
+## 7) Work context delegation
 
-## 6.1 Parallel feature delivery (API/UI/Tests)
+When a team is created and assigned work, the specific details about what code needs to be addressed must flow through to every teammate. This is handled by the `context` parameter on `team_create`.
+
+### How context flows
+
+1. User asks: *"Review the crates/ragent-server directory for security issues"*
+2. Lead calls `team_create` with `context: "Review the crates/ragent-server directory..."`
+3. Each teammate's spawn prompt from the blueprint gets the context prepended:
+
+```text
+## Work Context
+Review the crates/ragent-server directory for security issues, test coverage,
+and performance problems. Write findings to COMPLIANCE.md.
+
+## Your Role
+Perform a focused security review of the assigned code...
+```
+
+4. Teammates immediately know which files to read and what to produce.
+
+### Best practices for context
+
+- Include **specific directories/files** to target
+- Specify **output format** (e.g., "write to COMPLIANCE.md")
+- Mention **what to look for** (security, performance, tests)
+- Keep it concise but complete — this is the teammates' primary instruction
+
+---
+
+## 8) Team panel (TUI)
+
+The Teams panel displays the active team in a table format:
+
+```text
+Team: code-review-20260329-13-10-25  (lead + 3 teammates)
+  id         name                                status      elapsed  steps  claimed  done
+  b729b590   general                             active      6m41s    14     -        -
+  tm-001     security-reviewer                   idle        6m27s    22     0        0    [T]
+  tm-002     test-reviewer                       idle        6m27s    25     0        0    [T]
+  tm-003     performance-reviewer                idle        6m27s    7      0        0    [T]
+```
+
+Columns:
+
+- **id**: Short agent ID (last 8 chars of session UUID for lead, tm-NNN for teammates)
+- **name**: Teammate name (35 chars max) or agent type for lead
+- **status**: `active`, `working`, `idle`, `failed`, `spawning`
+- **elapsed**: Time since teammate was created
+- **steps**: Number of tool calls executed
+- **claimed**: Number of tasks claimed from the shared task list
+- **done**: Number of tasks completed
+- **[T]**: Click to open teammate's output view
+
+### Teammate output view
+
+Clicking `[T]` opens a scrollable overlay showing the teammate's full execution history — all tool calls, read results, write operations, and assistant messages. The output uses the same rich format as the primary Messages panel:
+
+- Colored status dots (green = success, red = error)
+- Inline diff stats for edit/patch operations
+- Line counts for read/write operations
+- File tree rendering for list operations
+
+The output view updates incrementally during execution — you can watch a teammate's progress in real-time without waiting for completion.
+
+---
+
+## 9) Example operation playbooks
+
+### 9.1 Blueprint-based code review (recommended)
+
+1. Browse available blueprints:
+
+```text
+/team blueprint
+```
+
+2. Inspect the code-review blueprint:
+
+```text
+/team blueprint code-review
+```
+
+3. Ask ragent to create and run the team:
+
+```text
+Create a code-review team and have it review the crates/ragent-server directory
+for security issues, test gaps, and performance problems. Write the output to
+COMPLIANCE.md in the crates/ragent-server folder.
+```
+
+The LLM will:
+- Call `team_create` with `blueprint="code-review"` and `context="Review the crates/ragent-server directory..."`
+- All 3 teammates auto-spawn with the context prepended to their prompts
+- Call `team_wait` to block until all teammates finish
+- Call `team_status` to collect findings
+- Aggregate results into the requested output file
+
+### 9.2 Parallel feature delivery (API/UI/Tests)
 
 1. Lead creates team:
 
@@ -212,33 +412,13 @@ Repeat for additional teammates (for example `ui-builder`, `test-owner`).
 /team close
 ```
 
-## 6.2 Multi-discipline code review swarm
-
-1. Create:
-
-```text
-/team create code-review
-```
-
-2. Spawn:
-
-- `security-reviewer`
-- `performance-reviewer`
-- `test-reviewer`
-
-3. Create review tasks by subsystem and severity.
-
-4. Teammates report findings through mailbox messages.
-
-5. Lead aggregates, triages, and assigns follow-up tasks.
-
 ---
 
-## 7) Configuration and file examples
+## 10) Configuration and file examples
 
 This section shows representative file formats used by Teams.
 
-## 7.1 Example team `config.json`
+### 10.1 Example team `config.json`
 
 ```json
 {
@@ -266,7 +446,7 @@ This section shows representative file formats used by Teams.
 }
 ```
 
-## 7.2 Example `tasks.json`
+### 10.2 Example `tasks.json`
 
 ```json
 {
@@ -298,32 +478,55 @@ This section shows representative file formats used by Teams.
 }
 ```
 
-## 7.3 Example teammate spawn request
+### 10.3 Example blueprint spawn-prompts.json
 
 ```json
-{
-  "tool": "team_spawn",
-  "input": {
-    "team_name": "code-review",
+[
+  {
+    "tool_name": "team_spawn",
     "teammate_name": "security-reviewer",
     "agent_type": "general",
-    "prompt": "Focus on auth, permissions, and command-execution boundaries."
+    "prompt": "Perform a focused security review. Check for auth gaps, injection vectors, unsafe shell usage, and unvalidated input."
+  },
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "test-reviewer",
+    "agent_type": "general",
+    "prompt": "Review test coverage. Identify untested paths, missing edge cases, and fragile assertions."
+  },
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "performance-reviewer",
+    "agent_type": "general",
+    "prompt": "Analyze performance and resource usage. Focus on expensive loops, repeated I/O, unnecessary allocations, and blocking calls."
   }
-}
+]
 ```
 
-## 7.4 Example task seed file
+### 10.4 Example task-seed.json
 
-See bundled examples:
-
-- `examples/teams/code-review/task-seed.json`
-- `examples/teams/parallel-feature/task-seed.json`
-
-You can apply those entries by invoking each `team_task_create` payload.
+```json
+[
+  {
+    "tool": "team_task_create",
+    "input": {
+      "title": "Audit authentication boundaries",
+      "description": "Confirm session/auth checks protect privileged actions."
+    }
+  },
+  {
+    "tool": "team_task_create",
+    "input": {
+      "title": "Audit command execution safety",
+      "description": "Review shell/tool invocation paths for injection risks."
+    }
+  }
+]
+```
 
 ---
 
-## 8) Reading `/team tasks` output
+## 11) Reading `/team tasks` output
 
 The command shows a table like:
 
@@ -332,7 +535,7 @@ ID            Title                               Status        Assignee
 ------------  ----------------------------------  ------------  --------
 task-001      Implement API endpoints             completed     tm-001
 task-002      Implement UI flow                   in-progress   tm-002
-task-003      Add feature regression tests        pending       —
+task-003      Add feature regression tests        pending       ---
 ```
 
 Status meanings:
@@ -344,8 +547,12 @@ Status meanings:
 
 ---
 
-## 9) Operational guidance and best practices
+## 12) Operational guidance and best practices
 
+- **Always use blueprints** for repeatable team patterns — they save time and reduce errors.
+- **Always pass `context`** when creating teams — teammates can't read your mind about which files to target.
+- **Call `team_wait`** immediately after `team_create` — don't try to read results before teammates finish.
+- **Don't re-spawn blueprint teammates** — they are spawned automatically by `team_create`.
 - Keep teammate prompts role-specific and narrow.
 - Seed tasks before heavy teammate execution.
 - Use `depends_on` to control sequencing across streams.
@@ -356,25 +563,20 @@ Status meanings:
 
 ---
 
-## 10) Troubleshooting
+## 13) Troubleshooting
 
-## “No active team”
+### "No active team"
 
 Cause: no current team selected in this session.
 
 Fix:
 
 ```text
-/team open <name>
+/team show          # list available teams
+/team create <blueprint>   # create new team
 ```
 
-or create one:
-
-```text
-/team create <name>
-```
-
-## “Failed to open team”
+### "Failed to open team"
 
 Cause: team name not found in project-local/global team directories.
 
@@ -383,7 +585,7 @@ Fix:
 - Verify team name spelling
 - Confirm the team exists under `.ragent/teams/` or `~/.ragent/teams/`
 
-## “teammate(s) still active — shut them down first”
+### "teammate(s) still active --- shut them down first"
 
 Cause: destructive operation requested while teammates still in `working` state.
 
@@ -392,9 +594,31 @@ Fix:
 - Request teammate shutdown (`team_shutdown_teammate` + `team_shutdown_ack`)
 - Retry cleanup/delete after teammates are idle/stopped
 
+### "parse tasks.json: EOF while parsing"
+
+Cause: `tasks.json` exists but is empty (0 bytes). This can happen if a concurrent operation created the file but didn't write content.
+
+Fix: The system now handles empty `tasks.json` files gracefully. If you encounter this with an older version, delete the empty file and retry:
+
+```text
+/team clear
+```
+
+### Teammates resolving wrong paths
+
+Cause: In older versions, teammates could resolve relative paths against the team directory instead of the project root.
+
+Fix: Ensure you are running the latest version. Teammate sessions now inherit the lead session's working directory (the project root).
+
+### "0 lines read" in teammate output
+
+Cause: In older versions, tool metadata (line counts, file counts) was not persisted to the message store, so the teammate output view couldn't display result summaries.
+
+Fix: Ensure you are running the latest version. Tool metadata is now merged into the persisted message, and the output view displays correct line counts, diff stats, and summaries.
+
 ---
 
-## 11) Safety and lifecycle recommendations
+## 14) Safety and lifecycle recommendations
 
 - Prefer `close` before `delete`.
 - Use `clear` to reset work queue while preserving team composition/history.
@@ -403,10 +627,11 @@ Fix:
 
 ---
 
-## 12) Related docs and examples
+## 15) Related docs and examples
 
 - Team guide: `docs/teams.md`
 - Quickstart: `QUICKSTART.md` (Teams section)
+- Blueprint location: `[PROJECT]/.ragent/blueprints/teams/` or `~/.ragent/blueprints/teams/`
 - Example bundles:
   - `examples/teams/code-review/`
   - `examples/teams/parallel-feature/`

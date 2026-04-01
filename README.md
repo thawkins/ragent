@@ -36,6 +36,9 @@ It is reimplemented in Rust as a learninh exercise for the author.
 - **Event bus** — internal pub/sub for real-time UI updates
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
   task execution, with REST API and TUI monitoring
+- **Prompt optimization** — `/opt <method> <prompt>` transforms any prompt into structured
+  frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, VARI, Q*, O1-STYLE, Meta Prompting) and
+  platform adapters (OpenAI, Claude, Microsoft/Azure); also available via `POST /opt`
 
 ## Installation
 
@@ -146,6 +149,42 @@ See [docs/custom-agents.md](docs/custom-agents.md) for the full schema
 reference, template variables (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`,
 `{{DATE}}`), permission rules, and worked examples. Ready-to-use example files
 are in [`examples/agents/`](examples/agents/).
+
+## Prompt Optimization
+
+The `/opt` slash command (and `POST /opt` HTTP endpoint) transforms a plain prompt into
+one of 12 structured frameworks — no LLM call needed, instant results.
+
+```
+/opt help                           # show method table
+/opt co_star Explain Rust lifetimes
+/opt cot     Solve the two-sum problem
+/opt draw    A futuristic city at sunset
+```
+
+| Method | Description |
+|---|---|
+| `co_star` | Context, Objective, Scope, Task, Action, Result |
+| `crispe` | Context, Role, Intent, Steps, Persona, Examples |
+| `cot` | Chain-of-Thought step-by-step reasoning |
+| `draw` | Image prompt: subject, style, details, negatives |
+| `rise` | Role, Intent, Scope, Examples |
+| `o1_style` | Stylized creative tokens and constraints |
+| `meta` | Meta Prompting — generate the internal prompt |
+| `variational` | VARI — multiple prompt candidates + selection criteria |
+| `q_star` | Q* — iterative query refinement |
+| `openai` | OpenAI/GPT system+user adapter |
+| `claude` | Anthropic Claude adapter |
+| `microsoft` | Microsoft Azure AI adapter |
+
+HTTP endpoint (requires Bearer token):
+
+```bash
+curl -s -X POST http://localhost:9100/opt \
+  -H "Authorization: Bearer $RAGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
+```
 
 ## Teams
 

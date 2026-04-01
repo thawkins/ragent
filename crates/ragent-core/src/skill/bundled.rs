@@ -61,6 +61,7 @@ pub fn make_bundled_skill(
         license: None,
         compatibility: None,
         metadata: HashMap::new(),
+        allow_dynamic_context: false,
         source_path: PathBuf::new(),
         skill_dir: PathBuf::new(),
         scope: SkillScope::Bundled,

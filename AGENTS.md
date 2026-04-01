@@ -75,9 +75,25 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 - **Linting**: No wildcard imports, cognitive complexity ≤30, warn on missing docs
 - **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply to the project.
 
-## Workflow
+## Team Workflow
 
-1. When asked "whats next", present a list of the top 9 unimplemented tasks by task number, accept a task number and perform that task.
+When asked to use a team or when a task benefits from parallel reviewers / workers:
+
+1. **Create the team**: Use `team_create` with an appropriate `blueprint` (e.g. `code-review`).
+   **Always pass `context`** — the user's specific request details: which directories/files to
+   target, what task to perform, and where to write output. This context is prepended to every
+   teammate's spawn prompt so they know exactly what to work on.
+2. **Wait for results**: Call `team_wait` after creation. This blocks until every teammate becomes idle. **Do NOT use `wait_tasks` for teammates — `wait_tasks` only tracks `new_task` sub-agents.**
+3. **Read results**: Use `team_status` or read the team's output files to collect teammate findings.
+4. **Do not duplicate work**: Do not independently read files or do analysis that a teammate is already doing. Wait for them first.
+
+```
+team_create blueprint="code-review" context="Review the crates/ragent-server directory for security, test coverage, and performance issues. Write findings to COMPLIANCE.md"
+team_wait                          ← REQUIRED: blocks until all idle
+team_status                        ← read what they found
+```
+
+
 2. Don't suggest features unless asked to.
 3. When debugging problems, use Occam's razor and assume that the simplest solution is more likely to be the right one. 
 4. Also when you are trying to debug a problem, change only one thing at a time, if it does not fix the problem then revert it, before trying another possible solution. 
