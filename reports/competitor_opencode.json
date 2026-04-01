@@ -1,0 +1,113 @@
+{
+  "repo": "../opencode",
+  "name": "OpenCode",
+  "license": "MIT",
+  "summary": "OpenCode is an open-source, terminal-first AI coding assistant. It provides a CLI/TUI, desktop and web clients, a provider-agnostic model layer, persistent PTY sessions, LSP integration, MCP support, and a modular tool architecture.",
+  "features": [
+    "Terminal/TUI with streaming chat and structured diffs",
+    "Headless CLI with onboarding and agents (build/plan)",
+    "Tool-based agent architecture (file edit/read, bash, grep, lsp, multiedit, apply_patch, webfetch, write)",
+    "Persistent PTY/shell sessions",
+    "LSP integration",
+    "Provider adapters for many model providers (@ai-sdk/*)",
+    "MCP support and server approval UX",
+    "Per-project permissions and trust model",
+    "Plugin architecture",
+    "Vendored ripgrep and repo search",
+    "Structured output and session compaction",
+    "Extensive tests and VCR-style replay support"
+  ],
+  "standout": [
+    "Terminal-first UX & interactive TUI",
+    "Provider-agnostic model layer",
+    "Persistent shell/PTy reuse",
+    "MCP support with approval flow",
+    "Robust session abstractions (Runner, compaction, structured output)"
+  ],
+  "key_files": [
+    "packages/opencode/src/session/prompt.ts",
+    "packages/opencode/src/pty/index.ts",
+    "packages/opencode/src/tool",
+    "packages/opencode/src/lsp",
+    "packages/opencode/test"
+  ],
+  "integration_points": [
+    "@ai-sdk providers",
+    "bun-pty and cross-spawn for PTY/shell",
+    "ripgrep for search",
+    "MCP SDK for external context",
+    "plugins via @opencode-ai/plugin"
+  ],
+  "strengths_vs_ragent": [
+    "Polished TUI and terminal ergonomics",
+    "Low-friction onboarding (OAuth + API key minting)",
+    "Persistent shell/PTY support",
+    "MCP support and approval UX",
+    "High test coverage and VCR replay"
+  ],
+  "weaknesses_vs_ragent": [
+    "Large TypeScript/Bun codebase and maintenance overhead",
+    "More runtime dependencies and native packaging complexity",
+    "Steep learning curve from 'effect' and concurrency patterns"
+  ],
+  "adoptable_features": [
+    {"feature":"OAuth + CLI API-key minting","priority":"High","complexity":"Medium"},
+    {"feature":"Persistent shell/PTY","priority":"High","complexity":"Medium"},
+    {"feature":"Per-project trust/permissions","priority":"High","complexity":"Low-Medium"},
+    {"feature":"Vendored ripgrep/fast search","priority":"Medium","complexity":"Low"},
+    {"feature":"MCP approval UX","priority":"Medium","complexity":"Medium"},
+    {"feature":"VCR-style test recorder","priority":"Medium","complexity":"Medium"}
+  ],
+  "risks": [
+    "Adopting JS/TS ecosystem-specific patterns may not translate cleanly to Rust",
+    "Large external dependency surface increases maintenance and security overhead",
+    "UX polish required to match user expectations"
+  ],
+  "pocs": [
+    {"title":"Persistent shell in ragent","description":"Implement a Rust equivalent of OpenCode's Runner + PTY persistent shell to enable stateful shell reuse.","estimate":"2-3 weeks"},
+    {"title":"OAuth + CLI API-key minting","description":"Prototype PKCE-based OAuth flow with local callback server to mint CLI-scoped API keys.","estimate":"2-4 weeks"},
+    {"title":"Structured diff + pre-apply approval UI","description":"Add structured diff preview and explicit approval modal before applying edits via the TUI.","estimate":"1-2 weeks"}
+  ],
+  "test_commands": {
+    "install_bun": "https://bun.sh",
+    "run_tests": "cd ../opencode/packages/opencode && bun install && bun test --timeout 30000",
+    "run_specific": "bun test test/session/prompt.test.ts --timeout 30000"
+  },
+  "snippet": {
+    "file": "packages/opencode/src/session/prompt.ts",
+    "start_line": 101,
+    "end_line": 130,
+    "lines": [
+      "        const cache = yield* InstanceState.make(",
+      "          Effect.fn(\"SessionPrompt.state\")(function* () {",
+      "            const runners = new Map<string, Runner<MessageV2.WithParts>>()",
+      "            yield* Effect.addFinalizer(",
+      "              Effect.fnUntraced(function* () {",
+      "                yield* Effect.forEach(runners.values(), (r) => r.cancel, { concurrency: \"unbounded\", discard: true })",
+      "                runners.clear()",
+      "              }),",
+      "            )",
+      "            return { runners }",
+      "          }),",
+      "        )",
+      "",
+      "        const getRunner = (runners: Map<string, Runner<MessageV2.WithParts>>, sessionID: SessionID) => {",
+      "          const existing = runners.get(sessionID)",
+      "          if (existing) return existing",
+      "          const runner = Runner.make<MessageV2.WithParts>(scope, {",
+      "            onIdle: Effect.gen(function* () {",
+      "              runners.delete(sessionID)",
+      "              yield* status.set(sessionID, { type: \"idle\" })",
+      "            }),",
+      "            onBusy: status.set(sessionID, { type: \"busy\" }),",
+      "            onInterrupt: lastAssistant(sessionID),",
+      "            busy: () => {",
+      "              throw new Session.BusyError(sessionID)",
+      "            },",
+      "          })",
+      "          runners.set(sessionID, runner)",
+      "          return runner",
+      "        }"
+    ]
+  }
+}

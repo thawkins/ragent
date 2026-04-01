@@ -1,0 +1,67 @@
+{
+  "name": "Roo Code (Roocode)",
+  "summary": "Open-source AI developer platform combining a VS Code extension with autonomous cloud agents. Key differentiators: role-based Modes, orchestrator/boomergang recursive task decomposition, provider-agnostic router, MCP integrations, and action proposal/approval UX.",
+  "sources": [
+    "https://github.com/RooCodeInc/Roo-Code",
+    "https://docs.roocode.com/",
+    "this repo: analysis_roocode.md, analysis_roocode.json, docs/competitive/roo_code_analysis.md"
+  ],
+  "features": [
+    {"id":"modes","title":"Mode-based Roles","description":"Predefined Modes (Code, Architect, Ask, Debug, Test, Custom) that constrain model behavior and tool access.","evidence":"README; docs.roocode.com - Modes"},
+    {"id":"orchestrator","title":"Orchestrator / Recursive Task Decomposition","description":"Planner/orchestrator breaks large tasks into subtasks and coordinates agents for multi-step workflows.","evidence":"docs.roocode.com - Orchestrator"},
+    {"id":"cloud_agents","title":"Cloud Agents","description":"Persistent autonomous agents that can run tasks, create PRs, and interact with team systems.","evidence":"docs.roocode.com - Roo Code Cloud"},
+    {"id":"vscode_ext","title":"VS Code Extension & Webview UI","description":"Full-featured extension with webviews, diffs, and approval UI.","evidence":"README; packages/extension"},
+    {"id":"router","title":"Provider Router & Adapters","description":"Model-agnostic dispatch layer to multiple provider backends with cost tracking.","evidence":"docs.roocode.com - Providers; package.json"},
+    {"id":"mcp","title":"MCP (Model Context Protocol) Integration","description":"Connects external tools/services as MCP servers with dynamic tool discovery.","evidence":"docs.roocode.com - MCP"},
+    {"id":"action_proposal","title":"Action Proposal + Approval Flow","description":"Agents propose edits or commands which the user approves; Auto-approve for trusted workflows.","evidence":"docs.roocode.com - auto-approving-actions"},
+    {"id":"github_integration","title":"GitHub PR & Automation","description":"Create PRs, run reviewers/fixers, comment on PRs, manage branches.","evidence":"docs and README"},
+    {"id":"cost_tracking","title":"Token/Cost Tracking","description":"Per-request token counts and cost estimates for budgeting and provider selection.","evidence":"docs mention token counts"},
+    {"id":"skills","title":"User-defined Skills & Slash Commands","description":"Reusable workflows and slash command exposure (local ~/.roo/skills).","evidence":"README; docs"}
+  ],
+  "architecture": {
+    "stack":"TypeScript monorepo (pnpm, turbo); extension + cloud + router backends; webviews for UI",
+    "components":[
+      {"name":"VS Code Extension","path":"packages/extension","role":"Editor UI, webviews, approvals"},
+      {"name":"Cloud Agents","path":"packages/cloud","role":"Agent orchestration, persistent tasks"},
+      {"name":"Router","path":"packages/router","role":"Provider dispatch, cost accounting"},
+      {"name":"MCP Servers","path":"packages/mcp or examples/mcp","role":"Expose external tools"},
+      {"name":"Indexer","path":"packages/indexer","role":"Context store & embeddings"}
+    ]
+  },
+  "strengths_vs_ragent":[
+    "Mature Mode system and UX for role switching",
+    "Robust multi-agent orchestration and autonomous PR workflows",
+    "Extensive MCP tool integration",
+    "Strong VS Code UX and cloud product"
+  ],
+  "weaknesses_vs_ragent":[
+    "TS/Node-first and heavy VS Code focus (ragent is Rust/CLI-first)",
+    "Possible coupling of cloud features to managed router (self-hosting complexity)",
+    "Less emphasis on Rust-native tooling and sourcemap handling"
+  ],
+  "adoptable_features": [
+    {"feature":"Modes (role prompts)","priority":"P0","complexity":"Medium","notes":"System prompts per mode, CLI flag or config to switch, custom modes storage."},
+    {"feature":"Action Proposal & Approval","priority":"P0","complexity":"Medium","notes":"Render diffs in TUI, require explicit approval; Auto-approve option."},
+    {"feature":"Orchestrator / Decomposition","priority":"P0-P1","complexity":"High","notes":"Planner that emits subtasks; task queue and worker implementation."},
+    {"feature":"Provider Router & Cost Tracking","priority":"P1","complexity":"Medium","notes":"Adapter pattern for providers and middleware to estimate token usage."},
+    {"feature":"MCP-like Plugin Protocol","priority":"P1","complexity":"High","notes":"Start with HTTP/stdio transports for tool adapters."},
+    {"feature":"Cloud Agents / Managed Runners","priority":"P2","complexity":"High","notes":"Offer self-hosted runner first; optional managed cloud later."}
+  ],
+  "licensing":"Apache-2.0 (open-source). Review cloud terms separately.",
+  "poc_suggestions":[
+    {"id":"poc1","title":"Mode system POC","estimate_days":"2-3","description":"Add role-specific prompts and a CLI flag to switch modes."},
+    {"id":"poc2","title":"Action proposal UI POC","estimate_days":"3-5","description":"Render diffs in TUI and require approval before applying."},
+    {"id":"poc3","title":"MCP adapter POC","estimate_days":"5-8","description":"Small HTTP endpoint exposing run-shell and read-file to agents."}
+  ],
+  "integration_notes":{
+    "apis":["GitHub API (PRs, webhooks)","Slack API (notifications, triggers)"],
+    "providers":"Adapter interface for OpenAI/Anthropic/others; router middleware for cost estimates",
+    "mcp":"Expose simple HTTP/JSON protocol for external tool integration; support stdio transport for local tools"
+  },
+  "missing_info_and_next_steps":[
+    "Direct inspection of Roo Code monorepo (packages/extension, packages/cloud, packages/router, packages/mcp, packages/indexer)",
+    "Architecture docs in repo (architecture.md, deploy.md)",
+    "Release notes and CHANGELOG for feature timelines",
+    "Provider router implementation details (which provider SDKs and how cost accounting works)"
+  ]
+}

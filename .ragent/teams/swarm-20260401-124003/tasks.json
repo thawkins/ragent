@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Product source review & baseline feature inventory",
+      "description": "Perform a thorough review of the current product codebase (the code available in the working repository). Produce a self-contained technical audit describing: code structure and modules, runtime components (CLI, server, libraries), public APIs and plugin/extension points, existing features and UX flows, build/test/deploy setup, documentation quality, developer ergonomics, known limitations and TODOs evident in code/comments, test coverage summary, and any obvious security/privacy/licensing concerns. Produce an output file named PRODUCT_REVIEW.md at the repo root. PRODUCT_REVIEW.md must include: (1) a concise feature inventory (bullet list of implemented features), (2) architecture diagram (textual or ascii), (3) a prioritized list of missing capabilities or pain points observed while exploring the code, and (4) a short, actionable suggestion list (3–8 items) of features to consider adding. For each suggested feature include: one-sentence description, rationale (why valuable), the approximate scope (small/medium/large), and an initial estimate of effort in person-days (or t-shirt size). This task is independent — do not wait for competitor analyses. Save machine-readable JSON summary named PRODUCT_REVIEW.json with the same information (feature list, components, suggested features with estimates).",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:40:03.275508065Z",
+      "claimed_at": "2026-04-01T12:41:20.445415946Z",
+      "completed_at": "2026-04-01T12:43:54.193688568Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze competitor: ClaudeCode (../claude-code-sourcemap)",
+      "description": "Perform a focused analysis of the competitor code at ../claude-code-sourcemap. Produce a document CLAUDEC_ANALYSIS.md summarizing: project purpose and target users; list of notable features and flows (detailed), architecture and integration points, unique or differentiating features vs. typical competitors, UX and CLI/API specifics, extension/plugin capabilities, observability and telemetry features if any, licensing and deployment constraints. Identify any features found in ClaudeCode that are missing in our PRODUCT_REVIEW feature inventory. For each missing feature, provide: description, why it matters, how it is implemented in ClaudeCode (technical notes), and an implementation suggestion for our product (one-paragraph). Include concrete pointers to the source files/paths (relative paths) that implement the feature in ClaudeCode repo. Produce CLAUDEC_ANALYSIS.json containing a machine-readable list of competitor features, unique strengths, and 3–6 recommended features to consider adopting or improving with priority and rough implementation complexity. This analysis is independent — do not depend on other agents.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:40:03.275749331Z",
+      "claimed_at": "2026-04-01T12:41:35.528360143Z",
+      "completed_at": "2026-04-01T12:43:54.194271570Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze competitor: OpenCode (../opencode)",
+      "description": "Analyze the OpenCode source at ../opencode. Create OPENCODE_ANALYSIS.md summarizing: main features and workflows, architecture and key components, notable developer-facing capabilities (CLI, SDK, APIs), integration points, unique UX or automation features, and any novel algorithms or engineering approaches. Highlight features that OpenCode provides which our product lacks (cross-reference feature names). For each such feature, include: how OpenCode implements it (referenced files/paths), potential advantages/disadvantages, and an implementation suggestion tailored to our product with estimated effort (small/medium/large). Provide OPENCODE_ANALYSIS.json with parsed lists: feature set, unique features, top 5 takeaways and 4–8 recommended feature additions with priority and rough estimates. This task is independent.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:40:03.276080953Z",
+      "claimed_at": "2026-04-01T12:41:18.198168208Z",
+      "completed_at": "2026-04-01T12:41:18.198169372Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze competitor: Copilot CLI",
+      "description": "Analyze the Copilot CLI competitor. First, look for a local path ../copilot-cli; if not present, attempt to fetch/inspect the canonical public repo (e.g., https://github.com/microsoft/copilot-cli) and treat the latest stable release or main branch as the target. Produce COPILOTCLI_ANALYSIS.md describing: product goals, key features (especially CLI workflows, authentication, telemetry, code assist features), developer experience, integrations (IDEs, cloud), and deployment/installation experience. Identify features or flows that are superior/different compared to our product and list features we do not have. For each such feature include: short description, where it lives in the repo (files/paths or module names), and a recommended way to add it to our product with an approximate effort estimate and risk notes. Save COPILOTCLI_ANALYSIS.json enumerating features and 3–6 recommended additions with priorities. This task is independent.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:40:03.276557360Z",
+      "claimed_at": "2026-04-01T12:41:46.014020026Z",
+      "completed_at": "2026-04-01T12:41:46.014021468Z"
+    },
+    {
+      "id": "s5",
+      "title": "Analyze competitor: Roocode",
+      "description": "Analyze the Roocode competitor. First check for a local path ../roocode; if not found, attempt to locate the canonical public repository for Roocode and analyze main branch. Produce ROOCODE_ANALYSIS.md describing: who the product serves, its standout features and developer/user flows, architectural choices, plugin/extension mechanisms, and any unique UX or automation features. Identify features present in Roocode but missing from our PRODUCT_REVIEW. For each identified feature, document: implementation notes (files/paths), pros/cons, and a recommended integration path for our product including estimated effort and any dependencies. Produce ROOCODE_ANALYSIS.json listing competitor features, unique strengths, and 3–6 recommended features to incorporate. This task is independent.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:40:03.285139411Z",
+      "claimed_at": "2026-04-01T12:41:48.032810827Z",
+      "completed_at": "2026-04-01T12:43:54.194754159Z"
+    },
+    {
+      "id": "s6",
+      "title": "Synthesize SWARMOUT2.md: final recommendations, plan, milestones, and tasks",
+      "description": "Aggregate findings from PRODUCT_REVIEW.md (s1) and all competitor analyses (s2, s3, s4, s5) and produce the final deliverable SWARMOUT2.md. This task depends_on s1, s2, s3, s4, s5. SWARMOUT2.md must include: (A) Executive summary (2–3 paragraphs) of major gaps and opportunities, (B) Consolidated list of recommended feature additions (grouped by priority: critical, high, medium, low), with for each feature: one-paragraph description, rationale, estimated implementation scope (small/medium/large), estimated person-days, and suggested owner/discipline (backend/frontend/infra/ML/UX), (C) A project plan with 3–6 milestones and for each milestone: objective, deliverables, acceptance criteria, predecessor milestones (if any), and an ordered list of implementation tasks (granular tasks suitable for individual engineers) with estimated durations; ensure tasks are independently implementable where possible, (D) Risk assessment and mitigation strategies for the top 5 risks, (E) A mapping table that ties each recommended feature back to which competitor(s) inspired it and brief notes (1–2 lines) on how the competitor implements it, (F) A rollout & measurement plan: how to validate value (metrics/KPIs) and a suggested minimal viable implementation for each top 3 features. Also produce SWARMOUT2.json containing a machine-readable plan: features, priorities, milestones, tasks, estimates, and mappings to competitor analyses. Ensure the document is actionable: milestones and tasks should be granular enough that separate engineering agents could pick individual tasks and implement them. Place SWARMOUT2.md and SWARMOUT2.json at the repo root.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T12:40:03.285670992Z",
+      "claimed_at": "2026-04-01T12:43:44.857725567Z",
+      "completed_at": "2026-04-01T12:43:44.857726819Z"
+    }
+  ]
+}

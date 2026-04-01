@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze current product codebase and document existing features",
+      "description": "Thoroughly review the current product's codebase, documentation, and existing features. Create a comprehensive inventory of all current capabilities, architecture patterns, and technical implementations. Document the product's core functionality, user workflows, technology stack, and any notable strengths or limitations. This analysis will form the baseline for comparison.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-01T10:51:30.811301968Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s2",
+      "title": "Research and document claudecode features and capabilities",
+      "description": "Research claudecode as a competitive product. Document its key features, unique selling points, user interface patterns, integration capabilities, and any innovative approaches it takes. Focus on features that differentiate it from standard coding assistants. Include specific examples of functionality, user workflows, and technical implementation approaches where visible.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-01T10:51:30.811551532Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s3",
+      "title": "Research and document copilot-cli features and capabilities",
+      "description": "Research GitHub Copilot CLI as a competitive product. Document its key features, command-line interface patterns, shell integration capabilities, AI-powered suggestions, and workflow automation features. Focus on CLI-specific innovations and how it enhances developer productivity in terminal environments. Include specific examples of commands, features, and integration points.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-01T10:51:30.811866839Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s4",
+      "title": "Research and document OpenCode features and capabilities",
+      "description": "Research OpenCode as a competitive product. Document its key features, open-source philosophy, extensibility mechanisms, community-driven capabilities, and unique technical approaches. Focus on features related to code generation, analysis, and developer assistance. Include specific examples of functionality and architectural patterns.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-01T10:51:30.812257468Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s5",
+      "title": "Research and document roocode features and capabilities",
+      "description": "Research roocode as a competitive product. Document its key features, collaboration capabilities, AI assistance patterns, and any innovative approaches to code development. Focus on unique features and user experience patterns. Include specific examples of functionality, integrations, and workflow enhancements.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-01T10:51:30.812828470Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s6",
+      "title": "Create comprehensive SWARMOUT.md with gap analysis, feature recommendations, and implementation plan",
+      "description": "Synthesize all research findings to create SWARMOUT.md. Perform a gap analysis comparing current product features against all competitive products (claudecode, copilot-cli, OpenCode, roocode). Identify missing features and prioritize them based on competitive advantage and user value. Generate a detailed implementation plan organized into Milestones, where each Milestone groups related features. For each Milestone, break down specific tasks with clear acceptance criteria, estimated complexity, and dependencies. Include: (1) Executive Summary of findings, (2) Feature Gap Analysis section, (3) Recommended Feature Additions with justifications, (4) Implementation Plan with 3-5 Milestones, (5) Each Milestone should contain 3-8 specific tasks with descriptions, priorities, and technical considerations. Format the document in clear Markdown with proper headers, lists, and tables where appropriate.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T10:51:30.813623851Z",
+      "claimed_at": null,
+      "completed_at": null
+    }
+  ]
+}

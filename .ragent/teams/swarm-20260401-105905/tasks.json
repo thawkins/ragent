@@ -1,0 +1,93 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze current product codebase and features",
+      "description": "Thoroughly analyze the current product's codebase, architecture, and existing features. Document the current capabilities, tech stack, architecture patterns, user interaction model, and key functionalities. Create a comprehensive inventory of what the product currently offers. Focus on understanding the product's strengths, core value proposition, and implementation approach. Output your findings in a structured format that can be referenced for comparison.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T10:59:05.550090817Z",
+      "claimed_at": "2026-04-01T11:04:32.078839117Z",
+      "completed_at": "2026-04-01T11:04:32.078841007Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze ClaudeCode competitor from source",
+      "description": "Examine the ClaudeCode source code located in ../claude-code-sourcemap. Document its key features, unique capabilities, architecture approach, user experience patterns, and any innovative functionality. Focus on identifying features that differentiate it from typical coding assistants. Create a structured list of notable features and implementation approaches that could be valuable additions to other products.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-01T10:59:05.550438223Z",
+      "claimed_at": "2026-04-01T11:02:48.054505889Z",
+      "completed_at": "2026-04-01T11:02:48.054507879Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze OpenCode competitor from source",
+      "description": "Examine the OpenCode source code located in ../opencode. Document its key features, unique capabilities, architecture approach, user experience patterns, and any innovative functionality. Focus on identifying features that differentiate it from typical coding assistants. Create a structured list of notable features and implementation approaches that could be valuable additions to other products.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-01T10:59:05.550924557Z",
+      "claimed_at": "2026-04-01T11:03:45.280033647Z",
+      "completed_at": "2026-04-01T11:03:45.280035491Z"
+    },
+    {
+      "id": "s4",
+      "title": "Research Copilot CLI and RooCode features",
+      "description": "Research and document the key features, capabilities, and unique selling points of Copilot CLI and RooCode. Since source code may not be available for these products, use available documentation, feature lists, demos, user reviews, and public information to create a comprehensive feature inventory. Focus on identifying distinctive features, workflow patterns, and user experience elements that set these products apart.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T10:59:05.551389130Z",
+      "claimed_at": "2026-04-01T11:02:17.668618786Z",
+      "completed_at": "2026-04-01T11:02:17.668619812Z"
+    },
+    {
+      "id": "s5",
+      "title": "Generate competitive gap analysis and feature recommendations",
+      "description": "Using the analysis from s1, s2, s3, and s4, perform a competitive gap analysis. Identify features present in competitors (ClaudeCode, OpenCode, Copilot CLI, RooCode) that are missing or underdeveloped in the current product. Categorize recommendations by impact (high/medium/low) and implementation complexity. Prioritize features that would provide the most value to users and strengthen competitive positioning.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "created_at": "2026-04-01T10:59:05.551901922Z",
+      "claimed_at": "2026-04-01T11:09:29.554685666Z",
+      "completed_at": "2026-04-01T11:09:29.554687995Z"
+    },
+    {
+      "id": "s6",
+      "title": "Create implementation plan with milestones and tasks",
+      "description": "Based on the gap analysis and feature recommendations from s5, create a detailed implementation plan. Organize recommended features into logical milestones (e.g., Phase 1, Phase 2, Quick Wins, Long-term Enhancements). For each milestone, define specific tasks with estimated effort, dependencies, and success criteria. Structure the plan to be actionable and realistic for a development team.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s5"
+      ],
+      "created_at": "2026-04-01T10:59:05.552504488Z",
+      "claimed_at": "2026-04-01T11:14:04.296886760Z",
+      "completed_at": "2026-04-01T11:14:04.296888017Z"
+    },
+    {
+      "id": "s7",
+      "title": "Compile and format SWARMOUT.md document",
+      "description": "Create the final SWARMOUT.md document by combining outputs from s1, s5, and s6. Structure the document with: (1) Executive Summary, (2) Current Product Overview (from s1), (3) Competitive Analysis Summary (from s5), (4) Feature Gap Analysis (from s5), (5) Recommended Feature Additions (from s5), (6) Implementation Plan with Milestones and Tasks (from s6). Ensure the document is well-formatted, clear, and actionable for stakeholders and developers.",
+      "status": "completed",
+      "assigned_to": "tm-007",
+      "depends_on": [
+        "s1",
+        "s5",
+        "s6"
+      ],
+      "created_at": "2026-04-01T10:59:05.553703662Z",
+      "claimed_at": "2026-04-01T11:21:15.507568935Z",
+      "completed_at": "2026-04-01T11:21:15.507570523Z"
+    }
+  ]
+}

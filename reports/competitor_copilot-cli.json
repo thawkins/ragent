@@ -1,0 +1,76 @@
+{
+  "name": "GitHub Copilot CLI",
+  "source_status": "source_missing",
+  "sources": [
+    "COPILOTCLI_ANALYSIS.md",
+    "target/temp/copilot-cli/README.md",
+    "target/temp/copilot-cli/changelog.md",
+    "target/temp/copilot-cli/install.sh",
+    "https://docs.github.com/copilot/concepts/agents/about-copilot-cli",
+    "https://github.com/github/copilot-cli (referenced)"
+  ],
+  "summary": "Terminal-first AI agent by GitHub: interactive sessions, agentic workflows, deep GitHub integration, extensibility via ACP/MCP, persistent memories, and strong tool permissioning.",
+  "features": {
+    "interactive_modes": "REPL-like sessions and single-shot programmatic prompts (--prompt)",
+    "agentic_behaviors": "plan mode, autopilot, subagents/fleet, multi-step orchestration",
+    "github_workflows": "create branches, commit, push, open PRs and issues programmatically",
+    "auth": "GitHub OAuth, device flow, PAT support, GitHub Enterprise variants",
+    "permissions": "trusted directory prompts, per-tool allow/deny, CLI flags (--allow-tool, --deny-tool, --allow-all-tools)",
+    "extensibility": "ACP server, MCP registry, plugins, hooks, skills",
+    "byom": "Bring-Your-Own-Model and model picker UI",
+    "lsp": "Language Server Protocol integration for hovers/defs/diagnostics",
+    "sessions": "persistent sessions, resume, rewind timeline, auto-compaction, snapshots",
+    "telemetry": "OpenTelemetry integration and event hooks",
+    "packaging": "curl|bash install, Homebrew, winget, npm, tarballs"
+  },
+  "architecture": {
+    "cli_first": "native CLI binary orchestrating sessions, calling cloud services",
+    "acp": "Agent Client Protocol server exposing sessions to IDEs/clients (WebSocket/SSE style)",
+    "mcp": "Model Context Protocol servers for tool/model registries",
+    "github_api": "uses GitHub API for repo/PR/issue operations",
+    "lsp": "connects to LSP servers",
+    "persistence": "session store and memory store (likely local DB with optional cloud sync)"
+  },
+  "strengths": [
+    "Deep GitHub integration for end-to-end code workflows",
+    "Strong extensibility story (ACP/MCP/plugins)",
+    "Granular security model and tool approval UX",
+    "Developer ergonomics: sessions, autopilot, timeline",
+    "Cross-platform installation and packaging"
+  ],
+  "weaknesses": [
+    "Tight coupling to GitHub ecosystem limits portability",
+    "Plugin/marketplace requires strong sandboxing, increasing attack surface",
+    "Advanced integration features increase implementation and maintenance cost"
+  ],
+  "adoptable_features": [
+    {"feature":"Advanced tool approval CLI flags & trusted directories","complexity":"Low-Medium","priority":"High","notes":"Quick win; implement session-scoped approvals and CLI flag parsing"},
+    {"feature":"GitHub PR/branch automation tool","complexity":"Medium","priority":"Medium-High","notes":"Server-side helper using GitHub API; integrate with permissions"},
+    {"feature":"Persistent agent memory","complexity":"Medium","priority":"Medium","notes":"SQLite memory table, heuristics, opt-in controls"},
+    {"feature":"ACP-compatible server","complexity":"High","priority":"High","notes":"Prototype minimal ACP subset via WebSocket/SSE"},
+    {"feature":"Plugin manifest & loader","complexity":"High","priority":"High","notes":"Start with read-only hooks, gradually expand; strong security controls"},
+    {"feature":"Auto-compaction & timeline rewind UI","complexity":"Medium","priority":"Medium","notes":"Token accounting and compaction routine; TUI timeline UI"}
+  ],
+  "licensing": {
+    "note": "Copilot CLI is a GitHub product. Check the official repo for license. Avoid copying code; implement behavior under project's license.",
+    "references": ["https://github.com/github/copilot-cli"]
+  },
+  "telemetry": {
+    "observability": "OpenTelemetry integration and event hooks",
+    "privacy_notes": "Provide opt-in/opt-out and retention controls; enterprise customers expect ability to disable telemetry"
+  },
+  "implementation_notes": [
+    "Add CLI flags for per-tool allow/deny and persist session approvals",
+    "Implement GitHub PR helper tool in ragent-server using GitHub APIs",
+    "Prototype ACP endpoint in ragent-server with WebSocket/SSE to expose session events",
+    "Add memory table to SQLite and inject into system prompts with opt-in and retention policies"
+  ],
+  "recommended_pocs": [
+    {"name":"Tool approval flags POC","effort_days":5,"description":"CLI flag parsing and session metadata persistence"},
+    {"name":"GitHub PR helper","effort_days":10,"description":"Server endpoint to create branches/PRs using GitHub API; integrate permissions"},
+    {"name":"ACP minimal prototype","effort_days":21,"description":"Expose session events over WebSocket/SSE, implement basic client handshake"},
+    {"name":"Memory POC","effort_days":14,"description":"SQLite memory store, basic read/write heuristics, injection into prompts"}
+  ],
+  "notes": "Analysis synthesized from local COPILOTCLI_ANALYSIS.md notes, target/temp artifacts, and GitHub Docs references. Local ../copilot-cli was not present.",
+  "prepared_by": "swarm-s4"
+}

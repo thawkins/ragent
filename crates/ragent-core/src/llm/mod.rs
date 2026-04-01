@@ -103,6 +103,12 @@ pub struct ChatRequest {
     /// Arbitrary key-value options forwarded to the provider (e.g. thinking control).
     #[serde(default)]
     pub options: HashMap<String, Value>,
+    /// Session ID for request tracing (used by providers like Copilot to avoid re-billing).
+    #[serde(skip)]
+    pub session_id: Option<String>,
+    /// Unique request ID for this specific API call (for provider-side request tracking).
+    #[serde(skip)]
+    pub request_id: Option<String>,
 }
 
 /// A single message in a chat conversation.

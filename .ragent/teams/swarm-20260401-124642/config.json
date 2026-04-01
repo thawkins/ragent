@@ -1,0 +1,92 @@
+{
+  "name": "swarm-20260401-124642",
+  "lead_session_id": "98521cbf-9028-4667-a0ae-65e2f489ce2e",
+  "created_at": "2026-04-01T12:46:42.981628073Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "2586604f-d08d-410e-835f-1e7b9a6ae9a9",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:42.999059673Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Product codebase review and inventory\n\n**Task ID:** s1\n**Title:** Product codebase review and inventory\n\nFully analyze the current product repository (the project root where this task runs). Produce a comprehensive, machine- and human-readable inventory of the product's current state. Deliverables: 1) reports/product_review.md — a readable review; 2) reports/product_review.json — structured JSON with the fields below. Requirements for the review: - List all high-level features and user flows the product implements. - Document architecture, tech stack, languages, frameworks, major modules, and inter-module boundaries. - Identify public APIs/CLI/UX extension points and plugin hooks. - List build/test/CI tooling present (commands to run tests, linters, CI config files). - Note documented developer workflows (README, CONTRIBUTING, docs). - List current limitations, known bugs, TODOs, and missing or incomplete features (explicitly note where functionality is lacking). - Produce a prioritized gap list: features missing compared to a generic competitive baseline (e.g., CLI UX polish, autocompletion, sourcemap support, offline/latency optimizations). - For each item in the gap list include: short description, why it matters (user/business impact), approximate implementation complexity (S/M/L), suggested component(s) to modify, and estimated effort in person-days. - Include exact file paths and code references (file:line ranges or functions) for key modules you cite. - If tests/examples are present, report their coverage and quality. - Include any relevant security/licensing notes found in repository files. Output files must be saved exactly as reports/product_review.md and reports/product_review.json. The structured JSON must include arrays \"features\", \"architecture\", \"apis\", \"gaps\", \"build_tools\", and \"references\".\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "a9e5be9d-8151-45b0-881c-6c348929cfd8",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:42.999775923Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Competitor analysis: claude-code-sourcemap\n\n**Task ID:** s2\n**Title:** Competitor analysis: claude-code-sourcemap\n\nAnalyze the competitor source code located at ../claude-code-sourcemap. Produce a competitor report in two artifacts: reports/competitor_claude-code-sourcemap.md and reports/competitor_claude-code-sourcemap.json. The report must include: - Project summary and purpose (brief). - Complete feature list implemented by this project (feature name + short description). - Unique/standout features and UX elements. - Architecture and key implementation files/modules (file paths and short notes on how they implement features). - Integration points (APIs, CLIs, SDKs) and any sourcemap-specific functionality. - Strengths and weaknesses vs. our product (concrete comparisons). - Missing features relative to our product and other competitors. - Licensing and redistribution constraints (license file and implications). - For each feature that we might adopt: rationale, estimated implementation complexity (S/M/L), priority (1-5), and a brief implementation approach (which modules to change, data flow, tests). - Any non-obvious risks (performance, legal, IP) and suggested mitigations. - A short list of 3 possible minimal POC experiments we could run to evaluate adopting a feature (with expected time/cost). Save exact file references used. If any build/test steps are required to inspect runtime behavior, list commands and any environment needed. Output the JSON with keys: \"summary\",\"features\",\"architecture\",\"comparisons\",\"adoptable_features\",\"risks\",\"pocexperiments\",\"license\".\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "7620619e-2aae-4838-981f-984ddfb599ce",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:43.001009098Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Competitor analysis: OpenCode (../opencode)\n\n**Task ID:** s3\n**Title:** Competitor analysis: OpenCode (../opencode)\n\nAnalyze the competitor source code located at ../opencode. Produce reports/competitor_opencode.md and reports/competitor_opencode.json. The report must cover the same structured items as the Claude analysis (see s2): project summary, detailed feature list, standout capabilities, architecture and key files, integration points, strengths/weaknesses vs our product, licensing, adoptable features with complexity & priority, risks, and 3 suggested POCs. Additionally, call out any developer ergonomics, onboarding flow, or CLI UX improvements that make OpenCode particularly attractive. If the repository includes example projects or test suites, run or summarize them and include commands to reproduce. Save exact file references and include a small code snippet (file + line range) that demonstrates any unique technique OpenCode uses that we might want to adopt.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "ce18e3c3-5eb0-4c8b-a8de-ca8971d45056",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:43.002279660Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Competitor analysis: copilot-cli\n\n**Task ID:** s4\n**Title:** Competitor analysis: copilot-cli\n\nAnalyze competitor copilot-cli. First look for a local copy at ../copilot-cli; if present, analyze source exactly as in s2/s3. If no local source is present, search the repository for README, docs, or references to copilot-cli and analyze those. Produce reports/competitor_copilot-cli.md and reports/competitor_copilot-cli.json. Required contents: summary, implemented features and UX (or documented features if source missing), architecture or integration model (how it integrates with editors/terminals), strengths/weaknesses, adoptable features (with complexity and priority), licensing/usage constraints, implementation notes and suggested POCs, and any telemetry/analytics behavior that affects product decisions. If source is missing and public web research would normally be needed but is not possible, clearly mark the report as \"source missing\" and produce recommendations based on available docs and analogous designs.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "ee9956ad-a7f7-4765-a9d6-32967dd249d4",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:43.003638923Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Competitor analysis: roocode\n\n**Task ID:** s5\n**Title:** Competitor analysis: roocode\n\nAnalyze competitor roocode. Search first for a local directory ../roocode; if found, analyze the source with the same structure required in s2. If not found, search the repo for READMEs/docs referencing roocode and build the report from available materials. Produce reports/competitor_roocode.md and reports/competitor_roocode.json. Include: summary, feature list, standout techniques, architecture/key files, strengths/weaknesses vs our product, adoptable features with complexity and priority, licensing notes, POC suggestions, and any integration notes (APIs/CLI/SDK). If key information is absent, state what is missing and list what to fetch next (which files or docs would be most useful).\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "34049da6-632a-4306-a38c-886f58fe9617",
+      "agent_type": "general",
+      "status": "working",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T12:46:43.005227324Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Create SWARMOUT2.md: consolidated recommendations and implementation roadmap\n\n**Task ID:** s6\n**Title:** Create SWARMOUT2.md: consolidated recommendations and implementation roadmap\n\nUsing the outputs from the product review (reports/product_review.md & .json) and all competitor reports (reports/competitor_*.md & .json), produce a consolidated document at SWARMOUT2.md at the repository root and a machine-readable plan at plans/SWARMOUT2_plan.json. This task depends on s1, s2, s3, s4, s5. The document must include: 1) Executive summary: top 5 recommended features to add and the 1-2 highest-priority risks. 2) For each recommended feature: description, user story(s), mapping to competitor inspiration (which competitor and exact capability), business/user rationale, scope (MVP vs full), estimated implementation effort (person-weeks), priority (1-5), owners/roles required, and acceptance criteria/tests. 3) Roadmap organized into Milestones (suggest a 3- to 6-month roadmap or 6 milestones): for each milestone list concrete tasks (implement, QA, docs, design, infra), estimated time per task, dependencies between tasks, and expected outcomes. 4) Implementation tasks must be granular enough that an engineer could pick one task and implement it (e.g., \"Add CLI command `swarm generate --sourcemap` that reads sourcemap files in ./maps and emits JSON schema; tests: unit tests for parsing, integration test with sample maps\"). 5) Migration/backwards-compatibility considerations, testing plan, CI adjustments, and required infra or third-party services. 6) Risk assessment and mitigation strategies. 7) A final prioritized short-term (2 sprints) MVP checklist for immediate work. 8) Reference section listing all competitor report files and the product review, plus a mapping table that shows which competitor inspired each recommended feature. 9) Commit instructions: create a branch named \"swarmout2/recommendations\" and prepare a PR with SWARMOUT2.md, plans/SWARMOUT2_plan.json, and links to reports. The JSON plan should include milestones, tasks, estimates (hours), dependencies, and mapping to competitor IDs. Save SWARMOUT2.md and plans/SWARMOUT2_plan.json exactly at the specified paths. Ensure the document is actionable, prioritized, and that each task is independently implementable.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

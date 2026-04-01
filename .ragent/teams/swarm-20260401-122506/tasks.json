@@ -1,0 +1,56 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Audit current product repository and produce product inventory",
+      "description": "Perform a thorough review of the current product codebase (assume repository root unless another path is provided). Produce a structured inventory and technical review that will be consumed by later tasks. Deliverables (place in project root or a specified output folder):\n\n- product_summary.md: A human-readable summary including: a one-paragraph product description, list of top-level features and workflows (CLI commands, GUI flows, APIs), supported languages/environments, installation/run instructions, and where to find docs/tests.\n- product_inventory.json: Machine-readable object with fields: features (array of feature objects with name and short description), architecture (components and relationships), entry_points (files/commands to start/operate), tech_stack (languages, frameworks, external services), test_coverage_summary (what tests exist and rough coverage by area), key_files (map of important files and their purpose), and existing integrations.\n- product_gaps.md: A prioritized list of missing features, usability/UX gaps, technical limitations, and known bugs or weak spots discovered while scanning the code. For each item include the evidence (file paths, code snippets, failing tests if any) and an initial severity/priority (low/medium/high).\n- complexity_estimates.json: Rough complexity estimates for adding typical new features (small/medium/large), and an estimate of the current codebase maturity (e.g., modularity, tests, docs).\n\nInstructions and scope:\n- Do static analysis of the repo structure, README, CI files, package manifests, and tests. Run basic commands where safe (build/test) if environment permits; otherwise rely on code inspection.\n- Clearly indicate any assumptions made (e.g., missing access or environment constraints) and any files or folders you could not analyze.\n- Use precise file path citations when referencing code artifacts so other agents can find them. Output files must use the exact filenames above.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:25:06.367742887Z",
+      "claimed_at": "2026-04-01T12:26:37.003144929Z",
+      "completed_at": "2026-04-01T12:26:37.003145721Z"
+    },
+    {
+      "id": "s2",
+      "title": "Competitive analysis of ClaudeCode, Copilot-CLI, OpenCode, and Roocode",
+      "description": "Analyze the specified competing products and produce a structured comparison that highlights features, UX patterns, technical approaches, and unique capabilities relevant to our product.\n\nInputs/locations to examine:\n- ../claude-code-sourcemap (local path provided)\n- ../opencode (local path provided)\n- copilot-cli (if no local path, fetch public repository/documentation from the canonical source)\n- roocode (fetch public docs/repo if local path not provided)\n\nDeliverables:\n- competitor_profiles.json: For each competitor provide: name, source path or repo URL, high-level description, list of core features, unique differentiation points, supported integrations, typical user workflows, and any notable architecture/implementation choices (e.g., use of language servers, local vs. cloud execution, UI/CLI design).\n- competitor_feature_matrix.csv or .json: A matrix of features (rows) vs products (columns) indicating presence/absence and short notes on quality/implementation (e.g., 'yes - robust local CLI with plugin system', 'partial - experimental', 'no'). Include features relevant to our product (extraction, code generation, sourcemap handling, local-run, authentication models, plugin/extensions, telemetry/KPIs, multi-file operations, error handling, offline capability, licensing, OSS/commercial distinctions).\n- competitor_strengths_weaknesses.md: A human-readable summary of each competitor's strengths, weaknesses, and the areas where they outcompete or underdeliver compared to what was observed in s1.\n- features_missing_from_our_product.md: An explicit list (with brief rationale) of competitor features that our product currently lacks, each cross-referenced to file paths or evidence from s1 when possible.\n\nInstructions:\n- If a competitor repo is available locally (paths given), scan its source tree and README. If only online resources exist, rely on official readmes, docs, and sample code. Cite exact file paths or URLs used as evidence.\n- Prioritize features that are most relevant to developer UX, integration, scalability, and business differentiation.\n- Produce objective, evidence-backed statements (quote README sections or code files when needed).",
+      "status": "inprogress",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T12:25:06.368396389Z",
+      "claimed_at": "2026-04-01T12:26:39.271218897Z",
+      "completed_at": null
+    },
+    {
+      "id": "s3",
+      "title": "Prioritize missing features and produce a DIA (impact, difficulty, acceptance) backlog",
+      "description": "Using the outputs from s1 (product inventory & gaps) and s2 (competitor analysis), produce a prioritized backlog of feature additions and improvements. For each proposed feature produce: a short description, user persona(s) who benefit, acceptance criteria (how to verify it is complete), estimated implementation effort (T-shirt sizing and rough engineering hours), implementation risk and dependencies, key technical notes, and a suggested priority (P0/P1/P2). Also produce a recommended MVP subset for immediate work.\n\nDeliverables:\n- backlog.json: Array of backlog items with fields: id, title, description, persona, acceptance_criteria, impact_score (1-10), difficulty_score (1-10), priority_label, estimated_hours, dependencies (if any), risk_level (low/medium/high), suggested_sprint (1..N).\n- prioritization_report.md: Narrative explanation of prioritization methodology (e.g., scoring formula), personas, recommended MVP scope (top N items), and a rationale linking items back to competitor gaps and product limitations (cite s1 and s2 outputs).\n\nInstructions and constraints:\n- This task depends on s1 and s2. Consume product_inventory.json, product_gaps.md, competitor_feature_matrix, and features_missing_from_our_product.md.\n- Provide clear, actionable acceptance criteria for each backlog item (e.g., 'support X for N file types with unit tests and docs', 'enable offline mode with specified performance thresholds').\n- Where estimates are uncertain, provide best-case/worst-case ranges and state assumptions.\n- Prioritize items for developer productivity, market differentiation, and technical feasibility.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2"
+      ],
+      "created_at": "2026-04-01T12:25:06.369505603Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s4",
+      "title": "Author SWARMOUT2.md: recommendations, milestones, and implementation plan",
+      "description": "Create the final document SWARMOUT2.md that consolidates findings and produces an actionable implementation plan with milestones and tasks. This task depends on s1, s2, and s3.\n\nRequired contents of SWARMOUT2.md:\n- Executive summary (one page) summarizing recommended feature additions and strategic rationale.\n- Feature recommendations: concise list of suggested features (from backlog), each with a short justification tied to competitor analysis and product gaps.\n- Implementation plan: broken into 3–6 milestones (timeboxed), each milestone containing concrete tasks (developer tasks, QA, docs, CI changes, maintenance), owners/roles (e.g., frontend, backend, infra, QA), rough duration estimates (in days or sprints), acceptance criteria, and dependencies between tasks.\n- Milestone schedule: suggested timeline (e.g., 12-week plan) with start/end dates per milestone and a Gantt-like textual view.\n- Resource plan: suggested team composition and skills required per milestone, and rough personnel estimates (e.g., 1 backend engineer (0.5 FTE) for 4 weeks).\n- KPIs and success metrics: measurable indicators to track progress and product impact (e.g., time-to-first-success, error rates, adoption metrics).\n- Risks and mitigations: top technical and business risks and recommended mitigation steps.\n- Appendices: brief extracts/citations from s1 and s2 supporting the recommendations (e.g., bullet points quoting competitor features or code evidence), and links to the produced machine-readable artifacts.\n\nDeliverables:\n- SWARMOUT2.md (primary deliverable)\n- plan_details.json: JSON representation of milestones, tasks, owners, estimates, acceptance criteria and dependencies (so it can be imported into a project tracker).\n\nFormatting and quality requirements:\n- The document should be professional, concise, and suitable for presentation to product/engineering leadership.\n- Cross-reference items to the backlog ids from s3 and to evidence files from s1 and s2.\n- State any open questions or assumptions that need resolving before execution.\n\nInstructions:\n- This task must consume backlog.json, prioritization_report.md, product_summary.md, product_gaps.md, and competitor_profiles.json to produce a coherent plan. Ensure internal consistency between SWARMOUT2.md and plan_details.json.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "created_at": "2026-04-01T12:25:06.378577657Z",
+      "claimed_at": null,
+      "completed_at": null
+    }
+  ]
+}

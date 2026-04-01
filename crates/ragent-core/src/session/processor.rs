@@ -13,6 +13,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use crate::agent::{AgentInfo, build_system_prompt};
 use crate::event::{Event, EventBus, FinishReason};
@@ -321,6 +322,8 @@ impl SessionProcessor {
                     max_tokens: Some(200),
                     system: Some(system_prompt.clone()),
                     options: agent.options.clone(),
+                    session_id: Some(session_id.to_string()),
+                    request_id: Some(Uuid::new_v4().to_string()),
                 };
 
                 if let Ok(mut stream) = client.chat(init_request).await {
@@ -423,6 +426,8 @@ impl SessionProcessor {
                 max_tokens: None,
                 system: Some(system_prompt.clone()),
                 options: agent.options.clone(),
+                session_id: Some(session_id.to_string()),
+                request_id: Some(Uuid::new_v4().to_string()),
             };
 
             // Log which tools are being sent with this request

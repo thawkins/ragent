@@ -1,0 +1,48 @@
+{
+  "name": "ragent",
+  "version": "0.1.0-alpha.20",
+  "summary": "Terminal-first AI coding agent in Rust with TUI and HTTP server; provider-agnostic LLM orchestration, tools, session storage, and background agents.",
+  "features": [
+    {"name":"Interactive TUI","description":"Full-screen ratatui TUI with slash commands, streaming chat, provider setup, and log panel","evidence":["README.md:22-24","src/main.rs:331-371"]},
+    {"name":"HTTP Server (REST + SSE)","description":"Axum-based server to drive agent programmatically with SSE streaming","evidence":["README.md:25","src/main.rs:394-409","crates/ragent-server/src/routes.rs"]},
+    {"name":"Multi-provider LLM support","description":"Provider registry with built-in providers (Anthropic, OpenAI, Copilot, Ollama, generic) and extensible provider trait","evidence":["README.md:14-16","Cargo.toml:29-33","src/main.rs:257-259"]},
+    {"name":"Tool system","description":"Built-in tools (file ops, shell, grep) and extended tools (multiedit, patch, webfetch, office/PDF, plan delegation)","evidence":["README.md:16-19","crates/ragent-core/src/tool/"]},
+    {"name":"Session persistence","description":"SQLite-backed session storage for persistent conversation history","evidence":["README.md:26","src/main.rs:233-236","crates/ragent-core/src/storage.rs"]},
+    {"name":"Teams & background agents","description":"Task manager to spawn and manage sub-agents and team coordination APIs","evidence":["README.md:36-38","src/main.rs:322-328","crates/*/task.rs"]},
+    {"name":"Prompt optimization","description":"/opt command and POST /opt endpoint implementing many frameworks","evidence":["README.md:153-187","crates/prompt_opt/"]},
+    {"name":"Provider permission system","description":"Configurable PermissionChecker to gate file writes and shell commands","evidence":["src/main.rs:259-263","crates/ragent-core/src/permission.rs"]}
+  ],
+  "architecture": [
+    {"component":"CLI Binary","path":"src/main.rs","description":"Wires provider/tool registries, storage, event bus and dispatches to TUI/server/run flows","lines":"1-520"},
+    {"component":"ragent-core","path":"crates/ragent-core","description":"Core types, session processor, tools, providers, storage, event bus"},
+    {"component":"ragent-server","path":"crates/ragent-server","description":"Axum routes and SSE server"},
+    {"component":"ragent-tui","path":"crates/ragent-tui","description":"Terminal UI built with ratatui and tracing integration"}
+  ],
+  "apis": [
+    {"type":"CLI","commands":["run","serve","session","auth","models","config"],"evidence":"src/main.rs:73-153"},
+    {"type":"HTTP","description":"REST + SSE endpoints in ragent-server crate. AppState built in src/main.rs:399-406","evidence":["crates/ragent-server/src/routes.rs","src/main.rs:394-409"]},
+    {"type":"Plugin hooks","description":"Provider registry and tool registry allow runtime extension via trait impls","evidence":["crates/ragent-core/src/provider.rs","crates/ragent-core/src/tool/mod.rs"]}
+  ],
+  "build_tools": [
+    {"tool":"cargo","commands":["cargo build","cargo build --release","cargo test","cargo fmt","cargo clippy"],"evidence":"README.md:47-52; Cargo.toml"},
+    {"tool":"CI","files":[".github/workflows/ci.yml",".github/workflows/ci_benchmarks.yml"],"evidence":".github/workflows/ci.yml"},
+    {"tool":"benchmark","files":["crates/*/benches"],"evidence":"Cargo.toml:130"}
+  ],
+  "gaps": [
+    {"id":"CI-coverage","title":"Coverage & security CI","description":"Add coverage reporting (tarpaulin/grcov) and cargo-audit to CI","impact":"Prevents undetected regressions and dependency vulnerabilities","complexity":"M","components":[".github/workflows","crates/*"],"estimate_person_days":3},
+    {"id":"SECRET-MASK","title":"Secret masking and logging lint","description":"Ensure secrets are masked in logs and TUI; add grep-based CI lint","impact":"Prevents key leakage in logs and artifacts","complexity":"S","components":["crates/ragent-tui","ragent-core sanitise"],"estimate_person_days":2},
+    {"id":"E2E-SERVER","title":"Server E2E & SSE tests","description":"Add robust in-process SSE and handler integration tests","impact":"Detect regressions in API used by frontends","complexity":"M","components":["crates/ragent-server/tests",".github/workflows"],"estimate_person_days":4},
+    {"id":"DOCKER","title":"Docker image & release packaging","description":"Add Dockerfile(s) and CI image build job","impact":"Simplifies deployment & CI reproducibility","complexity":"M","components":["repo root"],"estimate_person_days":3},
+    {"id":"PLUGIN-DOCS","title":"Plugin authoring docs","description":"Document how to write providers/tools and register them","impact":"Lower contributor friction; ecosystem growth","complexity":"M","components":["docs","crates/ragent-core"],"estimate_person_days":2}
+  ],
+  "references": [
+    "README.md",
+    "Cargo.toml",
+    "src/main.rs",
+    "crates/ragent-core",
+    "crates/ragent-server",
+    "crates/ragent-tui",
+    ".github/workflows/ci.yml",
+    "LICENSE"
+  ]
+}

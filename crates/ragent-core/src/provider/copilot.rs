@@ -468,6 +468,8 @@ impl LlmClient for CopilotClient {
                 .header("openai-organization", "github-copilot")
                 .header("openai-intent", "conversation-panel")
                 .header("x-github-api-version", "2023-07-07")
+                .header("x-request-id", request.request_id.as_deref().unwrap_or(""))
+                .header("x-session-id", request.session_id.as_deref().unwrap_or(""))
                 .json(&body)
                 .send(),
         )

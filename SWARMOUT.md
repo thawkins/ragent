@@ -1,1409 +1,1904 @@
-# Competitive Analysis & Strategic Roadmap
-## ragent Product Evolution Strategy
+# ragent: Competitive Analysis & Strategic Implementation Plan
 
-**Analysis Date:** March 30, 2026  
-**ragent Version:** 0.1.0-alpha.20  
-**Team:** swarm-20260330-194859  
-**Lead Analyst:** swarm-s5 (tm-005)  
-**Contributing Analysts:** swarm-s1, swarm-s2, swarm-s3, swarm-s4, swarm-s6
-
----
-
-## EXECUTIVE SUMMARY
-
-This comprehensive competitive analysis synthesizes findings from in-depth research on three leading AI coding assistants (ClaudeCode, GitHub Copilot CLI, and Roocode) against ragent's current capabilities. The analysis identifies critical gaps, strategic opportunities, and provides a prioritized implementation roadmap spanning 18-24 months.
-
-### Key Findings
-
-**ragent's Current Position:**
-- **Maturity:** Early alpha (v0.1.0-alpha.20) with ~2.5M lines of Rust code
-- **Core Strengths:** Multi-provider LLM orchestration, comprehensive tool system (60+ tools), agent teams, statically-linked binary with zero dependencies
-- **Unique Differentiators:** Rust-based architecture, advanced team orchestration, LSP integration, client/server architecture
-- **Primary Gaps:** Enterprise features, user experience polish, documentation depth, accessibility compliance
-
-**Competitive Landscape:**
-- **ClaudeCode:** Market leader with $500M+ ARR, multi-platform presence, sophisticated MCP ecosystem, strong enterprise features
-- **GitHub Copilot CLI:** Native GitHub integration, agentic capabilities with parallel execution (/fleet), extensive customization through hooks and MCP
-- **Roocode:** Open-source VS Code extension with multiple specialized modes, transparent codebase indexing, granular developer control
-
-**Strategic Imperatives:**
-1. **Enterprise Readiness (6-8 months):** Security hardening, observability, cost tracking, accessibility compliance
-2. **Developer Experience (7-10 months):** LSP documentation, codebase indexing, RBAC, UX polish
-3. **Global Expansion (4-6 months):** i18n/l10n, hooks system, enhanced vision support
-4. **Compliance Certification (3-4 months):** SOC 2, ISO 27001, GDPR compliance
-5. **Innovation Leadership (Ongoing):** Voice input, mobile clients, advanced semantic search
-
-**Investment Required:**
-- **Timeline:** 18-24 months
-- **Effort:** 3-4 full-time engineers
-- **Budget:** $500K-$750K (fully-loaded costs)
-
-**Expected Outcomes:**
-- Pass enterprise security reviews (enables B2B sales)
-- Achieve competitive feature parity within 12-18 months
-- Unlock 3x addressable market through internationalization
-- Achieve WCAG 2.1 Level AA accessibility compliance
-- Maintain Rust performance advantage while closing feature gaps
+**Document Type:** Strategic Planning & Roadmap  
+**Analysis Date:** April 1, 2026  
+**Version Analyzed:** 0.1.0-alpha.20  
+**Contributors:** swarm-s1 (Codebase Analysis), swarm-s5 (Competitive Gap Analysis), swarm-s6 (Implementation Plan)  
+**Status:** Final
 
 ---
 
-## COMPETITIVE LANDSCAPE
+## Executive Summary
 
-### 1. Market Overview
+This document provides a comprehensive competitive analysis and strategic implementation roadmap for **ragent**, an AI coding agent built in Rust. Based on analysis of the current product capabilities, competitive landscape (ClaudeCode, OpenCode, GitHub Copilot CLI, RooCode), and feature gaps, we present a prioritized 12-18 month development plan to achieve competitive parity and establish unique market differentiation.
 
-The AI coding assistant market has evolved from simple code completion to sophisticated agentic systems capable of autonomous multi-step task execution. Key trends include:
+### Current State: ragent Value Proposition
 
-- **Agentic Architecture:** Shift from reactive autocomplete to autonomous decision-making agents
-- **Multi-Platform Convergence:** Seamless experience across terminal, IDE, browser, and mobile
-- **Standardized Integrations:** Model Context Protocol (MCP) emerging as de facto standard
-- **Enterprise Adoption:** Security, compliance, and cost management becoming table stakes
-- **Extensibility Focus:** Hooks, custom agents, and marketplace ecosystems
+**ragent** is a terminal-first AI coding agent offering:
+- **Self-contained deployment**: Single static binary, zero runtime dependencies
+- **Multi-provider flexibility**: Anthropic, OpenAI, GitHub Copilot, Ollama support (no vendor lock-in)
+- **Comprehensive tooling**: 58+ tools across file operations, LSP integration, document processing, and web access
+- **Advanced multi-agent capabilities**: Team coordination system with task management, mailboxes, and orchestration
+- **Enterprise-grade features**: Permission system, session management, snapshots, event bus architecture
+- **Performance & reliability**: Rust implementation with async runtime, type safety, no unsafe code
 
-### 2. Competitive Matrix
+### Critical Competitive Gaps Identified
 
-| Capability | ragent | ClaudeCode | Copilot CLI | Roocode |
-|-----------|---------|------------|-------------|---------|
-| **Platform** | Terminal | Terminal/IDE/Desktop/Web | Terminal/IDE | VS Code Only |
-| **Language** | Rust | TypeScript | TypeScript | TypeScript |
-| **Distribution** | Binary | npm | npm | VS Code Extension |
-| **Pricing** | Open Source | Premium ($20+/mo) | $10-19/mo | Open Source |
-| **Multi-Provider** | ✅ 5 providers | ❌ Claude only | ✅ GitHub Models | ✅ Multiple |
-| **Team Orchestration** | ✅ Advanced | ✅ Sub-agents | ✅ /fleet command | ❌ Single-agent |
-| **MCP Support** | ⚠️ Basic | ✅ Extensive | ✅ Full support | ✅ Full support |
-| **LSP Integration** | ✅ 5 tools | ⚠️ Limited | ✅ Full | ✅ Full |
-| **Codebase Indexing** | ❌ Missing | ✅ Semantic | ✅ Tree-sitter | ✅ Configurable |
-| **Accessibility** | ❌ Non-compliant | ✅ WCAG 2.1 AA | ✅ WCAG 2.1 AA | ⚠️ Partial |
-| **i18n Support** | ❌ English only | ✅ 12+ languages | ✅ Multiple | ❌ English only |
-| **Enterprise Features** | ❌ Missing | ✅ Full RBAC/SSO | ✅ Full RBAC/SSO | ⚠️ Limited |
-| **Security Audit** | ❌ Not audited | ✅ SOC 2 certified | ✅ SOC 2 certified | ❌ Not audited |
-| **Cost Tracking** | ❌ Missing | ✅ Built-in | ✅ Built-in | ❌ Missing |
-| **Voice Input** | ❌ Missing | ✅ Available | ✅ Available | ❌ Missing |
-| **Hooks System** | ❌ Missing | ✅ 6 hook types | ✅ 8 hook types | ❌ Missing |
-| **Custom Agents** | ✅ OASF profiles | ✅ Custom agents | ✅ Custom agents | ✅ Custom modes |
-| **Performance** | ✅ Native Rust | ⚠️ Node.js | ⚠️ Node.js | ⚠️ Electron |
+Through analysis of four major competitors, we identified **seven critical gaps** requiring immediate attention:
 
-### 3. Positioning Analysis
+1. **No persistent shell sessions** — Command state lost between executions
+2. **Limited project memory system** — No hierarchical AGENTS.md discovery or automatic context accumulation
+3. **Missing git context auto-injection** — Agents unaware of repository state without manual commands
+4. **No cost tracking transparency** — Users cannot monitor LLM API expenses
+5. **Basic permission sophistication** — Lacks command whitelists, banned lists, and injection detection
+6. **No autonomous operation modes** — Missing autopilot and plan-before-implement workflows
+7. **Limited GitHub integration** — No native issue/PR management capabilities
 
-#### ClaudeCode Strengths:
-- **Market Leadership:** $500M+ ARR, 10x growth in 3 months, 80%+ internal adoption at Anthropic
-- **Multi-Platform Dominance:** Terminal, VS Code, JetBrains, Desktop app, Web, Slack, Chrome extension
-- **Sophisticated Memory:** CLAUDE.md files with auto-learning, path-specific rules, context compaction
-- **MCP Ecosystem:** Largest marketplace of MCP servers for external integrations
-- **Enterprise Ready:** Full RBAC, SSO/SAML, audit logging, cost tracking, SOC 2 certified
+### Strategic Recommendation: 5-Milestone Roadmap
 
-#### GitHub Copilot CLI Strengths:
-- **Native GitHub Integration:** Seamless issues, PRs, code review, GitHub Actions
-- **Parallel Execution:** /fleet command for decomposing tasks across subagents
-- **Three Operation Modes:** Standard, Plan, Autopilot for different workflow needs
-- **Comprehensive Customization:** MCP, hooks, skills, custom agents, plugins
-- **Programmatic Interface:** CI/CD integration, non-interactive execution
+This plan organizes **40+ feature enhancements** into 5 major milestones:
 
-#### Roocode Strengths:
-- **Multi-Mode Architecture:** 5 specialized modes (Code, Architect, Ask, Debug, Orchestrator)
-- **Transparent Indexing:** User-controlled embedding providers, configurable codebase search
-- **Configuration Profiles:** Multiple API profiles per provider with sticky model assignments
-- **Shadow Git Checkpoints:** Automatic version control without polluting main git history
-- **Open Source Advantage:** Free, community-driven, fork of popular Cline project
+1. **Milestone 1 (6-8 weeks)**: Quick Wins & Critical Parity — High-impact, low-complexity features
+2. **Milestone 2 (8-10 weeks)**: Autonomous Operation — Autopilot mode, plan workflows, agent roles
+3. **Milestone 3 (8-10 weeks)**: Project Intelligence — Memory system, context optimization, ripgrep integration
+4. **Milestone 4 (10-12 weeks)**: Advanced Features — Persistent shell, GitHub integration, security enhancements
+5. **Milestone 5 (12-16 weeks)**: Ecosystem Integration — Full MCP support, skills system, auto-update
 
-#### ragent Competitive Advantages:
-- **Rust Performance:** Native binary, zero runtime dependencies, minimal resource footprint
-- **Multi-Provider Strategy:** 5 providers (Anthropic, OpenAI, GitHub, Ollama, Generic) vs competitors' 1-2
-- **Advanced Team Orchestration:** Most sophisticated multi-agent coordination (20+ team tools)
-- **Comprehensive Tool System:** 60+ built-in tools (competitors: 20-30)
-- **LSP Integration:** Native language server protocol support (5 tools)
-- **Client/Server Architecture:** Statically-linked single binary with RESTful API
+**Total Timeline:** 44-56 weeks (12-14 months for core features)
 
-### 4. Market Share & Adoption Trends
+### Expected Outcomes
 
-**ClaudeCode:**
-- 10x usage growth in 3 months post-GA (May 2025)
-- 80%+ adoption among Anthropic engineers
-- $500M+ annual recurring revenue
-- Strong enterprise penetration
-
-**GitHub Copilot CLI:**
-- Leveraging GitHub's 100M+ developer userbase
-- GA release February 2026 (recent)
-- Tight integration with GitHub platform creates lock-in
-- Strong CI/CD and automation use cases
-
-**Roocode:**
-- Open-source with growing community (fork of Cline)
-- VS Code marketplace presence
-- Competing on customization and transparency
-- Popular among privacy-conscious developers
-
-**ragent:**
-- Early alpha stage (v0.1.0-alpha.20)
-- Small but growing technical audience
-- Positioned as learning project, not commercial product yet
-- Opportunity to pivot to enterprise/commercial offering
+By milestone completion, ragent will:
+- **Match or exceed** ClaudeCode, OpenCode, and Copilot CLI feature parity in critical areas
+- **Differentiate** through unique strengths: Rust performance, multi-provider support, advanced team coordination
+- **Enable autonomous workflows** reducing user intervention by 60%+
+- **Improve context efficiency** by 40% through intelligent memory and memoization
+- **Provide full cost transparency** for all LLM API usage
+- **Offer production-grade security** with command safety layers and permission enhancements
 
 ---
 
-## FEATURE GAP ANALYSIS
+## 1. Current Product Overview
 
-### Category 1: Enterprise & Security (Priority: P0 - Critical)
+*Source: Comprehensive Codebase Analysis by swarm-s1*
 
-#### Gap 1.1: Secrets Management
-**Description:** API keys stored in SQLite database without OS-level security integration  
-**Competitors:** ClaudeCode (OS keychain), Copilot CLI (OS keychain), Roocode (VS Code secure storage)  
-**Impact:** HIGH - Blocks enterprise security reviews, violates compliance standards  
-**Complexity:** MEDIUM - 2-3 weeks, keyring crate integration  
-**Recommendation:** **IMMEDIATE** - Critical blocker for B2B sales
+### 1.1 Architecture & Technology Stack
 
-#### Gap 1.2: Audit Logging
-**Description:** No structured audit trail for tool execution, permission grants, or LLM calls  
-**Competitors:** ClaudeCode (full audit log), Copilot CLI (JSON export), Roocode (history tracking)  
-**Impact:** HIGH - Required for SOC 2 compliance, enterprise security reviews  
-**Complexity:** MEDIUM - 3-4 weeks, structured logging framework  
-**Recommendation:** **PHASE 1** - Required for enterprise readiness
+**Workspace Structure:**
+```
+ragent/
+├── crates/
+│   ├── ragent-core/       # Core engine (58k LOC, 45 dependencies)
+│   ├── ragent-server/     # HTTP/SSE API server (Axum-based)
+│   ├── ragent-tui/        # Terminal UI (Ratatui-based)
+│   └── prompt_opt/        # Prompt optimization (12 methods)
+├── src/main.rs            # Binary entry point (CLI)
+└── examples/              # Agent and team examples
+```
 
-#### Gap 1.3: Cost Tracking & Budgets
-**Description:** No visibility into LLM API costs, token usage, or budget enforcement  
-**Competitors:** ClaudeCode (real-time tracking), Copilot CLI (usage dashboard), Roocode (token counters)  
-**Impact:** HIGH - Enterprise customers need cost predictability and controls  
-**Complexity:** MEDIUM - 4-6 weeks, database schema + reporting  
-**Recommendation:** **PHASE 1** - Critical for enterprise adoption
+**Core Technology:**
+- **Language:** Rust Edition 2024 (requires Rust 1.85+)
+- **Runtime:** Tokio async runtime (multi-threaded, full features)
+- **Storage:** SQLite (bundled via rusqlite)
+- **Security:** Rustls TLS, no unsafe code (`unsafe_code = deny`)
+- **Build:** LTO enabled, symbols stripped, optimized for size
 
-#### Gap 1.4: Role-Based Access Control (RBAC)
-**Description:** No user/group permissions, tool restrictions, or policy enforcement  
-**Competitors:** ClaudeCode (full RBAC), Copilot CLI (RBAC + policies), Roocode (N/A - single-user)  
-**Impact:** HIGH - Required for enterprise multi-user deployments  
-**Complexity:** HIGH - 8-10 weeks, authentication + authorization system  
-**Recommendation:** **PHASE 2** - After security hardening
+**Key Dependencies:**
+- **LLM & Networking:** reqwest, async-trait, futures, tokio-stream
+- **Document Processing:** docx-rust, calamine, spreadsheet-ods, printpdf, pdf-extract
+- **Code Intelligence:** lsp-types, rmcp (MCP client)
+- **UI/Server:** ratatui, crossterm, axum, tower
+- **Utilities:** tracing, anyhow, thiserror, uuid, chrono, clap
 
-#### Gap 1.5: SSO/SAML Integration
-**Description:** No enterprise authentication integration (Okta, Azure AD, etc.)  
-**Competitors:** ClaudeCode (full SSO), Copilot CLI (GitHub SSO + SAML), Roocode (N/A)  
-**Impact:** MEDIUM - Nice-to-have for large enterprise, not blocker  
-**Complexity:** HIGH - 6-8 weeks, SAML library integration  
-**Recommendation:** **PHASE 2** - After RBAC implementation
+### 1.2 Core Features Inventory
 
-#### Gap 1.6: SOC 2 / ISO 27001 Certification
-**Description:** No formal security audit or compliance certification  
-**Competitors:** ClaudeCode (SOC 2 Type II), Copilot CLI (SOC 2 Type II), Roocode (N/A)  
-**Impact:** HIGH - Required for regulated industries (healthcare, finance)  
-**Complexity:** HIGH - 12-16 weeks + external auditor  
-**Recommendation:** **PHASE 4** - After enterprise features stabilize
+#### Multi-Provider LLM Support
+- **Anthropic:** Claude Sonnet 4, Haiku, Opus
+- **OpenAI:** GPT-4o, GPT-4 Turbo, GPT-3.5
+- **GitHub Copilot:** Auto-discovery from IDE, reasoning level control
+- **Ollama:** Local models (Llama, Mistral, etc.)
+- **Generic OpenAI:** Custom API endpoints
+- **Health Checks:** Real-time provider connectivity status
 
-#### Gap 1.7: TLS Certificate Validation
-**Description:** Custom TLS certificate handling without proper validation  
-**Competitors:** All competitors enforce strict certificate validation  
-**Impact:** HIGH - Security vulnerability, man-in-the-middle risk  
-**Complexity:** LOW - 1 week, native-tls crate update  
-**Recommendation:** **IMMEDIATE** - Critical security fix
+#### Agent System (8 Built-in Agents)
+1. **ask** — Q&A without tools, single-step responses
+2. **general** — General-purpose coding with full tool access (500 steps)
+3. **build** — Build-focused development
+4. **plan** — Planning and analysis (read-only tools)
+5. **explore** — Codebase exploration
+6. **title** — Session title generation
+7. **summary** — Content summarization
+8. **compaction** — Context compression
 
-#### Gap 1.8: Command Injection Prevention
-**Description:** Bash tool vulnerable to shell injection attacks  
-**Competitors:** All competitors use sandboxed/escaped command execution  
-**Impact:** HIGH - Remote code execution risk  
-**Complexity:** MEDIUM - 2 weeks, shell escaping + validation  
-**Recommendation:** **IMMEDIATE** - Critical security fix
+**Custom Agent Support:**
+- OASF (Open Agentic Schema Framework) standard
+- User-global (`~/.ragent/agents/`) and project-local (`.ragent/agents/`)
+- Template variables: `{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`, `{{DATE}}`
+- Per-agent permissions, model bindings, skills, memory scopes
 
-#### Gap 1.9: SSRF Protection
-**Description:** Webfetch tool lacks URL filtering (localhost, private IPs, cloud metadata)  
-**Competitors:** All competitors implement URL allowlists/denylists  
-**Impact:** MEDIUM - Server-Side Request Forgery risk  
-**Complexity:** LOW - 1 week, URL validation  
-**Recommendation:** **PHASE 1** - Security hardening milestone
+#### Tool System (58 Tools)
 
-#### Gap 1.10: Storage Encryption
-**Description:** Conversation history and sessions stored in plaintext SQLite  
-**Competitors:** ClaudeCode (encrypted storage), Copilot CLI (encrypted storage)  
-**Impact:** MEDIUM - Data at rest encryption required for compliance  
-**Complexity:** MEDIUM - 3-4 weeks, SQLCipher integration  
-**Recommendation:** **PHASE 1** - Security hardening milestone
+**File Operations (11 tools):**
+- `read`, `write`, `create`, `edit`, `multiedit`, `patch`
+- `glob`, `grep`, `list`, `rm`, `file_ops_tool` (batch concurrent)
 
-### Category 2: Observability & Operations (Priority: P0 - Critical)
+**Code Intelligence (5 LSP tools):**
+- `lsp_symbols` — List symbols in file
+- `lsp_hover` — Type/doc info for symbol
+- `lsp_definition` — Go to definition
+- `lsp_references` — Find all usages
+- `lsp_diagnostics` — Compiler errors/warnings
 
-#### Gap 2.1: OpenTelemetry Integration
-**Description:** No distributed tracing, metrics collection, or observability framework  
-**Competitors:** ClaudeCode (full OTel), Copilot CLI (OTel), Roocode (N/A)  
-**Impact:** HIGH - Required for debugging production issues, performance monitoring  
-**Complexity:** MEDIUM - 4-6 weeks, opentelemetry crate integration  
-**Recommendation:** **PHASE 1** - Foundation for observability
+**Document Processing (9 tools):**
+- Office: `office_read`, `office_write`, `office_info` (.docx, .xlsx, .pptx)
+- LibreOffice: `libreoffice_read`, `libreoffice_write`, `libreoffice_info` (.odt, .ods, .odp)
+- PDF: `pdf_read`, `pdf_write`
 
-#### Gap 2.2: Structured Logging
-**Description:** Ad-hoc println!/tracing without consistent schema  
-**Competitors:** All competitors use structured JSON logging  
-**Impact:** MEDIUM - Makes debugging and log analysis difficult  
-**Complexity:** LOW - 2 weeks, standardize tracing spans  
-**Recommendation:** **PHASE 1** - Quick win for operations
+**Web & Search (2 tools):**
+- `webfetch` — Fetch URLs with HTML→text conversion
+- `websearch` — Web search via Tavily API
 
-#### Gap 2.3: Health Check Endpoints
-**Description:** No HTTP health checks for server mode  
-**Competitors:** ClaudeCode (/health), Copilot CLI (/health)  
-**Impact:** MEDIUM - Required for load balancer integration  
-**Complexity:** LOW - 1 week, add health endpoint  
-**Recommendation:** **PHASE 1** - Operational necessity
+**Execution & Interaction (2 tools):**
+- `bash` — Shell command execution
+- `question` — User interaction prompts
 
-#### Gap 2.4: Metrics & Dashboards
-**Description:** No built-in metrics, Prometheus exporter, or dashboard  
-**Competitors:** ClaudeCode (Grafana dashboards), Copilot CLI (analytics dashboard)  
-**Impact:** MEDIUM - Needed for capacity planning and SLA monitoring  
-**Complexity:** MEDIUM - 3-4 weeks, metrics collection + export  
-**Recommendation:** **PHASE 2** - After OTel integration
+**Sub-Agent Management (3 tools):**
+- `new_task` — Spawn background agents
+- `cancel_task` — Cancel background tasks
+- `list_tasks` — Monitor sub-agent status
 
-### Category 3: User Experience & Accessibility (Priority: P1 - High)
+**Team Coordination (20 tools):**
+- Team lifecycle: `team_create`, `team_spawn`, `team_cleanup`
+- Communication: `team_message`, `team_broadcast`, `team_read_messages`
+- Task management: `team_task_create`, `team_task_list`, `team_task_claim`, `team_task_complete`
+- Workflow: `team_submit_plan`, `team_approve_plan`, `team_assign_task`
+- State: `team_status`, `team_wait`, `team_idle`
+- Shutdown: `team_shutdown_teammate`, `team_shutdown_ack`
+- Memory: `team_memory_read`, `team_memory_write`
 
-#### Gap 3.1: Accessibility Compliance (WCAG 2.1 AA)
-**Description:** No screen reader support, keyboard-only navigation, or high-contrast themes  
-**Competitors:** ClaudeCode (WCAG 2.1 AA), Copilot CLI (WCAG 2.1 AA), Roocode (partial)  
-**Impact:** HIGH - Legal requirement in many jurisdictions, excludes disabled users  
-**Complexity:** HIGH - 6-8 weeks, ratatui ARIA support + themes  
-**Recommendation:** **PHASE 1** - Legal compliance requirement
+**Utility (6 tools):**
+- `plan` — Delegate to plan agent
+- `todo` — Session TODO management
+- `wait_tasks` — Synchronization for background agents
 
-#### Gap 3.2: First-Run Wizard
-**Description:** No interactive setup experience, requires manual configuration  
-**Competitors:** All competitors have guided onboarding  
-**Impact:** HIGH - Poor first impression, high abandonment rate  
-**Complexity:** MEDIUM - 3-4 weeks, interactive wizard  
-**Recommendation:** **PHASE 1** - Critical for user retention
+### 1.3 Advanced Features
 
-#### Gap 3.3: Feature Discoverability
-**Description:** No /help menu, tool discovery, or command palette  
-**Competitors:** ClaudeCode (extensive help), Copilot CLI (/help + tooltips), Roocode (UI hints)  
-**Impact:** MEDIUM - Users don't know what's available  
-**Complexity:** MEDIUM - 3-4 weeks, interactive help system  
-**Recommendation:** **PHASE 2** - UX improvement sprint
+#### Session Management
+- Persistent conversations (SQLite storage)
+- Session import/export (JSON serialization)
+- Session resume capability
+- Auto-titling for automatic naming
 
-#### Gap 3.4: Error Message Quality
-**Description:** Technical stack traces exposed to users, no actionable guidance  
-**Competitors:** All competitors have user-friendly error messages with suggestions  
-**Impact:** MEDIUM - Frustrating user experience, increases support burden  
-**Complexity:** MEDIUM - 2-3 weeks, error message catalog  
-**Recommendation:** **PHASE 2** - UX improvement sprint
+#### Permission System
+- Rule-based access control (glob pattern matching)
+- Permission types: `file:read`, `file:write`, `bash:exec`, `external:http`
+- Actions: allow, deny, prompt
+- Per-agent custom permission rules
 
-#### Gap 3.5: Progress Indicators
-**Description:** Long operations (indexing, LSP startup) have no progress feedback  
-**Competitors:** All competitors show progress bars and ETA  
-**Impact:** MEDIUM - Users think application is frozen  
-**Complexity:** LOW - 2 weeks, progress bar components  
-**Recommendation:** **PHASE 2** - UX improvement sprint
+#### Snapshot & Undo
+- Pre-edit snapshots saved before modifications
+- Rollback support for reverting changes
+- File hashing (SHA2/Blake3) for integrity verification
 
-#### Gap 3.6: Undo/Redo for File Edits
-**Description:** No easy way to revert accidental file changes  
-**Competitors:** Roocode (shadow git checkpoints), ClaudeCode (diff review), Copilot CLI (approve/reject)  
-**Impact:** MEDIUM - Reduces trust in autonomous edits  
-**Complexity:** MEDIUM - 3-4 weeks, undo stack implementation  
-**Recommendation:** **PHASE 2** - User safety feature
+#### Team Workflows
+- Shared task lists with lock-free atomic claiming
+- Mailbox messaging for peer-to-peer communication
+- Plan approval workflow (lead reviews teammate plans)
+- Persistent team memory across sessions
+- Blueprint templates (`code-review`, `parallel-feature`)
+- Lifecycle hooks (spawn, idle, complete, shutdown)
+- Swarm mode for automatic task decomposition
 
-### Category 4: Code Intelligence (Priority: P1 - High)
+#### Multi-Agent Orchestration
+- AgentRegistry for capability-based agent discovery
+- InProcessRouter with actor-style message passing
+- Coordinator for job orchestration (sync/async modes)
+- Pluggable transport (HTTP routing, composite routers)
+- Leader election with vote-based coordination
+- Conflict resolution policies (Concat, FirstSuccess, Consensus, HumanReview)
 
-#### Gap 4.1: Codebase Indexing - Structural
-**Description:** No tree-sitter based structural map of codebase  
-**Competitors:** Copilot CLI (tree-sitter), Roocode (configurable indexing)  
-**Impact:** HIGH - Limits understanding of large codebases  
-**Complexity:** HIGH - 8-10 weeks, tree-sitter integration  
-**Recommendation:** **PHASE 2** - Foundation for semantic search
+#### Prompt Optimization
+- **12 transformation methods:**
+  - CO-STAR, CRISPE, Chain-of-Thought, DRAW, RISE
+  - O1-Style, Meta Prompting, Variational, Q*
+  - OpenAI, Claude, Microsoft adapters
+- Instant results (no LLM call required)
+- Slash command: `/opt <method> <prompt>`
+- HTTP endpoint: `POST /opt`
 
-#### Gap 4.2: Codebase Indexing - Semantic
-**Description:** No embedding-based semantic search  
-**Competitors:** ClaudeCode (semantic search), Roocode (configurable embeddings)  
-**Impact:** HIGH - Misses conceptually related code  
-**Complexity:** HIGH - 10-12 weeks, embedding pipeline  
-**Recommendation:** **PHASE 5** - After structural indexing
+#### LSP Integration
+- Auto-discovery of language servers (PATH and VS Code extensions)
+- Multi-server support
+- Workspace folders (modern LSP initialization)
+- Full code intelligence: symbols, hover, definitions, references, diagnostics
 
-#### Gap 4.3: LSP Documentation
-**Description:** Minimal documentation on LSP tool usage, no examples  
-**Competitors:** All competitors have extensive LSP guides  
-**Impact:** MEDIUM - Users don't leverage existing LSP features  
-**Complexity:** LOW - 2 weeks, write documentation  
-**Recommendation:** **PHASE 2** - Quick documentation win
+#### MCP Support
+- Server auto-discovery (npm packages, registry directories)
+- 18+ known servers: filesystem, GitHub, git, postgres, sqlite, brave-search, etc.
+- F9 discovery panel in TUI
 
-#### Gap 4.4: LSP Multi-Language Support
-**Description:** LSP tools work but lack per-language setup guides  
-**Competitors:** All competitors document setup for Python, Go, TypeScript, etc.  
-**Impact:** MEDIUM - Harder to use with non-Rust projects  
-**Complexity:** LOW - 2 weeks, language-specific guides  
-**Recommendation:** **PHASE 2** - Documentation improvement
+#### Context Management
+- Auto-compaction when approaching context limits
+- Live context window usage display
+- Message replay after compaction
 
-#### Gap 4.5: Inline Diffs
-**Description:** No inline diff view in TUI for reviewing changes  
-**Competitors:** ClaudeCode (diff view), Copilot CLI (plan review), Roocode (diff view)  
-**Impact:** MEDIUM - Harder to review multi-file changes  
-**Complexity:** MEDIUM - 4-6 weeks, TUI diff component  
-**Recommendation:** **PHASE 2** - UX enhancement
+#### Image Support
+- Clipboard paste (Alt+V) with PNG encoding
+- File URI attachments (`file:///...`)
+- Vision model support (Anthropic, Copilot)
+- Pending attachment display before sending
 
-### Category 5: Internationalization (Priority: P1 - High)
+### 1.4 User Interaction Model
 
-#### Gap 5.1: i18n Infrastructure
-**Description:** No internationalization support, English-only interface  
-**Competitors:** ClaudeCode (12+ languages), Copilot CLI (multiple languages)  
-**Impact:** HIGH - Excludes 70%+ of global developers  
-**Complexity:** HIGH - 8-10 weeks, fluent-rs integration  
-**Recommendation:** **PHASE 3** - Market expansion priority
+#### Terminal UI (Ratatui)
+- Full-screen interface: Home, chat, provider setup screens
+- Panels: Message history, multi-line input, tool call logs, status bar
+- Keyboard shortcuts:
+  - `Ctrl+R`: Send message
+  - `Shift+Enter`: Newline in input
+  - `Esc`: Clear/cancel
+  - `Tab/Shift+Tab`: Navigate agents/providers
+  - `/`: Slash command autocomplete
+  - `?`: Help panel
+  - `Alt+V`: Attach image
+  - `F9`: MCP discovery
+- Context menu (right-click): Cut/Copy/Paste
+- Session navigation with UI cycling
+- Step-numbered tool calls (`[sid:step]`)
 
-#### Gap 5.2: RTL Text Support
-**Description:** No right-to-left language support (Arabic, Hebrew)  
-**Competitors:** ClaudeCode (full RTL), Copilot CLI (full RTL)  
-**Impact:** MEDIUM - Excludes Middle East market  
-**Complexity:** MEDIUM - 4-6 weeks, ratatui RTL layout  
-**Recommendation:** **PHASE 3** - Part of i18n milestone
+#### CLI (One-Shot)
+```bash
+ragent run "Explain this codebase"
+ragent run --model openai/gpt-4o --agent build "Add tests"
+ragent run --no-tui --yes "Fix bug"
+```
 
-#### Gap 5.3: Locale-Aware Formatting
-**Description:** Dates, numbers, currencies hardcoded to US format  
-**Competitors:** All competitors use locale-aware formatting  
-**Impact:** MEDIUM - Confusing for international users  
-**Complexity:** LOW - 2 weeks, chrono locale support  
-**Recommendation:** **PHASE 3** - Part of i18n milestone
+#### HTTP API (Axum Server)
+- **REST Endpoints:**
+  - Sessions: `/sessions` (list, create, get, archive)
+  - Messages: `/sessions/{id}/messages` (get, send)
+  - Permissions: `/sessions/{id}/permission/{req_id}` (approve/deny)
+  - Tasks: `/sessions/{id}/tasks` (list, spawn, cancel)
+  - Orchestration: `/orchestrator/metrics`, `/orchestrator/start`, `/orchestrator/jobs/{id}`
+  - Optimization: `/opt` (prompt transformation)
+- **SSE Stream:** `/events` (real-time updates)
+- **Authentication:** Bearer token required
+- **Rate Limiting:** Per-client throttling
+- **CORS:** Permissive for browser clients
 
-### Category 6: Extensibility (Priority: P2 - Medium)
+### 1.5 Technical Strengths
 
-#### Gap 6.1: Hooks System
-**Description:** No lifecycle hooks for external integration  
-**Competitors:** ClaudeCode (6 hook types), Copilot CLI (8 hook types)  
-**Impact:** MEDIUM - Limits workflow automation  
-**Complexity:** MEDIUM - 6-8 weeks, hook infrastructure  
-**Recommendation:** **PHASE 3** - Extensibility milestone
+#### Code Quality
+- Modern Rust Edition 2024
+- Strict linting (clippy pedantic/nursery)
+- Comprehensive error handling (`anyhow::Result`, `thiserror`)
+- Structured logging (`tracing` with JSON support)
+- DOCBLOCK documentation on all public APIs
+- Type safety (no unsafe code)
 
-#### Gap 6.2: Plugin Marketplace
-**Description:** No marketplace for sharing custom agents, skills, MCP servers  
-**Competitors:** ClaudeCode (marketplace), Copilot CLI (plugin system)  
-**Impact:** MEDIUM - Reduces ecosystem growth  
-**Complexity:** HIGH - 12+ weeks, marketplace infrastructure  
-**Recommendation:** **PHASE 5** - After core features stabilize
+#### Concurrency & Performance
+- Async/await with Tokio throughout
+- Concurrent tools (parallel file operations, sub-agents)
+- File locking (`fs2`) for safe concurrent edits
+- Non-blocking storage (`spawn_blocking` for SQLite)
+- Efficient encoding (Blake3 hashing)
 
-#### Gap 6.3: Skills System Enhancement
-**Description:** Basic skill support exists but lacks discoverability, versioning  
-**Competitors:** ClaudeCode (rich skills), Copilot CLI (comprehensive skills)  
-**Impact:** MEDIUM - Underutilized existing feature  
-**Complexity:** MEDIUM - 4-6 weeks, skill registry + UI  
-**Recommendation:** **PHASE 2** - Leverage existing foundation
+#### Reliability
+- Transaction safety (atomic multi-file edits)
+- Permission gating for all writes/commands
+- Graceful degradation with health checks
+- Session isolation (independent state)
+- Event-driven UI/server decoupling
 
-#### Gap 6.4: MCP Server Ecosystem
-**Description:** Basic MCP support but no curated server list or documentation  
-**Competitors:** ClaudeCode (50+ servers), Copilot CLI (extensive ecosystem)  
-**Impact:** MEDIUM - Users don't know what's available  
-**Complexity:** LOW - 2 weeks, documentation + examples  
-**Recommendation:** **PHASE 2** - Documentation improvement
+#### Extensibility
+- Plugin architecture (custom agents, MCP/LSP servers)
+- Provider trait for easy LLM addition
+- Dynamic tool registry
+- Blueprint system for reusable team templates
+- Hook system for team lifecycle events
 
-### Category 7: Multi-Platform (Priority: P2 - Medium)
+### 1.6 Competitive Differentiation vs. OpenCode
 
-#### Gap 7.1: Web UI
-**Description:** Terminal-only, no browser-based interface  
-**Competitors:** ClaudeCode (claude.ai/code), Roocode (VS Code webview)  
-**Impact:** MEDIUM - Reduces accessibility, no mobile support  
-**Complexity:** HIGH - 16+ weeks, web frontend + API  
-**Recommendation:** **PHASE 5** - Future innovation
+**Current Advantages:**
+- **Rust vs. TypeScript:** Native performance, zero GC pauses, memory safety
+- **Single Binary:** No Node.js runtime dependency, simpler deployment
+- **Teams System:** Built-in multi-agent coordination (OpenCode lacks this)
+- **LSP Integration:** Native code intelligence (not in OpenCode)
+- **Document Processing:** More extensive Office/PDF support
+- **Prompt Optimization:** 12 built-in transformation methods (unique feature)
 
-#### Gap 7.2: IDE Extensions
-**Description:** No VS Code or JetBrains plugins  
-**Competitors:** ClaudeCode (all IDEs), Copilot CLI (VS Code + JetBrains), Roocode (VS Code native)  
-**Impact:** HIGH - Misses largest user segment (IDE users)  
-**Complexity:** HIGH - 12+ weeks per IDE  
-**Recommendation:** **FUTURE** - Large scope, consider partnerships
+### 1.7 Project Metadata
 
-#### Gap 7.3: Desktop Application
-**Description:** No standalone GUI outside terminal  
-**Competitors:** ClaudeCode (Electron app)  
-**Impact:** LOW - Terminal is core use case  
-**Complexity:** HIGH - 16+ weeks, GUI framework  
-**Recommendation:** **FUTURE** - Low priority
-
-#### Gap 7.4: Mobile Clients
-**Description:** No iOS or Android apps  
-**Competitors:** ClaudeCode (iOS app with Web UI)  
-**Impact:** LOW - Not primary use case for coding  
-**Complexity:** HIGH - 20+ weeks per platform  
-**Recommendation:** **PHASE 5** - Experimental after Web UI
-
-### Category 8: Advanced Features (Priority: P3 - Low)
-
-#### Gap 8.1: Voice Input
-**Description:** No speech-to-text input capability  
-**Competitors:** ClaudeCode (voice input), Copilot CLI (voice input)  
-**Impact:** MEDIUM - Accessibility benefit, modern UX  
-**Complexity:** MEDIUM - 6-8 weeks, whisper-rs integration  
-**Recommendation:** **PHASE 5** - Nice-to-have feature
-
-#### Gap 8.2: Vision/Image Analysis
-**Description:** Basic vision support exists but limited provider support  
-**Competitors:** ClaudeCode (multi-provider), Copilot CLI (full vision)  
-**Impact:** MEDIUM - Needed for UI design, diagram analysis  
-**Complexity:** MEDIUM - 4-6 weeks, provider integration  
-**Recommendation:** **PHASE 3** - Enhance existing feature
-
-#### Gap 8.3: Git Worktree Isolation
-**Description:** No automatic git worktree creation for tasks  
-**Competitors:** Copilot CLI (worktree support)  
-**Impact:** LOW - Nice safety feature  
-**Complexity:** MEDIUM - 4-6 weeks, git integration  
-**Recommendation:** **PHASE 5** - Low priority
-
-#### Gap 8.4: Suggested Responses
-**Description:** No quick-reply buttons for common actions  
-**Competitors:** Copilot CLI (suggested responses), Roocode (action buttons)  
-**Impact:** LOW - Minor UX convenience  
-**Complexity:** MEDIUM - 3-4 weeks, UI enhancement  
-**Recommendation:** **PHASE 5** - Low priority
-
-#### Gap 8.5: Scheduled Tasks
-**Description:** No cron-like scheduling for recurring tasks  
-**Competitors:** ClaudeCode (scheduled tasks)  
-**Impact:** LOW - Niche use case  
-**Complexity:** MEDIUM - 4-6 weeks, scheduler + persistence  
-**Recommendation:** **FUTURE** - Not on roadmap
-
-#### Gap 8.6: Remote Session Control
-**Description:** No ability to start/resume sessions from different devices  
-**Competitors:** ClaudeCode (full mobility), Copilot CLI (session sync)  
-**Impact:** MEDIUM - Improves workflow flexibility  
-**Complexity:** HIGH - 10+ weeks, session sync protocol  
-**Recommendation:** **FUTURE** - After Web UI
-
-### Category 9: Performance (Priority: P2 - Medium)
-
-#### Gap 9.1: Startup Time
-**Description:** Slow TUI initialization (~2-3 seconds)  
-**Competitors:** ClaudeCode (<1s), Copilot CLI (<1s)  
-**Impact:** MEDIUM - Noticeable delay on every launch  
-**Complexity:** MEDIUM - 2-3 weeks, lazy initialization  
-**Recommendation:** **PHASE 1** - Performance sprint
-
-#### Gap 9.2: LSP Connection Pooling
-**Description:** Creates new LSP process per file, high overhead  
-**Competitors:** All competitors pool LSP connections  
-**Impact:** MEDIUM - Wastes resources on large projects  
-**Complexity:** MEDIUM - 3-4 weeks, connection manager  
-**Recommendation:** **PHASE 3** - Performance optimization
-
-#### Gap 9.3: Async Blocking
-**Description:** Some file I/O blocks event loop  
-**Competitors:** All competitors fully async  
-**Impact:** MEDIUM - UI freezes during operations  
-**Complexity:** MEDIUM - 4-6 weeks, refactor to async  
-**Recommendation:** **PHASE 1** - Performance sprint
-
-#### Gap 9.4: Memory Footprint
-**Description:** Memory usage grows with conversation history  
-**Competitors:** All competitors implement memory compaction  
-**Impact:** LOW - Noticeable only in very long sessions  
-**Complexity:** MEDIUM - 3-4 weeks, history compaction  
-**Recommendation:** **PHASE 3** - Performance optimization
-
-### Category 10: Documentation (Priority: P1 - High)
-
-#### Gap 10.1: Comprehensive Guides
-**Description:** Minimal user documentation, READMEs only  
-**Competitors:** All competitors have extensive docs sites  
-**Impact:** HIGH - High barrier to entry for new users  
-**Complexity:** MEDIUM - 4-6 weeks, documentation site  
-**Recommendation:** **PHASE 2** - Critical for adoption
-
-#### Gap 10.2: Video Tutorials
-**Description:** No video walkthroughs or screencasts  
-**Competitors:** ClaudeCode (video tutorials), Copilot CLI (demos)  
-**Impact:** MEDIUM - Harder to learn complex features  
-**Complexity:** MEDIUM - 2-3 weeks, produce videos  
-**Recommendation:** **PHASE 2** - Marketing effort
-
-#### Gap 10.3: Architecture Documentation
-**Description:** Limited technical documentation for contributors  
-**Competitors:** Most competitors have architecture docs  
-**Impact:** MEDIUM - Slows community contributions  
-**Complexity:** LOW - 2 weeks, write architecture guide  
-**Recommendation:** **PHASE 2** - Community building
-
-#### Gap 10.4: API Reference
-**Description:** No auto-generated API documentation  
-**Competitors:** All competitors have comprehensive API docs  
-**Impact:** MEDIUM - Hard to use programmatically  
-**Complexity:** LOW - 1 week, rustdoc + hosting  
-**Recommendation:** **PHASE 2** - Documentation improvement
+- **Repository:** https://github.com/thawkins/ragent
+- **License:** MIT
+- **Author:** Tim Hawkins <tim.thawkins@gmail.com>
+- **Version:** 0.1.0-alpha.20 (active development)
+- **Codebase Size:** 226 Rust files, 58,425 lines of code
 
 ---
 
-## RECOMMENDED FEATURE ADDITIONS
+## 2. Competitive Analysis Summary
 
-### Priority Tier 0: Immediate Security Fixes (Weeks 1-2)
+*Source: Competitive Gap Analysis by swarm-s5*
 
-**Rationale:** Critical vulnerabilities blocking any commercial deployment
+### 2.1 Competitors Analyzed
 
-1. **TLS Certificate Validation** (1 week, P0)
-   - Fix custom certificate handling to enforce strict validation
-   - Prevents MITM attacks
-   - Zero business risk to fix
+1. **ClaudeCode** — Anthropic's official coding assistant (TypeScript)
+2. **OpenCode** — Popular open-source terminal agent (TypeScript)
+3. **GitHub Copilot CLI** — Microsoft's command-line AI assistant
+4. **RooCode** — VS Code extension with autonomous features
 
-2. **Command Injection Prevention** (2 weeks, P0)
-   - Implement shell escaping and validation for bash tool
-   - Blocks remote code execution attacks
-   - Required for security audit
+### 2.2 ragent's Current Competitive Advantages
 
-### Priority Tier 1: Enterprise Blockers (Months 1-6)
+**Unique Strengths:**
+- ✅ **Rust implementation** (performance, reliability, single binary)
+- ✅ **Multi-provider support** (no vendor lock-in)
+- ✅ **Team/swarm orchestration system** (unmatched in competitors)
+- ✅ **LSP integration** (native semantic code understanding)
+- ✅ **Office document and PDF tools** (broader than competitors)
+- ✅ **Terminal-first philosophy** (optimized for CLI workflows)
+- ✅ **No cloud dependencies** (fully local operation possible)
 
-**Rationale:** Cannot sell to enterprises without these features
+### 2.3 Competitive Landscape Matrix
 
-3. **Secrets Management Migration** (3 weeks, P0)
-   - Replace SQLite with OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-   - Automatic migration for existing users
-   - **Business Value:** Pass enterprise security reviews
+| Feature Category | ragent | ClaudeCode | OpenCode | Copilot CLI | RooCode |
+|-----------------|--------|------------|----------|-------------|---------|
+| **Multi-Provider** | ✅ Full | ❌ Anthropic only | ✅ Full | ❌ GitHub only | ✅ Full |
+| **Persistent Shell** | ❌ Missing | ✅ Yes | ❌ No | ✅ Yes | ❌ No |
+| **Project Memory** | ⚠️ Basic | ✅ Advanced | ⚠️ Skills | ✅ Custom instructions | ⚠️ Basic |
+| **Git Auto-Context** | ❌ Missing | ✅ Yes | ❌ No | ✅ Yes | ❌ No |
+| **Cost Tracking** | ❌ Missing | ✅ Yes | ❌ No | ❌ No | ⚠️ Partial |
+| **Autopilot Mode** | ❌ Missing | ✅ Yes | ❌ No | ❌ No | ✅ Yes |
+| **Team Coordination** | ✅ Advanced | ❌ No | ❌ No | ❌ No | ❌ No |
+| **LSP Integration** | ✅ Yes | ❌ No | ❌ No | ❌ No | ⚠️ VS Code only |
+| **GitHub Integration** | ⚠️ Basic | ✅ Full | ⚠️ via gh | ✅ Full | ✅ Full |
+| **Command Safety** | ⚠️ Basic | ✅ Advanced | ⚠️ Basic | ✅ Whitelist | ⚠️ Basic |
+| **MCP Support** | ⚠️ Partial | ❌ No | ❌ No | ❌ No | ❌ No |
+| **Single Binary** | ✅ Yes | ❌ Node.js | ❌ Node.js | ✅ Go | ❌ Extension |
 
-4. **Audit Logging** (4 weeks, P0)
-   - Structured JSON audit trail for all tool executions, permission grants, LLM calls
-   - Export to SIEM systems
-   - **Business Value:** SOC 2 compliance requirement
+**Legend:**
+- ✅ Full support / Major strength
+- ⚠️ Partial / Basic implementation
+- ❌ Missing / Not applicable
 
-5. **Cost Tracking & Budgets** (6 weeks, P0)
-   - Real-time LLM token usage and cost tracking
-   - Budget limits and alerts
-   - Usage dashboard
-   - **Business Value:** Enterprise customers demand cost predictability
+### 2.4 Key Insights from Competitive Analysis
 
-6. **Accessibility Compliance (WCAG 2.1 AA)** (8 weeks, P0)
-   - Screen reader support (ARIA labels)
-   - Keyboard-only navigation
-   - High-contrast theme
-   - **Business Value:** Legal compliance in US/EU markets
+#### What Competitors Do Better
 
-7. **First-Run Wizard** (4 weeks, P1)
-   - Interactive onboarding
-   - Provider setup
-   - Tutorial walkthrough
-   - **Business Value:** Reduce abandonment rate from 70% to <30%
+1. **Persistent Shell Sessions** (ClaudeCode, Copilot CLI)
+   - Maintain shell environment state across commands
+   - Preserve environment variables, working directory, history
+   - Enable complex multi-step workflows without state loss
 
-8. **OpenTelemetry Integration** (6 weeks, P0)
-   - Distributed tracing
-   - Metrics collection
-   - **Business Value:** Required for debugging production issues
+2. **Project Memory Systems** (ClaudeCode, Copilot CLI)
+   - Hierarchical context file discovery (CLAUDE.md, .copilot-instructions.md)
+   - Automatic accumulation of project knowledge across sessions
+   - Memory write tools for agents to persist learnings
 
-### Priority Tier 2: Competitive Parity (Months 4-12)
+3. **Git Context Auto-Injection** (ClaudeCode, Copilot CLI)
+   - Current branch, main branch, git status, recent commits, author stats
+   - Truncated at 200 lines, injected into every prompt
+   - Reduces need for agents to manually query git
 
-**Rationale:** Close feature gaps with ClaudeCode and Copilot CLI
+4. **Cost Tracking Transparency** (ClaudeCode, RooCode)
+   - Real-time token counting and USD cost display
+   - Session cost summaries and cumulative tracking
+   - Budget alerts and spend management
 
-9. **LSP Documentation & Examples** (4 weeks, P1)
-   - Comprehensive LSP guide
-   - Language-specific setup (Python, Go, TypeScript, Rust, etc.)
-   - Example workflows
-   - **Business Value:** Unlock existing LSP investment, improve user satisfaction
+5. **Command Safety Layers** (ClaudeCode, Copilot CLI)
+   - Whitelists for safe commands (ls, cat, grep, git status, etc.)
+   - Banned command lists (rm -rf, mkfs, dd, sudo, etc.)
+   - LLM-based injection detection before execution
 
-10. **Codebase Indexing - Structural** (10 weeks, P1)
-    - Tree-sitter based structural map
-    - Symbol index
-    - File relationship graph
-    - **Business Value:** Competitive parity with Copilot CLI, handle large codebases
+6. **Autonomous Operation Modes** (ClaudeCode, RooCode)
+   - Autopilot: multi-step execution without user confirmation
+   - Plan-before-implement: explicit planning phase with user approval
+   - Agent role modes (architect, coder, reviewer, debugger)
 
-11. **RBAC & SSO/SAML** (10 weeks, P0)
-    - Role-based access control
-    - Okta, Azure AD integration
-    - Policy engine
-    - **Business Value:** Required for enterprise multi-tenant deployments
+7. **Native GitHub Integration** (ClaudeCode, Copilot CLI, RooCode)
+   - OAuth authentication with GitHub API
+   - Issue listing, creation, commenting, assignment
+   - PR review, creation, commenting, approval
+   - Commit graph analysis, blame, PR context injection
 
-12. **Usage Analytics Dashboard** (6 weeks, P1)
-    - Web-based analytics UI
-    - Team usage reports
-    - Cost attribution
-    - **Business Value:** Enterprise admin visibility
+#### What ragent Does Better
 
-13. **Feature Discoverability** (4 weeks, P1)
-    - Interactive help system (/help command)
-    - Contextual tooltips
-    - Onboarding hints
-    - **Business Value:** Reduce support burden, improve user activation
+1. **Team/Swarm Orchestration**
+   - Shared task lists with atomic claiming
+   - Peer-to-peer mailbox messaging
+   - Plan approval workflows
+   - Persistent team memory
+   - Blueprint system for reusable patterns
+   - **Unique to ragent** — no competitor has equivalent multi-agent coordination
 
-14. **Error Message Enhancements** (3 weeks, P1)
-    - User-friendly error messages
-    - Actionable suggestions
-    - Hide stack traces
-    - **Business Value:** Improve user trust, reduce frustration
+2. **Multi-Provider Flexibility**
+   - Seamless switching between Anthropic, OpenAI, Copilot, Ollama
+   - Provider health checks and fallback configuration
+   - No vendor lock-in (vs. ClaudeCode/Copilot)
 
-15. **Unified Documentation Site** (6 weeks, P1)
-    - mdBook or Docusaurus site
-    - API reference (rustdoc)
-    - Tutorial videos
-    - **Business Value:** Lower barrier to entry, improve SEO/discoverability
+3. **LSP Integration**
+   - Native code intelligence with language servers
+   - Symbols, hover, definitions, references, diagnostics
+   - Auto-discovery of LSP servers (PATH and VS Code extensions)
+   - **Unique to ragent and RooCode** — others lack semantic code understanding
 
-### Priority Tier 3: Global Expansion (Months 10-16)
+4. **Performance & Deployment**
+   - Single static binary (vs. Node.js runtime for ClaudeCode/OpenCode)
+   - Rust performance (native compilation, no GC pauses)
+   - Zero runtime dependencies (bundled SQLite, rustls)
 
-**Rationale:** Expand addressable market 3x
+5. **Document Processing**
+   - Full Office support (.docx, .xlsx, .pptx)
+   - OpenDocument support (.odt, .ods, .odp)
+   - PDF read/write with structured content
+   - **Most comprehensive** among all competitors
 
-16. **i18n Infrastructure** (10 weeks, P1)
-    - fluent-rs integration
-    - Translation files for 12 languages (ES, FR, DE, JA, ZH, PT, KO, RU, AR, HI, IT, PL)
-    - Community translation workflow
-    - **Business Value:** Unlock international markets (70% of developers)
-
-17. **RTL Text Support** (6 weeks, P1)
-    - Right-to-left UI layout
-    - Arabic, Hebrew language support
-    - **Business Value:** Middle East market expansion
-
-18. **Hooks System** (8 weeks, P2)
-    - 6 hook types (before/after: session_start, tool_execution, agent_response)
-    - External script execution
-    - Webhook support
-    - **Business Value:** Enable workflow automation, integration with CI/CD
-
-19. **Enhanced Vision Support** (6 weeks, P2)
-    - Multi-provider vision API support (OpenAI, Anthropic, Google)
-    - Image analysis tools
-    - **Business Value:** UI design analysis, diagram understanding
-
-### Priority Tier 4: Compliance Certification (Months 16-20)
-
-**Rationale:** Access regulated industries (healthcare, finance)
-
-20. **SOC 2 Type II Audit** (12 weeks, P0)
-    - Hire external auditor (Big 4 or specialist)
-    - Evidence collection
-    - Policy documentation
-    - **Business Value:** Required for enterprise sales in regulated industries
-
-21. **ISO 27001 Certification** (4 weeks, P0)
-    - Information Security Management System (ISMS)
-    - Certification audit
-    - **Business Value:** International enterprise compliance
-
-22. **GDPR Compliance** (4 weeks, P0)
-    - Data subject rights (export, deletion)
-    - Privacy policy
-    - Consent management
-    - **Business Value:** Required for EU market
-
-### Priority Tier 5: Innovation Leadership (Months 18-24+)
-
-**Rationale:** Differentiation and future-proofing
-
-23. **Voice Input** (8 weeks, P3)
-    - Speech-to-text via whisper-rs
-    - Push-to-talk interface
-    - **Business Value:** Accessibility, modern UX, hands-free coding
-
-24. **Semantic Codebase Search** (12 weeks, P2)
-    - Embedding-based search
-    - Conceptual code discovery
-    - **Business Value:** Differentiation vs competitors, handle complex refactoring
-
-25. **Web UI & Mobile Client** (20+ weeks, P3)
-    - React-based web interface
-    - iOS/Android apps
-    - **Business Value:** Expand platform reach, enable remote work scenarios
-
-26. **Git Worktree Isolation** (6 weeks, P3)
-    - Automatic worktree creation for tasks
-    - Safe experimentation
-    - **Business Value:** Safety feature, reduce fear of AI changes
+6. **Prompt Optimization**
+   - 12 transformation methods (CO-STAR, CRISPE, Chain-of-Thought, etc.)
+   - Instant results without LLM calls
+   - **Unique feature** — no competitor offers this
 
 ---
 
-## IMPLEMENTATION PLAN
+## 3. Feature Gap Analysis
 
-### Phase 1: Enterprise Readiness (Q2 2026)
+*Source: Competitive Gap Analysis by swarm-s5*
 
-**Duration:** 6-8 months  
-**Effort:** 8-10 person-months  
-**Goal:** Pass enterprise security reviews, achieve WCAG 2.1 Level AA compliance, enable cost management
+### 3.1 Critical Gaps (High Impact, Urgent)
 
-#### Milestone 1.1: Security Hardening (Weeks 1-6)
+#### Gap 1: No Persistent Shell Sessions
+**Impact:** HIGH | **Complexity:** HIGH | **Priority:** P0
 
-**Objective:** Fix all critical security vulnerabilities
+**Current State:**
+- Each `bash` tool call creates a new shell process
+- Environment variables, working directory, history lost between commands
+- Complex workflows (e.g., `cd src && cargo build`) require chaining in single command
 
-**Features:**
-1. **Secrets Management Overhaul** (3 weeks)
-   - Replace SQLite with OS keychain integration
-   - Automatic migration for existing users
-   - Fallback for headless environments
-   - **Deliverable:** No API keys in plaintext storage
+**Competitor Behavior:**
+- **ClaudeCode:** Persistent PTY session per conversation
+- **Copilot CLI:** Maintains shell context across invocations
 
-2. **TLS Certificate Validation** (1 week)
-   - Enforce strict certificate validation
-   - Remove custom certificate handlers
-   - **Deliverable:** Pass OWASP security scan
+**Gap Details:**
+- Cannot run interactive programs (REPLs, debuggers)
+- Environment setup commands (export, cd) don't persist
+- Build state (virtual envs, cargo target) resets
 
-3. **Command Injection Prevention** (2 weeks)
-   - Implement shell escaping for bash tool
-   - Validation of command arguments
-   - **Deliverable:** Pass penetration test
+**User Impact:**
+- Frustrating multi-step workflows (e.g., configure → build → test)
+- Workarounds required (chaining commands with `&&`)
+- Cannot use tools like Python REPL, gdb, docker exec
 
-4. **SSRF Protection** (1 week)
-   - URL filtering for webfetch tool
-   - Block localhost, private IPs, cloud metadata endpoints
-   - **Deliverable:** Pass SSRF vulnerability scan
+#### Gap 2: Limited Project Memory System
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P0
 
-5. **Storage Encryption** (4 weeks)
-   - Integrate SQLCipher for conversation history
-   - Encrypt session data at rest
-   - **Deliverable:** Data at rest encryption for compliance
+**Current State:**
+- Single root `AGENTS.md` file loaded if present
+- No multi-directory discovery or recursive scanning
+- No automatic context accumulation across sessions
+- No memory write tool for agents to persist learnings
 
-**Success Criteria:**
-- ✅ Pass external security audit
-- ✅ Zero critical or high severity vulnerabilities
-- ✅ Secrets stored in OS keychain
-- ✅ All file storage encrypted
+**Competitor Behavior:**
+- **ClaudeCode:** Discovers all `CLAUDE.md` files via ripgrep, lists in context
+- **Copilot CLI:** Custom instructions files, project-specific memory
+- **OpenCode:** Skills system for project knowledge
 
-#### Milestone 1.2: Observability & Telemetry (Weeks 7-12)
+**Gap Details:**
+- Agents cannot learn and persist project conventions
+- Repeated explanations required across sessions
+- No way to document discovered patterns or preferences
 
-**Objective:** Enable production monitoring and cost tracking
+**User Impact:**
+- Repetitive context setting ("Remember we use spaces, not tabs")
+- Token waste on redundant project explanations
+- Inconsistent agent behavior across sessions
 
-**Features:**
-1. **OpenTelemetry Integration** (6 weeks)
-   - Distributed tracing for tool execution
-   - Metrics collection (latency, error rates, token usage)
-   - Jaeger and Prometheus exporters
-   - **Deliverable:** Observable system for debugging
+#### Gap 3: Missing Git Context Auto-Injection
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0
 
-2. **Cost Tracking Database** (3 weeks)
-   - Schema for LLM usage tracking (tokens, costs, models)
-   - Real-time usage updates
-   - **Deliverable:** Full cost visibility
+**Current State:**
+- No git information in system prompt
+- Agents must manually run git commands to discover context
+- Wastes tokens and tool calls for routine git queries
 
-3. **Cost Reporting & Budgets** (3 weeks)
-   - Usage dashboard (CLI command)
-   - Budget limits and alerts
-   - Export to CSV/JSON
-   - **Deliverable:** Cost control for enterprises
+**Competitor Behavior:**
+- **ClaudeCode:** Auto-injects branch, status, recent commits, author stats
+- **Copilot CLI:** Includes branch, modified files, commit context
 
-**Success Criteria:**
-- ✅ Traces exported to Jaeger
-- ✅ Real-time cost tracking per session
-- ✅ Budget alerts functional
-- ✅ <100ms performance overhead
+**Gap Details:**
+- Agents unaware of current branch (risk of working on wrong branch)
+- Don't know what files are modified (relevant for targeted fixes)
+- Miss recent commit context (helpful for understanding ongoing work)
 
-#### Milestone 1.3: Audit Logging (Weeks 13-16)
+**User Impact:**
+- Agents make uninformed decisions (e.g., committing to main)
+- Extra token usage for manual git commands
+- Lower quality responses without git context
 
-**Objective:** SOC 2 compliance requirement
+#### Gap 4: No Cost Tracking and Transparency
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0
 
-**Features:**
-1. **Structured Audit Log** (3 weeks)
-   - JSON event log for all sensitive operations
-   - Tamper-evident (append-only, checksums)
-   - Log rotation and compression
-   - **Deliverable:** Immutable audit trail
+**Current State:**
+- No token counting or cost calculation
+- Users have no visibility into LLM API expenses
+- Cannot track spending per session or project
 
-2. **Audit Log Export** (1 week)
-   - Export to Splunk, ELK, Datadog
-   - SIEM integration
-   - **Deliverable:** Enterprise log aggregation support
+**Competitor Behavior:**
+- **ClaudeCode:** Real-time cost display in TUI, `/cost` command
+- **RooCode:** Token counts and estimated costs per message
 
-**Success Criteria:**
-- ✅ All tool executions logged
-- ✅ All permission grants logged
-- ✅ All LLM API calls logged
-- ✅ Export to at least 2 SIEM systems
+**Gap Details:**
+- Token counts not captured from provider responses
+- No pricing table for cost calculation
+- No session cost summaries or analytics
 
-#### Milestone 1.4: Accessibility (WCAG 2.1 AA) (Weeks 17-22)
+**User Impact:**
+- Surprise bills from LLM providers
+- Cannot budget or optimize token usage
+- No feedback loop to improve cost efficiency
 
-**Objective:** Legal compliance and inclusive design
+#### Gap 5: Basic Permission System
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P1
 
-**Features:**
-1. **Screen Reader Support** (4 weeks)
-   - ARIA labels for all UI elements
-   - Focus management
-   - Semantic HTML (for future Web UI)
-   - **Deliverable:** NVDA/JAWS compatibility
+**Current State:**
+- Pattern-based rules (glob matching)
+- Actions: allow, deny, prompt
+- No command-specific safety checks
 
-2. **High-Contrast Theme** (2 weeks)
-   - WCAG AA contrast ratios (4.5:1)
-   - Colorblind-friendly palette
-   - **Deliverable:** Accessible visual design
+**Competitor Behavior:**
+- **ClaudeCode:** Safe command whitelist (ls, cat, grep, etc.) + banned list (rm -rf, dd, etc.)
+- **Copilot CLI:** Command syntax pre-check before execution
+- **RooCode:** LLM-based injection detection for dangerous commands
 
-3. **Keyboard-Only Navigation** (2 weeks)
-   - Tab order optimization
-   - Keyboard shortcuts for all actions
-   - **Deliverable:** Zero mouse dependency
+**Gap Details:**
+- No safe command whitelist for auto-approval
+- No banned command list for dangerous operations
+- No command injection detection
+- No syntax validation before execution
 
-**Success Criteria:**
-- ✅ Pass automated WCAG 2.1 AA tests (axe-core)
-- ✅ Manual testing with screen reader users
-- ✅ Legal review confirmation
-- ✅ Accessibility statement published
+**User Impact:**
+- Excessive permission prompts for safe commands (ls, cat, grep)
+- Risk of accidental destructive commands
+- No protection against command injection attempts
 
-#### Milestone 1.5: First-Run Wizard (Weeks 23-26)
+#### Gap 6: No Autonomous Operation Modes
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P1
 
-**Objective:** Reduce user abandonment rate
+**Current State:**
+- Interactive mode only (user approves each action)
+- No plan-before-implement workflow
+- No agent role specialization
 
-**Features:**
-1. **Interactive Setup** (4 weeks)
-   - Provider configuration wizard
-   - Permission preferences
-   - Tutorial walkthrough
-   - **Deliverable:** <5 minute setup time
+**Competitor Behavior:**
+- **ClaudeCode:** Autopilot mode (multi-step execution without prompts)
+- **RooCode:** Plan mode (explicit planning phase, then execution)
+- **Multiple:** Agent roles (architect, coder, reviewer, debugger)
 
-**Success Criteria:**
-- ✅ 90% of new users complete setup
-- ✅ Abandonment rate <30% (down from 70%)
-- ✅ Positive feedback from user testing
+**Gap Details:**
+- Cannot run long-running tasks unattended
+- No explicit planning phase for complex tasks
+- Agents don't specialize by role
 
-#### Milestone 1.6: Performance Optimization (Weeks 27-30)
+**User Impact:**
+- Must babysit agents through multi-step tasks
+- Risk of agents jumping to implementation without planning
+- Suboptimal results from lack of role specialization
 
-**Objective:** Eliminate UI freezes and slow startup
+#### Gap 7: Limited GitHub Integration
+**Impact:** MEDIUM | **Complexity:** MEDIUM | **Priority:** P2
 
-**Features:**
-1. **Async Blocking Fixes** (4 weeks)
-   - Convert blocking file I/O to async
-   - Lazy initialization
-   - **Deliverable:** TUI startup <1 second
+**Current State:**
+- Basic `gh` CLI wrapper via bash tool
+- No OAuth authentication or native API client
+- No specialized tools for issues/PRs
 
-**Success Criteria:**
-- ✅ Startup time <1 second (down from 2-3 seconds)
-- ✅ Zero UI freezes during operations
-- ✅ Smooth streaming LLM responses
+**Competitor Behavior:**
+- **ClaudeCode:** Full GitHub OAuth, issue/PR management tools
+- **Copilot CLI:** Native GitHub API integration, PR context
+- **RooCode:** Issue/PR creation, commenting, approval
 
-**Phase 1 Total Duration:** 30 weeks (~7 months)  
-**Phase 1 Total Effort:** 8-10 person-months
+**Gap Details:**
+- No GitHub API token management
+- Manual `gh` CLI commands required (verbose, error-prone)
+- No issue/PR context auto-injection
+
+**User Impact:**
+- Clunky GitHub workflows via CLI wrappers
+- Cannot review PRs or manage issues efficiently
+- Miss PR context for informed responses
+
+### 3.2 Important Gaps (High Impact, Lower Priority)
+
+#### Gap 8: Context Memoization
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P2
+
+**Current State:**
+- No caching of expensive context operations
+- File tree, git status, README re-computed every prompt
+
+**Gap Details:**
+- Redundant file tree generation (can be cached with invalidation)
+- Repeated git command execution (cache until user runs git)
+- README re-read every session (cache at project level)
+
+#### Gap 9: Ripgrep Integration
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P2
+
+**Current State:**
+- `grep` tool uses basic string matching
+- No parallel search or advanced features
+
+**Competitor Behavior:**
+- **ClaudeCode:** Uses ripgrep for fast multi-file discovery and search
+
+**Gap Details:**
+- Slower search performance (especially large codebases)
+- Missing advanced features (regex, file type filtering, ignore patterns)
+
+#### Gap 10: Incomplete MCP Support
+**Impact:** MEDIUM | **Complexity:** MEDIUM | **Priority:** P2
+
+**Current State:**
+- MCP server discovery and connection
+- Basic resource/prompt access
+- No tool exposure from MCP servers
+
+**Gap Details:**
+- Cannot invoke tools provided by MCP servers
+- Missing OAuth flow for authenticated servers
+- Limited server lifecycle management
+
+#### Gap 11: No Skills System
+**Impact:** MEDIUM | **Complexity:** LOW | **Priority:** P3
+
+**Current State:**
+- Custom agents can define skills
+- No dedicated `/skill` invocation mechanism
+
+**Competitor Behavior:**
+- **OpenCode:** Skills system for reusable agent capabilities
+- **RooCode:** User-defined skills with templating
+
+**Gap Details:**
+- No slash command for skill invocation
+- Skills buried in agent definitions (not easily discoverable)
+- No skill marketplace or sharing
+
+#### Gap 12: Limited Slash Commands
+**Impact:** LOW | **Complexity:** LOW | **Priority:** P3
+
+**Current State:**
+- Basic slash commands: `/clear`, `/save`, `/opt`, `/cost` (missing), `/init` (missing)
+
+**Competitor Behavior:**
+- **ClaudeCode:** Rich slash commands (/system, /web, /github, /explain, /debug)
+- **Copilot CLI:** Context commands (/file, /repo, /git, /branch)
+
+#### Gap 13: No Auto-Update Mechanism
+**Impact:** LOW | **Complexity:** LOW | **Priority:** P4
+
+**Current State:**
+- Manual downloads from GitHub releases
+- No version check or auto-update prompt
+
+**Competitor Behavior:**
+- **ClaudeCode:** Auto-update via npm/package manager
+- **Copilot CLI:** GitHub API version check, download prompt
+
+### 3.3 Nice-to-Have Gaps (Lower Priority)
+
+- **Jupyter Notebook Support** (read/write .ipynb)
+- **Think Tool / Scratchpad** for agent reasoning transparency
+- **Conversation Management** (fork, merge, branch threads)
+- **Real-Time Streaming Indicators** (typing speed, progress bars)
+- **Directory Escape Guard** (prevent access outside project root)
+- **Trusted Directories** (auto-approve all operations in whitelist paths)
 
 ---
 
-### Phase 2: Developer Experience (Q3 2026)
+## 4. Recommended Feature Additions
 
-**Duration:** 7-10 months  
-**Effort:** 10-12 person-months  
-**Goal:** Achieve competitive feature parity, improve user retention
+*Source: Competitive Gap Analysis by swarm-s5*
 
-#### Milestone 2.1: LSP Documentation & Examples (Weeks 1-4)
+### 4.1 High-Impact Quick Wins (Do First)
 
-**Objective:** Unlock existing LSP investment
+#### 1. Git Context Auto-Injection
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0 | **Effort:** 3 days
 
-**Features:**
-1. **Comprehensive LSP Guide** (2 weeks)
-   - How LSP tools work
-   - Benefits over grep/find
-   - Troubleshooting guide
-   - **Deliverable:** LSP documentation site section
+**Recommendation:**
+- On session start, run 5 git commands in parallel (1 second timeout each):
+  - `git rev-parse --abbrev-ref HEAD` (current branch)
+  - `git symbolic-ref refs/remotes/origin/HEAD` (main branch)
+  - `git status --short` (modified files)
+  - `git log --oneline -n5` (recent commits)
+  - `git shortlog -sn --all --no-merges` (author stats, top 5)
+- Inject results into system prompt context section
+- Truncate total git context to max 200 lines
+- Cache results, invalidate on `/clear` command
+- Gracefully handle non-git directories (skip injection)
+- Add `--no-git-context` flag to disable
 
-2. **Language-Specific Guides** (2 weeks)
-   - Python (pylsp, pyright, ruff)
-   - Go (gopls)
-   - TypeScript (tsserver)
-   - Rust (rust-analyzer)
-   - Java (jdtls)
-   - **Deliverable:** 5 language setup guides
+**Benefits:**
+- Agents make better decisions with git awareness
+- Reduces unnecessary git command tool calls
+- Improves response quality for version control operations
 
-**Success Criteria:**
-- ✅ LSP tool usage increases 10x
-- ✅ User satisfaction with code intelligence features >8/10
-- ✅ Zero LSP setup support tickets
+#### 2. Cost Tracking System
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0 | **Effort:** 5 days
 
-#### Milestone 2.2: Codebase Indexing (Weeks 5-12)
+**Recommendation:**
+- Implement `TokenTracker` struct to accumulate counts per message
+- Add pricing table as `HashMap<ProviderModel, Pricing>` in config
+- Update each provider client to return token counts in response
+- Create `/cost` command showing:
+  - Total tokens (input/output)
+  - Total USD cost
+  - Cost breakdown by provider (if multi-provider used)
+  - Session duration
+- Optional: Real-time cost display in TUI status bar
+- Log session cost to history/analytics file
+- Support all providers: Anthropic, OpenAI, Ollama, Azure, etc.
 
-**Objective:** Handle large codebases like competitors
+**Benefits:**
+- Full cost transparency for users
+- Enables budget management and optimization
+- Feedback loop to improve token efficiency
 
-**Features:**
-1. **Tree-sitter Structural Map** (8 weeks)
-   - Parse files with tree-sitter grammars
-   - Build symbol index (functions, classes, imports)
-   - File relationship graph
-   - **Deliverable:** Fast symbol lookup
+#### 3. README Auto-Injection
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0 | **Effort:** 2 days
 
-2. **Basic Semantic Search** (4 weeks)
-   - BM25 text search
-   - Symbol name search
-   - **Deliverable:** Find conceptually related code
+**Recommendation:**
+- On session start, search for README files:
+  - `README.md`, `README.txt`, `README.rst` (case-insensitive)
+  - Check working directory and parent directories
+- Extract first 500 lines of README content
+- Inject into system prompt context section
+- Add `--no-readme-context` flag to disable
 
-**Success Criteria:**
-- ✅ Index 10,000 file codebase in <30 seconds
-- ✅ Symbol search returns results in <100ms
-- ✅ Competitive parity with Copilot CLI structural indexing
+**Benefits:**
+- Agents understand project purpose and structure immediately
+- Reduces need for explicit project explanations
+- Improves context relevance for targeted responses
 
-#### Milestone 2.3: RBAC & SSO/SAML (Weeks 13-20)
+#### 4. Safe Command Whitelist
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P0 | **Effort:** 3 days
 
-**Objective:** Enable enterprise multi-user deployments
+**Recommendation:**
+- Implement whitelist of safe commands for auto-approval:
+  - **Read-only:** ls, cat, head, tail, grep, find, file, stat, wc, diff
+  - **Git read:** git status, git log, git show, git diff, git branch
+  - **Info:** env, pwd, whoami, uname, date, echo
+  - **Process:** ps, top (non-interactive)
+- Check bash command against whitelist before execution
+- Auto-approve if command matches (no permission prompt)
+- Log auto-approvals for audit trail
 
-**Features:**
-1. **Role-Based Access Control** (6 weeks)
-   - User/group management
-   - Permission matrix (read/write/execute by tool)
-   - Policy engine
-   - **Deliverable:** Fine-grained access control
+**Benefits:**
+- Reduces permission prompt fatigue by 40%+
+- Faster agent workflows for common operations
+- Maintains safety for destructive operations
 
-2. **SSO/SAML Integration** (4 weeks)
-   - Okta integration
-   - Azure AD integration
-   - SAML 2.0 support
-   - **Deliverable:** Enterprise authentication
+#### 5. ThinkTool for Agent Reasoning
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P1 | **Effort:** 2 days
 
-**Success Criteria:**
-- ✅ 3 roles defined (admin, developer, viewer)
-- ✅ Integration with 2+ SSO providers
-- ✅ Policy enforcement tested
-- ✅ Enterprise pilot deployment successful
+**Recommendation:**
+- Add `think` tool for agents to expose internal reasoning:
+  - `think(thought: str)` — Record reasoning step
+  - Displayed in log panel (TUI) or response (API)
+  - Not sent back to LLM (output-only)
+- Encourage agents to think before acting in system prompt
 
-#### Milestone 2.4: Usage Analytics Dashboard (Weeks 21-26)
+**Benefits:**
+- Transparency into agent decision-making
+- Improved debugging when agents make errors
+- Better user trust through explainability
 
-**Objective:** Admin visibility for enterprise customers
+### 4.2 High-Impact Strategic Features (Do Second)
 
-**Features:**
-1. **Analytics API** (4 weeks)
-   - REST API for usage data
-   - Team/user statistics
-   - Cost attribution
-   - **Deliverable:** Programmatic access to analytics
+#### 6. Autopilot Mode
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P1 | **Effort:** 8 days
 
-2. **Web Dashboard** (2 weeks)
-   - Simple React dashboard
-   - Charts and reports
-   - **Deliverable:** Self-service analytics
+**Recommendation:**
+- Implement `/autopilot on` command to enable autonomous operation:
+  - Auto-approve all safe commands (whitelist)
+  - Auto-approve file writes in allowed patterns
+  - Prompt only for destructive operations (banned list)
+  - Add token budget limit (stop after N tokens)
+  - Add time limit (stop after N minutes)
+  - Add task completion detection (agent calls `task_complete` tool)
+- Add `/autopilot off` to return to interactive mode
+- Display autopilot status in TUI status bar
 
-**Success Criteria:**
-- ✅ Dashboard shows usage for all teams
-- ✅ Cost attribution accurate to 95%
-- ✅ Export to CSV/Excel
-- ✅ Enterprise customers use analytics weekly
+**Benefits:**
+- Enables long-running tasks without user supervision
+- 60%+ reduction in user interaction for routine tasks
+- Competitive parity with ClaudeCode, RooCode
 
-#### Milestone 2.5: UX Improvements (Weeks 27-36)
+#### 7. Plan Mode with Approval Checkpoint
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P1 | **Effort:** 6 days
 
-**Objective:** Polish user experience
+**Recommendation:**
+- Implement `/plan <task>` command for two-phase workflow:
+  - **Phase 1 (Planning):** Agent has read-only tools, produces written plan
+  - **Phase 2 (Implementation):** User approves plan, agent executes with full tools
+- Add `submit_plan(plan: str)` tool for agents to mark planning complete
+- Display plan in TUI with approve/reject buttons
+- On approval, continue session with implementation phase
+- On rejection, return to planning with user feedback
 
-**Features:**
-1. **Feature Discoverability** (4 weeks)
-   - Interactive /help command
-   - Contextual hints
-   - Tool suggestions
-   - **Deliverable:** Discoverable features
+**Benefits:**
+- Reduces risk of premature implementation
+- Explicit planning improves task quality
+- User retains control while enabling autonomy
 
-2. **Error Message Enhancements** (3 weeks)
-   - User-friendly error catalog
-   - Actionable suggestions
-   - **Deliverable:** Reduced support tickets
+#### 8. Agent Mode Switching
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P1 | **Effort:** 5 days
 
-3. **Progress Indicators** (2 weeks)
-   - Progress bars for long operations
-   - ETA estimates
-   - **Deliverable:** User confidence during waits
+**Recommendation:**
+- Implement agent role modes (similar to RooCode):
+  - **Architect:** Read-only tools, focus on design and planning
+  - **Coder:** Full tools, focus on implementation
+  - **Reviewer:** Read-only tools, focus on code review and suggestions
+  - **Debugger:** Full tools, focus on investigation and fixes
+  - **Tester:** Full tools, focus on test creation and execution
+- Add `/mode <role>` command to switch agent behavior
+- Each mode has specialized system prompt and tool allowlist
+- Display current mode in TUI status bar
 
-4. **Unified Documentation Site** (3 weeks)
-   - mdBook site
-   - API reference
-   - Video tutorials
-   - **Deliverable:** Comprehensive docs
+**Benefits:**
+- Role-specific behavior improves task quality
+- Encourages separation of concerns (plan → implement → review)
+- Competitive feature vs. RooCode
 
-**Success Criteria:**
-- ✅ Feature discovery NPS >8/10
-- ✅ Support ticket volume reduced 50%
-- ✅ Documentation site traffic >1000 monthly users
-- ✅ Video tutorials viewed >5000 times
+### 4.3 High-Impact Transformative Features (Do Third)
 
-**Phase 2 Total Duration:** 36 weeks (~9 months)  
-**Phase 2 Total Effort:** 10-12 person-months
+#### 9. Hierarchical AGENTS.md Discovery
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P2 | **Effort:** 6 days
+
+**Recommendation:**
+- Implement recursive discovery of AGENTS.md files:
+  - Use ripgrep to find all `AGENTS.md` files in project tree
+  - Load and concatenate in hierarchical order (root → child dirs)
+  - List discovered file paths in system prompt (not full content)
+  - Support alternative names: `CLAUDE.md`, `.ragent.md`, `INSTRUCTIONS.md`
+- Cache discovery results, invalidate on `/clear` or file system change
+
+**Benefits:**
+- Multi-directory project support
+- Agents discover module-specific context
+- Reduces token usage (list paths, not content)
+
+#### 10. Memory Write Tool
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P2 | **Effort:** 5 days
+
+**Recommendation:**
+- Add `memory_write(content: str, scope: 'user'|'project')` tool:
+  - **User scope:** `~/.ragent/memory/MEMORY.md` (global across projects)
+  - **Project scope:** `.ragent/memory/MEMORY.md` (project-specific)
+- Agents can persist learnings (conventions, preferences, patterns)
+- Auto-load memory files into context on session start
+- Add `/memory show` command to view accumulated memory
+
+**Benefits:**
+- Agents learn and improve across sessions
+- Eliminates repetitive context explanations
+- Competitive parity with ClaudeCode, Copilot CLI
+
+#### 11. Persistent Shell Implementation
+**Impact:** HIGH | **Complexity:** HIGH | **Priority:** P2 | **Effort:** 15 days
+
+**Recommendation:**
+- Implement persistent PTY-based shell session:
+  - Create PTY on first `bash` tool call
+  - Keep PTY alive across tool invocations
+  - Parse command output using prompt detection (PS1)
+  - Support interactive programs (REPLs, debuggers)
+  - Add shell state display (cwd, env vars) in TUI
+  - Add `bash_reset` tool to restart shell if state corrupted
+- Isolate shell per conversation (not shared across sessions)
+- Add `--no-persistent-shell` flag to disable
+
+**Benefits:**
+- Complex multi-step workflows (cd, export, build, test)
+- Interactive program support (Python REPL, gdb, etc.)
+- Competitive parity with ClaudeCode, Copilot CLI
+
+#### 12. GitHub OAuth & API Client
+**Impact:** MEDIUM | **Complexity:** MEDIUM | **Priority:** P2 | **Effort:** 10 days
+
+**Recommendation:**
+- Implement GitHub OAuth flow:
+  - Device flow for CLI authentication (user authorizes via browser)
+  - Store access token securely (OS keychain or encrypted file)
+  - Add `/github login` command to initiate auth
+- Create GitHub API client with rate limiting and error handling
+- Add specialized tools:
+  - `github_issue_list`, `github_issue_create`, `github_issue_comment`
+  - `github_pr_list`, `github_pr_create`, `github_pr_review`, `github_pr_comment`
+  - `github_repo_info`, `github_commit_history`, `github_file_blame`
+- Auto-inject PR context if running in PR branch
+
+**Benefits:**
+- Native GitHub integration (no gh CLI required)
+- Streamlined issue/PR workflows
+- Competitive parity with ClaudeCode, Copilot CLI, RooCode
+
+### 4.4 Medium-Impact Quick Wins
+
+#### 13. Context Memoization System
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P2 | **Effort:** 5 days
+
+**Recommendation:**
+- Implement caching for expensive context operations:
+  - File tree generation (cache with file system watcher invalidation)
+  - Git commands (cache until user runs git via bash)
+  - README content (cache at project level, invalidate on file change)
+- Use `FileSystemWatcher` or mtime checks for invalidation
+- Add `/context refresh` command to force re-computation
+
+**Benefits:**
+- 40%+ reduction in context preparation latency
+- Lower token usage (skip redundant context)
+- Faster agent response times
+
+#### 14. Ripgrep Integration
+**Impact:** HIGH | **Complexity:** LOW | **Priority:** P2 | **Effort:** 4 days
+
+**Recommendation:**
+- Replace `grep` tool backend with ripgrep:
+  - Install ripgrep binary or bundle statically
+  - Use `rg` command for all grep operations
+  - Support advanced features: regex, file type filtering, ignore patterns
+  - Parallel search across files (10x+ faster)
+- Maintain backward compatibility (same tool interface)
+
+**Benefits:**
+- 10x+ faster search performance
+- Better ignore patterns (.gitignore, .rgignore)
+- Advanced regex and filter support
+
+### 4.5 Ecosystem & Polish Features (Do Later)
+
+#### 15. Complete MCP Client Implementation
+**Impact:** HIGH | **Complexity:** MEDIUM | **Priority:** P3 | **Effort:** 12 days
+
+**Recommendation:**
+- Extend MCP client to expose tools from servers:
+  - Parse MCP tool schemas and register dynamically
+  - Map MCP tool invocations to server RPC calls
+  - Handle tool results and errors
+- Add OAuth support for authenticated MCP servers
+- Implement server lifecycle management (start, stop, restart)
+
+**Benefits:**
+- Access to ecosystem of MCP tools (filesystem, git, postgres, etc.)
+- Extensibility without recompiling ragent
+- Competitive advantage (no competitor has full MCP support)
+
+#### 16. Skills System
+**Impact:** MEDIUM | **Complexity:** LOW | **Priority:** P3 | **Effort:** 5 days
+
+**Recommendation:**
+- Add `/skill <name>` command to invoke predefined capabilities:
+  - Skills defined in `~/.ragent/skills/` and `.ragent/skills/`
+  - Skill files contain prompt template and optional tool allowlist
+  - Variables substituted: `{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{ARGS}}`
+- Add `/skill list` to show available skills
+- Ship default skills: /skill debug, /skill refactor, /skill explain
+
+**Benefits:**
+- Reusable agent capabilities without custom agents
+- Easy skill sharing (copy .md file)
+- Competitive parity with OpenCode
+
+#### 17. Auto-Update Mechanism
+**Impact:** LOW | **Complexity:** LOW | **Priority:** P4 | **Effort:** 5 days
+
+**Recommendation:**
+- On startup, check GitHub releases API for new version:
+  - Compare current version (from Cargo.toml) with latest release
+  - Display update notification in TUI if newer version available
+  - Add `/update` command to download and replace binary
+- Use GitHub's auto-update patterns (download, verify signature, replace)
+- Add `--no-update-check` flag to disable
+
+**Benefits:**
+- Users stay up-to-date automatically
+- Reduces support burden (fewer old version issues)
+- Competitive parity with ClaudeCode
 
 ---
 
-### Phase 3: Global Expansion (Q4 2026)
+## 5. Implementation Plan with Milestones and Tasks
 
-**Duration:** 4-6 months  
-**Effort:** 6-8 person-months  
-**Goal:** Expand addressable market 3x through internationalization
+*Source: Implementation Plan by swarm-s6*
 
-#### Milestone 3.1: Internationalization (Weeks 1-12)
+### 5.1 Milestone Overview
 
-**Objective:** Support 12 languages
+| Milestone | Duration | Focus | Success Metric |
+|-----------|----------|-------|----------------|
+| **M1: Quick Wins** | 6-8 weeks | High-impact, low-complexity features | Cost transparency 100%, permission prompts -40%, git context in all sessions |
+| **M2: Autonomous Operation** | 8-10 weeks | Autopilot, plan mode, agent roles | Autonomous task completion 60%+, planning adoption 30%+ |
+| **M3: Project Intelligence** | 8-10 weeks | Memory system, context optimization | Context efficiency +40%, memory write usage 50%+ |
+| **M4: Advanced Features** | 10-12 weeks | Persistent shell, GitHub, security | Multi-step workflows +80%, GitHub API usage 40%+ |
+| **M5: Ecosystem & Polish** | 12-16 weeks | MCP, skills, auto-update | MCP tool usage 20%+, skill invocations 30%+ |
 
-**Features:**
-1. **i18n Infrastructure** (6 weeks)
-   - fluent-rs integration
-   - Translation file format (.ftl)
-   - Locale detection
-   - **Deliverable:** i18n framework
-
-2. **Initial Translations** (4 weeks)
-   - Spanish, French, German, Japanese, Chinese (Simplified)
-   - Professional translation service
-   - **Deliverable:** 5 language support
-
-3. **RTL Support** (2 weeks)
-   - Right-to-left UI layout
-   - Arabic, Hebrew support
-   - **Deliverable:** RTL language support
-
-**Success Criteria:**
-- ✅ 12 languages supported
-- ✅ 95%+ translation coverage
-- ✅ International user growth >300%
-- ✅ Community translation workflow functional
-
-#### Milestone 3.2: Hooks System (Weeks 13-18)
-
-**Objective:** Enable workflow automation
-
-**Features:**
-1. **Hook Infrastructure** (6 weeks)
-   - 6 hook types (before/after: session_start, tool_execution, agent_response)
-   - External script execution
-   - Webhook support
-   - **Deliverable:** Extensible hook system
-
-**Success Criteria:**
-- ✅ All 6 hook types functional
-- ✅ Example hooks for common scenarios (CI/CD, Slack notifications)
-- ✅ Hook marketplace with 10+ community hooks
-- ✅ Enterprise customers using hooks for automation
-
-#### Milestone 3.3: Enhanced Vision Support (Weeks 19-22)
-
-**Objective:** Multi-provider vision analysis
-
-**Features:**
-1. **Multi-Provider Vision** (4 weeks)
-   - OpenAI Vision API
-   - Anthropic Claude Vision
-   - Google Gemini Vision
-   - **Deliverable:** Image analysis tools
-
-**Success Criteria:**
-- ✅ 3+ vision providers supported
-- ✅ Image analysis use cases documented
-- ✅ UI design analysis demo
-
-#### Milestone 3.4: Performance Optimization Round 2 (Weeks 23-26)
-
-**Objective:** Reduce resource usage
-
-**Features:**
-1. **Memory Optimization** (2 weeks)
-   - Reduce excessive cloning
-   - Implement Arc/Cow patterns
-   - **Deliverable:** 30% memory reduction
-
-2. **LSP Connection Pooling** (2 weeks)
-   - Reuse LSP processes
-   - Connection manager
-   - **Deliverable:** 50% LSP overhead reduction
-
-**Success Criteria:**
-- ✅ Memory usage reduced 30%
-- ✅ LSP operations 50% faster
-- ✅ Benchmark suite passing
-
-**Phase 3 Total Duration:** 26 weeks (~6 months)  
-**Phase 3 Total Effort:** 6-8 person-months
+**Total Timeline:** 44-56 weeks (12-14 months)
 
 ---
 
-### Phase 4: Compliance & Certification (Q1 2027)
+### 5.2 Milestone 1: Quick Wins & Critical Parity
 
-**Duration:** 3-4 months  
-**Effort:** 4-5 person-months  
-**Goal:** Access regulated industries
+**Duration:** 6-8 weeks  
+**Goal:** Deliver high-impact, low-complexity features to close immediate gaps
 
-#### Milestone 4.1: SOC 2 Type II Audit (Weeks 1-8)
+#### Task 1.1: Cost Tracking System
+**Priority:** P0 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
 
-**Objective:** SOC 2 certification
+**Acceptance Criteria:**
+- [ ] Token counting for all message exchanges (input + output)
+- [ ] USD cost calculation using provider-specific pricing tables
+- [ ] `/cost` command shows total tokens, USD cost, breakdown by provider, session duration
+- [ ] Real-time cost display in TUI status bar (optional)
+- [ ] Session cost logged to history/analytics file
+- [ ] Support for all providers: Anthropic, OpenAI, Ollama, Azure
 
+**Technical Approach:**
+1. Create `TokenTracker` struct to accumulate counts per message
+2. Add pricing table as `HashMap<ProviderModel, Pricing>` in config
+3. Update each provider client to return token counts in response
+4. Create `/cost` command handler
+5. Add cost summary to session cleanup
+
+**Risks:** Pricing tables may become outdated (mitigation: auto-update from public APIs)
+
+---
+
+#### Task 1.2: Git Context Auto-Injection
+**Priority:** P0 | **Effort:** 3 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] On session start, run 5 git commands in parallel (1s timeout each)
+- [ ] Inject results into system prompt context section
+- [ ] Truncate total git context to max 200 lines
+- [ ] Cache results, invalidate on `/clear` command
+- [ ] Gracefully handle non-git directories (skip injection)
+- [ ] Add `--no-git-context` flag to disable
+
+**Technical Approach:**
+1. Create `GitContextProvider` module
+2. Use `tokio::spawn` for parallel command execution
+3. Parse and format output into structured context string
+4. Inject into `SystemPrompt` builder
+5. Add memoization cache with session lifetime
+
+**Risks:** Git commands may timeout in large repos (mitigation: 1s timeout per command)
+
+---
+
+#### Task 1.3: README Auto-Injection
+**Priority:** P0 | **Effort:** 2 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Search for README files (README.md, README.txt, README.rst, case-insensitive)
+- [ ] Check working directory and parent directories (up to 3 levels)
+- [ ] Extract first 500 lines of README content
+- [ ] Inject into system prompt context section
+- [ ] Add `--no-readme-context` flag to disable
+
+**Technical Approach:**
+1. Create `ReadmeProvider` module
+2. Search directory tree with `fs::read_dir` (non-recursive)
+3. Filter for README variants (case-insensitive)
+4. Read and truncate to 500 lines
+5. Inject into `SystemPrompt` builder
+
+**Risks:** Large README files (mitigation: truncate to 500 lines)
+
+---
+
+#### Task 1.4: Safe Command Whitelist
+**Priority:** P0 | **Effort:** 3 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Whitelist of safe commands for auto-approval
+- [ ] Check bash command against whitelist before execution
+- [ ] Auto-approve if command matches (no permission prompt)
+- [ ] Log auto-approvals for audit trail
+- [ ] Configurable whitelist in `ragent.json`
+
+**Technical Approach:**
+1. Define `SAFE_COMMANDS` constant with regex patterns
+2. Add `is_safe_command()` function to permission checker
+3. Update `bash` tool to check whitelist before prompting
+4. Log auto-approvals to event bus
+5. Add config option to extend/override whitelist
+
+**Risks:** Overly broad whitelist (mitigation: conservative initial list)
+
+---
+
+#### Task 1.5: ThinkTool for Agent Reasoning
+**Priority:** P1 | **Effort:** 2 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] `think(thought: str)` tool for agents to expose reasoning
+- [ ] Displayed in log panel (TUI) or response (API)
+- [ ] Not sent back to LLM (output-only)
+- [ ] System prompt encourages agents to think before acting
+
+**Technical Approach:**
+1. Create `ThinkTool` struct implementing `Tool` trait
+2. Add to default tool registry
+3. Update TUI log panel to display think messages
+4. Add "Use the think() tool to explain your reasoning" to system prompt
+
+**Risks:** Agents may over-use and slow down (mitigation: monitor usage)
+
+---
+
+#### Milestone 1 Testing & Integration
+- [ ] Integration test for cost tracking (all providers)
+- [ ] Integration test for git context injection
+- [ ] Integration test for README auto-injection
+- [ ] Integration test for safe command whitelist
+- [ ] Manual TUI testing for all new features
+- [ ] Documentation updates (QUICKSTART.md, CHANGELOG.md)
+
+---
+
+### 5.3 Milestone 2: Autonomous Operation
+
+**Duration:** 8-10 weeks  
+**Goal:** Enable autonomous agent operation with plan workflows
+
+#### Task 2.1: Autopilot Mode
+**Priority:** P1 | **Effort:** 8 days | **Assignee:** TBD | **Dependencies:** Task 1.4 (Safe Command Whitelist)
+
+**Acceptance Criteria:**
+- [ ] `/autopilot on` command to enable autonomous operation
+- [ ] Auto-approve safe commands (whitelist)
+- [ ] Auto-approve file writes in allowed patterns
+- [ ] Prompt only for destructive operations (banned list)
+- [ ] Token budget limit (stop after N tokens)
+- [ ] Time limit (stop after N minutes)
+- [ ] Task completion detection (agent calls `task_complete` tool)
+- [ ] `/autopilot off` to return to interactive mode
+- [ ] Display autopilot status in TUI status bar
+
+**Technical Approach:**
+1. Add `AutopilotState` to session context
+2. Create `/autopilot` command handler
+3. Update permission checker to auto-approve in autopilot mode
+4. Add `task_complete` tool for agents to signal completion
+5. Add token/time limits with graceful shutdown
+6. Update TUI status bar to show autopilot status
+
+**Risks:** Agents may run indefinitely (mitigation: token/time limits)
+
+---
+
+#### Task 2.2: Plan Mode with Approval Checkpoint
+**Priority:** P1 | **Effort:** 6 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] `/plan <task>` command for two-phase workflow
+- [ ] Phase 1 (Planning): Read-only tools, produces written plan
+- [ ] Phase 2 (Implementation): User approves plan, agent executes with full tools
+- [ ] `submit_plan(plan: str)` tool for agents to mark planning complete
+- [ ] Display plan in TUI with approve/reject buttons
+- [ ] On approval, continue session with implementation phase
+- [ ] On rejection, return to planning with user feedback
+
+**Technical Approach:**
+1. Add `PlanModeState` to session context
+2. Create `/plan` command handler
+3. Create `submit_plan` tool
+4. Update tool registry to filter by mode (planning vs implementation)
+5. Add TUI plan approval dialog
+6. Implement state transition logic (planning → implementation)
+
+**Risks:** Agents may skip planning (mitigation: system prompt emphasis)
+
+---
+
+#### Task 2.3: Agent Mode Switching
+**Priority:** P1 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Agent role modes: architect, coder, reviewer, debugger, tester
+- [ ] `/mode <role>` command to switch agent behavior
+- [ ] Each mode has specialized system prompt and tool allowlist
+- [ ] Display current mode in TUI status bar
+
+**Technical Approach:**
+1. Define `AgentMode` enum with role variants
+2. Create mode-specific system prompts
+3. Create mode-specific tool allowlists
+4. Add `/mode` command handler
+5. Update session processor to apply mode constraints
+6. Update TUI status bar to show current mode
+
+**Risks:** Mode-specific prompts may conflict with agent definitions (mitigation: merge prompts)
+
+---
+
+#### Task 2.4: Completion Detection Tool
+**Priority:** P1 | **Effort:** 2 days | **Assignee:** TBD | **Dependencies:** Task 2.1 (Autopilot Mode)
+
+**Acceptance Criteria:**
+- [ ] `task_complete(summary: str)` tool for agents to signal task completion
+- [ ] Stops autopilot loop gracefully
+- [ ] Displays summary in TUI
+- [ ] Logs completion event
+
+**Technical Approach:**
+1. Create `TaskCompleteTool` struct
+2. Add to default tool registry
+3. Update autopilot loop to exit on task_complete
+4. Display summary in TUI chat panel
+5. Log completion event to event bus
+
+**Risks:** Agents may call prematurely (mitigation: system prompt guidance)
+
+---
+
+#### Milestone 2 Testing & Integration
+- [ ] Integration test for autopilot mode (full workflow)
+- [ ] Integration test for plan mode (approval/rejection)
+- [ ] Integration test for agent mode switching
+- [ ] Manual TUI testing for all new features
+- [ ] Documentation updates (QUICKSTART.md, CHANGELOG.md)
+
+---
+
+### 5.4 Milestone 3: Project Intelligence
+
+**Duration:** 8-10 weeks  
+**Goal:** Implement memory system and context optimization
+
+#### Task 3.1: Hierarchical AGENTS.md Discovery
+**Priority:** P2 | **Effort:** 6 days | **Assignee:** TBD | **Dependencies:** Task 3.5 (Ripgrep Integration)
+
+**Acceptance Criteria:**
+- [ ] Recursive discovery of AGENTS.md files via ripgrep
+- [ ] Load and concatenate in hierarchical order (root → child dirs)
+- [ ] List discovered file paths in system prompt (not full content)
+- [ ] Support alternative names: CLAUDE.md, .ragent.md, INSTRUCTIONS.md
+- [ ] Cache discovery results, invalidate on `/clear` or FS change
+
+**Technical Approach:**
+1. Use ripgrep to find all AGENTS.md variants
+2. Sort by directory depth (root first)
+3. Load and concatenate content
+4. Inject file path list into system prompt
+5. Add cache with file system watcher invalidation
+
+**Risks:** Large AGENTS.md files (mitigation: list paths, not content)
+
+---
+
+#### Task 3.2: Memory Write Tool
+**Priority:** P2 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] `memory_write(content: str, scope: 'user'|'project')` tool
+- [ ] User scope: `~/.ragent/memory/MEMORY.md` (global)
+- [ ] Project scope: `.ragent/memory/MEMORY.md` (project-specific)
+- [ ] Auto-load memory files into context on session start
+- [ ] `/memory show` command to view accumulated memory
+
+**Technical Approach:**
+1. Create `MemoryWriteTool` struct
+2. Add to default tool registry
+3. Implement file append logic (user vs project scope)
+4. Add memory loader to session initialization
+5. Create `/memory` command handler
+
+**Risks:** Memory files may grow large (mitigation: periodic compaction)
+
+---
+
+#### Task 3.3: `/init` Command for Project Analysis
+**Priority:** P2 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** Task 3.2 (Memory Write Tool)
+
+**Acceptance Criteria:**
+- [ ] `/init` command triggers project analysis agent
+- [ ] Agent uses `explore` agent definition
+- [ ] Analyzes file tree, README, build files, test structure
+- [ ] Writes summary to `.ragent/memory/PROJECT_ANALYSIS.md`
+- [ ] Auto-loads on subsequent session starts
+
+**Technical Approach:**
+1. Create `/init` command handler
+2. Spawn `explore` agent with project analysis prompt
+3. Agent uses file operations, grep, LSP tools
+4. Agent calls `memory_write` with project scope
+5. Add loader for PROJECT_ANALYSIS.md to session init
+
+**Risks:** Long analysis time for large projects (mitigation: progress indicator)
+
+---
+
+#### Task 3.4: Context Memoization System
+**Priority:** P2 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Cache file tree generation (invalidate on FS change)
+- [ ] Cache git commands (invalidate on git operations)
+- [ ] Cache README content (invalidate on file change)
+- [ ] Use `FileSystemWatcher` or mtime checks for invalidation
+- [ ] `/context refresh` command to force re-computation
+
+**Technical Approach:**
+1. Create `ContextCache` struct with TTL and invalidation
+2. Wrap file tree, git, and README providers with cache
+3. Add file system watcher for automatic invalidation
+4. Create `/context refresh` command handler
+5. Add cache hit/miss metrics
+
+**Risks:** Stale cache if invalidation fails (mitigation: TTL fallback)
+
+---
+
+#### Task 3.5: Ripgrep Integration
+**Priority:** P2 | **Effort:** 4 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Replace `grep` tool backend with ripgrep
+- [ ] Install ripgrep binary or bundle statically
+- [ ] Support advanced features: regex, file type filtering, ignore patterns
+- [ ] Parallel search across files (10x+ faster)
+- [ ] Maintain backward compatibility (same tool interface)
+
+**Technical Approach:**
+1. Add ripgrep as dependency (static binary or runtime check)
+2. Update `GrepTool` to invoke `rg` command
+3. Map tool parameters to `rg` flags
+4. Parse and format `rg` output
+5. Add fallback to grep if ripgrep unavailable
+
+**Risks:** Ripgrep unavailable on user system (mitigation: fallback to grep)
+
+---
+
+#### Milestone 3 Testing & Integration
+- [ ] Integration test for hierarchical AGENTS.md discovery
+- [ ] Integration test for memory write tool
+- [ ] Integration test for `/init` command
+- [ ] Integration test for context memoization
+- [ ] Integration test for ripgrep integration
+- [ ] Manual TUI testing for all new features
+- [ ] Documentation updates (QUICKSTART.md, CHANGELOG.md)
+
+---
+
+### 5.5 Milestone 4: Advanced Features & Differentiation
+
+**Duration:** 10-12 weeks  
+**Goal:** Implement persistent shell, GitHub integration, and security enhancements
+
+#### Task 4.1: Persistent Shell Implementation
+**Priority:** P2 | **Effort:** 15 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Create PTY on first `bash` tool call
+- [ ] Keep PTY alive across tool invocations
+- [ ] Parse command output using prompt detection (PS1)
+- [ ] Support interactive programs (REPLs, debuggers)
+- [ ] Add shell state display (cwd, env vars) in TUI
+- [ ] Add `bash_reset` tool to restart shell if state corrupted
+- [ ] Isolate shell per conversation (not shared across sessions)
+- [ ] Add `--no-persistent-shell` flag to disable
+
+**Technical Approach:**
+1. Add `pty-process` or `portable-pty` dependency
+2. Create `PersistentShell` struct managing PTY lifecycle
+3. Implement command execution with output parsing
+4. Add PS1 detection for command completion
+5. Create shell state tracker (cwd, env vars)
+6. Update TUI to display shell state
+7. Add `bash_reset` tool
+
+**Risks:** PTY parsing errors (mitigation: fallback to non-persistent)
+
+---
+
+#### Task 4.2: Shell State Display
+**Priority:** P2 | **Effort:** 3 days | **Assignee:** TBD | **Dependencies:** Task 4.1 (Persistent Shell)
+
+**Acceptance Criteria:**
+- [ ] Display current working directory in TUI status bar
+- [ ] Display key environment variables (PATH, VIRTUAL_ENV, etc.)
+- [ ] Update in real-time after each bash command
+
+**Technical Approach:**
+1. Extract cwd and env vars from shell state tracker
+2. Add shell state section to TUI status bar
+3. Update on each bash tool execution
+
+**Risks:** Cluttered status bar (mitigation: abbreviate paths)
+
+---
+
+#### Task 4.3: GitHub OAuth & API Client
+**Priority:** P2 | **Effort:** 10 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] GitHub OAuth device flow for CLI authentication
+- [ ] Store access token securely (OS keychain or encrypted file)
+- [ ] `/github login` command to initiate auth
+- [ ] Create GitHub API client with rate limiting and error handling
+
+**Technical Approach:**
+1. Add `octocrab` or `reqwest` for GitHub API
+2. Implement OAuth device flow (user authorizes via browser)
+3. Store token securely (use `keyring` crate or encrypted file)
+4. Add `/github login` command handler
+5. Create `GitHubClient` struct with rate limiting
+
+**Risks:** OAuth flow complexity (mitigation: thorough testing)
+
+---
+
+#### Task 4.4: GitHub Issue Management
+**Priority:** P2 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** Task 4.3 (GitHub OAuth)
+
+**Acceptance Criteria:**
+- [ ] `github_issue_list`, `github_issue_create`, `github_issue_comment` tools
+- [ ] Support filtering by state, labels, assignee
+- [ ] Display issue details in structured format
+
+**Technical Approach:**
+1. Create GitHub issue tools using `GitHubClient`
+2. Map tool parameters to GitHub API calls
+3. Format responses for LLM consumption
+4. Add to default tool registry
+
+**Risks:** API rate limits (mitigation: caching and rate limiting)
+
+---
+
+#### Task 4.5: GitHub PR Management
+**Priority:** P2 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** Task 4.3 (GitHub OAuth)
+
+**Acceptance Criteria:**
+- [ ] `github_pr_list`, `github_pr_create`, `github_pr_review`, `github_pr_comment` tools
+- [ ] Auto-inject PR context if running in PR branch
+- [ ] Support PR review approval/request changes
+
+**Technical Approach:**
+1. Create GitHub PR tools using `GitHubClient`
+2. Add PR context detection (check branch naming pattern)
+3. Inject PR details into system prompt if detected
+4. Add to default tool registry
+
+**Risks:** PR context injection complexity (mitigation: simple heuristics)
+
+---
+
+#### Task 4.6: Advanced Security Features
+**Priority:** P2 | **Effort:** 6 days | **Assignee:** TBD | **Dependencies:** Task 1.4 (Safe Command Whitelist)
+
+**Acceptance Criteria:**
+- [ ] Banned command list (rm -rf, mkfs, dd, sudo, etc.)
+- [ ] LLM-based command injection detection (optional, expensive)
+- [ ] Command syntax pre-check using shell parser
+- [ ] Directory escape guard (prevent access outside project root)
+
+**Technical Approach:**
+1. Define `BANNED_COMMANDS` constant with regex patterns
+2. Add banned command check to permission checker (hard reject)
+3. Optional: Add LLM-based injection detection (separate LLM call)
+4. Add shell syntax pre-check using `shlex` or similar
+5. Add directory escape guard to file tools (check path canonicalization)
+
+**Risks:** False positives on banned commands (mitigation: allow override with --force)
+
+---
+
+#### Milestone 4 Testing & Integration
+- [ ] Integration test for persistent shell (multi-step workflows)
+- [ ] Integration test for GitHub OAuth flow
+- [ ] Integration test for GitHub issue/PR tools
+- [ ] Integration test for advanced security features
+- [ ] Manual TUI testing for all new features
+- [ ] Documentation updates (QUICKSTART.md, CHANGELOG.md)
+
+---
+
+### 5.6 Milestone 5: Ecosystem Integration & Polish
+
+**Duration:** 12-16 weeks  
+**Goal:** Full MCP support, skills system, auto-update, and polish
+
+#### Task 5.1: Complete MCP Client Implementation
+**Priority:** P3 | **Effort:** 12 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Expose tools from MCP servers dynamically
+- [ ] Parse MCP tool schemas and register in tool registry
+- [ ] Map MCP tool invocations to server RPC calls
+- [ ] Handle tool results and errors
+- [ ] OAuth support for authenticated MCP servers
+- [ ] Server lifecycle management (start, stop, restart)
+
+**Technical Approach:**
+1. Extend `rmcp` client to fetch tool definitions
+2. Parse tool schemas and create dynamic tool wrappers
+3. Register MCP tools in tool registry at runtime
+4. Implement RPC call mapping (tool → MCP server)
+5. Add OAuth flow for authenticated servers
+6. Add server lifecycle management commands
+
+**Risks:** MCP server compatibility issues (mitigation: test with common servers)
+
+---
+
+#### Task 5.2: MCP OAuth Support
+**Priority:** P3 | **Effort:** 4 days | **Assignee:** TBD | **Dependencies:** Task 5.1 (MCP Client)
+
+**Acceptance Criteria:**
+- [ ] OAuth flow for MCP servers requiring authentication
+- [ ] Token storage and refresh
+- [ ] Add to MCP server configuration
+
+**Technical Approach:**
+1. Implement OAuth client flow (authorization code or device flow)
+2. Store tokens securely (OS keychain or encrypted file)
+3. Add token refresh logic
+4. Update MCP server configuration schema
+
+**Risks:** OAuth flow complexity (mitigation: reuse GitHub OAuth patterns)
+
+---
+
+#### Task 5.3: Skills System
+**Priority:** P3 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] `/skill <name>` command to invoke predefined capabilities
+- [ ] Skills defined in `~/.ragent/skills/` and `.ragent/skills/`
+- [ ] Skill files contain prompt template and optional tool allowlist
+- [ ] Variables substituted: `{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{ARGS}}`
+- [ ] `/skill list` to show available skills
+- [ ] Ship default skills: /skill debug, /skill refactor, /skill explain
+
+**Technical Approach:**
+1. Create skill discovery logic (search skill directories)
+2. Parse skill files (YAML or Markdown with frontmatter)
+3. Add `/skill` command handler with template substitution
+4. Create default skill definitions
+5. Add `/skill list` command
+
+**Risks:** Skill template complexity (mitigation: simple variable substitution)
+
+---
+
+#### Task 5.4: Hooks System
+**Priority:** P3 | **Effort:** 4 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] Hook points: `on_session_start`, `on_session_end`, `on_error`, `on_permission_denied`
+- [ ] Hooks defined in config as shell commands or agent invocations
+- [ ] Execute hooks asynchronously (non-blocking)
+
+**Technical Approach:**
+1. Define `Hook` struct with trigger and action
+2. Add hook configuration to `ragent.json`
+3. Add hook execution points in session processor
+4. Implement async hook execution (spawn tasks)
+
+**Risks:** Hook execution failures (mitigation: log errors, don't block)
+
+---
+
+#### Task 5.5: Auto-Update Mechanism
+**Priority:** P4 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] On startup, check GitHub releases API for new version
+- [ ] Display update notification in TUI if newer version available
+- [ ] `/update` command to download and replace binary
+- [ ] Verify signature (if available)
+- [ ] Add `--no-update-check` flag to disable
+
+**Technical Approach:**
+1. Add GitHub releases API client
+2. Compare current version (from Cargo.toml) with latest release
+3. Display notification in TUI (non-blocking)
+4. Add `/update` command handler
+5. Download binary, verify, replace current binary
+
+**Risks:** Binary replacement permissions (mitigation: prompt for sudo if needed)
+
+---
+
+#### Task 5.6: `/doctor` Diagnostic Command
+**Priority:** P4 | **Effort:** 3 days | **Assignee:** TBD | **Dependencies:** None
+
+**Acceptance Criteria:**
+- [ ] `/doctor` command runs comprehensive system checks
+- [ ] Check provider API keys (present and valid)
+- [ ] Check LSP servers (installed and working)
+- [ ] Check MCP servers (installed and working)
+- [ ] Check git (installed and repo status)
+- [ ] Check ripgrep (installed)
+- [ ] Display summary with pass/fail indicators
+
+**Technical Approach:**
+1. Create `/doctor` command handler
+2. Run provider health checks (API key validation)
+3. Run LSP server discovery and health checks
+4. Run MCP server discovery and health checks
+5. Check git installation and repo status
+6. Check ripgrep installation
+7. Format results as structured report
+
+**Risks:** False negatives (mitigation: detailed error messages)
+
+---
+
+#### Milestone 5 Testing & Integration
+- [ ] Integration test for complete MCP client
+- [ ] Integration test for skills system
+- [ ] Integration test for hooks system
+- [ ] Integration test for auto-update mechanism
+- [ ] Integration test for `/doctor` command
+- [ ] Manual TUI testing for all new features
+- [ ] Documentation updates (QUICKSTART.md, CHANGELOG.md)
+
+---
+
+### 5.7 Effort Summary
+
+| Milestone | Tasks | Total Effort (days) | Duration (weeks) |
+|-----------|-------|---------------------|------------------|
+| M1: Quick Wins | 5 | 15 | 6-8 |
+| M2: Autonomous Operation | 4 | 21 | 8-10 |
+| M3: Project Intelligence | 5 | 25 | 8-10 |
+| M4: Advanced Features | 6 | 44 | 10-12 |
+| M5: Ecosystem & Polish | 6 | 33 | 12-16 |
+| **Total** | **26** | **138** | **44-56** |
+
+**Adjusted Timeline with Parallelization:**
+- Multiple developers working concurrently can reduce total duration
+- Estimated 12-14 months for core features (Milestones 1-4)
+- Milestone 5 can proceed in parallel with user feedback collection
+
+---
+
+### 5.8 Dependencies & Critical Path
+
+#### Critical Path (Sequential)
+1. **M1 Task 1.4** (Safe Command Whitelist) → **M2 Task 2.1** (Autopilot Mode)
+2. **M3 Task 3.5** (Ripgrep Integration) → **M3 Task 3.1** (Hierarchical AGENTS.md)
+3. **M3 Task 3.2** (Memory Write) → **M3 Task 3.3** (`/init` Command)
+4. **M4 Task 4.3** (GitHub OAuth) → **M4 Task 4.4** (Issues) + **M4 Task 4.5** (PRs)
+5. **M5 Task 5.1** (MCP Client) → **M5 Task 5.2** (MCP OAuth)
+
+#### Parallel Opportunities
+- **M1 tasks** are mostly independent (can run in parallel)
+- **M2 tasks** can run in parallel after M1 completion
+- **M3 tasks** can partially overlap (3.1, 3.2, 3.4 are independent)
+- **M4 tasks** 4.1-4.2 (Shell) and 4.3-4.5 (GitHub) are independent
+- **M5 tasks** are mostly independent (can run in parallel)
+
+---
+
+### 5.9 Risk Management
+
+#### High-Risk Tasks
+1. **M4 Task 4.1** (Persistent Shell) — Complex PTY handling, parsing
+   - **Mitigation:** Thorough testing, fallback to non-persistent mode
+2. **M5 Task 5.1** (Complete MCP Client) — MCP server compatibility issues
+   - **Mitigation:** Test with common servers, graceful degradation
+
+#### Medium-Risk Tasks
+1. **M2 Task 2.1** (Autopilot Mode) — Agents may run indefinitely
+   - **Mitigation:** Token/time limits, task completion detection
+2. **M4 Task 4.3** (GitHub OAuth) — OAuth flow complexity
+   - **Mitigation:** Reuse patterns from other tools, thorough testing
+
+#### Low-Risk Tasks
+- Most M1, M3, M5 tasks are low-risk (well-understood patterns)
+
+---
+
+### 5.10 Success Criteria by Milestone
+
+#### Milestone 1 Success Criteria
+- [ ] Cost transparency visible to 100% of users
+- [ ] Permission prompts reduced by 40%
+- [ ] Git context available in all sessions
+- [ ] ThinkTool improves agent reasoning quality by 20%
+
+#### Milestone 2 Success Criteria
+- [ ] Autopilot mode enables 60%+ of users to run unattended tasks
+- [ ] Plan mode adoption by 30%+ of users
+- [ ] Agent role switching used in 20%+ of sessions
+
+#### Milestone 3 Success Criteria
+- [ ] Context efficiency improved by 40% (fewer tokens, faster responses)
+- [ ] Memory write usage by 50%+ of users
+- [ ] Ripgrep search 10x faster than grep
+
+#### Milestone 4 Success Criteria
+- [ ] Persistent shell enables 80%+ more complex workflows
+- [ ] GitHub API usage by 40%+ of users
+- [ ] Zero security incidents from command safety features
+
+#### Milestone 5 Success Criteria
+- [ ] MCP tool usage by 20%+ of users
+- [ ] Skill invocations by 30%+ of users
+- [ ] Auto-update adoption by 80%+ of users
+
+---
+
+## 6. Rollout Strategy & Release Plan
+
+### 6.1 Alpha Releases (After Milestone 1)
+**Version:** 0.2.0-alpha  
+**Timeline:** 6-8 weeks from start  
+**Target Audience:** Early adopters, power users  
 **Features:**
-1. **SOC 2 Readiness** (4 weeks)
-   - Policy documentation
-   - Evidence collection
-   - Gap remediation
-   - **Deliverable:** SOC 2 ready system
+- Cost tracking system
+- Git context auto-injection
+- README auto-injection
+- Safe command whitelist
+- ThinkTool
 
-2. **Formal Audit** (4 weeks)
-   - Hire Big 4 or specialist auditor
-   - Audit engagement
-   - Report issuance
-   - **Deliverable:** SOC 2 Type II report
+**Rollout:**
+- GitHub release with binaries (Linux, macOS, Windows)
+- Announcement on project README and relevant communities
+- Solicit feedback on critical features
 
-**Success Criteria:**
-- ✅ SOC 2 Type II certification achieved
-- ✅ Zero audit findings
-- ✅ Certificate publicly available
-
-#### Milestone 4.2: ISO 27001 Certification (Weeks 9-12)
-
-**Objective:** International compliance
-
+### 6.2 Beta Releases (After Milestone 2)
+**Version:** 0.3.0-beta  
+**Timeline:** 14-18 weeks from start  
+**Target Audience:** Broader user base, production pilots  
 **Features:**
-1. **ISO 27001 Implementation** (4 weeks)
-   - ISMS documentation
-   - Certification audit
-   - **Deliverable:** ISO 27001 certificate
+- All Milestone 1 features
+- Autopilot mode
+- Plan mode with approval
+- Agent role switching
+- Task completion detection
 
-**Success Criteria:**
-- ✅ ISO 27001 certified
-- ✅ Certificate publicly available
+**Rollout:**
+- GitHub release with binaries
+- Documentation updates (QUICKSTART.md, tutorial videos)
+- User testimonials and case studies
 
-#### Milestone 4.3: GDPR Compliance (Weeks 13-16)
-
-**Objective:** EU market access
-
+### 6.3 Release Candidate (After Milestone 3)
+**Version:** 0.9.0-rc  
+**Timeline:** 22-28 weeks from start  
+**Target Audience:** Production users, enterprises  
 **Features:**
-1. **Data Privacy Features** (4 weeks)
-   - Data subject rights (export, deletion)
-   - Consent management
-   - Privacy policy
-   - **Deliverable:** GDPR compliant system
+- All Milestone 1-2 features
+- Hierarchical AGENTS.md discovery
+- Memory write tool
+- `/init` command
+- Context memoization
+- Ripgrep integration
 
-**Success Criteria:**
-- ✅ GDPR compliance verified by legal counsel
-- ✅ Data subject rights functional
-- ✅ Privacy policy published
+**Rollout:**
+- GitHub release with binaries
+- Comprehensive documentation
+- Stability and performance testing
+- Bug bounty program
 
-**Phase 4 Total Duration:** 16 weeks (~4 months)  
-**Phase 4 Total Effort:** 4-5 person-months
+### 6.4 v1.0 Production (After Milestone 4)
+**Version:** 1.0.0  
+**Timeline:** 32-40 weeks from start  
+**Target Audience:** General availability  
+**Features:**
+- All Milestone 1-3 features
+- Persistent shell
+- GitHub OAuth and API integration
+- Advanced security features
 
----
+**Rollout:**
+- Major GitHub release announcement
+- Blog post, social media campaign
+- Package manager distribution (Homebrew, Cargo, apt)
+- Press outreach
 
-### Phase 5: Advanced Features (2027+)
+### 6.5 v1.5 Enhancement (After Milestone 5)
+**Version:** 1.5.0  
+**Timeline:** 44-56 weeks from start  
+**Target Audience:** Ecosystem adopters  
+**Features:**
+- All Milestone 1-4 features
+- Complete MCP support
+- Skills system
+- Hooks system
+- Auto-update mechanism
+- `/doctor` diagnostic command
 
-**Duration:** Ongoing  
-**Effort:** Variable  
-**Goal:** Innovation leadership and differentiation
-
-#### Feature 5.1: Voice Input (8 weeks, P3)
-- Speech-to-text via whisper-rs
-- Push-to-talk interface
-- Accessibility benefit
-
-#### Feature 5.2: Git Worktree Isolation (6 weeks, P3)
-- Automatic worktree creation for tasks
-- Safe experimentation environment
-
-#### Feature 5.3: Suggested Responses (4 weeks, P3)
-- Quick-reply buttons for common actions
-- UX convenience
-
-#### Feature 5.4: Web UI & Mobile Client (20+ weeks, P3)
-- React-based web interface
-- iOS/Android apps
-- Platform expansion
-
-#### Feature 5.5: Semantic Indexing Phase 2 (12 weeks, P2)
-- Embedding-based search
-- Vector database integration
-- Conceptual code discovery
-
-**Phase 5 Success Criteria:**
-- ✅ At least 3 innovation features shipped
-- ✅ Competitive differentiation established
-- ✅ User satisfaction >9/10 for new features
+**Rollout:**
+- GitHub release with binaries
+- MCP server ecosystem documentation
+- Skills marketplace (community contributions)
 
 ---
 
-## RISK ASSESSMENT
+## 7. Key Performance Indicators (KPIs)
 
-### High-Risk Items
+### 7.1 Development Metrics
+- **Velocity:** Tasks completed per week (target: 1.5-2 tasks/week)
+- **Quality:** Bug rate per release (target: <5 critical bugs)
+- **Test Coverage:** Code coverage percentage (target: >70%)
+- **Documentation:** Docs-to-code ratio (target: 15%+)
 
-#### Risk 1: Security Audit Delays
-**Description:** External security audit takes longer than expected, blocking Phase 1 completion  
-**Probability:** MEDIUM (40%)  
-**Impact:** HIGH ($100K+ revenue loss, delayed enterprise sales)  
-**Mitigation:**
-- Start auditor selection immediately (Week 1)
-- Run internal security scans continuously (Snyk, Semgrep)
-- Over-prepare documentation and evidence
-- Build buffer into timeline (2 weeks)
+### 7.2 Product Metrics
+- **Adoption:** Active users per month (target: 10% MoM growth)
+- **Engagement:** Sessions per user per week (target: 5+)
+- **Retention:** 30-day retention rate (target: >40%)
+- **Cost Efficiency:** Average LLM cost per session (target: <$0.50)
 
-#### Risk 2: SOC 2 Audit Failure
-**Description:** SOC 2 audit identifies gaps requiring remediation and re-audit  
-**Probability:** MEDIUM (30%)  
-**Impact:** HIGH (6+ month delay, loss of regulated industry customers)  
-**Mitigation:**
-- Hire SOC 2 readiness consultant pre-audit (Phase 1)
-- Run mock audit internally (Phase 3)
-- Implement audit logging and monitoring early (Phase 1)
-- Budget for remediation sprint (4 weeks)
-
-#### Risk 3: Accessibility Compliance Challenges
-**Description:** WCAG 2.1 AA compliance harder than expected in terminal UI  
-**Probability:** MEDIUM (35%)  
-**Impact:** MEDIUM (Legal risk, market exclusion)  
-**Mitigation:**
-- Engage accessibility consultant early (Phase 1, Week 17)
-- Manual testing with disabled users
-- Automated accessibility testing in CI
-- Consider Web UI as alternative interface
-
-#### Risk 4: i18n Translation Quality
-**Description:** Machine or low-quality translations damage brand in international markets  
-**Probability:** MEDIUM (40%)  
-**Impact:** MEDIUM (Negative reviews, churn in non-English markets)  
-**Mitigation:**
-- Use professional translation services (not Google Translate)
-- Native speaker review for each language
-- Community translation workflow with review process
-- Phased rollout (5 languages → 12 languages)
-
-#### Risk 5: Performance Regressions
-**Description:** New features degrade performance below competitive benchmarks  
-**Probability:** LOW (25%)  
-**Impact:** MEDIUM (User churn, competitive disadvantage)  
-**Mitigation:**
-- Continuous benchmarking in CI (criterion crate)
-- Performance budget gates (startup <1s, search <100ms)
-- Regular profiling (flamegraph, perf)
-- Dedicated performance optimization sprints (Phase 1, Phase 3)
-
-#### Risk 6: Scope Creep
-**Description:** Roadmap expands beyond 18-24 months, resources exhausted  
-**Probability:** HIGH (60%)  
-**Impact:** HIGH (Budget overrun, delayed time-to-market)  
-**Mitigation:**
-- Strict prioritization (P0/P1/P2/P3 tiers)
-- Monthly roadmap reviews with stakeholders
-- Feature flagging for experimental work
-- Defer Phase 5 features to post-1.0 backlog
-
-### Medium-Risk Items
-
-#### Risk 7: LSP Server Compatibility
-**Description:** LSP integration breaks with certain language servers or versions  
-**Probability:** MEDIUM (35%)  
-**Impact:** LOW (User frustration, workaround available)  
-**Mitigation:**
-- Comprehensive LSP testing matrix (5+ languages)
-- Community-reported compatibility database
-- Graceful degradation when LSP unavailable
-
-#### Risk 8: MCP Ecosystem Maturity
-**Description:** MCP standard evolves, breaking existing integrations  
-**Probability:** LOW (20%)  
-**Impact:** MEDIUM (Loss of extensibility advantage)  
-**Mitigation:**
-- Track MCP spec changes via Anthropic GitHub
-- Version MCP server connections
-- Maintain backward compatibility
-
-#### Risk 9: Team Orchestration Bugs
-**Description:** Complex race conditions in team coordination tools  
-**Probability:** MEDIUM (30%)  
-**Impact:** MEDIUM (Data loss, task duplication)  
-**Mitigation:**
-- Extensive integration testing
-- Fuzzing for concurrency issues
-- Formal verification for lock-free algorithms
-
-#### Risk 10: Enterprise Customer Churn
-**Description:** Early enterprise customers churn due to missing features  
-**Probability:** LOW (25%)  
-**Impact:** HIGH (Revenue loss, negative references)  
-**Mitigation:**
-- Quarterly roadmap sharing with customers
-- Early access beta program
-- Customer advisory board
-- SLA commitments only post-Phase 4
+### 7.3 Competitive Metrics
+- **Feature Parity:** % of competitor features implemented (target: 85%+)
+- **Performance:** Response time vs. competitors (target: 20% faster)
+- **Reliability:** Uptime and error rate (target: 99.5% uptime)
+- **User Satisfaction:** NPS score (target: >50)
 
 ---
 
-## SUCCESS METRICS
+## 8. Open Questions & Decisions Needed
 
-### Phase 1 Success Metrics (Enterprise Readiness)
+### 8.1 Technical Decisions
+1. **Persistent Shell:** PTY library choice (`pty-process` vs `portable-pty`)?
+2. **MCP OAuth:** Which OAuth flows to support (authorization code, device flow, both)?
+3. **Context Memoization:** Use file system watcher or mtime checks for invalidation?
+4. **GitHub API:** Use `octocrab` library or direct `reqwest` implementation?
+5. **Ripgrep:** Bundle statically or require system installation?
 
-**Security:**
-- ✅ Zero critical or high severity vulnerabilities (per external audit)
-- ✅ 100% secrets stored in OS keychain (0% in SQLite)
-- ✅ Pass penetration test (command injection, SSRF)
+### 8.2 Product Decisions
+1. **Autopilot Defaults:** What token/time limits should be default for autopilot mode?
+2. **Plan Mode:** Should plan mode be default for complex tasks, or opt-in?
+3. **Agent Roles:** Should mode switching be automatic based on task type?
+4. **Memory Scope:** Should memory be global by default, or project-scoped?
+5. **GitHub Integration:** OAuth vs. PAT (personal access token) — which to prioritize?
+6. **Cost Tracking:** Should there be budget limits with automatic stops?
+7. **Skills System:** Should skills be discoverable via online registry, or local-only?
+8. **Auto-Update:** Automatic updates by default, or prompt user for approval?
 
-**Observability:**
-- ✅ 99.9% uptime for telemetry data collection
-- ✅ Real-time cost tracking within 1% accuracy
-- ✅ <100ms performance overhead for tracing
-
-**Accessibility:**
-- ✅ Pass automated WCAG 2.1 AA tests (axe-core)
-- ✅ Positive feedback from 5+ disabled users
-- ✅ Legal review approval
-
-**User Experience:**
-- ✅ First-run completion rate >90%
-- ✅ Abandonment rate <30% (down from 70%)
-- ✅ Startup time <1 second
-
-**Business Impact:**
-- ✅ Pass 3+ enterprise security reviews
-- ✅ First enterprise customer signed ($50K+ ARR)
-
-### Phase 2 Success Metrics (Developer Experience)
-
-**Documentation:**
-- ✅ LSP tool usage increases 10x
-- ✅ Documentation site traffic >1000 monthly visitors
-- ✅ Video tutorials viewed >5000 times
-
-**Code Intelligence:**
-- ✅ Index 10,000 file codebase in <30 seconds
-- ✅ Symbol search returns results in <100ms
-- ✅ User satisfaction with code intelligence >8/10
-
-**Enterprise Features:**
-- ✅ RBAC deployed to 3+ enterprise customers
-- ✅ SSO integration with Okta and Azure AD
-- ✅ Analytics dashboard used by 50+ admins
-
-**User Experience:**
-- ✅ Support ticket volume reduced 50%
-- ✅ Feature discovery NPS >8/10
-- ✅ Error message satisfaction >8/10
-
-**Business Impact:**
-- ✅ 10+ enterprise customers ($500K+ total ARR)
-- ✅ Competitive win rate >50% vs ClaudeCode/Copilot CLI
-
-### Phase 3 Success Metrics (Global Expansion)
-
-**Internationalization:**
-- ✅ 12 languages supported with 95%+ translation coverage
-- ✅ International user growth >300%
-- ✅ Non-English user retention rate >70%
-
-**Extensibility:**
-- ✅ 10+ community hooks published
-- ✅ Enterprise customers using hooks for automation (5+)
-- ✅ MCP server marketplace with 25+ servers
-
-**Performance:**
-- ✅ Memory usage reduced 30% vs Phase 2
-- ✅ LSP operations 50% faster
-- ✅ Benchmark suite passing (startup, search, indexing)
-
-**Business Impact:**
-- ✅ 50+ enterprise customers ($2M+ total ARR)
-- ✅ International revenue >40% of total
-
-### Phase 4 Success Metrics (Compliance)
-
-**Certifications:**
-- ✅ SOC 2 Type II certification achieved
-- ✅ ISO 27001 certification achieved
-- ✅ GDPR compliance verified by legal counsel
-
-**Regulated Industries:**
-- ✅ First healthcare customer signed
-- ✅ First financial services customer signed
-- ✅ Pass 5+ regulated industry RFPs
-
-**Business Impact:**
-- ✅ 100+ enterprise customers ($5M+ total ARR)
-- ✅ Regulated industry revenue >25% of total
-
-### Phase 5 Success Metrics (Innovation)
-
-**Advanced Features:**
-- ✅ At least 3 innovation features shipped (voice, web UI, semantic search)
-- ✅ User satisfaction with new features >9/10
-- ✅ Press coverage in 3+ major tech publications
-
-**Market Leadership:**
-- ✅ Recognized as top 3 AI coding assistant (Gartner, Forrester)
-- ✅ 500+ enterprise customers ($20M+ total ARR)
-- ✅ Net Promoter Score (NPS) >50
+### 8.3 Business Decisions
+1. **Pricing:** Will ragent remain free and open-source, or introduce paid tiers?
+2. **Support:** What level of support will be provided (community-only, paid support)?
+3. **Partnerships:** Should we pursue partnerships with LLM providers for discounts?
+4. **Marketing:** What channels will be used for user acquisition (GitHub, Reddit, Twitter)?
 
 ---
 
-## CONCLUSION
+## 9. Conclusion
 
-This strategic roadmap positions ragent to close critical gaps with market leaders (ClaudeCode, GitHub Copilot CLI) while leveraging unique strengths (Rust performance, multi-provider support, advanced team orchestration). The phased approach balances enterprise readiness (revenue unlock) with competitive parity (user retention) and innovation leadership (differentiation).
+This implementation plan provides a comprehensive roadmap to transform **ragent** from a strong alpha product into a competitive, feature-complete AI coding agent over the next 12-18 months. By prioritizing high-impact quick wins in Milestone 1, establishing autonomous operation capabilities in Milestone 2, and building intelligent context management in Milestone 3, we position ragent to achieve competitive parity with ClaudeCode, OpenCode, and GitHub Copilot CLI while leveraging unique differentiators (Rust performance, multi-provider support, team orchestration).
 
-**Key Success Factors:**
-1. **Execute Phase 1 security fixes immediately** — No enterprise sales possible without security compliance
-2. **Invest in accessibility and i18n early** — 3x market expansion potential, legal compliance
-3. **Leverage existing differentiators** — Double down on team orchestration, multi-provider strategy
-4. **Focus on documentation and UX** — Lower barrier to entry, reduce support burden
-5. **Maintain performance advantage** — Rust speed is a competitive moat, don't compromise
+### Key Takeaways
 
-**Investment Justification:**
-- **Total Cost:** $500K-$750K over 18-24 months
-- **Expected Revenue:** $5M+ ARR by end of Phase 4 (10x ROI)
-- **Market Size:** $10B+ AI coding assistant market (Gartner 2026)
-- **Competitive Position:** Top 3 by end of Phase 5
+1. **Strong Foundation:** ragent already has 58 tools, multi-provider support, LSP integration, and advanced team coordination — a solid base for growth.
 
-**Next Steps:**
-1. Secure funding and resources (3-4 FTE engineers)
-2. Hire external security auditor (Phase 1, Week 1)
-3. Begin immediate security fixes (TLS, command injection)
-4. Kick off Phase 1, Milestone 1.1 (Security Hardening)
+2. **Clear Gaps:** Seven critical gaps identified (persistent shell, project memory, git context, cost tracking, permissions, autonomous modes, GitHub integration) with actionable solutions.
+
+3. **Phased Approach:** 5 milestones balance quick wins (M1), strategic features (M2-3), transformative capabilities (M4), and ecosystem integration (M5).
+
+4. **Competitive Positioning:** Upon completion, ragent will match or exceed competitors in critical areas while maintaining unique strengths (Rust, multi-provider, teams, LSP, prompt optimization).
+
+5. **Risk Mitigation:** High-risk tasks identified with mitigation strategies; parallel opportunities enable faster delivery with multiple developers.
+
+6. **Success Metrics:** Clear KPIs for each milestone ensure measurable progress and course correction opportunities.
+
+### Next Steps
+
+1. **Resource Allocation:** Assign developers to high-priority tasks (M1) immediately.
+2. **Stakeholder Alignment:** Review and approve roadmap with project leadership.
+3. **Community Engagement:** Share roadmap publicly for feedback and contributions.
+4. **Infrastructure Setup:** Prepare CI/CD, testing environments, and documentation platforms.
+5. **Kickoff Milestone 1:** Begin implementation of cost tracking, git context, README injection, safe command whitelist, and ThinkTool.
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** March 30, 2026  
-**Next Review:** April 30, 2026 (monthly roadmap review)
+**Document Status:** Final  
+**Approval Required:** Project Lead, Engineering Team  
+**Next Review:** After Milestone 1 completion (6-8 weeks)  
+**Contact:** swarm-s7 (document compiler), swarm-s1 (codebase analysis), swarm-s5 (competitive analysis), swarm-s6 (implementation plan)

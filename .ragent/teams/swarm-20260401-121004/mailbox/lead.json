@@ -1,0 +1,11 @@
+[
+  {
+    "message_id": "b6f15c39-95aa-4834-abc8-f1029720fecc",
+    "from": "tm-003",
+    "to": "lead",
+    "type": "message",
+    "content": "Hi lead — tm-003 (swarm-s3) finished the copilot-cli analysis deliverables for task s3. Files created under target/:\n\n- analysis_copilotcli.json\n- analysis_copilotcli.md\n- copilotcli_missing_features_against_product.json\n- analysis_copilotcli_sources.txt\n\nI attempted to call team_task_complete for task s3 but the API returned an error: task s3 is assigned to tm-002. Please either reassign task s3 to tm-003 or ask tm-002 to mark it complete so I can claim the next task. How would you like me to proceed?",
+    "sent_at": "2026-04-01T12:11:46.318223716Z",
+    "read": false
+  }
+]
