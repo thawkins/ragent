@@ -271,7 +271,10 @@ impl SessionProcessor {
                     ~500 words; link to files rather than pasting large content.\n\
                  4. **Then wait.** After all spawns, call `team_wait` once to block until \
                     all teammates report idle or complete.\n\
-                 5. **Synthesise.** Read each teammate's output and combine results yourself.\n\n\
+                 5. **Synthesise.** Read each teammate's output and combine results yourself.\n\
+                 6. **Iterate if needed.** If you have more items than available teammates, \
+                    distribute in waves — spawn a batch, wait, synthesise, then spawn the \
+                    next batch with freshly-idle teammates.\n\n\
                  **Example — analysing 3 competitors A, B, C:**\n\
                  ```\n\
                  team_spawn(teammate_name: \"analyst-A\", prompt: \"Analyse competitor A only …\")\n\
@@ -279,7 +282,10 @@ impl SessionProcessor {
                  team_spawn(teammate_name: \"analyst-C\", prompt: \"Analyse competitor C only …\")\n\
                  team_wait()\n\
                  ```\n\
-                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n",
+                 Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n\
+                 **Critical:** The `team_spawn` tool **rejects multi-item prompts**. If your \
+                 prompt contains patterns like \"1.\", \"2.\", \"- Item\", or \"and\" joining multiple \
+                 items, the spawn will fail. This is intentional — it forces correct distribution.\n\n",
             );
         }
 

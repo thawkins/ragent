@@ -82,10 +82,49 @@ impl Tool for TeamSpawnTool {
             .and_then(|v| v.as_str())
             .unwrap_or("general");
 
-        let _prompt = input
+        let prompt = input
             .get("prompt")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: prompt"))?;
+
+        // Guard: detect multi-item prompts that violate the "one per spawn" rule.
+        // Common patterns: "1.", "2.", "3.", "- Competitor A", "- Item B", "and", "also"
+        let multi_item_patterns = [
+            "1.", "2.", "3.", "4.", "5.",  // Numbered lists
+            "a)", "b)", "c)", "d)", "e)",  // Letter lists
+            "- ", "* ",                     // Bullet lists
+            ", and ",
+            " and ",
+            " or ",
+            " also ",
+            "Item 1",
+            "Item 2",
+            "Competitor 1",
+            "Competitor 2",
+        ];
+
+        let prompt_lower = prompt.to_lowercase();
+        let mut detected_multi_items = Vec::new();
+
+        for pattern in &multi_item_patterns {
+            let pattern_lower = pattern.to_lowercase();
+            if prompt_lower.contains(&pattern_lower) {
+                detected_multi_items.push(*pattern);
+            }
+        }
+
+        if !detected_multi_items.is_empty() {
+            return Err(anyhow::anyhow!(
+                "POLICY VIOLATION: Prompt for teammate '{}' contains multi-item patterns: {:?}\n\
+                 RULE: Each team_spawn must cover **exactly ONE work item** — never assign multiple \
+                 items to a single teammate.\n\
+                 Split this into separate team_spawn calls, one per item.\n\
+                 Offending patterns: {}",
+                teammate_name,
+                detected_multi_items,
+                detected_multi_items.join(", ")
+            ));
+        }
 
         // Parse optional per-teammate model override ("provider_id/model_id").
         let teammate_model: Option<ModelRef> = input

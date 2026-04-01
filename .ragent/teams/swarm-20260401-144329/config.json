@@ -87,7 +87,7 @@
       "agent_id": "tm-007",
       "session_id": "73bec3c0-e7f9-4c77-9c9d-5e1667fd8ed2",
       "agent_type": "general",
-      "status": "working",
+      "status": "idle",
       "current_task_id": null,
       "plan_status": "none",
       "created_at": "2026-04-01T14:43:29.254702767Z",
