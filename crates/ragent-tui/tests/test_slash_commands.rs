@@ -642,8 +642,11 @@ fn test_ctrl_terminal_cursor_movement_bindings() {
     app.handle_key_event(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
     assert_eq!(app.input_cursor, 3);
 
+    // Ctrl+A now selects all: anchor → 0, cursor → end.
     app.handle_key_event(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
-    assert_eq!(app.input_cursor, 0);
+    assert_eq!(app.kb_select_anchor, Some(0));
+    assert_eq!(app.input_cursor, 6);
+    // Ctrl+E moves to end (cursor is already there; clears selection).
     app.handle_key_event(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
     assert_eq!(app.input_cursor, 6);
 }
@@ -1165,4 +1168,323 @@ fn test_slash_tools_creates_session_if_none() {
     assert!(app.session_id.is_some(), "should create session");
     assert_eq!(app.status, "tools");
     assert!(!app.messages.is_empty());
+}
+
+// ── /opt ────────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_opt_help_shows_markdown_table() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/opt help");
+
+    assert_eq!(app.status, "opt help");
+    assert!(!app.messages.is_empty(), "/opt help should produce a message");
+    let text = app.messages.last().unwrap().text_content();
+    // The table must list at least a few well-known methods
+    assert!(text.contains("co_star"), "table should include co_star");
+    assert!(text.contains("crispe"), "table should include crispe");
+    assert!(text.contains("cot"), "table should include cot");
+    assert!(text.contains("draw"), "table should include draw");
+    assert!(text.contains("rise"), "table should include rise");
+    assert!(text.contains("meta"), "table should include meta");
+    assert!(text.contains("variational"), "table should include variational");
+    assert!(text.contains("q_star"), "table should include q_star");
+    assert!(text.contains("openai"), "table should include openai");
+    assert!(text.contains("claude"), "table should include claude");
+    assert!(text.contains("microsoft"), "table should include microsoft");
+}
+
+#[test]
+fn test_slash_opt_help_switches_to_chat() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    assert_eq!(app.current_screen, ScreenMode::Home);
+
+    app.execute_slash_command("/opt help");
+
+    assert_eq!(app.current_screen, ScreenMode::Chat);
+}
+
+#[test]
+fn test_slash_opt_no_args_shows_help() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    // /opt with no args falls through to the help branch
+    app.execute_slash_command("/opt");
+
+    assert_eq!(app.status, "opt help");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("co_star"));
+}
+
+#[tokio::test]
+async fn test_slash_opt_co_star_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    // Provide a configured model so the command proceeds past the guard.
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt co_star Explain async/await in Rust");
+
+    // With LLM integration the command is async: status shows "optimizing" immediately,
+    // and no message is appended until the background task completes.
+    assert!(
+        app.status.contains("⏳") && app.status.contains("co_star"),
+        "status should show optimizing with method name: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_crispe_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt crispe Write a blog post intro");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("crispe"),
+        "status should show optimizing with method name: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_cot_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt cot Solve the fizzbuzz problem");
+
+    // "cot" is an alias for ChainOfThought whose canonical name is "cot".
+    assert!(
+        app.status.contains("⏳") && app.status.contains("cot"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_draw_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt draw A futuristic cityscape at sunset");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("draw"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_rise_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt rise Summarise this article");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("rise"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_meta_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt meta Generate a test suite");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("meta"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_variational_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt variational Write a product description");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("variational"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_qstar_alias_works() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt qstar What is Rust ownership?");
+
+    // "qstar" alias resolves to canonical name "q_star".
+    assert!(
+        app.status.contains("⏳") && app.status.contains("q_star"),
+        "qstar alias should resolve to canonical q_star: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_openai_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt openai Translate text to French");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("openai"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_claude_formats_prompt() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt claude Summarise this meeting transcript");
+
+    assert!(
+        app.status.contains("⏳") && app.status.contains("claude"),
+        "status should show optimizing: {}",
+        app.status
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_microsoft_alias_azure() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt azure Classify this support ticket");
+
+    // "azure" alias resolves to canonical name "microsoft".
+    assert!(
+        app.status.contains("⏳") && app.status.contains("microsoft"),
+        "azure alias should resolve to canonical microsoft: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_slash_opt_unknown_method_shows_warning() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/opt nonexistent Some prompt text");
+
+    assert!(
+        app.status.contains("Unknown optimization method"),
+        "status should warn about unknown method: {}",
+        app.status
+    );
+    // No new message should appear for an unknown method
+    assert!(
+        app.messages.is_empty(),
+        "unknown method should not produce a message"
+    );
+}
+
+#[test]
+fn test_slash_opt_missing_prompt_shows_warning() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/opt co_star");
+
+    assert!(
+        app.status.contains("Please provide a prompt"),
+        "status should ask for prompt: {}",
+        app.status
+    );
+    assert!(
+        app.messages.is_empty(),
+        "missing prompt should not produce a message"
+    );
+}
+
+#[test]
+fn test_slash_opt_is_listed_in_help() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/help");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("/opt"), "/help should mention /opt");
+}
+
+#[test]
+fn test_slash_opt_adds_to_input_history() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/opt help");
+
+    assert!(
+        app.input_history
+            .iter()
+            .any(|h| h.starts_with("/opt")),
+        "input history should include the /opt command"
+    );
+}
+
+#[tokio::test]
+async fn test_slash_opt_o1_alias_works() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.selected_model = Some("anthropic/claude-3-7-sonnet-20250219".to_string());
+
+    app.execute_slash_command("/opt o1 Write a creative short story");
+
+    // "o1" alias resolves to canonical name "o1_style".
+    assert!(
+        app.status.contains("⏳") && app.status.contains("o1_style"),
+        "o1 alias should resolve to canonical o1_style: {}",
+        app.status
+    );
+}
+
+#[test]
+fn test_slash_opt_no_model_shows_warning() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    // No selected_model — should produce a friendly error.
+
+    app.execute_slash_command("/opt co_star Explain async/await in Rust");
+
+    assert!(
+        app.status.contains("requires a configured model"),
+        "status should warn when no model is configured: {}",
+        app.status
+    );
+    assert!(
+        app.messages.is_empty(),
+        "no message should be added when no model configured"
+    );
 }

@@ -16,7 +16,7 @@ use ratatui::{
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
-use ragent_core::message::{MessagePart, Role, ToolCallStatus};
+use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, ScreenMode,
@@ -206,7 +206,7 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     // Compute input height based on wrapped text length
     let max_width = 88u16.min(area.width.saturating_sub(4));
     let inner_width = max_width.saturating_sub(2).max(1) as usize; // inside borders
-    let input_height = input_widget_height(app.input_len_chars(), inner_width);
+    let input_height = input_widget_height(&app.input, inner_width);
 
     // Vertical layout: flex-grow top | logo | gap | prompt | provider | tip | flex-grow bottom | status bar
     let chunks = Layout::default()
@@ -350,16 +350,14 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
         // Cursor sits right after the "> " prefix.
         frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
     } else {
-        let wrapped_lines = input_widget_lines(&app.input, inner_width);
-        let wrapped_lines: Vec<Line<'_>> = wrapped_lines
-            .into_iter()
-            .map(Line::from)
-            .collect();
+        let kb_sel = app.kb_selection_char_range();
+        let wrapped_lines = input_lines_with_kb_selection(&app.input, inner_width, kb_sel);
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
 
         // Position cursor accounting for wrapped lines
-        let (cursor_line, cursor_col) = input_cursor_display_pos(app.input_cursor, inner_width);
+        let (cursor_line, cursor_col) =
+            input_cursor_display_pos(&app.input, app.input_cursor, inner_width);
         let cursor_x = area.x + 1 + cursor_col as u16;
         let cursor_y = area.y + 1 + cursor_line as u16;
         frame.set_cursor_position((cursor_x, cursor_y));
@@ -445,7 +443,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 50, frame.area());
     frame.render_widget(Clear, area);
 
-    let step = app.provider_setup.as_ref().unwrap();
+    let Some(step) = app.provider_setup.as_ref() else { return };
     match step {
         ProviderSetupStep::SelectProvider { selected } => {
             let mut lines: Vec<Line<'_>> = vec![
@@ -1137,9 +1135,38 @@ fn char_wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn input_cursor_display_pos(cursor_chars: usize, inner_width: usize) -> (usize, usize) {
-    let display_pos = cursor_chars + 2; // "> " prefix
-    (display_pos / inner_width, display_pos % inner_width)
+fn input_cursor_display_pos(input: &str, cursor_chars: usize, inner_width: usize) -> (usize, usize) {
+    let inner_width = inner_width.max(1);
+    let mut display_row = 0usize;
+    let mut char_idx = 0usize;
+
+    for (line_i, logical_line) in input.split('\n').enumerate() {
+        let prefix_len = 2usize; // "> " or "  "
+        let content_len = logical_line.chars().count();
+
+        // Is the cursor within this logical line's content range (inclusive of end)?
+        if char_idx <= cursor_chars && cursor_chars <= char_idx + content_len {
+            let content_offset = cursor_chars - char_idx;
+            let display_offset = prefix_len + content_offset;
+            let row_within_line = display_offset / inner_width;
+            let col = display_offset % inner_width;
+            return (display_row + row_within_line, col);
+        }
+
+        // Advance: this logical line consumed content_len chars + 1 for the '\n'
+        char_idx += content_len + 1;
+        // Count wrapped display rows this logical line occupies
+        let line_display_len = prefix_len + content_len;
+        let wrapped_rows = line_display_len.div_ceil(inner_width).max(1);
+        if line_i == 0 {
+            display_row = wrapped_rows;
+        } else {
+            display_row += wrapped_rows;
+        }
+    }
+
+    // Fallback: cursor at or past end of input
+    (display_row, 0)
 }
 
 fn with_cursor_marker(text: &str, cursor: usize) -> String {
@@ -1152,17 +1179,131 @@ fn with_cursor_marker(text: &str, cursor: usize) -> String {
     out
 }
 
-fn input_widget_height(input_chars: usize, inner_width: usize) -> u16 {
-    let input_text_len = input_chars + 2; // "> " prefix
-    let num_lines = ((input_text_len as f32) / (inner_width as f32))
-        .ceil()
-        .max(1.0) as u16;
-    num_lines + 2 // +2 for borders
+fn input_widget_height(input: &str, inner_width: usize) -> u16 {
+    let num_lines = input_widget_lines(input, inner_width).len();
+    (num_lines as u16).max(1) + 2 // +2 for borders
 }
 
 fn input_widget_lines(input: &str, inner_width: usize) -> Vec<String> {
-    let input_text = format!("> {}", input);
-    char_wrap(&input_text, inner_width)
+    if inner_width == 0 {
+        return vec![format!("> {}", input.replace('\n', " ↵ "))];
+    }
+    let mut result = Vec::new();
+    for (i, logical_line) in input.split('\n').enumerate() {
+        let prefix = if i == 0 { "> " } else { "  " };
+        let prefixed = format!("{}{}", prefix, logical_line);
+        let wrapped = char_wrap(&prefixed, inner_width);
+        result.extend(wrapped);
+    }
+    if result.is_empty() {
+        result.push("> ".to_string());
+    }
+    result
+}
+
+/// Render input text as styled ratatui `Line`s with keyboard-selection highlighting.
+///
+/// Characters within `selection` (a `[start, end)` char-index range) are
+/// rendered with a blue background. Prefix characters (`"> "` / `"  "`) are
+/// never considered part of the selection.
+fn input_lines_with_kb_selection(
+    input: &str,
+    inner_width: usize,
+    selection: Option<(usize, usize)>,
+) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
+
+    let inner_width = inner_width.max(1);
+    let sel_style = Style::default().bg(Color::LightBlue).fg(Color::Black);
+
+    // Build a flat list of (char, Option<char_index>) representing the full display
+    // text. Prefix chars carry `None` (never selectable); content chars carry their
+    // original index in `input`.
+    let mut flat: Vec<(char, Option<usize>)> = Vec::new();
+    let mut char_idx = 0usize;
+    let logical_line_count = input.split('\n').count();
+
+    for (line_i, logical_line) in input.split('\n').enumerate() {
+        // Each logical line starts a new display line — flush a boundary marker.
+        // We represent this as a "newline flush" by letting the chunker know when
+        // to start a new display row; we do this by resetting a counter below.
+        let prefix = if line_i == 0 { "> " } else { "  " };
+
+        // Prefix chars: not selectable
+        for c in prefix.chars() {
+            flat.push((c, None));
+        }
+
+        // Content chars: carry original char_idx
+        for c in logical_line.chars() {
+            flat.push((c, Some(char_idx)));
+            char_idx += 1;
+        }
+
+        // Account for the '\n' in char_idx (not added to flat)
+        if line_i + 1 < logical_line_count {
+            char_idx += 1;
+        }
+
+        // Mark end of this logical line so chunker starts a new display row.
+        // We store a sentinel `('\0', None)` as a line-break marker.
+        flat.push(('\0', None)); // sentinel: force display-row break
+    }
+
+    // Chunk `flat` into display lines of `inner_width`, breaking at sentinels.
+    let mut display_lines: Vec<Vec<(char, Option<usize>)>> = Vec::new();
+    let mut current: Vec<(char, Option<usize>)> = Vec::new();
+    let mut col = 0usize;
+
+    for (c, idx) in flat {
+        if c == '\0' {
+            // Logical line boundary — flush current display row.
+            display_lines.push(std::mem::take(&mut current));
+            col = 0;
+            continue;
+        }
+        if col == inner_width {
+            // Width wrap — flush and start new display row.
+            display_lines.push(std::mem::take(&mut current));
+            col = 0;
+        }
+        current.push((c, idx));
+        col += 1;
+    }
+    if !current.is_empty() {
+        display_lines.push(current);
+    }
+    if display_lines.is_empty() {
+        display_lines.push(vec![('>', None), (' ', None)]);
+    }
+
+    // Convert each display line into a ratatui Line with selection spans.
+    display_lines
+        .into_iter()
+        .map(|chars| {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            let mut text = String::new();
+            let mut in_sel = false;
+
+            for (c, idx) in chars {
+                let this_sel = idx.map_or(false, |ci| {
+                    selection.map_or(false, |(s, e)| ci >= s && ci < e)
+                });
+                if this_sel != in_sel && !text.is_empty() {
+                    let style = if in_sel { sel_style } else { Style::default() };
+                    spans.push(Span::styled(std::mem::take(&mut text), style));
+                }
+                in_sel = this_sel;
+                text.push(c);
+            }
+            if !text.is_empty() {
+                let style = if in_sel { sel_style } else { Style::default() };
+                spans.push(Span::styled(text, style));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -1186,18 +1327,27 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         .saturating_sub(button_col_w)
         .saturating_sub(2)
         .max(1) as usize;
-    let input_height = input_widget_height(app.input_len_chars(), input_inner_width);
+    let input_height = input_widget_height(&app.input, input_inner_width);
+
+    // Whether to show the teammate strip (1 row under the status bar).
+    let team_strip = app.active_team.is_some() && !app.team_members.is_empty();
+    let team_strip_h = if team_strip { 1u16 } else { 0 };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),            // status bar
-            Constraint::Min(3),               // messages + optional log
-            Constraint::Length(input_height), // input (dynamic)
+            Constraint::Length(1),                        // status bar
+            Constraint::Length(team_strip_h),             // teammate strip (0 when hidden)
+            Constraint::Min(3),                           // messages + optional log
+            Constraint::Length(input_height),             // input (dynamic)
         ])
         .split(chat_area);
 
     render_status_bar(frame, app, chunks[0]);
+
+    if team_strip {
+        render_teammate_strip(frame, app, chunks[1]);
+    }
 
     // Split the middle area horizontally when the log panel is visible.
     if app.show_log {
@@ -1207,7 +1357,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
                 Constraint::Percentage(60), // messages
                 Constraint::Percentage(40), // log
             ])
-            .split(chunks[1]);
+            .split(chunks[2]);
 
         app.message_area = h_chunks[0];
         app.log_area = h_chunks[1];
@@ -1216,18 +1366,18 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_log_panel(frame, app, h_chunks[1]);
         apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
     } else {
-        app.message_area = chunks[1];
+        app.message_area = chunks[2];
         app.log_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
-        render_messages(frame, app, chunks[1]);
-        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[1]);
+        render_messages(frame, app, chunks[2]);
+        apply_selection_highlight(frame, app, SelectionPane::Messages, chunks[2]);
     }
 
     let input_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(button_col_w), Constraint::Min(20)])
-        .split(chunks[2]);
+        .split(chunks[3]);
 
     app.input_area = input_chunks[1];
     render_input(frame, app, input_chunks[1]);
@@ -1413,13 +1563,31 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(85, 70, frame.area());
+    let area = centered_rect(90, 70, frame.area());
     app.output_view_area = area;
     frame.render_widget(Clear, area);
 
     let Some(view) = app.output_view.as_mut() else {
         return;
     };
+
+    // If this is a TeamMember view with a missing session_id, try to resolve
+    // it from the in-memory team_members list (which is refreshed from disk
+    // every render cycle via `refresh_team_member_session_ids`).
+    if let OutputViewTarget::TeamMember {
+        ref agent_id,
+        ref mut session_id,
+        ..
+    } = view.target
+    {
+        if session_id.is_none() {
+            if let Some(member) = app.team_members.iter().find(|m| m.agent_id == *agent_id) {
+                if let Some(ref sid) = member.session_id {
+                    *session_id = Some(sid.clone());
+                }
+            }
+        }
+    }
 
     let (title, target_session, team_filter): (
         String,
@@ -1451,91 +1619,7 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         } else {
             app.storage.get_messages(sid).unwrap_or_default()
         };
-        for msg in &session_messages {
-            let ts = msg.created_at.format("%H:%M:%S");
-            let who = match msg.role {
-                Role::User => "You",
-                Role::Assistant => "Assistant",
-            };
-            let mut wrote_any = false;
-            for part in &msg.parts {
-                match part {
-                    MessagePart::Text { text } => {
-                        for (idx, line) in text.lines().enumerate() {
-                            let prefix = if idx == 0 {
-                                format!("{ts} MSG {who}: ")
-                            } else {
-                                " ".repeat(15)
-                            };
-                            lines.push(Line::from(vec![
-                                Span::styled(prefix, Style::default().fg(Color::DarkGray)),
-                                Span::raw(line.to_string()),
-                            ]));
-                            wrote_any = true;
-                        }
-                    }
-                    MessagePart::ToolCall { tool, state, .. } => {
-                        let display_name = capitalize_tool_name(tool);
-                        let input_summary = tool_input_summary(tool, &state.input, &app.cwd);
-                        let mut detail = if input_summary.is_empty() {
-                            display_name
-                        } else {
-                            format!("{display_name} {input_summary}")
-                        };
-                        if state.status == ToolCallStatus::Completed
-                            && let Some(result) =
-                                tool_result_summary(tool, &state.output, &state.input, &app.cwd)
-                        {
-                            detail.push_str(&format!(" -> {result}"));
-                        } else if state.status == ToolCallStatus::Error
-                            && let Some(err) = state.error.as_deref()
-                        {
-                            detail.push_str(&format!(" -> {err}"));
-                        }
-                        let icon = match state.status {
-                            ToolCallStatus::Completed => "✓",
-                            ToolCallStatus::Error => "✗",
-                            ToolCallStatus::Running => "…",
-                            ToolCallStatus::Pending => "○",
-                        };
-                        lines.push(Line::from(vec![
-                            Span::styled(
-                                format!("{ts} TOOL {icon} "),
-                                Style::default().fg(Color::DarkGray),
-                            ),
-                            Span::raw(detail),
-                        ]));
-                        wrote_any = true;
-                    }
-                    MessagePart::Reasoning { text } => {
-                        for line in text.lines() {
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("{ts} RSN "),
-                                    Style::default().fg(Color::DarkGray),
-                                ),
-                                Span::raw(line.to_string()),
-                            ]));
-                        }
-                        wrote_any = true;
-                    }
-                    MessagePart::Image { path, .. } => {
-                        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
-                        lines.push(Line::from(vec![
-                            Span::styled(format!("{ts} IMG "), Style::default().fg(Color::DarkGray)),
-                            Span::raw(format!("[image: {name}]")),
-                        ]));
-                        wrote_any = true;
-                    }
-                }
-            }
-            if !wrote_any {
-                lines.push(Line::from(vec![
-                    Span::styled(format!("{ts} MSG {who}: "), Style::default().fg(Color::DarkGray)),
-                    Span::raw("(empty)"),
-                ]));
-            }
-        }
+        lines = messages_to_lines(&session_messages, &app.tool_step_map, &app.cwd);
     }
 
     for entry in app.log_entries.iter().filter(|entry| {
@@ -1635,7 +1719,7 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
-    let area = centered_rect(58, 56, frame.area());
+    let area = centered_rect(90, 56, frame.area());
     frame.render_widget(Clear, area);
 
     let block = Block::default()
@@ -1673,6 +1757,69 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
         .alignment(Alignment::Center),
         close_area,
     );
+}
+
+/// Render a single-row teammate strip below the status bar.
+///
+/// Shows each teammate as a compact pill: `[icon] name (status)`.
+/// The focused teammate is highlighted with a different background.
+fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
+    use ragent_core::team::MemberStatus;
+
+    let bg = Color::Rgb(30, 30, 40);
+    let mut spans: Vec<Span<'_>> = Vec::new();
+    spans.push(Span::styled(" 👥 ", Style::default().fg(Color::Blue).bg(bg)));
+
+    for member in &app.team_members {
+        let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
+
+        let (status_icon, status_color) = match member.status {
+            MemberStatus::Working => ("▶", Color::Cyan),
+            MemberStatus::Idle => ("●", Color::Green),
+            MemberStatus::Spawning => ("◌", Color::Yellow),
+            MemberStatus::Blocked => ("◈", Color::DarkGray),
+            MemberStatus::PlanPending => ("◎", Color::Magenta),
+            MemberStatus::ShuttingDown => ("◌", Color::Yellow),
+            MemberStatus::Stopped => ("○", Color::DarkGray),
+            MemberStatus::Failed => ("✗", Color::Red),
+        };
+
+        let pill_bg = if is_focused { Color::Rgb(50, 50, 80) } else { bg };
+        let name_color = if is_focused { Color::White } else { Color::Gray };
+        let border_char = if is_focused { "▸" } else { " " };
+
+        spans.push(Span::styled(
+            format!("{border_char}{status_icon} "),
+            Style::default().fg(status_color).bg(pill_bg),
+        ));
+        // Truncate name to 16 chars
+        let display_name: String = member.name.chars().take(16).collect();
+        spans.push(Span::styled(
+            display_name,
+            Style::default()
+                .fg(name_color)
+                .bg(pill_bg)
+                .add_modifier(if is_focused { Modifier::BOLD } else { Modifier::empty() }),
+        ));
+        spans.push(Span::styled(" ", Style::default().bg(bg)));
+    }
+
+    // Hint at right edge
+    let hint = " Alt+↑↓:cycle ";
+    let used: usize = spans.iter().map(|s| s.content.len()).sum();
+    let remaining = (area.width as usize).saturating_sub(used + hint.len());
+    spans.push(Span::styled(
+        " ".repeat(remaining),
+        Style::default().bg(bg),
+    ));
+    spans.push(Span::styled(
+        hint,
+        Style::default().fg(Color::DarkGray).bg(bg),
+    ));
+
+    let line = Line::from(spans);
+    let bar = Paragraph::new(line).style(Style::default().bg(bg));
+    frame.render_widget(bar, area);
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -1833,23 +1980,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
-      let mut lines: Vec<Line<'_>> = Vec::new();
+/// Render a slice of messages into formatted lines using the rich format
+/// from the primary Messages panel.  Both `render_messages` and
+/// `render_output_view_overlay` delegate here so teammate output looks
+/// identical to the lead agent's chat window.
+fn messages_to_lines<'a>(
+    messages: &[Message],
+    tool_step_map: &std::collections::HashMap<String, (String, u32)>,
+    cwd: &str,
+) -> Vec<Line<'a>> {
+    let mut lines: Vec<Line<'a>> = Vec::new();
 
-      // Determine which session to display messages for.
-      // If a specific agent is selected, show its messages; otherwise show primary session.
-      let _display_session = app
-          .selected_agent_session_id
-          .clone()
-          .or_else(|| app.session_id.clone());
-
-      // Filter messages to the selected agent's session.
-      // For now, messages are still stored globally, so we match by session_id if available.
-      // TODO: Implement proper multi-session message storage to filter by _display_session.
-      // This is a placeholder for future multi-session message handling.
-      let messages_to_show = &app.messages;
-
-      for msg in messages_to_show {        for part in &msg.parts {
+    for msg in messages {
+        for part in &msg.parts {
             match part {
                 MessagePart::Text { text } => {
                     let (dot, dot_style, indent) = match msg.role {
@@ -1872,7 +2015,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                         if i == 0 {
                             lines.push(Line::from(vec![
                                 Span::styled(dot, dot_style),
-                                Span::raw(line),
+                                Span::raw(line.to_owned()),
                             ]));
                         } else {
                             lines.push(Line::from(Span::raw(format!(
@@ -1888,8 +2031,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     call_id,
                     state,
                 } => {
-                    let step_tag = app
-                        .tool_step_map
+                    let step_tag = tool_step_map
                         .get(call_id)
                         .map(|(sid, s)| format!("[{sid}:{s}] "))
                         .unwrap_or_default();
@@ -1914,9 +2056,8 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                     };
 
                     let display_name = capitalize_tool_name(tool);
-                    let summary = tool_input_summary(tool, &state.input, &app.cwd);
+                    let summary = tool_input_summary(tool, &state.input, cwd);
 
-                    // Build the inline diff stats for edit tool (e.g. "(+25 -5)")
                     let inline_diff = if state.status == ToolCallStatus::Completed {
                         tool_inline_diff(tool, &state.output)
                     } else {
@@ -1938,7 +2079,6 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
                         spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
                     }
-                    // Show line range for read tool in bold
                     if tool == "read" {
                         if let Some(range) = read_line_range(&state.output) {
                             spans.push(Span::styled(
@@ -1966,7 +2106,7 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 
                     if state.status == ToolCallStatus::Completed {
                         if let Some(result) =
-                            tool_result_summary(tool, &state.output, &state.input, &app.cwd)
+                            tool_result_summary(tool, &state.output, &state.input, cwd)
                         {
                             lines.push(Line::from(Span::styled(
                                 format!("  └ {}", result),
@@ -2006,6 +2146,25 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
             lines.push(Line::from(""));
         }
     }
+
+    lines
+}
+
+fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
+      // Determine which session to display messages for.
+      // If a specific agent is selected, show its messages; otherwise show primary session.
+      let _display_session = app
+          .selected_agent_session_id
+          .clone()
+          .or_else(|| app.session_id.clone());
+
+      // Filter messages to the selected agent's session.
+      // For now, messages are still stored globally, so we match by session_id if available.
+      // TODO: Implement proper multi-session message storage to filter by _display_session.
+      // This is a placeholder for future multi-session message handling.
+      let messages_to_show = &app.messages;
+
+      let lines = messages_to_lines(messages_to_show, &app.tool_step_map, &app.cwd);
 
     // Cache plain-text content for text selection copy
     app.message_content_lines = lines
@@ -2054,9 +2213,21 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
 fn render_input(frame: &mut Frame, app: &App, area: Rect) {
     let inner_width = area.width.saturating_sub(2).max(1) as usize;
 
-    // Build title: show staged attachments in the block title when present.
-    let title = if app.pending_attachments.is_empty() {
-        " Input ".to_string()
+    // Build title: show focused teammate or staged attachments in the block title.
+    let (title, title_style) = if let Some(ref focused_id) = app.focused_teammate {
+        let name = app.team_members.iter()
+            .find(|m| m.agent_id == *focused_id)
+            .map(|m| m.name.as_str())
+            .unwrap_or("?");
+        (
+            format!(" → {name} (focused) "),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )
+    } else if app.pending_attachments.is_empty() {
+        (
+            " Input ".to_string(),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )
     } else {
         let names: Vec<String> = app
             .pending_attachments
@@ -2067,15 +2238,15 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
                     .map(|s| format!("📎{s}"))
             })
             .collect();
-        format!(" Input  {} ", names.join("  "))
+        (
+            format!(" Input  {} ", names.join("  ")),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )
     };
 
-    let attachment_style = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(title, attachment_style));
+        .title(Span::styled(title, title_style));
 
     if app.input.is_empty() {
         // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
@@ -2088,17 +2259,15 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
         // Cursor sits right after the "> " prefix.
         frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
     } else {
-        // Character-wrap the text so cursor math (pos / width) stays correct
-        let wrapped_lines: Vec<Line<'_>> = input_widget_lines(&app.input, inner_width)
-            .into_iter()
-            .map(Line::from)
-            .collect();
+        let kb_sel = app.kb_selection_char_range();
+        let wrapped_lines = input_lines_with_kb_selection(&app.input, inner_width, kb_sel);
         let paragraph = Paragraph::new(wrapped_lines).block(block);
         frame.render_widget(paragraph, area);
 
         // Position cursor accounting for wrapped lines.
         // Use the character index (not byte length) so unicode content behaves.
-        let (cursor_line, cursor_col) = input_cursor_display_pos(app.input_cursor, inner_width);
+        let (cursor_line, cursor_col) =
+            input_cursor_display_pos(&app.input, app.input_cursor, inner_width);
         let cursor_x = area.x + 1 + cursor_col as u16;
         let cursor_y = area.y + 1 + cursor_line as u16;
         frame.set_cursor_position((cursor_x, cursor_y));
@@ -2111,12 +2280,19 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("@", "Mention a file — opens file picker"),
     ("/", "Slash command — opens command menu"),
     ("?", "Show this keybindings help panel"),
+    ("Shift+Enter", "Insert a newline (multiline input)"),
     ("Left/Right", "Move cursor within the input line"),
+    ("Shift+Left/Right", "Extend/shrink keyboard selection"),
     ("Ctrl+Left/Right", "Move cursor by word"),
+    ("Ctrl+Shift+Left/Right", "Extend/shrink selection by word"),
     ("Home/End", "Jump to start/end of input"),
     ("Ctrl+Home/End", "Jump to input start/end"),
-    ("Ctrl+A / Ctrl+E", "Jump to input start/end (terminal style)"),
+    ("Ctrl+E", "Jump to end of input (terminal style)"),
     ("Ctrl+B / Ctrl+F", "Move cursor left/right (terminal style)"),
+    ("Ctrl+A", "Select all input text"),
+    ("Ctrl+C", "Copy selection (or quit if no selection)"),
+    ("Ctrl+X", "Cut selection to clipboard"),
+    ("Ctrl+V", "Paste text from clipboard"),
     ("Delete", "Delete character under cursor"),
     ("Ctrl+W", "Delete previous word"),
     ("Ctrl+K", "Delete to end of line"),
@@ -2135,6 +2311,9 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     // ── Agent ────────────────────────────────────────────────────────────
     ("Tab", "Cycle to next agent"),
     ("Esc", "Cancel running agent (while processing)"),
+    // ── Teams ────────────────────────────────────────────────────────────
+    ("Alt+↓", "Focus next teammate"),
+    ("Alt+↑", "Focus previous teammate (or clear focus)"),
     // ── Dialogs ──────────────────────────────────────────────────────────
     ("Esc", "Close any open dialog or menu"),
     ("y / a / n", "Allow / Always / Deny permission request"),
@@ -2347,7 +2526,7 @@ fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the interactive LSP discovery dialog overlay.
 fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
-    let state = app.lsp_discover.as_ref().unwrap();
+    let Some(state) = app.lsp_discover.as_ref() else { return };
 
     // Size the dialog: taller when there are more servers.
     let server_rows = state.servers.len().max(1) as u16;
@@ -2495,7 +2674,7 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the interactive MCP discovery dialog overlay.
 fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
-    let state = app.mcp_discover.as_ref().unwrap();
+    let Some(state) = app.mcp_discover.as_ref() else { return };
 
     // Size the dialog: taller when there are more servers.
     let server_rows = state.servers.len().max(1) as u16;

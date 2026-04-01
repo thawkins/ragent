@@ -24,6 +24,74 @@ use ragent_core::team::{TeamConfig, TeamMember};
 
 // Pending confirmation field is stored on App (defined in app.rs) as Option<PendingForceCleanup>.
 
+/// Atomically update a JSON config file with file locking.
+///
+/// 1. Opens (or creates) a sibling `.lock` file and acquires an exclusive
+///    `flock` on it (a separate lock file avoids inode confusion caused by
+///    the atomic rename below).
+/// 2. Reads the current JSON (missing/empty file → `{}`).
+/// 3. Calls `updater` to mutate the parsed JSON value.
+/// 4. Writes the result to a unique temp file in the same directory, then
+///    atomically renames it over the original so readers never see a partial
+///    write.
+/// 5. Releases the lock.
+///
+/// # Errors
+///
+/// Returns an error string if any I/O or JSON (de)serialisation step fails.
+pub fn atomic_config_update<F>(config_path: &std::path::Path, updater: F) -> Result<(), String>
+where
+    F: FnOnce(&mut serde_json::Value) -> Result<(), String>,
+{
+    use fs2::FileExt;
+    use std::fs::OpenOptions;
+
+    // Use a dedicated lock file so the flock survives the atomic rename of
+    // the config file (flock is inode-based; renaming swaps inodes).
+    let lock_path = config_path.with_extension("json.lock");
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("open lock {}: {e}", lock_path.display()))?;
+
+    lock_file
+        .lock_exclusive()
+        .map_err(|e| format!("lock {}: {e}", lock_path.display()))?;
+
+    // Read current content while holding the lock.
+    let raw = std::fs::read_to_string(config_path).unwrap_or_default();
+
+    let mut json: serde_json::Value = if raw.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&raw).map_err(|e| format!("parse {}: {e}", config_path.display()))?
+    };
+
+    updater(&mut json)?;
+
+    let out = serde_json::to_string_pretty(&json)
+        .map_err(|e| format!("serialise config: {e}"))?;
+
+    // Write to a unique temp file in the same directory, then rename.
+    let parent = config_path
+        .parent()
+        .ok_or_else(|| "config path has no parent directory".to_string())?;
+    let tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("create temp file: {e}"))?;
+    std::fs::write(tmp.path(), &out)
+        .map_err(|e| format!("write temp file: {e}"))?;
+    tmp.persist(config_path)
+        .map_err(|e| format!("rename temp → {}: {e}", config_path.display()))?;
+
+    lock_file
+        .unlock()
+        .map_err(|e| format!("unlock {}: {e}", lock_path.display()))?;
+
+    Ok(())
+}
+
 /// Returns `true` if `path` has a recognised image file extension.
 pub fn is_image_path(path: &std::path::Path) -> bool {
     matches!(
@@ -36,54 +104,99 @@ pub fn is_image_path(path: &std::path::Path) -> bool {
 }
 
 /// Decode `%XX` percent-encoding in a file-URI path component.
-pub fn percent_decode_path(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let h1 = chars.next();
-            let h2 = chars.next();
-            if let (Some(a), Some(b)) = (h1, h2) {
-                if let Ok(byte) = u8::from_str_radix(&format!("{a}{b}"), 16) {
-                    out.push(byte as char);
-                    continue;
-                }
+///
+/// Decodes percent-encoded bytes into raw bytes and constructs a [`PathBuf`].
+/// On Unix, raw bytes are preserved via `OsStr::from_bytes` so non-UTF-8 paths
+/// round-trip correctly.  On other platforms, invalid UTF-8 is replaced with
+/// the Unicode replacement character (lossy).
+pub fn percent_decode_path(s: &str) -> std::path::PathBuf {
+    let input = s.as_bytes();
+    let mut bytes = Vec::with_capacity(input.len());
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] == b'%' && i + 2 < input.len() {
+            if let Ok(decoded) =
+                u8::from_str_radix(std::str::from_utf8(&input[i + 1..i + 3]).unwrap_or(""), 16)
+            {
+                bytes.push(decoded);
+                i += 3;
+                continue;
             }
         }
-        out.push(c);
+        bytes.push(input[i]);
+        i += 1;
     }
-    out
+    bytes_to_path(&bytes)
 }
 
-/// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a temp file.
+#[cfg(unix)]
+fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+
+#[cfg(not(unix))]
+fn bytes_to_path(bytes: &[u8]) -> std::path::PathBuf {
+    std::path::PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// Maximum raw pixel buffer size we accept from the clipboard (50 MB).
+const MAX_CLIPBOARD_IMAGE_BYTES: usize = 50 * 1024 * 1024;
+
+/// Maximum dimension (width or height) we accept from the clipboard.
+const MAX_CLIPBOARD_IMAGE_DIM: u32 = 16_384;
+
+/// Encode `arboard::ImageData` (raw RGBA pixels) as a PNG saved to a
+/// securely-created temp file.
 ///
-/// Returns the path of the written file.
+/// Returns the path of the written file.  The file is persisted (not
+/// auto-deleted) so the caller can attach it to a message.
 ///
 /// # Errors
 ///
 /// Returns an error if:
+/// - The image exceeds the maximum allowed size or dimensions
 /// - The image dimensions don't match the pixel buffer size
-/// - The PNG file cannot be written to the temp directory
+/// - The temporary file cannot be created or written
 pub fn save_clipboard_image_to_temp(
     img_data: &ImageData<'_>,
 ) -> Result<std::path::PathBuf> {
+    let buf_len = img_data.bytes.len();
+    if buf_len > MAX_CLIPBOARD_IMAGE_BYTES {
+        anyhow::bail!(
+            "clipboard image too large ({:.1} MB, limit {:.0} MB)",
+            buf_len as f64 / (1024.0 * 1024.0),
+            MAX_CLIPBOARD_IMAGE_BYTES as f64 / (1024.0 * 1024.0),
+        );
+    }
+
     let width = img_data.width as u32;
     let height = img_data.height as u32;
-    let bytes = img_data.bytes.as_ref().to_vec();
+    if width > MAX_CLIPBOARD_IMAGE_DIM || height > MAX_CLIPBOARD_IMAGE_DIM {
+        anyhow::bail!(
+            "clipboard image dimensions too large ({width}×{height}, max {MAX_CLIPBOARD_IMAGE_DIM}×{MAX_CLIPBOARD_IMAGE_DIM})"
+        );
+    }
 
+    let bytes = img_data.bytes.as_ref().to_vec();
     let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, bytes)
         .ok_or_else(|| anyhow::anyhow!("clipboard image dimensions mismatch pixel buffer"))?;
 
-    let tmp_dir = std::env::temp_dir();
-    let filename = format!(
-        "ragent_paste_{}.png",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
-    let path = tmp_dir.join(filename);
-    img.save(&path)?;
+    // Create a secure temporary file (O_EXCL, restrictive permissions).
+    let tmp_file = tempfile::Builder::new()
+        .prefix("ragent_paste_")
+        .suffix(".png")
+        .tempfile()
+        .map_err(|e| anyhow::anyhow!("failed to create secure temp file: {e}"))?;
+
+    img.save(tmp_file.path())?;
+
+    // Prevent auto-deletion — the caller owns the file lifecycle.
+    let path = tmp_file
+        .into_temp_path()
+        .keep()
+        .map_err(|_| anyhow::anyhow!("failed to persist temp image file"))?;
+
     Ok(path)
 }
 
@@ -315,6 +428,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "List all registered skills and their descriptions",
     },
     SlashCommandDef {
+        trigger: "opt",
+        description: "Prompt optimization helpers: /opt help or /opt <method> <prompt>",
+    },
+    SlashCommandDef {
         trigger: "tasks",
         description: "Show background task status and cancel tasks",
     },
@@ -337,6 +454,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "teams",
         description: "Alias of /team (supports /teams show <name>)",
+    },
+    SlashCommandDef {
+        trigger: "swarm",
+        description: "Auto-decompose a goal into parallel subtasks (/swarm <prompt> | /swarm status | /swarm help)",
+    },
+    SlashCommandDef {
+        trigger: "yolo",
+        description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
     },
 ];
 
@@ -644,6 +769,9 @@ pub struct App {
     pub history_draft: String,
     /// Cursor position (character index) within the input line.
     pub input_cursor: usize,
+    /// Keyboard selection anchor (character index). When `Some(n)`, the region
+    /// between `n` and `input_cursor` forms the active keyboard selection.
+    pub kb_select_anchor: Option<usize>,
     /// Whether the log panel is visible.
     pub show_log: bool,
     /// Log entries displayed in the log panel.
@@ -769,8 +897,26 @@ pub struct App {
                 pub teams_scroll_offset: u16,
                  /// Max scroll for the Teams panel.
                  pub teams_max_scroll: u16,
+                 /// Currently focused teammate (agent_id). When set, the status
+                 /// bar shows a focus indicator and the input box routes messages
+                 /// to this teammate's mailbox instead of the lead session.
+                 pub focused_teammate: Option<String>,
+                 /// Active swarm state (if a /swarm is running).
+                 pub swarm_state: Option<ragent_core::team::SwarmState>,
+                 /// Pending result from an async `/swarm` LLM decomposition call.
+                 pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
                  /// Active output overlay state.
                  pub output_view: Option<OutputViewState>,
+                 /// Pending result from an async `/opt` LLM call.
+                 pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+                 /// Whether input history has been modified since last save.
+                 pub history_dirty: bool,
+                 /// Deadline after which a dirty history should be flushed to disk.
+                 /// Set on the first modification; cleared after each flush.
+                 pub history_save_deadline: Option<std::time::Instant>,
+                  /// Cache for rendered markdown output, keyed by FNV-style hash of input text.
+                  /// Cleared when messages change.
+                  pub md_render_cache: HashMap<u64, String>,
             }impl App {
     /// Set the path for persisting input history.
     pub fn set_history_file(&mut self, path: std::path::PathBuf) {
@@ -820,5 +966,44 @@ pub struct App {
             tracing::debug!("Saved {} history entries to {:?}", self.input_history.len(), path);
         }
         Ok(())
+    }
+
+    /// Flush history to disk in a background thread if the debounce deadline
+    /// has elapsed.  Called from the TUI main loop (~50 ms cadence).
+    ///
+    /// This avoids blocking the UI thread on every keystroke while still
+    /// persisting history within a few seconds of a change.
+    pub fn flush_history_if_due(&mut self) {
+        if !self.history_dirty {
+            return;
+        }
+        if let Some(deadline) = self.history_save_deadline {
+            if std::time::Instant::now() < deadline {
+                return;
+            }
+        }
+        let Some(ref path) = self.history_file_path else {
+            return;
+        };
+        let path = path.clone();
+        let content = self.input_history.join("\n");
+        let entry_count = self.input_history.len();
+
+        tokio::task::spawn_blocking(move || {
+            if let Some(parent) = path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!("Failed to create history directory: {e}");
+                    return;
+                }
+            }
+            if let Err(e) = std::fs::write(&path, content) {
+                tracing::warn!("Failed to save history (async): {e}");
+            } else {
+                tracing::debug!("Saved {entry_count} history entries to {path:?}");
+            }
+        });
+
+        self.history_dirty = false;
+        self.history_save_deadline = None;
     }
 }

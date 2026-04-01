@@ -78,6 +78,28 @@ pub enum InputAction {
     ConfirmForceCleanup,
     /// Cancel a pending forcecleanup modal (Esc -> cancel).
     CancelForceCleanup,
+    /// Cycle focus to the next teammate (Alt+Down).
+    FocusNextTeammate,
+    /// Cycle focus to the previous teammate (Alt+Up).
+    FocusPrevTeammate,
+    /// Insert a literal newline at cursor (Shift+Enter — multiline input).
+    InsertNewline,
+    /// Select all input text (Ctrl+A).
+    SelectAll,
+    /// Extend keyboard selection one character to the left (Shift+Left).
+    SelectCharLeft,
+    /// Extend keyboard selection one character to the right (Shift+Right).
+    SelectCharRight,
+    /// Extend keyboard selection one word to the left (Ctrl+Shift+Left).
+    SelectWordLeft,
+    /// Extend keyboard selection one word to the right (Ctrl+Shift+Right).
+    SelectWordRight,
+    /// Copy the active keyboard selection to the clipboard (Ctrl+C when selection active).
+    CopyToClipboard,
+    /// Cut the active keyboard selection to the clipboard (Ctrl+X).
+    CutToClipboard,
+    /// Paste text from the clipboard at the cursor (Ctrl+V).
+    PasteFromClipboard,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -355,6 +377,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             KeyCode::PageUp => Some(InputAction::OutputViewPageUp),
             KeyCode::PageDown => Some(InputAction::OutputViewPageDown),
+            // Alt+Down/Up cycle teammate focus even while output view is open
+            KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+                Some(InputAction::FocusNextTeammate)
+            }
+            KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+                Some(InputAction::FocusPrevTeammate)
+            }
             KeyCode::Esc => {
                 app.output_view = None;
                 app.selected_agent_session_id = None;
@@ -366,6 +395,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     match key.code {
+        KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            // Shift+Enter: insert a literal newline without sending.
+            app.clear_kb_selection();
+            app.insert_char_at_cursor('\n');
+            None
+        }
         KeyCode::Enter => {
             let text = app.input.clone();
             if text.is_empty() {
@@ -376,14 +411,30 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             Some(InputAction::SendMessage(text))
         }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(InputAction::Quit),
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(InputAction::ConfirmQuit)
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Copy if a keyboard selection is active; otherwise arm quit.
+            if app.kb_select_anchor.is_some() {
+                Some(InputAction::CopyToClipboard)
+            } else {
+                Some(InputAction::Quit)
+            }
+        }
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::CutToClipboard)
+        }
+        KeyCode::Char('v')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            Some(InputAction::PasteFromClipboard)
         }
         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
             // Alt+V: paste image from clipboard as a staged attachment.
             app.paste_image_from_clipboard();
             None
+        }
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::ConfirmQuit)
         }
         KeyCode::Char('?') if app.input.is_empty() => {
             // Show keybindings help panel when '?' is typed on an empty input.
@@ -391,7 +442,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             None
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(InputAction::MoveCursorHome)
+            Some(InputAction::SelectAll)
         }
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::MoveCursorEnd)
@@ -409,12 +460,35 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::DeleteToLineEnd)
         }
         KeyCode::Char(c) => {
+            // Typing a character replaces the active keyboard selection.
+            if let Some((start, end)) = app.kb_selection_char_range() {
+                app.remove_input_char_range(start, end);
+                app.kb_select_anchor = None;
+            }
             app.insert_char_at_cursor(c);
             None
         }
         KeyCode::Backspace => {
-            app.delete_prev_char();
+            // Backspace deletes the selection when one is active.
+            if let Some((start, end)) = app.kb_selection_char_range() {
+                app.remove_input_char_range(start, end);
+                app.kb_select_anchor = None;
+            } else {
+                app.delete_prev_char();
+            }
             None
+        }
+        KeyCode::Left
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            Some(InputAction::SelectWordLeft)
+        }
+        KeyCode::Right
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            Some(InputAction::SelectWordRight)
         }
         KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::MoveCursorWordLeft)
@@ -428,6 +502,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::MoveCursorEnd)
         }
+        KeyCode::Left if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(InputAction::SelectCharLeft)
+        }
+        KeyCode::Right if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(InputAction::SelectCharRight)
+        }
         KeyCode::Left => Some(InputAction::MoveCursorLeft),
         KeyCode::Right => Some(InputAction::MoveCursorRight),
         KeyCode::Home => Some(InputAction::MoveCursorHome),
@@ -436,6 +516,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Up if key.modifiers.contains(KeyModifiers::SHIFT) => Some(InputAction::ScrollUp),
         KeyCode::Down if key.modifiers.contains(KeyModifiers::SHIFT) => {
             Some(InputAction::ScrollDown)
+        }
+        KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::FocusNextTeammate)
+        }
+        KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::FocusPrevTeammate)
         }
         KeyCode::Up => Some(InputAction::HistoryUp),
         KeyCode::Down => Some(InputAction::HistoryDown),
@@ -461,7 +547,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    let step = app.provider_setup.take().unwrap();
+    let Some(step) = app.provider_setup.take() else {
+        return;
+    };
 
     match step {
         ProviderSetupStep::SelectProvider { selected } => match key.code {
@@ -1094,7 +1182,7 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
 
         // Confirm selection on Enter
         KeyCode::Enter => {
-            let state = app.lsp_discover.as_mut().unwrap();
+            let Some(state) = app.lsp_discover.as_mut() else { return };
             let input = state.number_input.trim().to_string();
             if input.is_empty() {
                 // Empty input = close dialog
@@ -1104,42 +1192,43 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
             match input.parse::<usize>() {
                 Ok(n) if n >= 1 => {
                     // Take the server (avoids borrow issues)
-                    let server = {
-                        let state = app.lsp_discover.as_ref().unwrap();
-                        state.servers.get(n - 1).cloned()
-                    };
+                    let server = app
+                        .lsp_discover
+                        .as_ref()
+                        .and_then(|s| s.servers.get(n - 1).cloned());
                     match server {
                         Some(srv) => {
                             let result = app.enable_discovered_server(&srv);
-                            let state = app.lsp_discover.as_mut().unwrap();
-                            match result {
-                                Ok(msg) => {
-                                state.feedback = Some(msg);
-                                    state.number_input.clear();
-                                    state.number_cursor = 0;
+                            if let Some(state) = app.lsp_discover.as_mut() {
+                                match result {
+                                    Ok(msg) => {
+                                        state.feedback = Some(msg);
+                                    }
+                                    Err(e) => {
+                                        state.feedback = Some(format!("✗ {e}"));
+                                    }
                                 }
-                                Err(e) => {
-                                    state.feedback = Some(format!("✗ {e}"));
-                                    state.number_input.clear();
-                                    state.number_cursor = 0;
-                                }
+                                state.number_input.clear();
+                                state.number_cursor = 0;
                             }
                         }
                         None => {
-                            let count = app.lsp_discover.as_ref().unwrap().servers.len();
-                            let state = app.lsp_discover.as_mut().unwrap();
-                            state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
-                            state.number_input.clear();
-                            state.number_cursor = 0;
+                            if let Some(state) = app.lsp_discover.as_mut() {
+                                let count = state.servers.len();
+                                state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                                state.number_input.clear();
+                                state.number_cursor = 0;
+                            }
                         }
                     }
                 }
                 _ => {
-                    let count = app.lsp_discover.as_ref().unwrap().servers.len();
-                    let state = app.lsp_discover.as_mut().unwrap();
-                    state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
-                    state.number_input.clear();
-                    state.number_cursor = 0;
+                    if let Some(state) = app.lsp_discover.as_mut() {
+                        let count = state.servers.len();
+                        state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                        state.number_input.clear();
+                        state.number_cursor = 0;
+                    }
                 }
             }
         }
@@ -1211,7 +1300,7 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
 
         // Confirm selection on Enter
         KeyCode::Enter => {
-            let state = app.mcp_discover.as_mut().unwrap();
+            let Some(state) = app.mcp_discover.as_mut() else { return };
             let input = state.number_input.trim().to_string();
             if input.is_empty() {
                 // Empty input = close dialog
@@ -1221,42 +1310,43 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
             match input.parse::<usize>() {
                 Ok(n) if n >= 1 => {
                     // Take the server (avoids borrow issues)
-                    let server = {
-                        let state = app.mcp_discover.as_ref().unwrap();
-                        state.servers.get(n - 1).cloned()
-                    };
+                    let server = app
+                        .mcp_discover
+                        .as_ref()
+                        .and_then(|s| s.servers.get(n - 1).cloned());
                     match server {
                         Some(srv) => {
                             let result = app.enable_discovered_mcp_server(&srv);
-                            let state = app.mcp_discover.as_mut().unwrap();
-                            match result {
-                                Ok(msg) => {
-                                state.feedback = Some(msg);
-                                    state.number_input.clear();
-                                    state.number_cursor = 0;
+                            if let Some(state) = app.mcp_discover.as_mut() {
+                                match result {
+                                    Ok(msg) => {
+                                        state.feedback = Some(msg);
+                                    }
+                                    Err(e) => {
+                                        state.feedback = Some(format!("✗ {e}"));
+                                    }
                                 }
-                                Err(e) => {
-                                    state.feedback = Some(format!("✗ {e}"));
-                                    state.number_input.clear();
-                                    state.number_cursor = 0;
-                                }
+                                state.number_input.clear();
+                                state.number_cursor = 0;
                             }
                         }
                         None => {
-                            let count = app.mcp_discover.as_ref().unwrap().servers.len();
-                            let state = app.mcp_discover.as_mut().unwrap();
-                            state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
-                            state.number_input.clear();
-                            state.number_cursor = 0;
+                            if let Some(state) = app.mcp_discover.as_mut() {
+                                let count = state.servers.len();
+                                state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                                state.number_input.clear();
+                                state.number_cursor = 0;
+                            }
                         }
                     }
                 }
                 _ => {
-                    let count = app.mcp_discover.as_ref().unwrap().servers.len();
-                    let state = app.mcp_discover.as_mut().unwrap();
-                    state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
-                    state.number_input.clear();
-                    state.number_cursor = 0;
+                    if let Some(state) = app.mcp_discover.as_mut() {
+                        let count = state.servers.len();
+                        state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                        state.number_input.clear();
+                        state.number_cursor = 0;
+                    }
                 }
             }
         }

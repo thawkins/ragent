@@ -32,8 +32,71 @@ use ragent_core::{
 use crate::input::{self, InputAction};
 use crate::tips;
 
+// Prompt optimization templates
+use prompt_opt::{Completer, OptMethod, optimize};
+
 mod state;
 pub use self::state::*;
+
+/// Connects the `prompt_opt` crate to the session's active LLM provider.
+///
+/// `RagentCompleter` implements [`Completer`] by building an [`LlmClient`] from
+/// the configured provider, sending the system+user message pair, and collecting
+/// the streaming `TextDelta` events into a single `String`.
+struct RagentCompleter {
+    registry: Arc<ragent_core::provider::ProviderRegistry>,
+    storage: Arc<ragent_core::storage::Storage>,
+    provider_id: String,
+    model_id: String,
+}
+
+#[async_trait::async_trait]
+impl Completer for RagentCompleter {
+    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String> {
+        use anyhow::Context as _;
+        use futures::StreamExt as _;
+        use ragent_core::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
+
+        let api_key = self
+            .storage
+            .get_provider_auth(&self.provider_id)
+            .context("reading API key")?
+            .unwrap_or_default();
+
+        let provider = self
+            .registry
+            .get(&self.provider_id)
+            .with_context(|| format!("provider '{}' not found", self.provider_id))?;
+
+        let client = provider
+            .create_client(&api_key, None, &Default::default())
+            .await
+            .context("creating LLM client")?;
+
+        let request = ChatRequest {
+            model: self.model_id.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text(user.to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: Some(system.to_string()),
+            options: Default::default(),
+        };
+
+        let mut stream = client.chat(request).await.context("starting LLM stream")?;
+        let mut result = String::new();
+        while let Some(event) = stream.next().await {
+            if let StreamEvent::TextDelta { text } = event {
+                result.push_str(&text);
+            }
+        }
+        Ok(result)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct MentionSpan {
@@ -75,7 +138,7 @@ impl App {
         out
     }
 
-    fn normalize_ascii_tables(&self, rendered: &str) -> String {
+    pub fn normalize_ascii_tables(&self, rendered: &str) -> String {
         let lines: Vec<&str> = rendered.lines().collect();
         let mut out: Vec<String> = Vec::new();
         let mut i = 0usize;
@@ -155,11 +218,25 @@ impl App {
         out.join("\n")
     }
 
-    fn render_markdown_to_ascii(&self, text: &str) -> String {
+    pub fn render_markdown_to_ascii(&mut self, text: &str) -> String {
         // Only convert markdown-like slash output; preserve plain runtime text.
         if !text.starts_with("From: /") {
             return text.to_string();
         }
+
+        // Check cache using FNV-1a hash of input.
+        let hash = {
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+            for b in text.as_bytes() {
+                h ^= u64::from(*b);
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+            h
+        };
+        if let Some(cached) = self.md_render_cache.get(&hash) {
+            return cached.clone();
+        }
+
         let mut opts = Options::empty();
         opts.insert(Options::ENABLE_TABLES);
         opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -178,7 +255,14 @@ impl App {
             .map(|l| l.trim_end())
             .collect::<Vec<&str>>()
             .join("\n");
-        self.normalize_ascii_tables(&cleaned)
+        let result = self.normalize_ascii_tables(&cleaned);
+
+        // Limit cache size to avoid unbounded growth.
+        if self.md_render_cache.len() >= 256 {
+            self.md_render_cache.clear();
+        }
+        self.md_render_cache.insert(hash, result.clone());
+        result
     }
 
     /// Create a new [`App`] with default state and the given event bus.
@@ -266,6 +350,7 @@ impl App {
             messages: Vec::new(),
             input: String::new(),
             input_cursor: 0,
+            kb_select_anchor: None,
             scroll_offset: 0,
             is_running: true,
             event_bus,
@@ -358,7 +443,14 @@ impl App {
                           show_teams: false,
                           teams_scroll_offset: 0,
                           teams_max_scroll: 0,
+                          focused_teammate: None,
+                          swarm_state: None,
+                          swarm_result: Arc::new(std::sync::Mutex::new(None)),
                           output_view: None,
+                          opt_result: Arc::new(std::sync::Mutex::new(None)),
+                          history_dirty: false,
+                          history_save_deadline: None,
+                          md_render_cache: HashMap::new(),
                       };
 
         // Log any warnings from custom agent loading into the log panel
@@ -367,6 +459,83 @@ impl App {
         }
 
         app
+    }
+
+    /// Poll for a completed `/opt` LLM result and display it.
+    ///
+    /// Called from the TUI main loop (~50 ms cadence). If the background
+    /// optimize task has deposited a result, this method retrieves it, appends
+    /// the text to the message list, and updates the status bar.
+    pub fn poll_pending_opt(&mut self) {
+        let outcome = {
+            let mut guard = match self.opt_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => {
+                    tracing::error!("opt_result mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
+            guard.take()
+        };
+        if let Some(outcome) = outcome {
+            match outcome {
+                Ok(text) => {
+                    let lines = text.lines().count();
+                    self.append_assistant_text(&text);
+                    self.status = "opt: done".to_string();
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("Finished /opt — {} lines output", lines),
+                    );
+                }
+                Err(msg) => {
+                    self.status = format!("⚠ opt failed: {}", msg);
+                    self.push_log(LogLevel::Warn, format!("opt error: {}", msg));
+                }
+            }
+        }
+    }
+
+    /// Poll for a completed `/swarm` LLM decomposition.  When the async
+    /// decomposition task has deposited a result, this method parses it,
+    /// creates the ephemeral team, seeds tasks, and spawns teammates.
+    pub fn poll_pending_swarm(&mut self) {
+        let outcome = {
+            let mut guard = match self.swarm_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => {
+                    tracing::error!("swarm_result mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
+            guard.take()
+        };
+        let Some(outcome) = outcome else { return };
+        match outcome {
+            Ok(raw_json) => {
+                match ragent_core::team::parse_decomposition(&raw_json) {
+                    Ok(decomposition) => {
+                        self.execute_swarm_decomposition(decomposition);
+                    }
+                    Err(msg) => {
+                        self.status = "⚠ swarm: decomposition parse error".to_string();
+                        self.append_assistant_text(&format!(
+                            "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
+                            msg
+                        ));
+                        self.push_log(LogLevel::Warn, format!("Swarm parse error: {}", msg));
+                    }
+                }
+            }
+            Err(msg) => {
+                self.status = format!("⚠ swarm failed: {}", msg);
+                self.append_assistant_text(&format!(
+                    "From: /swarm\n## ❌ Swarm Error\n\n{}\n",
+                    msg
+                ));
+                self.push_log(LogLevel::Warn, format!("Swarm error: {}", msg));
+            }
+        }
     }
 
     /// Add a user message to the input history and save it.
@@ -380,8 +549,12 @@ impl App {
         if self.input_history.len() > 100 {
             self.input_history.remove(0);
         }
-        // Save after adding
-        let _ = self.save_history();
+        // Mark dirty; the main loop will flush after the debounce window.
+        self.history_dirty = true;
+        if self.history_save_deadline.is_none() {
+            self.history_save_deadline =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
+        }
         self.history_index = None;
         self.history_draft.clear();
     }
@@ -542,13 +715,19 @@ impl App {
         );
 
         let mut agent = self.agent_info.clone();
-        if let Some(ref model_str) = self.selected_model
-            && let Some((provider, model)) = model_str.split_once('/')
-        {
-            agent.model = Some(ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model.to_string(),
-            });
+        // Inherit the globally-selected model only when the agent does not
+        // declare its own.  This lets `.md` profiles (and OASF records) pin a
+        // specific provider:model while still allowing model-less agents to
+        // fall back to the user's current selection.
+        if agent.model.is_none() {
+            if let Some(ref model_str) = self.selected_model
+                && let Some((provider, model)) = model_str.split_once('/')
+            {
+                agent.model = Some(ModelRef {
+                    provider_id: provider.to_string(),
+                    model_id: model.to_string(),
+                });
+            }
         }
 
         let processor = self.session_processor.clone();
@@ -772,7 +951,7 @@ impl App {
     }
 
     /// Return the current input length in characters.
-    pub(crate) fn input_len_chars(&self) -> usize {
+    pub fn input_len_chars(&self) -> usize {
         self.input.chars().count()
     }
 
@@ -859,7 +1038,7 @@ impl App {
     }
 
     /// Insert a single character at the current cursor position.
-    pub(crate) fn insert_char_at_cursor(&mut self, c: char) {
+    pub fn insert_char_at_cursor(&mut self, c: char) {
         let insert_pos = self.cursor_byte_pos();
         self.input.insert(insert_pos, c);
         self.cursor_move_right();
@@ -868,19 +1047,20 @@ impl App {
     }
 
     /// Insert text at the current cursor position.
-    pub(crate) fn insert_text_at_cursor(&mut self, text: &str) {
+    pub fn insert_text_at_cursor(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
         let insert_pos = self.cursor_byte_pos();
+        let added = text.chars().count();
         self.input.insert_str(insert_pos, text);
-        self.set_cursor_char_index_clamped(self.input_cursor + text.chars().count());
+        self.set_cursor_char_index_clamped(self.input_cursor + added);
         self.refresh_input_menus();
         self.assert_input_cursor_invariant();
     }
 
     /// Delete the character before the cursor, if any.
-    pub(crate) fn delete_prev_char(&mut self) {
+    pub fn delete_prev_char(&mut self) {
         if self.input_cursor == 0 {
             return;
         }
@@ -892,7 +1072,7 @@ impl App {
     }
 
     /// Delete the character at the cursor, if any.
-    pub(crate) fn delete_next_char(&mut self) {
+    pub fn delete_next_char(&mut self) {
         if self.input_cursor >= self.input_len_chars() {
             return;
         }
@@ -903,7 +1083,7 @@ impl App {
     }
 
     /// Remove a char-index range from input and place cursor at the range start.
-    pub(crate) fn remove_input_char_range(&mut self, start: usize, end: usize) {
+    pub fn remove_input_char_range(&mut self, start: usize, end: usize) {
         if start >= end {
             return;
         }
@@ -914,6 +1094,7 @@ impl App {
         }
         let byte_start = self.cursor_byte_pos_at_char_index(clamped_start);
         let byte_end = self.cursor_byte_pos_at_char_index(clamped_end);
+        let removed = clamped_end - clamped_start;
         self.input.replace_range(byte_start..byte_end, "");
         self.set_cursor_char_index_clamped(clamped_start);
         self.refresh_input_menus();
@@ -969,19 +1150,16 @@ impl App {
     }
 
     /// Return the byte offset corresponding to the current cursor position.
-    pub(crate) fn cursor_byte_pos(&self) -> usize {
+    pub fn cursor_byte_pos(&self) -> usize {
         self.cursor_byte_pos_at_char_index(self.input_cursor)
     }
 
     /// Return the byte offset corresponding to a character index.
-    pub(crate) fn cursor_byte_pos_at_char_index(&self, char_index: usize) -> usize {
+    pub fn cursor_byte_pos_at_char_index(&self, char_index: usize) -> usize {
         if char_index == 0 {
             return 0;
         }
-        if char_index >= self.input_len_chars() {
-            return self.input.len();
-        }
-        // Walk the chars to determine the byte offset.
+        // Single pass: nth() returns None when char_index is past the end.
         self.input
             .char_indices()
             .nth(char_index)
@@ -1047,6 +1225,62 @@ impl App {
         self.assert_input_cursor_invariant();
     }
 
+    /// Return the `[start, end)` char-index range for the active keyboard
+    /// selection, or `None` when no selection is active or when anchor equals
+    /// cursor (zero-width selection).
+    pub fn kb_selection_char_range(&self) -> Option<(usize, usize)> {
+        let anchor = self.kb_select_anchor?;
+        let cursor = self.input_cursor;
+        if anchor == cursor {
+            None
+        } else if anchor < cursor {
+            Some((anchor, cursor))
+        } else {
+            Some((cursor, anchor))
+        }
+    }
+
+    /// Copy the active keyboard selection to the system clipboard.
+    /// Does nothing when no selection is active.
+    pub(crate) fn copy_kb_selection(&mut self) {
+        if let Some((start, end)) = self.kb_selection_char_range() {
+            let selected: String = self.input.chars().skip(start).take(end - start).collect();
+            Self::set_clipboard(&selected);
+        }
+    }
+
+    /// Cut the active keyboard selection: copies to clipboard then removes it.
+    /// Does nothing when no selection is active.
+    pub(crate) fn cut_kb_selection(&mut self) {
+        if let Some((start, end)) = self.kb_selection_char_range() {
+            let selected: String = self.input.chars().skip(start).take(end - start).collect();
+            Self::set_clipboard(&selected);
+            self.remove_input_char_range(start, end);
+            self.kb_select_anchor = None;
+        }
+    }
+
+    /// Paste text from the system clipboard at the cursor (replacing the
+    /// keyboard selection if one is active). Newlines are preserved; carriage
+    /// returns are stripped.
+    pub(crate) fn paste_text_from_clipboard(&mut self) {
+        if let Some(text) = Self::get_clipboard() {
+            // Replace selection if one is active.
+            if let Some((start, end)) = self.kb_selection_char_range() {
+                self.remove_input_char_range(start, end);
+                self.kb_select_anchor = None;
+            }
+            let clean: String = text.chars().filter(|&c| c != '\r').collect();
+            self.insert_text_at_cursor(&clean);
+        }
+    }
+
+    /// Clear the keyboard selection anchor without moving the cursor.
+    #[inline]
+    pub(crate) fn clear_kb_selection(&mut self) {
+        self.kb_select_anchor = None;
+    }
+
     /// Delete the word immediately before the cursor.
     pub(crate) fn delete_prev_word(&mut self) {
         if self.input_cursor == 0 {
@@ -1080,7 +1314,7 @@ impl App {
         use std::collections::HashMap;
 
         // Load (or default-construct) the current config.
-        let mut config = Config::load().unwrap_or_default();
+        let config = Config::load().unwrap_or_default();
 
         if config.lsp.contains_key(&server.id) {
             return Err(format!(
@@ -1089,7 +1323,7 @@ impl App {
             ));
         }
 
-        let cfg = LspServerConfig {
+        let _cfg = LspServerConfig {
             command: Some(server.executable.to_string_lossy().into_owned()),
             args: server.args.clone(),
             env: HashMap::new(),
@@ -1097,42 +1331,24 @@ impl App {
             disabled: false,
             timeout_ms: LspServerConfig::default_timeout_ms(),
         };
-        config.lsp.insert(server.id.clone(), cfg);
 
         // Persist back to ragent.json in the working directory.
         let config_path = std::env::current_dir()
             .unwrap_or_default()
             .join("ragent.json");
 
-        match std::fs::read_to_string(&config_path) {
-            Ok(existing) => {
-                // Merge: parse existing JSON, insert/update the lsp key.
-                let mut json: serde_json::Value =
-                    serde_json::from_str(&existing).map_err(|e| e.to_string())?;
-                let lsp_entry = serde_json::json!({
-                    "command": server.executable.to_string_lossy(),
-                    "args": server.args,
-                    "extensions": server.extensions,
-                    "disabled": false,
-                });
-                json["lsp"][&server.id] = lsp_entry;
-                let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
-                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
-            }
-            Err(_) => {
-                // No existing file — write a minimal config.
-                let out = serde_json::to_string_pretty(&serde_json::json!({ "lsp": {
-                    &server.id: {
-                        "command": server.executable.to_string_lossy(),
-                        "args": server.args,
-                        "extensions": server.extensions,
-                        "disabled": false,
-                    }
-                }}))
-                .map_err(|e| e.to_string())?;
-                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
-            }
-        }
+        let server_id = server.id.clone();
+        let lsp_entry = serde_json::json!({
+            "command": server.executable.to_string_lossy(),
+            "args": server.args,
+            "extensions": server.extensions,
+            "disabled": false,
+        });
+
+        atomic_config_update(&config_path, |json| {
+            json["lsp"][&server_id] = lsp_entry;
+            Ok(())
+        })?;
 
         Ok(format!(
             "✓ '{}' added to ragent.json. Restart ragent to activate the LSP server.",
@@ -1149,7 +1365,7 @@ impl App {
         use ragent_core::config::Config;
 
         // Load (or default-construct) the current config.
-        let mut config = Config::load().unwrap_or_default();
+        let config = Config::load().unwrap_or_default();
 
         if config.mcp.contains_key(&server.id) {
             return Err(format!(
@@ -1158,48 +1374,24 @@ impl App {
             ));
         }
 
-        let cfg = server.to_config();
-        // Enable the server (discovery sets disabled=true by default)
-        let mut cfg = cfg;
-        cfg.disabled = false;
-        config.mcp.insert(server.id.clone(), cfg.clone());
-
         // Persist back to ragent.json in the working directory.
         let config_path = std::env::current_dir()
             .unwrap_or_default()
             .join("ragent.json");
 
-        match std::fs::read_to_string(&config_path) {
-            Ok(existing) => {
-                // Merge: parse existing JSON, insert/update the mcp key.
-                let mut json: serde_json::Value =
-                    serde_json::from_str(&existing).map_err(|e| e.to_string())?;
-                let mcp_entry = serde_json::json!({
-                    "type": "stdio",
-                    "command": server.executable.to_string_lossy(),
-                    "args": server.args,
-                    "env": server.env,
-                    "disabled": false,
-                });
-                json["mcp"][&server.id] = mcp_entry;
-                let out = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
-                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
-            }
-            Err(_) => {
-                // No existing file — write a minimal config.
-                let out = serde_json::to_string_pretty(&serde_json::json!({ "mcp": {
-                    &server.id: {
-                        "type": "stdio",
-                        "command": server.executable.to_string_lossy(),
-                        "args": server.args,
-                        "env": server.env,
-                        "disabled": false,
-                    }
-                }}))
-                .map_err(|e| e.to_string())?;
-                std::fs::write(&config_path, out).map_err(|e| e.to_string())?;
-            }
-        }
+        let server_id = server.id.clone();
+        let mcp_entry = serde_json::json!({
+            "type": "stdio",
+            "command": server.executable.to_string_lossy(),
+            "args": server.args,
+            "env": server.env,
+            "disabled": false,
+        });
+
+        atomic_config_update(&config_path, |json| {
+            json["mcp"][&server_id] = mcp_entry;
+            Ok(())
+        })?;
 
         Ok(format!(
             "✓ '{}' added to ragent.json. Restart ragent to activate the MCP server.",
@@ -1236,6 +1428,20 @@ impl App {
         team_name: &str,
         known_team_dir: Option<std::path::PathBuf>,
     ) {
+        self.ensure_team_manager_for_team_inner(team_name, known_team_dir, false);
+    }
+
+    /// Internal helper: optionally trigger reconciliation of queued `Spawning` members.
+    ///
+    /// Pass `reconcile = true` only when the team was created via an LLM tool call
+    /// (where the TeamManager didn't exist during blueprint seeding) so that the
+    /// queued members are started now that the manager is available.
+    fn ensure_team_manager_for_team_inner(
+        &mut self,
+        team_name: &str,
+        known_team_dir: Option<std::path::PathBuf>,
+        reconcile: bool,
+    ) {
         if self.session_processor.team_manager.get().is_some() {
             return;
         }
@@ -1259,19 +1465,35 @@ impl App {
             }
         };
 
-        let manager = Arc::new(TeamManager::new(
+        // Parse the currently selected model so teammates inherit it in the reconcile loop.
+        let active_model: Option<ragent_core::agent::ModelRef> =
+            self.selected_model.as_deref().and_then(|s| {
+                s.split_once('/').map(|(pid, mid)| ragent_core::agent::ModelRef {
+                    provider_id: pid.to_string(),
+                    model_id: mid.to_string(),
+                })
+            });
+
+        let mut manager = TeamManager::new(
             team_name.to_string(),
             lead_session_id,
             team_dir,
             self.session_processor.clone(),
             self.event_bus.clone(),
-        ));
+        );
+        manager.active_model = active_model;
+        let manager = Arc::new(manager);
 
-        if self.session_processor.team_manager.set(manager).is_ok() {
+        if self.session_processor.team_manager.set(manager.clone()).is_ok() {
             self.push_log(
                 LogLevel::Info,
                 format!("TeamManager initialised for team '{team_name}'"),
             );
+            // Only reconcile when explicitly requested (i.e. when the team was seeded
+            // via the LLM tool path and members may be queued in Spawning state).
+            if reconcile {
+                manager.reconcile_spawning_members();
+            }
         }
     }
 
@@ -1289,17 +1511,24 @@ impl App {
         };
 
         for member in &mut self.team_members {
-            if member.session_id.is_some() {
-                continue;
-            }
-            if let Some(stored) = store
+            // If a stored entry exists for this agent, copy session_id, status,
+            // and current_task_id so the UI reflects the authoritative on-disk state.
+            if let Some(stored_member) = store
                 .config
                 .members
                 .iter()
                 .find(|m| m.agent_id == member.agent_id)
-                .and_then(|m| m.session_id.clone())
             {
-                member.session_id = Some(stored);
+                if member.session_id.is_none() {
+                    if let Some(sid) = &stored_member.session_id {
+                        member.session_id = Some(sid.clone());
+                    }
+                }
+                // Always sync status and current task from the store so races
+                // between disk hydration and spawn events don't leave the UI
+                // showing an outdated "spawning" state.
+                member.status = stored_member.status.clone();
+                member.current_task_id = stored_member.current_task_id.clone();
             }
         }
     }
@@ -2019,8 +2248,18 @@ impl App {
         let start_lines = self.assistant_output_lines();
         self.push_log(LogLevel::Info, format!("Executing /{} {}", cmd, args));
 
+        // Retain the raw slash command in input history so users can recall it later.
+        self.add_to_history(raw.to_string());
+
         // Call the original implementation moved to an inner function.
         self.execute_slash_command_inner(raw);
+
+        // If the command spawned an async task (status begins with ⏳), defer
+        // the "Finished" log entry — poll_pending_opt will emit it once the
+        // background work completes.
+        if self.status.starts_with('⏳') {
+            return;
+        }
 
         let end_lines = self.assistant_output_lines();
         let added = end_lines.saturating_sub(start_lines);
@@ -2155,7 +2394,7 @@ impl App {
 
                 if self.custom_agent_defs.is_empty() {
                     output.push_str(
-                        "\nCustom Agents:\n\n  (none — place .json files in .ragent/agents/ or ~/.ragent/agents/)\n",
+                        "\nCustom Agents:\n\n  (none — place .json or .md files in .ragent/agents/ or ~/.ragent/agents/)\n",
                     );
                 } else {
                     output.push_str("\nCustom Agents:\n\n");
@@ -2164,9 +2403,14 @@ impl App {
                         let name = &def.agent_info.name;
                         let desc = &def.agent_info.description;
                         let active = if *name == self.agent_name { " ●" } else { "" };
+                        let fmt = if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
+                            "profile"
+                        } else {
+                            "oasf"
+                        };
                         output.push_str(&format!(
-                            "  {:<18} {} [{}]{}\n",
-                            name, desc, scope, active
+                            "  {:<18} {} [{}/{}]{}\n",
+                            name, desc, scope, fmt, active
                         ));
                     }
                 }
@@ -2273,6 +2517,72 @@ impl App {
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "help".to_string();
+            }
+            "opt" => {
+                // /opt help => show markdown table of available optimization methods
+                if args.is_empty() || args == "help" {
+                    let table = OptMethod::help_table();
+                    self.append_assistant_text(&format!("From: /opt help\n\n{}", table));
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
+                    }
+                    self.status = "opt help".to_string();
+                    return;
+                }
+
+                // /opt <method> <prompt>
+                let (method_str, rest) = args
+                    .split_once(char::is_whitespace)
+                    .map_or((args, ""), |(m, r)| (m, r.trim()));
+
+                if rest.is_empty() {
+                    self.status = "⚠ Please provide a prompt: /opt <method> <prompt>".to_string();
+                    return;
+                }
+
+                let method = match OptMethod::from_str(method_str) {
+                    Some(m) => m,
+                    None => {
+                        self.status = format!("⚠ Unknown optimization method: {}", method_str);
+                        self.push_log(LogLevel::Warn, format!("opt: unknown method '{}'", method_str));
+                        return;
+                    }
+                };
+
+                // Resolve provider / model from session config
+                let (provider_id, model_id) = match self.selected_model.as_deref()
+                    .and_then(|s| s.split_once('/'))
+                    .map(|(p, m)| (p.to_string(), m.to_string()))
+                {
+                    Some(pair) => pair,
+                    None => {
+                        self.status = "⚠ /opt requires a configured model (use /provider)".to_string();
+                        return;
+                    }
+                };
+
+                let registry = Arc::clone(&self.provider_registry);
+                let storage  = Arc::clone(&self.storage);
+                let opt_result = Arc::clone(&self.opt_result);
+                let user_prompt = rest.to_string();
+                let method_name = method.name().to_string();
+
+                self.status = format!("⏳ opt/{}: optimizing…", method_name);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+
+                tokio::spawn(async move {
+                    let completer = RagentCompleter { registry, storage, provider_id, model_id };
+                    let outcome = optimize(method, &user_prompt, &completer).await
+                        .map(|text| format!("[opt: {}]\n\n{}", method_name, text))
+                        .map_err(|e| e.to_string());
+                    if let Ok(mut guard) = opt_result.lock() {
+                        *guard = Some(outcome);
+                    } else {
+                        tracing::error!("opt_result mutex poisoned, result dropped");
+                    }
+                });
             }
             "inputdiag" => {
                 let selection = self
@@ -2557,7 +2867,10 @@ impl App {
                 }
 
                 self.agent_halted = false;
-                let sid = self.session_id.clone().unwrap();
+                let Some(sid) = self.session_id.clone() else {
+                    self.status = "No active session".to_string();
+                    return;
+                };
                 let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
@@ -2615,43 +2928,273 @@ impl App {
             "tools" => {
                 let tool_defs = self.session_processor.tool_registry.definitions();
                 let mut output = String::from("From: /tools\nBuilt-in Tools:\n\n");
-                for def in &tool_defs {
-                    output.push_str(&format!("  {:<16} {}\n", def.name, def.description));
-                    // Show parameter actions indented under each tool
-                    if let Some(props) =
-                        def.parameters.get("properties").and_then(|v| v.as_object())
-                    {
-                        for (param, schema) in props {
-                            let desc = schema
-                                .get("description")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
-                            output.push_str(&format!("    {:<14} {}\n", param, desc));
-                        }
+
+                // Prepare built-in tools table
+                let built_tools: Vec<_> = tool_defs.iter().collect();
+                if built_tools.is_empty() {
+                    output.push_str("  (no built-in tools)\n");
+                } else {
+                    // Compute parameter strings and column widths
+                    let mut param_strs: Vec<String> = Vec::new();
+                    let mut name_w = "Name".len();
+                    let mut params_w = "Params".len();
+                    for def in &built_tools {
+                        name_w = name_w.max(def.name.len());
+                        let params = if let Some(props) = def.parameters.get("properties").and_then(|v| v.as_object()) {
+                            let keys: Vec<&str> = props.keys().map(|k| k.as_str()).collect();
+                            keys.join(", ")
+                        } else {
+                            String::new()
+                        };
+                        params_w = params_w.max(params.len());
+                        param_strs.push(params);
                     }
+                    // Cap params column for readability
+                    params_w = params_w.min(40);
+
+                    // Helper: wrap text into lines no longer than `w` (word wrap)
+                    fn wrap_text(s: &str, w: usize) -> Vec<String> {
+                        if w == 0 { return vec![s.to_string()]; }
+                        let mut lines: Vec<String> = Vec::new();
+                        let mut cur = String::new();
+                        for word in s.split_whitespace() {
+                            if cur.is_empty() {
+                                if word.len() <= w { cur.push_str(word); }
+                                else {
+                                    // split long word
+                                    let mut rem = word;
+                                    while !rem.is_empty() {
+                                        let take = rem.chars().take(w).collect::<String>();
+                                        lines.push(take.clone());
+                                        rem = &rem[take.len()..];
+                                    }
+                                }
+                            } else if cur.len() + 1 + word.len() <= w {
+                                cur.push(' ');
+                                cur.push_str(word);
+                            } else {
+                                lines.push(cur);
+                                cur = String::new();
+                                if word.len() <= w { cur.push_str(word); }
+                                else {
+                                    let mut rem = word;
+                                    while !rem.is_empty() {
+                                        let take = rem.chars().take(w).collect::<String>();
+                                        lines.push(take.clone());
+                                        rem = &rem[take.len()..];
+                                    }
+                                }
+                            }
+                        }
+                        if !cur.is_empty() { lines.push(cur); }
+                        if lines.is_empty() { lines.push(String::new()); }
+                        lines
+                    }
+
+                    // Add a leading "No" column for incremental row numbers
+                    let mut no_w = "No".len();
+                    // Update name width to account for extra padding
+                    no_w = no_w.max(2);
+                    name_w = name_w.max(4);
+
+                    // Compute description column width from a reasonable total width
+                    let total_w = 120usize;
+                    // +4 accounts for the extra spaces and separators between columns
+                    let desc_w = total_w.saturating_sub(no_w + name_w + params_w + 8).max(20);
+
+                    // Build wrapped table rows with a leading number column
+                    let mut table_buf = String::new();
+                    // Header
+                    table_buf.push_str(&format!(
+                        "  {:<no_w$}  {:<name_w$}  {:<params_w$}  {:<desc_w$}\n",
+                        "No",
+                        "Name",
+                        "Params",
+                        "Description",
+                        no_w = no_w,
+                        name_w = name_w,
+                        params_w = params_w,
+                        desc_w = desc_w
+                    ));
+                    table_buf.push_str(&format!(
+                        "  {:-<no_w$}  {:-<name_w$}  {:-<params_w$}  {:-<desc_w$}\n",
+                        "",
+                        "",
+                        "",
+                        "",
+                        no_w = no_w,
+                        name_w = name_w,
+                        params_w = params_w,
+                        desc_w = desc_w
+                    ));
+
+                    for (i, def) in built_tools.iter().enumerate() {
+                        let params = &param_strs[i];
+                        let params_display = params.clone();
+                        let name_lines = wrap_text(&def.name, name_w);
+                        let params_lines = wrap_text(&params_display, params_w);
+                        let desc_lines = wrap_text(&def.description, desc_w);
+                        let row_lines = name_lines.len().max(params_lines.len()).max(desc_lines.len());
+                        for r in 0..row_lines {
+                            let no_cell = if r == 0 { format!("{}", i + 1) } else { String::new() };
+                            let name_cell = name_lines.get(r).cloned().unwrap_or_default();
+                            let params_cell = params_lines.get(r).cloned().unwrap_or_default();
+                            let desc_cell = desc_lines.get(r).cloned().unwrap_or_default();
+                            table_buf.push_str(&format!(
+                                "  {:<no_w$}  {:<name_w$}  {:<params_w$}  {:<desc_w$}\n",
+                                no_cell,
+                                name_cell,
+                                params_cell,
+                                desc_cell,
+                                no_w = no_w,
+                                name_w = name_w,
+                                params_w = params_w,
+                                desc_w = desc_w
+                            ));
+                        }
+                        table_buf.push_str("\n");
+                    }
+
+                    output.push_str("```text\n");
+                    output.push_str(&table_buf);
+                    if !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str("```\n\n");
                 }
 
+                // MCP tools table
                 let connected_servers: Vec<&McpServer> = self
                     .mcp_servers
                     .iter()
                     .filter(|s| s.status == ragent_core::mcp::McpStatus::Connected)
                     .collect();
 
+                output.push_str("\nMCP Tools:\n\n");
                 if connected_servers.is_empty() {
-                    output.push_str("\nMCP Tools:\n\n  (no MCP servers connected)\n");
+                    output.push_str("  (no MCP servers connected)\n");
                 } else {
-                    output.push_str("\nMCP Tools:\n\n");
+                    // Compute widths
+                    let mut name_w = "Name".len();
+                    let mut server_w = "Server".len();
                     for server in &connected_servers {
+                        server_w = server_w.max(server.id.len() + 2); // account for brackets
                         for tool in &server.tools {
-                            output.push_str(&format!(
-                                "  {:<16} [{}] {}\n",
-                                tool.name, server.id, tool.description
-                            ));
+                            name_w = name_w.max(tool.name.len());
                         }
                     }
-                    if connected_servers.iter().all(|s| s.tools.is_empty()) {
-                        output.push_str("  (no tools advertised)\n");
+                    name_w = name_w.max(4);
+                    server_w = server_w.max(6);
+
+                    // Helper wrap (reuse same as above)
+                    fn wrap_text(s: &str, w: usize) -> Vec<String> {
+                        if w == 0 { return vec![s.to_string()]; }
+                        let mut lines: Vec<String> = Vec::new();
+                        let mut cur = String::new();
+                        for word in s.split_whitespace() {
+                            if cur.is_empty() {
+                                if word.len() <= w { cur.push_str(word); }
+                                else {
+                                    let mut rem = word;
+                                    while !rem.is_empty() {
+                                        let take = rem.chars().take(w).collect::<String>();
+                                        lines.push(take.clone());
+                                        rem = &rem[take.len()..];
+                                    }
+                                }
+                            } else if cur.len() + 1 + word.len() <= w {
+                                cur.push(' ');
+                                cur.push_str(word);
+                            } else {
+                                lines.push(cur);
+                                cur = String::new();
+                                if word.len() <= w { cur.push_str(word); }
+                                else {
+                                    let mut rem = word;
+                                    while !rem.is_empty() {
+                                        let take = rem.chars().take(w).collect::<String>();
+                                        lines.push(take.clone());
+                                        rem = &rem[take.len()..];
+                                    }
+                                }
+                            }
+                        }
+                        if !cur.is_empty() { lines.push(cur); }
+                        if lines.is_empty() { lines.push(String::new()); }
+                        lines
                     }
+
+                    // Add No column for MCP table
+                    let mut no_w = "No".len();
+                    no_w = no_w.max(2);
+                    name_w = name_w.max(4);
+
+                    let total_w = 120usize;
+                    let desc_w = total_w.saturating_sub(no_w + name_w + server_w + 8).max(20);
+
+                    let mut table_buf = String::new();
+                    // Header with No
+                    table_buf.push_str(&format!(
+                        "  {:<no_w$}  {:<name_w$}  {:<server_w$}  {:<desc_w$}\n",
+                        "No",
+                        "Name",
+                        "Server",
+                        "Description",
+                        no_w = no_w,
+                        name_w = name_w,
+                        server_w = server_w,
+                        desc_w = desc_w
+                    ));
+                    table_buf.push_str(&format!(
+                        "  {:-<no_w$}  {:-<name_w$}  {:-<server_w$}  {:-<desc_w$}\n",
+                        "",
+                        "",
+                        "",
+                        "",
+                        no_w = no_w,
+                        name_w = name_w,
+                        server_w = server_w,
+                        desc_w = desc_w
+                    ));
+
+                    let mut idx = 1usize;
+                    for server in &connected_servers {
+                        if server.tools.is_empty() {
+                            continue;
+                        }
+                        for tool in &server.tools {
+                            let name_lines = wrap_text(&tool.name, name_w);
+                            let server_lines = wrap_text(&format!("[{}]", server.id), server_w);
+                            let desc_lines = wrap_text(&tool.description, desc_w);
+                            let row_lines = name_lines.len().max(server_lines.len()).max(desc_lines.len());
+                            for r in 0..row_lines {
+                                let no_cell = if r == 0 { format!("{}", idx) } else { String::new() };
+                                let name_cell = name_lines.get(r).cloned().unwrap_or_default();
+                                let server_cell = server_lines.get(r).cloned().unwrap_or_default();
+                                let desc_cell = desc_lines.get(r).cloned().unwrap_or_default();
+                                table_buf.push_str(&format!(
+                                    "  {:<no_w$}  {:<name_w$}  {:<server_w$}  {:<desc_w$}\n",
+                                    no_cell,
+                                    name_cell,
+                                    server_cell,
+                                    desc_cell,
+                                    no_w = no_w,
+                                    name_w = name_w,
+                                    server_w = server_w,
+                                    desc_w = desc_w
+                                ));
+                            }
+                            table_buf.push_str("\n");
+                            idx += 1;
+                        }
+                    }
+
+                    output.push_str("```text\n");
+                    output.push_str(&table_buf);
+                    if !output.ends_with('\n') {
+                        output.push('\n');
+                    }
+                    output.push_str("```\n");
                 }
 
                 self.append_assistant_text(&output);
@@ -3023,13 +3566,14 @@ impl App {
 | `/team status` | none | Show the currently active team in this session. |
 | `/team show [name]` | optional `name` | Show one team in detail, or all registered teams when no name is given. |
 | `/team create <blueprint> [name]` | required `blueprint`, optional `name` | Create a new project-local team (blueprint mandatory) and set it active. |
-
 | `/team close` | none | Close the active team in this session (does not delete on disk). |
 | `/team delete <name>` | required `name` | Delete a team from disk (also clears active state if it is active). |
+| `/team blueprint [name]` | optional `name` | List all installed blueprints, or show details of a specific blueprint. |
 | `/team message <teammate-name> <text>` | required `teammate-name`, required `text` | Send a mailbox message from lead to a teammate. |
 | `/team tasks` | none | Show the task table for the active team. |
 | `/team clear` | none | Clear/remove the active team task list file. |
 | `/team cleanup` | none | Clean up the active team (requires no working teammates). |
+| `/team focus [name]` | optional `name` | Focus on a teammate (shows output, routes input). No arg clears focus. |
 
 Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams show`).";
                         self.append_assistant_text(output);
@@ -3057,9 +3601,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     let status = format!("{:?}", m.status).to_lowercase();
                                     let task =
                                         m.current_task_id.as_deref().unwrap_or("—").to_string();
+                                    let model_str = m.model_override.as_ref()
+                                        .map(|mr| format!("{}/{}", mr.provider_id, mr.model_id))
+                                        .unwrap_or_else(|| "(inherited)".to_string());
                                     output.push_str(&format!(
-                                        "  └ {:<18} {:<10} task:{}\n",
-                                        m.name, status, task
+                                        "  └ {:<18} {:<10} model:{:<30} task:{}\n",
+                                        m.name, status, model_str, task
                                     ));
                                 }
                             }
@@ -3094,7 +3641,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             let generated_name = format!("{}-{}", blueprint, chrono::Utc::now().format("%Y%m%d-%H-%M-%S"));
                             name = Some(generated_name);
                         }
-                        let name = name.unwrap();
+                        let name = name.expect("name guaranteed Some above");
 
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         let sid = self.session_id.clone().unwrap_or_default();
@@ -3127,28 +3674,46 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     let working_dir_clone = working_dir.clone();
                                     let sid_clone = sid.clone();
                                     let name_clone = name.clone();
-                                    tokio::spawn(async move {
-                                        let registry = ragent_core::tool::create_default_registry();
-                                        if let Some(tool) = registry.get("team_create") {
-                                            let input = serde_json::json!({
-                                                "name": name_clone,
-                                                "project_local": true,
-                                                "blueprint": bp,
-                                            });
-                                            let ctx = ragent_core::tool::ToolContext {
-                                                session_id: sid_clone.clone(),
-                                                working_dir: working_dir_clone.clone(),
-                                                event_bus: event_bus.clone(),
-                                                storage: Some(storage.clone()),
-                                                task_manager: None,
-                                                lsp_manager: lsp_manager.clone(),
-                                                active_model: None,
-                                                team_context: None,
-                                                team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                    // Capture the currently selected model so teammates inherit it.
+                                    let active_model_clone: Option<ragent_core::agent::ModelRef> =
+                                        self.selected_model.as_deref().and_then(|s| {
+                                            s.split_once('/').map(|(pid, mid)| ragent_core::agent::ModelRef {
+                                                provider_id: pid.to_string(),
+                                                model_id: mid.to_string(),
+                                            })
+                                        });
+                                    std::thread::spawn(move || {
+                                            // Create a small runtime for seeding if there is no existing Tokio runtime
+                                            let rt = match tokio::runtime::Runtime::new() {
+                                                Ok(rt) => rt,
+                                                Err(e) => {
+                                                    tracing::error!("Failed to create tokio runtime for team seed: {e}");
+                                                    return;
+                                                }
                                             };
-                                            let _ = tool.execute(input, &ctx).await;
-                                        }
-                                    });
+                                            rt.block_on(async move {
+                                                let registry = ragent_core::tool::create_default_registry();
+                                                if let Some(tool) = registry.get("team_create") {
+                                                    let input = serde_json::json!({
+                                                        "name": name_clone,
+                                                        "project_local": true,
+                                                        "blueprint": bp,
+                                                    });
+                                                    let ctx = ragent_core::tool::ToolContext {
+                                                        session_id: sid_clone.clone(),
+                                                        working_dir: working_dir_clone.clone(),
+                                                        event_bus: event_bus.clone(),
+                                                        storage: Some(storage.clone()),
+                                                        task_manager: None,
+                                                        lsp_manager: lsp_manager.clone(),
+                                                        active_model: active_model_clone,
+                                                        team_context: None,
+                                                        team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                                    };
+                                                    let _ = tool.execute(input, &ctx).await;
+                                                }
+                                            });
+                                        });
                                 }
                             }
                             Err(e) => {
@@ -3255,6 +3820,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.team_members.clear();
                             self.team_message_counts.clear();
                             self.show_teams = false;
+                            self.focused_teammate = None;
+                            if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                                self.swarm_state = None;
+                            }
                             self.push_log(
                                 LogLevel::Info,
                                 format!("🤝 Team '{}' closed for this session", team_name),
@@ -3300,6 +3869,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         self.team_members.clear();
                                         self.team_message_counts.clear();
                                         self.show_teams = false;
+                                        self.focused_teammate = None;
+                                        if self.swarm_state.as_ref().is_some_and(|s| s.team_name == rest) {
+                                            self.swarm_state = None;
+                                        }
                                     }
                                     self.push_log(
                                         LogLevel::Info,
@@ -3325,6 +3898,174 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     LogLevel::Error,
                                     format!("team delete failed for '{}': {}", rest, e),
                                 );
+                            }
+                        }
+                    }
+                    "blueprint" | "blueprints" => {
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+
+                        // Collect all blueprint directories from project-local and global paths.
+                        let mut blueprint_dirs: Vec<(String, std::path::PathBuf, String)> = Vec::new();
+                        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+                        // Walk up to find project .ragent/blueprints/teams/
+                        let mut cur_opt: Option<&std::path::Path> = Some(working_dir.as_path());
+                        while let Some(cur) = cur_opt {
+                            let bp_root = cur.join(".ragent").join("blueprints").join("teams");
+                            if bp_root.is_dir() {
+                                if let Ok(entries) = std::fs::read_dir(&bp_root) {
+                                    for entry in entries.flatten() {
+                                        if entry.path().is_dir() {
+                                            let name = entry.file_name().to_string_lossy().to_string();
+                                            if seen_names.insert(name.clone()) {
+                                                blueprint_dirs.push((name, entry.path(), "project".to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                            cur_opt = cur.parent();
+                        }
+                        // Global blueprints
+                        if let Some(home) = dirs::home_dir() {
+                            let bp_root = home.join(".ragent").join("blueprints").join("teams");
+                            if bp_root.is_dir() {
+                                if let Ok(entries) = std::fs::read_dir(&bp_root) {
+                                    for entry in entries.flatten() {
+                                        if entry.path().is_dir() {
+                                            let name = entry.file_name().to_string_lossy().to_string();
+                                            if seen_names.insert(name.clone()) {
+                                                blueprint_dirs.push((name, entry.path(), "global".to_string()));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        blueprint_dirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+                        if rest.is_empty() {
+                            // List all blueprints as a markdown table.
+                            let mut output = String::from("From: /team blueprint\n\n## Installed Team Blueprints\n\n");
+                            if blueprint_dirs.is_empty() {
+                                output.push_str("No blueprints found.\n\nInstall blueprints to:\n- `[project]/.ragent/blueprints/teams/<name>/`\n- `~/.ragent/blueprints/teams/<name>/`\n");
+                            } else {
+                                output.push_str("| Blueprint | Scope | Teammates | Tasks | Description |\n");
+                                output.push_str("|-----------|-------|-----------|-------|-------------|\n");
+                                for (name, path, scope) in &blueprint_dirs {
+                                    // Count teammates from spawn-prompts.json
+                                    let teammate_count = std::fs::read_to_string(path.join("spawn-prompts.json"))
+                                        .ok()
+                                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                                        .and_then(|v| v.as_array().map(|a| a.len()))
+                                        .unwrap_or(0);
+                                    // Count tasks from task-seed.json
+                                    let task_count = std::fs::read_to_string(path.join("task-seed.json"))
+                                        .ok()
+                                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                                        .and_then(|v| v.as_array().map(|a| a.len()))
+                                        .unwrap_or(0);
+                                    // Description from first line of README.md (skip heading)
+                                    let desc = std::fs::read_to_string(path.join("README.md"))
+                                        .ok()
+                                        .and_then(|raw| {
+                                            raw.lines()
+                                                .find(|l| !l.trim().is_empty() && !l.starts_with('#'))
+                                                .map(|l| l.trim().to_string())
+                                        })
+                                        .unwrap_or_else(|| "-".to_string());
+                                    output.push_str(&format!(
+                                        "| `{}` | {} | {} | {} | {} |\n",
+                                        name, scope, teammate_count, task_count, desc
+                                    ));
+                                }
+                            }
+                            self.append_assistant_text(&output);
+                            self.status = "team: blueprints".to_string();
+                        } else {
+                            // Show detailed summary for a specific blueprint.
+                            let bp_name = rest.trim();
+                            let found = blueprint_dirs.iter().find(|(n, _, _)| n == bp_name);
+                            if let Some((name, path, scope)) = found {
+                                let mut output = format!(
+                                    "From: /team blueprint {name}\n\n## Blueprint: `{name}`\n\n**Scope:** {scope}  \n**Path:** `{}`\n\n",
+                                    path.display()
+                                );
+
+                                // README.md
+                                if let Ok(readme) = std::fs::read_to_string(path.join("README.md")) {
+                                    output.push_str("### Description\n\n");
+                                    output.push_str(&readme);
+                                    output.push_str("\n\n");
+                                }
+
+                                // Teammates from spawn-prompts.json
+                                if let Ok(raw) = std::fs::read_to_string(path.join("spawn-prompts.json")) {
+                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                                        if let Some(items) = val.as_array() {
+                                            output.push_str("### Teammates\n\n");
+                                            output.push_str("| Name | Type | Prompt |\n");
+                                            output.push_str("|------|------|--------|\n");
+                                            for item in items {
+                                                let tname = item.get("teammate_name")
+                                                    .or_else(|| item.get("args").and_then(|a| a.get("teammate_name")))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("auto");
+                                                let atype = item.get("agent_type")
+                                                    .or_else(|| item.get("args").and_then(|a| a.get("agent_type")))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("general");
+                                                let prompt = item.get("prompt")
+                                                    .or_else(|| item.get("args").and_then(|a| a.get("prompt")))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("-");
+                                                // Truncate long prompts for the table
+                                                let prompt_short = if prompt.len() > 80 {
+                                                    format!("{}…", &prompt[..77])
+                                                } else {
+                                                    prompt.to_string()
+                                                };
+                                                output.push_str(&format!(
+                                                    "| `{}` | {} | {} |\n",
+                                                    tname, atype, prompt_short
+                                                ));
+                                            }
+                                            output.push('\n');
+                                        }
+                                    }
+                                }
+
+                                // Tasks from task-seed.json
+                                if let Ok(raw) = std::fs::read_to_string(path.join("task-seed.json")) {
+                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                                        if let Some(items) = val.as_array() {
+                                            output.push_str("### Seed Tasks\n\n");
+                                            output.push_str("| Title | Description |\n");
+                                            output.push_str("|-------|-------------|\n");
+                                            for item in items {
+                                                let title = item.get("title")
+                                                    .or_else(|| item.get("input").and_then(|a| a.get("title")))
+                                                    .or_else(|| item.get("args").and_then(|a| a.get("title")))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("-");
+                                                let desc = item.get("description")
+                                                    .or_else(|| item.get("input").and_then(|a| a.get("description")))
+                                                    .or_else(|| item.get("args").and_then(|a| a.get("description")))
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("-");
+                                                output.push_str(&format!("| {} | {} |\n", title, desc));
+                                            }
+                                            output.push('\n');
+                                        }
+                                    }
+                                }
+
+                                output.push_str(&format!("**Usage:** `/team create {name}`\n"));
+                                self.append_assistant_text(&output);
+                                self.status = format!("team: blueprint {name}");
+                            } else {
+                                self.status = format!("Blueprint '{}' not found", bp_name);
                             }
                         }
                     }
@@ -3555,6 +4296,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.team_members.clear();
                             self.team_message_counts.clear();
                             self.show_teams = false;
+                            self.focused_teammate = None;
+                            if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                                self.swarm_state = None;
+                            }
                             if removed {
                                 self.push_log(
                                     LogLevel::Info,
@@ -3640,7 +4385,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 let m_name = m.name.clone();
                                                 let m_agent_type = m.agent_type.clone();
                                                 let working_dir_clone = store.dir.clone();
-                                                let active_model = None;
+                                                let active_model: Option<&ragent_core::agent::ModelRef> = None;
                                                 if let Some(tm_arc) = self.session_processor.team_manager.get() {
                                                     let tm = tm_arc.clone();
                                                     tokio::spawn(async move {
@@ -3651,6 +4396,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                                 &m_agent_type,
                                                                 "shutdown",
                                                                 active_model,
+                                                                None,
                                                                 &working_dir_clone,
                                                             )
                                                             .await;
@@ -3678,6 +4424,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     self.team_members.clear();
                                     self.team_message_counts.clear();
                                     self.show_teams = false;
+                                    self.focused_teammate = None;
+                                    if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                                        self.swarm_state = None;
+                                    }
 
                                     if !deactivated.is_empty() {
                                         self.push_log(
@@ -3722,9 +4472,42 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.status = "No active team to clean up".to_string();
                         }
                     },
+                    "focus" => {
+                        if self.active_team.is_none() {
+                            self.status = "No active team".to_string();
+                            return;
+                        }
+                        if rest.is_empty() {
+                            // No arg → clear focus
+                            self.focused_teammate = None;
+                            self.output_view = None;
+                            self.append_assistant_text("From: /team focus\nTeammate focus cleared. Input returns to lead session.");
+                            self.status = "team: focus cleared".to_string();
+                        } else {
+                            match self.focus_teammate_by_name(rest) {
+                                Ok(()) => {
+                                    let name = self.focused_teammate.as_ref()
+                                        .and_then(|id| self.team_members.iter().find(|m| m.agent_id == *id))
+                                        .map(|m| m.name.clone())
+                                        .unwrap_or_default();
+                                    self.append_assistant_text(&format!(
+                                        "From: /team focus\nFocused on **{}**. Messages will be routed to this teammate.\n\nUse `/team focus` (no args) or Alt+Up/Down to change focus.\nPress Esc to close the output view.",
+                                        name
+                                    ));
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "From: /team focus\n{e}\n\nAvailable teammates: {}",
+                                        self.team_members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")
+                                    ));
+                                    self.status = format!("team focus: {e}");
+                                }
+                            }
+                        }
+                    }
                     _ => {
                         self.status = format!(
-                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show [name]|create <name>|close|delete <name>|message <name> <text>|tasks|clear|cleanup]",
+                            "Unknown /team subcommand '{}'. Usage: /team [help|status|show|create|close|delete|message|tasks|clear|cleanup|focus]",
                             sub
                         );
                         self.push_log(
@@ -3741,7 +4524,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                 if !self.ensure_session() {
                     return;
                 }
-                let session_id = self.session_id.clone().unwrap();
+                let Some(session_id) = self.session_id.clone() else {
+                    self.status = "No active session".to_string();
+                    return;
+                };
                 let storage = self.session_processor.session_manager.storage();
 
                 // Fetch todos from storage
@@ -3786,8 +4572,150 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     }
                 }
             }
+            "yolo" => {
+                let new_state = ragent_core::yolo::toggle();
+                let label = if new_state { "ENABLED ⚠️" } else { "disabled" };
+                let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
+                if new_state {
+                    output.push_str(
+                        "All command validation is now **bypassed**:\n\
+                         - Bash denied-pattern checks — **off**\n\
+                         - Dynamic context allowlist — **off**\n\
+                         - MCP config validation — **off**\n\
+                         - Obfuscation detection — **off**\n\n\
+                         ⚠️  The agent can now execute **any** command without restriction.\n\
+                         Use `/yolo` again to re-enable safety checks.\n",
+                    );
+                } else {
+                    output.push_str("All safety checks have been **re-enabled**.\n");
+                }
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = format!("YOLO mode {label}");
+                self.push_log(
+                    if new_state { LogLevel::Warn } else { LogLevel::Info },
+                    format!("YOLO mode {label}"),
+                );
+            }
+            // ── /swarm ──────────────────────────────────────────────────────
+            "swarm" => {
+                let (sub, rest) = args.split_once(char::is_whitespace)
+                    .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
+
+                match sub {
+                    "help" => {
+                        let help = "\
+From: /swarm help\n\
+## Swarm — Fleet-Style Auto-Decomposition\n\n\
+| Command | Description |\n\
+|---------|-------------|\n\
+| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |\n\
+| `/swarm status` | Show live progress of the active swarm |\n\
+| `/swarm cancel` | Cancel the active swarm and clean up |\n\
+| `/swarm help` | Show this help |\n\n\
+The swarm analyses your prompt, breaks it into independent subtasks with dependency \
+edges, creates an ephemeral team, and orchestrates parallel execution.\n";
+                        self.append_assistant_text(help);
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "status" => {
+                        self.handle_swarm_status();
+                    }
+                    "cancel" => {
+                        self.handle_swarm_cancel();
+                    }
+                    _ => {
+                        // /swarm <prompt> — decompose and execute
+                        let full_prompt = if sub.is_empty() {
+                            String::new()
+                        } else if rest.is_empty() {
+                            sub.to_string()
+                        } else {
+                            format!("{} {}", sub, rest)
+                        };
+
+                        if full_prompt.is_empty() {
+                            let help = "From: /swarm\n\n\
+Usage: `/swarm <prompt>` — describe what you want the swarm to accomplish.\n\
+Type `/swarm help` for more info.\n";
+                            self.append_assistant_text(help);
+                            if self.current_screen == ScreenMode::Home {
+                                self.current_screen = ScreenMode::Chat;
+                            }
+                            return;
+                        }
+
+                        if self.swarm_state.is_some() {
+                            self.status = "⚠ A swarm is already active — use /swarm cancel first".to_string();
+                            return;
+                        }
+
+                        // Require provider + model
+                        let (provider_id, model_id) = match self.selected_model.as_deref()
+                            .and_then(|s| s.split_once('/'))
+                            .map(|(p, m)| (p.to_string(), m.to_string()))
+                        {
+                            Some(pair) => pair,
+                            None => {
+                                self.status = "⚠ /swarm requires a configured model — use /model".to_string();
+                                return;
+                            }
+                        };
+
+                        self.status = "⏳ swarm: decomposing goal…".to_string();
+                        self.push_log(LogLevel::Info, format!("Swarm: decomposing — {}", &full_prompt[..full_prompt.len().min(80)]));
+
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+
+                        // Show user message in chat
+                        self.append_assistant_text(&format!(
+                            "From: /swarm\n## 🐝 Swarm Decomposition\n\n\
+                            Analysing your goal and breaking it into parallel subtasks…\n\n\
+                            > {}\n",
+                            full_prompt
+                        ));
+
+                        // Store prompt for later use when decomposition returns
+                        {
+                            // We'll create the swarm state after decomposition returns
+                            // For now just store the prompt in a temporary field
+                        }
+
+                        // Spawn async LLM call for decomposition
+                        let registry = Arc::clone(&self.provider_registry);
+                        let storage_clone = Arc::clone(&self.storage);
+                        let swarm_result = Arc::clone(&self.swarm_result);
+
+                        tokio::spawn(async move {
+                            let completer = RagentCompleter {
+                                registry,
+                                storage: storage_clone,
+                                provider_id,
+                                model_id,
+                            };
+
+                            let system = ragent_core::team::DECOMPOSITION_SYSTEM_PROMPT;
+                            let user = ragent_core::team::build_decomposition_user_prompt(&full_prompt);
+
+                            let outcome = match completer.complete(system, &user).await {
+                                Ok(text) => Ok(text),
+                                Err(e) => Err(e.to_string()),
+                            };
+
+                            if let Ok(mut guard) = swarm_result.lock() {
+                                *guard = Some(outcome);
+                            }
+                        });
+                    }
+                }
+            }
             _ => {
-                // Check if this is a skill invocation before reporting unknown command.
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
                     .map(|c| c.skill_dirs)
@@ -3835,10 +4763,16 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     let processor = self.session_processor.clone();
 
                     let mut agent = self.agent_info.clone();
-                    // Apply skill model override if present, otherwise use selected model
-                    if let Some(ref model_str) =
-                        skill.model.as_ref().or(self.selected_model.as_ref())
-                    {
+                    // Skill model takes highest priority, then agent-defined
+                    // model, then global selected_model as fallback.
+                    let override_model = skill.model.as_ref().or_else(|| {
+                        if agent.model.is_none() {
+                            self.selected_model.as_ref()
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(ref model_str) = override_model {
                         if let Some((provider, model)) = model_str.split_once('/') {
                             agent.model = Some(ModelRef {
                                 provider_id: provider.to_string(),
@@ -4100,25 +5034,16 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         .saturating_sub(self.teams_area.y.saturating_add(1));
                     let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
                     if absolute_row == 1 {
-                        if let Some(ref sid) = self.session_id {
-                            self.open_output_view_session(sid.clone(), "lead".to_string());
-                        }
+                        // Lead row clicked — unfocus any teammate
+                        self.focused_teammate = None;
+                        self.status = "focus: lead (you)".to_string();
                         return;
                     }
                     if absolute_row >= 2 {
                         let idx = absolute_row - 2;
                         if let Some(member) = self.team_members.get(idx).cloned() {
-                            let team_name = self
-                                .active_team
-                                .as_ref()
-                                .map(|t| t.name.clone())
-                                .unwrap_or_else(|| "team".to_string());
-                            self.open_output_view_team_member(
-                                team_name,
-                                member.agent_id.clone(),
-                                member.name.clone(),
-                                member.session_id.clone(),
-                            );
+                            // Focus this teammate (same as /team focus <name>)
+                            self.focus_teammate_by_id(&member.agent_id);
                         }
                         return;
                     }
@@ -4150,7 +5075,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                 
                                       if self.file_menu.is_some() {
                                           // Recompute popup geometry identical to layout::render_file_menu
-                                          let menu = self.file_menu.as_ref().unwrap();
+                                          let Some(menu) = self.file_menu.as_ref() else { return };
                                           let input_area = self.active_input_widget_area();
                                           let item_count = menu.matches.len() as u16;
                                           let visible_items = item_count.max(1).min(8);
@@ -4471,7 +5396,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
 
             // Resolve file:// URI
             let candidate = if let Some(rest) = trimmed.strip_prefix("file://") {
-                Some(std::path::PathBuf::from(percent_decode_path(rest)))
+                Some(percent_decode_path(rest))
             } else if trimmed.starts_with('/') || trimmed.starts_with('.') {
                 // Plain absolute or relative path
                 Some(std::path::PathBuf::from(trimmed))
@@ -4551,9 +5476,9 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
                 ) {
                     if let Some(text) = Self::get_clipboard() {
-                        // Strip newlines for single-line input.
+                        // Strip carriage returns but keep newlines (multiline input supported).
                         let clean: String =
-                            text.chars().filter(|&c| c != '\n' && c != '\r').collect();
+                            text.chars().filter(|&c| c != '\r').collect();
                         if let Some(sel) = selection.as_ref()
                             && let Some((start, end)) = self.input_selection_char_range(sel)
                         {
@@ -4651,6 +5576,22 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
         if let Some(action) = input::handle_key(self, key) {
             match action {
                 InputAction::SendMessage(text) => {
+                    // When a teammate is focused, route the message to their
+                    // mailbox instead of the lead session.
+                    if let Some(ref focused_id) = self.focused_teammate.clone() {
+                        if let Some(member) = self.team_members.iter().find(|m| m.agent_id == *focused_id).cloned() {
+                            let team_name = self.active_team.as_ref().map(|t| t.name.clone()).unwrap_or_default();
+                            self.send_teammate_message(&team_name, &member.name, &text);
+                            self.input.clear();
+                            self.input_cursor = 0;
+                            self.history_index = None;
+                            self.push_log(
+                                LogLevel::Info,
+                                format!("→ {} (focused): {}", member.name, &text[..text.len().min(60)]),
+                            );
+                            return;
+                        }
+                    }
                     // Block sending if no provider/model is configured
                     if self.configured_provider.is_none() {
                         self.status =
@@ -4768,31 +5709,91 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     None => {}
                 },
                 InputAction::MoveCursorLeft => {
-                    self.cursor_move_left();
+                    // Standard: if selection active, jump to left boundary and clear.
+                    if let Some((start, _)) = self.kb_selection_char_range() {
+                        self.kb_select_anchor = None;
+                        self.set_cursor_char_index_clamped(start);
+                    } else {
+                        self.cursor_move_left();
+                    }
                 }
                 InputAction::MoveCursorRight => {
-                    self.cursor_move_right();
+                    // Standard: if selection active, jump to right boundary and clear.
+                    if let Some((_, end)) = self.kb_selection_char_range() {
+                        self.kb_select_anchor = None;
+                        self.set_cursor_char_index_clamped(end);
+                    } else {
+                        self.cursor_move_right();
+                    }
                 }
                 InputAction::MoveCursorWordLeft => {
+                    self.clear_kb_selection();
                     self.cursor_move_word_left();
                 }
                 InputAction::MoveCursorWordRight => {
+                    self.clear_kb_selection();
                     self.cursor_move_word_right();
                 }
                 InputAction::MoveCursorHome => {
+                    self.clear_kb_selection();
                     self.cursor_move_home();
                 }
                 InputAction::MoveCursorEnd => {
+                    self.clear_kb_selection();
                     self.cursor_move_end();
                 }
                 InputAction::Delete => {
-                    self.delete_next_char();
+                    if let Some((start, end)) = self.kb_selection_char_range() {
+                        self.remove_input_char_range(start, end);
+                        self.kb_select_anchor = None;
+                    } else {
+                        self.delete_next_char();
+                    }
                 }
                 InputAction::DeletePrevWord => {
+                    self.clear_kb_selection();
                     self.delete_prev_word();
                 }
                 InputAction::DeleteToLineEnd => {
+                    self.clear_kb_selection();
                     self.delete_to_end_of_line();
+                }
+                InputAction::SelectAll => {
+                    self.kb_select_anchor = Some(0);
+                    self.cursor_move_end();
+                }
+                InputAction::SelectCharLeft => {
+                    if self.kb_select_anchor.is_none() {
+                        self.kb_select_anchor = Some(self.input_cursor);
+                    }
+                    self.cursor_move_left();
+                }
+                InputAction::SelectCharRight => {
+                    if self.kb_select_anchor.is_none() {
+                        self.kb_select_anchor = Some(self.input_cursor);
+                    }
+                    self.cursor_move_right();
+                }
+                InputAction::SelectWordLeft => {
+                    if self.kb_select_anchor.is_none() {
+                        self.kb_select_anchor = Some(self.input_cursor);
+                    }
+                    self.cursor_move_word_left();
+                }
+                InputAction::SelectWordRight => {
+                    if self.kb_select_anchor.is_none() {
+                        self.kb_select_anchor = Some(self.input_cursor);
+                    }
+                    self.cursor_move_word_right();
+                }
+                InputAction::CopyToClipboard => {
+                    self.copy_kb_selection();
+                }
+                InputAction::CutToClipboard => {
+                    self.cut_kb_selection();
+                }
+                InputAction::PasteFromClipboard => {
+                    self.paste_text_from_clipboard();
                 }
                 InputAction::SwitchAgent => {
                     if self.cycleable_agents.len() > 1 {
@@ -4846,6 +5847,17 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         self.push_log(LogLevel::Info, "forcecleanup cancelled".to_string());
                         self.status = "forcecleanup cancelled".to_string();
                     }
+                }
+                InputAction::FocusNextTeammate => {
+                    self.cycle_focused_teammate(true);
+                }
+                InputAction::FocusPrevTeammate => {
+                    self.cycle_focused_teammate(false);
+                }
+                // InsertNewline is handled directly in handle_key (returns None),
+                // so this arm should not be reached in normal operation.
+                InputAction::InsertNewline => {
+                    self.insert_char_at_cursor('\n');
                 }
             }
         }
@@ -4952,6 +5964,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
             // can see it in context.
             let plan_text = format!("📋 **Plan summary:**\n{}", summary);
             self.append_assistant_text(&plan_text);
+
+            // Offer /swarm as an execution option after plan completion
+            self.append_assistant_text(
+                "\n💡 **Tip:** You can execute this plan in parallel with `/swarm <goal>`, \
+                 or implement it step-by-step.\n"
+            );
             self.force_new_message = true;
         } else {
             self.push_log(
@@ -5320,7 +6338,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.team_members = store.config.members.clone();
                             self.active_team = Some(store.config);
                             self.show_teams = true;
-                            self.ensure_team_manager_for_team(&name, Some(team_dir));
+                            // Reconcile is needed here: team was created via LLM tool path,
+                            // so the TeamManager didn't exist during blueprint seeding and
+                            // members may have been queued in Spawning state.
+                            self.ensure_team_manager_for_team_inner(&name, Some(team_dir), true);
                         }
                     }
                     let step_tag = self
@@ -5460,8 +6481,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             .entry(agent_id.clone())
                             .or_insert((0, 0));
                     }
+                    // Always refresh the stored values (session id, status, current task)
+                    // from disk so races between UI hydration and spawn events don't
+                    // leave the UI showing an outdated state.
                     if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id)
-                        && m.session_id.is_none()
                     {
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
@@ -5507,6 +6530,32 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     );
                 }
             }
+            Event::TeammateP2PMessage {
+                ref session_id,
+                ref team_name,
+                ref from,
+                ref to,
+                ref preview,
+            } => {
+                if self.is_current_session(session_id) {
+                    // Track sent count for sender.
+                    let from_counts = self
+                        .team_message_counts
+                        .entry(from.clone())
+                        .or_insert((0, 0));
+                    from_counts.0 = from_counts.0.saturating_add(1);
+                    // Track received count for recipient.
+                    let to_counts = self
+                        .team_message_counts
+                        .entry(to.clone())
+                        .or_insert((0, 0));
+                    to_counts.1 = to_counts.1.saturating_add(1);
+                    self.push_log(
+                        LogLevel::Info,
+                        format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
+                    );
+                }
+            }
             Event::TeammateIdle {
                 ref session_id,
                 ref team_name,
@@ -5519,6 +6568,24 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     self.push_log(
                         LogLevel::Info,
                         format!("💤 [{team_name}] Teammate {agent_id} is idle"),
+                    );
+                }
+            }
+            Event::TeammateFailed {
+                ref session_id,
+                ref team_name,
+                ref agent_id,
+                ref error,
+            } => {
+                if self.is_current_session(session_id) {
+                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                        m.status = MemberStatus::Failed;
+                        m.last_spawn_error = Some(error.clone());
+                    }
+                    let short_err = if error.len() > 80 { &error[..80] } else { error };
+                    self.push_log(
+                        LogLevel::Error,
+                        format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
                     );
                 }
             }
@@ -5564,6 +6631,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     self.team_members.clear();
                     self.team_message_counts.clear();
                     self.show_teams = false;
+                    self.focused_teammate = None;
+                    if self.swarm_state.as_ref().is_some_and(|s| &s.team_name == team_name) {
+                        self.swarm_state = None;
+                    }
                     self.push_log(
                         LogLevel::Info,
                         format!("🗑️  Team '{team_name}' cleaned up"),
@@ -5667,6 +6738,647 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
     fn jump_output_view_end(&mut self) {
         if let Some(ref mut view) = self.output_view {
             view.scroll_offset = view.max_scroll;
+        }
+    }
+
+    /// Cycle the focused teammate forward or backward.
+    ///
+    /// Cycling order: None → first teammate → second → … → last → None → …
+    fn cycle_focused_teammate(&mut self, forward: bool) {
+        if self.team_members.is_empty() {
+            self.focused_teammate = None;
+            return;
+        }
+        let ids: Vec<String> = self.team_members.iter().map(|m| m.agent_id.clone()).collect();
+        let current_idx = self.focused_teammate.as_ref().and_then(|f| ids.iter().position(|id| id == f));
+        let next = match (current_idx, forward) {
+            (None, true) => Some(0),
+            (None, false) => Some(ids.len() - 1),
+            (Some(i), true) => {
+                if i + 1 >= ids.len() { None } else { Some(i + 1) }
+            }
+            (Some(i), false) => {
+                if i == 0 { None } else { Some(i - 1) }
+            }
+        };
+        match next {
+            Some(idx) => {
+                let agent_id = ids[idx].clone();
+                self.focus_teammate_by_id(&agent_id);
+            }
+            None => {
+                self.focused_teammate = None;
+                self.output_view = None;
+                self.status = "team: focus cleared".to_string();
+            }
+        }
+    }
+
+    /// Focus a specific teammate by agent_id, opening their output view.
+    fn focus_teammate_by_id(&mut self, agent_id: &str) {
+        let member = self.team_members.iter().find(|m| m.agent_id == agent_id).cloned();
+        if let Some(m) = member {
+            self.focused_teammate = Some(m.agent_id.clone());
+            let team_name = self.active_team.as_ref().map(|t| t.name.clone()).unwrap_or_default();
+            self.open_output_view_team_member(
+                team_name,
+                m.agent_id.clone(),
+                m.name.clone(),
+                m.session_id.clone(),
+            );
+            self.status = format!("team: focused → {}", m.name);
+        }
+    }
+
+    /// Focus a teammate by name (partial match supported).
+    fn focus_teammate_by_name(&mut self, name: &str) -> Result<(), String> {
+        let lower = name.to_lowercase();
+        let matches: Vec<_> = self.team_members.iter()
+            .filter(|m| m.name.to_lowercase().contains(&lower) || m.agent_id.to_lowercase().contains(&lower))
+            .cloned()
+            .collect();
+        match matches.len() {
+            0 => Err(format!("No teammate matching '{name}'")),
+            1 => {
+                let agent_id = matches[0].agent_id.clone();
+                self.focus_teammate_by_id(&agent_id);
+                Ok(())
+            }
+            _ => {
+                let names: Vec<_> = matches.iter().map(|m| m.name.as_str()).collect();
+                Err(format!("Ambiguous: matches {}", names.join(", ")))
+            }
+        }
+    }
+
+    /// Send a message to a teammate's mailbox.
+    fn send_teammate_message(&mut self, team_name: &str, teammate_name: &str, text: &str) {
+        let member = self.team_members.iter().find(|m| m.name == teammate_name).cloned();
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        match (self.active_team.as_ref(), member) {
+            (Some(_team), Some(member)) => {
+                match TeamStore::load_by_name(team_name, &working_dir) {
+                    Ok(store) => match Mailbox::open(&store.dir, &member.agent_id) {
+                        Ok(mb) => {
+                            let msg = MailboxMessage::new(
+                                "lead",
+                                &member.agent_id,
+                                MessageType::Message,
+                                text,
+                            );
+                            match mb.push(msg) {
+                                Ok(_) => {
+                                    self.push_log(
+                                        LogLevel::Info,
+                                        format!("📨 lead → {teammate_name}: {text}"),
+                                    );
+                                    self.status = format!("message sent to {teammate_name}");
+                                }
+                                Err(e) => {
+                                    self.status = format!("Failed to send message: {e}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.status = format!("Failed to open mailbox: {e}");
+                        }
+                    },
+                    Err(e) => {
+                        self.status = format!("Failed to load team: {e}");
+                    }
+                }
+            }
+            (None, _) => {
+                self.status = "No active team".to_string();
+            }
+            (Some(_), None) => {
+                self.status = format!("Teammate '{teammate_name}' not found");
+            }
+        }
+    }
+
+    // ── Swarm helpers ───────────────────────────────────────────────────────
+
+    /// Process a successful decomposition and create the ephemeral swarm team.
+    fn execute_swarm_decomposition(&mut self, decomposition: ragent_core::team::SwarmDecomposition) {
+        use ragent_core::team::{SwarmState, TaskStore, TeamStore};
+        use ragent_core::team::task::Task;
+
+        let task_count = decomposition.tasks.len();
+        if task_count == 0 {
+            self.status = "⚠ swarm: LLM returned 0 subtasks".to_string();
+            self.append_assistant_text("From: /swarm\n## ⚠ No subtasks\n\nThe LLM returned an empty task list.\n");
+            return;
+        }
+
+        // Create ephemeral team name
+        let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let team_name = format!("swarm-{ts}");
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let lead_sid = self.session_id.clone().unwrap_or_else(|| "unknown".to_string());
+
+        // Create the team
+        match TeamStore::create(&team_name, &lead_sid, &working_dir, true) {
+            Ok(store) => {
+                // Seed tasks into tasks.json
+                if let Ok(task_store) = TaskStore::open(&store.dir) {
+                    for st in &decomposition.tasks {
+                        let mut task = Task::new(&st.id, &st.title);
+                        task.description = st.description.clone();
+                        task.depends_on = st.depends_on.clone();
+                        if let Err(e) = task_store.add_task(task) {
+                            self.push_log(LogLevel::Warn, format!("Swarm: failed to add task {}: {e}", st.id));
+                        }
+                    }
+                }
+
+                // Set up active team state
+                self.active_team = Some(store.config.clone());
+                self.team_members.clear();
+                self.show_teams = true;
+                self.ensure_team_manager_for_team(&team_name, Some(store.dir.clone()));
+
+                // Build display table
+                let mut output = format!(
+                    "From: /swarm\n## 🐝 Swarm Created: {team_name}\n\n\
+                    **{task_count} subtasks** decomposed and seeded.\n\n\
+                    | ID | Title | Dependencies |\n\
+                    |----|-------|--------------|\n"
+                );
+                for st in &decomposition.tasks {
+                    let deps = if st.depends_on.is_empty() {
+                        "—".to_string()
+                    } else {
+                        st.depends_on.join(", ")
+                    };
+                    output.push_str(&format!("| {} | {} | {} |\n", st.id, st.title, deps));
+                }
+                output.push_str("\nSpawning teammates…\n");
+                self.append_assistant_text(&output);
+
+                // Record swarm state (prompt is blank for now — it was consumed in the slash command)
+                let swarm_prompt = String::new();
+                self.swarm_state = Some(SwarmState {
+                    team_name: team_name.clone(),
+                    prompt: swarm_prompt,
+                    decomposition: decomposition.clone(),
+                    spawned: false,
+                    completed: false,
+                });
+
+                // Spawn one teammate per subtask
+                self.spawn_swarm_teammates(&team_name, &decomposition, &store.dir);
+            }
+            Err(e) => {
+                self.status = format!("⚠ swarm: team creation failed: {e}");
+                self.push_log(LogLevel::Warn, format!("Swarm team creation failed: {e}"));
+            }
+        }
+    }
+
+    /// Spawn one teammate per swarm subtask using the team_spawn tool pattern.
+    fn spawn_swarm_teammates(
+        &mut self,
+        team_name: &str,
+        decomposition: &ragent_core::team::SwarmDecomposition,
+        team_dir: &std::path::Path,
+    ) {
+        let working_dir = std::env::current_dir().unwrap_or_default();
+
+        for subtask in &decomposition.tasks {
+            let teammate_name = format!("swarm-{}", subtask.id);
+            let agent_type = subtask.agent_type.as_deref().unwrap_or("general").to_string();
+
+            // Build a rich prompt with task context
+            let prompt = format!(
+                "## Swarm Task: {}\n\n\
+                **Task ID:** {}\n\
+                **Title:** {}\n\n\
+                {}\n\n\
+                You are part of a swarm team. Complete this specific task. \
+                When done, use `team_task_complete` to mark task \"{}\" as completed.\n\
+                Focus only on your assigned task — other teammates are handling other parts.",
+                subtask.title, subtask.id, subtask.title, subtask.description, subtask.id
+            );
+
+            // Parse per-subtask model override
+            let teammate_model: Option<ragent_core::agent::ModelRef> =
+                subtask.model.as_deref().and_then(|s| {
+                    s.split_once('/').or_else(|| s.split_once(':')).map(|(p, m)| {
+                        ragent_core::agent::ModelRef {
+                            provider_id: p.to_string(),
+                            model_id: m.to_string(),
+                        }
+                    })
+                });
+
+            // Tasks with unresolved dependencies start as Blocked; others as Spawning
+            let has_deps = !subtask.depends_on.is_empty();
+            let initial_status = if has_deps {
+                MemberStatus::Blocked
+            } else {
+                MemberStatus::Spawning
+            };
+
+            // Record member in config
+            {
+                if let Ok(mut store) = ragent_core::team::TeamStore::load_by_name(team_name, &working_dir) {
+                    if store.config.member_by_name(&teammate_name).is_none() {
+                        let agent_id = store.next_agent_id();
+                        let mut member = ragent_core::team::TeamMember::new(&teammate_name, &agent_id, &agent_type);
+                        member.spawn_prompt = Some(prompt.clone());
+                        member.model_override = teammate_model.clone();
+                        member.status = initial_status;
+                        store.config.members.push(member.clone());
+                        let _ = store.save();
+
+                        // Add to local state
+                        self.team_members.push(member);
+                    }
+                }
+            }
+
+            let status_label = if has_deps { "blocked (deps)" } else { "spawning" };
+            self.push_log(
+                LogLevel::Info,
+                format!("🐝 Swarm teammate: {} ({}) — {}", teammate_name, subtask.id, status_label),
+            );
+        }
+
+        // Trigger reconcile — the manager picks up Spawning members and spawns them.
+        // Blocked members are skipped by reconcile (they aren't MemberStatus::Spawning).
+        if let Some(manager) = self.session_processor.team_manager.get() {
+            manager.clone().reconcile_spawning_members();
+        } else {
+            self.ensure_team_manager_for_team_inner(team_name, Some(team_dir.to_path_buf()), true);
+        }
+
+        if let Some(ref mut swarm) = self.swarm_state {
+            swarm.spawned = true;
+        }
+
+        let ready = decomposition.tasks.iter().filter(|t| t.depends_on.is_empty()).count();
+        let blocked = decomposition.tasks.len() - ready;
+        self.status = format!("🐝 swarm: {ready} spawning, {blocked} blocked");
+    }
+
+    /// Handle `/swarm status` — display progress of active swarm.
+    fn handle_swarm_status(&mut self) {
+        if self.current_screen == ScreenMode::Home {
+            self.current_screen = ScreenMode::Chat;
+        }
+
+        let Some(ref swarm) = self.swarm_state else {
+            self.append_assistant_text("From: /swarm status\n\nNo active swarm. Use `/swarm <prompt>` to start one.\n");
+            return;
+        };
+
+        let mut output = format!(
+            "From: /swarm status\n## 🐝 Swarm: {}\n\n",
+            swarm.team_name
+        );
+
+        // Load tasks from disk for current status
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let tasks = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&swarm.team_name, &working_dir) {
+            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+                ts.read().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let total = swarm.decomposition.tasks.len();
+        let (completed, in_progress, pending) = if let Some(ref tl) = tasks {
+            let c = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Completed).count();
+            let ip = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::InProgress).count();
+            let p = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Pending).count();
+            (c, ip, p)
+        } else {
+            (0, 0, total)
+        };
+
+        // Progress bar
+        let bar_width = 30;
+        let filled = if total > 0 { (completed * bar_width) / total } else { 0 };
+        let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+        output.push_str(&format!(
+            "**Progress:** [{bar}] {completed}/{total} ({} in progress, {} pending)\n\n",
+            in_progress, pending
+        ));
+
+        // Task table
+        output.push_str("| ID | Title | Status | Assigned | Dependencies |\n");
+        output.push_str("|----|-------|--------|----------|-------------|\n");
+
+        if let Some(ref tl) = tasks {
+            for task in &tl.tasks {
+                let status_icon = match task.status {
+                    ragent_core::team::TaskStatus::Completed => "✅",
+                    ragent_core::team::TaskStatus::InProgress => "🔄",
+                    ragent_core::team::TaskStatus::Pending => "⏳",
+                    ragent_core::team::TaskStatus::Cancelled => "❌",
+                };
+                let assigned = task.assigned_to.as_deref().unwrap_or("—");
+                let deps = if task.depends_on.is_empty() {
+                    "—".to_string()
+                } else {
+                    task.depends_on.join(", ")
+                };
+                output.push_str(&format!(
+                    "| {} | {} | {} | {} | {} |\n",
+                    task.id, task.title, status_icon, assigned, deps
+                ));
+            }
+        } else {
+            for st in &swarm.decomposition.tasks {
+                let deps = if st.depends_on.is_empty() {
+                    "—".to_string()
+                } else {
+                    st.depends_on.join(", ")
+                };
+                output.push_str(&format!("| {} | {} | ⏳ | — | {} |\n", st.id, st.title, deps));
+            }
+        }
+
+        // Teammate status
+        output.push_str("\n**Teammates:**\n");
+        if self.team_members.is_empty() {
+            output.push_str("  (spawning…)\n");
+        } else {
+            for m in &self.team_members {
+                let status = format!("{:?}", m.status).to_lowercase();
+                output.push_str(&format!("  • {} — {}\n", m.name, status));
+            }
+        }
+
+        if completed == total && total > 0 {
+            output.push_str("\n🎉 **All tasks complete!** Use `/swarm cancel` to clean up.\n");
+        }
+
+        self.append_assistant_text(&output);
+    }
+
+    /// Handle `/swarm cancel` — tear down the swarm team.
+    fn handle_swarm_cancel(&mut self) {
+        if self.current_screen == ScreenMode::Home {
+            self.current_screen = ScreenMode::Chat;
+        }
+
+        let Some(swarm) = self.swarm_state.take() else {
+            self.append_assistant_text("From: /swarm cancel\n\nNo active swarm to cancel.\n");
+            return;
+        };
+
+        // Reuse the existing team cleanup path
+        let team_name = swarm.team_name.clone();
+
+        // Trigger team cleanup
+        self.execute_slash_command(&format!("/team close {}", team_name));
+
+        self.append_assistant_text(&format!(
+            "From: /swarm cancel\n## 🐝 Swarm Cancelled\n\n\
+            Swarm **{team_name}** has been shut down.\n"
+        ));
+        self.status = "swarm: cancelled".to_string();
+        self.push_log(LogLevel::Info, format!("Swarm cancelled: {team_name}"));
+    }
+
+    /// Check if any blocked swarm tasks can be unblocked now that deps have completed.
+    ///
+    /// A blocked member becomes Spawning when all its dependency tasks (by task ID)
+    /// have been completed by their respective teammates (member status Idle/Stopped,
+    /// or task status Completed in the TaskStore).
+    pub fn poll_swarm_unblock(&mut self) {
+        let Some(ref swarm) = self.swarm_state else { return };
+        if swarm.completed { return; }
+
+        // Clone what we need from swarm_state to avoid borrow issues
+        let team_name = swarm.team_name.clone();
+        let decomp_tasks = swarm.decomposition.tasks.clone();
+
+        // Find blocked members
+        let blocked_members: Vec<(String, String)> = self.team_members.iter()
+            .filter(|m| m.status == MemberStatus::Blocked)
+            .map(|m| (m.name.clone(), m.agent_id.clone()))
+            .collect();
+
+        if blocked_members.is_empty() { return; }
+
+        // Build set of completed task IDs from member status.
+        // A task ID is the suffix after "swarm-" in the teammate name.
+        let completed_task_ids: std::collections::HashSet<String> = self.team_members.iter()
+            .filter(|m| matches!(m.status, MemberStatus::Idle | MemberStatus::Stopped))
+            .filter_map(|m| m.name.strip_prefix("swarm-").map(|s| s.to_string()))
+            .collect();
+
+        // Also check TaskStore for explicitly completed tasks
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let task_completed_ids: std::collections::HashSet<String> = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+                if let Ok(tl) = ts.read() {
+                    tl.tasks.iter()
+                        .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
+                        .map(|t| t.id.clone())
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                }
+            } else {
+                std::collections::HashSet::new()
+            }
+        } else {
+            std::collections::HashSet::new()
+        };
+
+        let all_completed: std::collections::HashSet<String> = completed_task_ids.union(&task_completed_ids).cloned().collect();
+
+        // Check each blocked member's dependencies
+        let mut unblocked = Vec::new();
+        for (member_name, agent_id) in &blocked_members {
+            let task_id = member_name.strip_prefix("swarm-").unwrap_or(member_name);
+            // Find the task's depends_on from decomposition
+            let deps = decomp_tasks.iter()
+                .find(|t| t.id == task_id)
+                .map(|t| &t.depends_on);
+
+            if let Some(deps) = deps {
+                let missing: Vec<_> = deps.iter().filter(|d| !all_completed.contains(*d)).cloned().collect();
+                tracing::debug!(
+                    task = %task_id,
+                    deps = ?deps,
+                    missing = ?missing,
+                    completed_ids = ?all_completed,
+                    "Checking swarm dependency resolution"
+                );
+                if missing.is_empty() && !deps.is_empty() {
+                    unblocked.push((member_name.clone(), agent_id.clone(), task_id.to_string()));
+                } else if deps.is_empty() {
+                    // No deps — should have been Spawning, but unblock anyway
+                    unblocked.push((member_name.clone(), agent_id.clone(), task_id.to_string()));
+                }
+            }
+        }
+
+        if unblocked.is_empty() { return; }
+
+        // Transition unblocked members from Blocked → Spawning
+        for (member_name, agent_id, task_id) in &unblocked {
+            // Update local state
+            if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                m.status = MemberStatus::Spawning;
+            }
+            // Update persisted config
+            if let Ok(mut store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+                if let Some(m) = store.config.member_by_id_mut(agent_id) {
+                    m.status = MemberStatus::Spawning;
+                }
+                let _ = store.save();
+            }
+            // Log with actual deps for debugging
+            let dep_info = decomp_tasks.iter()
+                .find(|t| t.id == *task_id)
+                .map(|t| t.depends_on.join(", "))
+                .unwrap_or_default();
+            self.push_log(
+                LogLevel::Info,
+                format!("🔓 Unblocking {} ({}) — deps [{}] all in {:?}", member_name, task_id, dep_info, all_completed),
+            );
+        }
+
+        // Trigger reconcile to spawn newly-unblocked members
+        if let Some(manager) = self.session_processor.team_manager.get() {
+            manager.clone().reconcile_spawning_members();
+        }
+
+        let remaining_blocked = blocked_members.len() - unblocked.len();
+        if remaining_blocked > 0 {
+            self.status = format!("🐝 swarm: {} unblocked, {} still blocked", unblocked.len(), remaining_blocked);
+        } else {
+            self.status = format!("🐝 swarm: all teammates spawned");
+        }
+    }
+
+    /// Check if the active swarm has completed all tasks and auto-summarise.
+    ///
+    /// Completion is detected in two ways:
+    /// 1. All tasks in the TaskStore are Completed/Cancelled (normal path via `team_task_complete`)
+    /// 2. All teammates are idle/failed/stopped — they finished their agent loop but may not have
+    ///    called `team_task_complete`. In this case we auto-complete their tasks.
+    pub fn poll_swarm_completion(&mut self) {
+        let Some(ref swarm) = self.swarm_state else { return };
+        if swarm.completed || !swarm.spawned { return; }
+        let team_name = swarm.team_name.clone();
+
+        let working_dir = std::env::current_dir().unwrap_or_default();
+
+        // Check member status — if all non-lead members are terminal (idle/failed/stopped),
+        // the swarm is effectively done regardless of task store state.
+        let members: Vec<_> = self.team_members.iter()
+            .filter(|m| m.name != "lead" && !m.name.is_empty())
+            .collect();
+        let has_members = !members.is_empty();
+        let all_members_terminal = has_members && members.iter().all(|m| matches!(
+            m.status,
+            MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped
+        ));
+
+        // If all members are terminal, auto-complete any non-completed tasks in the task store
+        if all_members_terminal {
+            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+                if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+                    if let Ok(tl) = ts.read() {
+                        for task in &tl.tasks {
+                            if task.status != ragent_core::team::TaskStatus::Completed
+                                && task.status != ragent_core::team::TaskStatus::Cancelled
+                            {
+                                let agent_id = task.assigned_to.as_deref().unwrap_or("swarm");
+                                if let Err(e) = ts.complete(&task.id, agent_id) {
+                                    tracing::warn!(task = %task.id, error = %e, "failed to auto-complete swarm task");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now check task store for final tally
+        let tasks = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+                ts.read().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let Some(ref tl) = tasks else {
+            // No task store — fall back to member-only check
+            if all_members_terminal {
+                self.finalize_swarm_completion(&team_name, 0, 0, 0);
+            }
+            return;
+        };
+        let total = tl.tasks.len();
+        if total == 0 && all_members_terminal {
+            self.finalize_swarm_completion(&team_name, 0, 0, 0);
+            return;
+        }
+        if total == 0 { return; }
+
+        let completed = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Completed).count();
+        let cancelled = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Cancelled).count();
+        let failed_members = members.iter().filter(|m| m.status == MemberStatus::Failed).count();
+
+        if completed + cancelled >= total {
+            self.finalize_swarm_completion(&team_name, total, completed, cancelled);
+        } else if all_members_terminal {
+            // Members done but tasks not all completed — report partial completion
+            self.finalize_swarm_completion(&team_name, total, completed, cancelled + failed_members);
+        }
+    }
+
+    /// Build the swarm completion summary and mark the swarm as done.
+    fn finalize_swarm_completion(&mut self, team_name: &str, total: usize, completed: usize, cancelled: usize) {
+        let working_dir = std::env::current_dir().unwrap_or_default();
+
+        let mut output = format!(
+            "From: /swarm\n## 🎉 Swarm Complete: {team_name}\n\n\
+            All **{total}** subtasks have finished ({completed} completed, {cancelled} failed/cancelled).\n\n"
+        );
+
+        // Include task table if we have tasks
+        if total > 0 {
+            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(team_name, &working_dir) {
+                if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+                    if let Ok(tl) = ts.read() {
+                        output.push_str("| ID | Title | Status |\n|----|-------|--------|\n");
+                        for task in &tl.tasks {
+                            let icon = match task.status {
+                                ragent_core::team::TaskStatus::Completed => "✅",
+                                ragent_core::team::TaskStatus::Cancelled => "❌",
+                                _ => "⚠️",
+                            };
+                            output.push_str(&format!("| {} | {} | {} |\n", task.id, task.title, icon));
+                        }
+                        output.push('\n');
+                    }
+                }
+            }
+        }
+
+        output.push_str("Use `/swarm cancel` to clean up the ephemeral team.\n");
+
+        self.append_assistant_text(&output);
+        self.status = format!("🎉 swarm complete: {team_name}");
+        self.push_log(LogLevel::Info, format!("Swarm complete: {team_name} — {completed}/{total} tasks done"));
+
+        if let Some(ref mut s) = self.swarm_state {
+            s.completed = true;
         }
     }
 
