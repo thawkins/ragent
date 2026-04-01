@@ -270,6 +270,38 @@ async fn main() -> Result<()> {
         resolved_agent.max_steps = Some(max);
     }
 
+    // Apply model selection with priority:
+    //   1. --model CLI flag (provider/model format)
+    //   2. storage selected_model (saved by TUI /provider or /model command)
+    //   3. agent built-in default (e.g. anthropic/claude-sonnet-4)
+    //
+    // Skip override when the agent has model_pinned=true (custom agents that
+    // explicitly fix a model should not be overridden by global selection).
+    if let Some(ref model_str) = cli.model {
+        if let Some((provider, model)) = model_str.split_once('/') {
+            resolved_agent.model = Some(agent::ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model.to_string(),
+            });
+            resolved_agent.model_pinned = true;
+        } else {
+            anyhow::bail!(
+                "Invalid --model format '{}'. Expected 'provider/model' (e.g. 'copilot/claude-sonnet-4.5')",
+                model_str
+            );
+        }
+    } else if !resolved_agent.model_pinned || resolved_agent.model.is_none() {
+        // Fall back to the user's stored provider/model preference
+        if let Ok(Some(model_str)) = storage.get_setting("selected_model") {
+            if let Some((provider, model)) = model_str.split_once('/') {
+                resolved_agent.model = Some(agent::ModelRef {
+                    provider_id: provider.to_string(),
+                    model_id: model.to_string(),
+                });
+            }
+        }
+    }
+
     let max_background_agents = config.experimental.max_background_agents;
 
     let config = Arc::new(tokio::sync::RwLock::new(config));
