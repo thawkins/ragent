@@ -1,0 +1,92 @@
+{
+  "name": "swarm-20260401-150443",
+  "lead_session_id": "aa29d9f4-9246-4a9a-b37b-71093833bc4e",
+  "created_at": "2026-04-01T15:04:43.834263263Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "64ebdb90-252a-4e2d-a526-4f4d5f01fbfe",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.844226467Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: claude-code-sourcemap\n\n**Task ID:** s1\n**Title:** Analyze competitor: claude-code-sourcemap\n\nThoroughly analyze the competitor whose source is available at ../claude-code-sourcemap. Produce a Markdown report saved to target/temp/swarmout/claude_code_sourcemap_analysis.md. The report must include: (1) a short summary of the project purpose and primary user workflows; (2) an architecture overview (major components, languages, build/runtime requirements, notable modules/files); (3) feature inventory (detailed list of features and commands or UI flows); (4) UX/CLI/API surface: inputs/outputs, flags, config, integration points; (5) strengths and weaknesses from an end-user, developer, and integration perspective; (6) license and any notable legal/third-party constraints; (7) security/privacy considerations; (8) explicit feature ideas that this competitor has which our product does not (clear bullet list); (9) candidate features from this competitor that would be high-value to add to our product, with a short rationale for each; (10) estimated implementation complexity (Very Low / Low / Medium / High) and rough time estimates (hours or days) for each candidate feature; (11) suggested test cases or validation steps for each candidate feature; and (12) any gaps or unanswered questions requiring follow-up. Use code references (file paths and snippets) where helpful. Output must be a standalone report sufficient for an engineer to understand what to adopt and why.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "83719a9c-15db-4fd9-9c15-e115d906c9a2",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.844948771Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: copilot-cli\n\n**Task ID:** s2\n**Title:** Analyze competitor: copilot-cli\n\nPerform a comprehensive analysis of Copilot-CLI (or the closest available copilot-cli product). Produce a Markdown report saved to target/temp/swarmout/copilot_cli_analysis.md. The report should include the same sections and level of detail required for s1: summary, architecture, features, UX/CLI/API surface, strengths/weaknesses, license, security/privacy, explicit feature differences between copilot-cli and our product, prioritized feature suggestions to consider adding, complexity/time estimates for each suggestion, suggested tests, and follow-up questions. If the competitor source is not in the repo, search known local paths or documentation; if external resources are required, document which external sources were referenced. Provide concrete examples of commands or interactions and note any unique integrations (e.g., editor plugins, cloud connectors). The output must be actionable and self-contained.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "c0ad506a-6dcf-4eb2-bac3-87374845a22e",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.845800309Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: OpenCode\n\n**Task ID:** s3\n**Title:** Analyze competitor: OpenCode\n\nAnalyze the competitor whose source is available at ../opencode. Produce a Markdown report saved to target/temp/swarmout/opencode_analysis.md. Include: summary, architecture/component map, detailed feature inventory, UX/API/CLI breakdown, strengths/weaknesses, license, security/privacy notes, explicit list of features OpenCode has that our product lacks, prioritized recommended features to add (with rationale), implementation complexity and time estimates for each, suggested tests, and unanswered questions. Reference specific files and modules from ../opencode as evidence where applicable. Deliver a standalone, actionable report for engineering and product planning.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "e32e71de-b947-440b-ac22-e22ef8362e2a",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.847014309Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: roocode\n\n**Task ID:** s4\n**Title:** Analyze competitor: roocode\n\nPerform a full analysis of the competitor Roocode. Save the analysis as target/temp/swarmout/roocode_analysis.md. The report must contain: project summary and target users, high-level architecture (components and languages), complete feature inventory and user flows, UX/CLI/API details, strengths/weaknesses, licensing and legal notes, security/privacy considerations, list of features Roocode offers that our product does not, prioritized candidate features to add to our product (with rationales), implementation complexity and estimated effort for each candidate feature, recommended tests and validation steps, and any follow-up questions. If local source is not present, inspect available docs or repos and document sources referenced. Make the report detailed enough for an engineer to begin estimating and scoping work.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "688d7482-b39d-4cd3-87f1-1bff55b206fb",
+      "agent_type": "general",
+      "status": "working",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.848491248Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Perform internal product review\n\n**Task ID:** s5\n**Title:** Perform internal product review\n\nPerform a thorough review of our product (the current repository/workspace). Produce a Markdown report saved to target/temp/swarmout/product_analysis.md. The review must include: (1) concise product description and primary user personas; (2) architecture and component map (key modules, services, entry points); (3) current feature inventory and capabilities (detailed); (4) UX/CLI/API surface and integration points; (5) current limitations, bugs, or known issues; (6) performance, security, and deployment considerations; (7) testing coverage and CI status; (8) areas where the product already overlaps with competitor features; and (9) an explicit list of missing or weak features relative to typical competitor functionality. For each missing/weak feature, include: suggested implementation approach, complexity estimate (Very Low/Low/Medium/High), rough time estimate, and suggested acceptance criteria/tests. Reference code files, modules, or documentation lines as evidence. Save as target/temp/swarmout/product_analysis.md and ensure the artifact is comprehensive for later synthesis.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": null,
+      "agent_type": "general",
+      "status": "blocked",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-01T15:04:43.849920612Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Synthesize SWARMOUT2.md: feature additions, plan, milestones, and tasks\n\n**Task ID:** s6\n**Title:** Synthesize SWARMOUT2.md: feature additions, plan, milestones, and tasks\n\nCreate the consolidated document target/temp/swarmout/SWARMOUT2.md. This synthesis task depends on the five analysis reports: target/temp/swarmout/claude_code_sourcemap_analysis.md, target/temp/swarmout/copilot_cli_analysis.md, target/temp/swarmout/opencode_analysis.md, target/temp/swarmout/roocode_analysis.md, and target/temp/swarmout/product_analysis.md. Read each competitor and product analysis and produce a single, coherent document that contains: (1) Executive summary of findings and strategic recommendations; (2) A prioritized list of feature additions to implement (grouped into Must, Should, Could, Won't) with one-sentence rationales; (3) For each prioritized feature: a short description, required components/subsystems, estimated complexity and time, risks & mitigation, and suggested tests/acceptance criteria; (4) A project plan with milestones (minimum 3 milestones) and deliverables per milestone; (5) A task-level breakdown for each milestone (concrete engineering tasks, suggested owners/roles, estimated durations in days, and dependencies between tasks); (6) A rough schedule/timeline (calendar or week-based) showing when milestones should be completed; (7) Resource estimates (headcount, skillsets required) and rough cost/effort assumptions; (8) Integration plan (how each new feature integrates with existing components and with each other); and (9) a rollout/QA plan and post-launch monitoring suggestions. The document should reference the individual competitor reports as sources and include an appendix summarizing the key differences between competitors and our product. Produce the document in clear Markdown, optimized for stakeholders (product + engineering). Ensure the file is saved at target/temp/swarmout/SWARMOUT2.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

@@ -63,7 +63,56 @@ impl Tool for TeamTaskCompleteTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TaskStore::open(&team_dir)?;
-        let task = store.complete(task_id, &agent_id)?;
+        
+        // Log current state for debugging
+        if let Ok(list) = store.read() {
+            let task_summary: Vec<String> = list.tasks.iter()
+                .map(|t| format!("{} ({})", t.id, match t.status {
+                    crate::team::TaskStatus::Pending => "pending",
+                    crate::team::TaskStatus::InProgress => "in-progress",
+                    crate::team::TaskStatus::Completed => "completed",
+                    crate::team::TaskStatus::Cancelled => "cancelled",
+                }))
+                .collect();
+            tracing::debug!(
+                agent_id = %agent_id,
+                team_name = %team_name,
+                task_id = %task_id,
+                tasks = ?task_summary,
+                "team_task_complete: attempting to complete"
+            );
+        }
+        
+        let task = match store.complete(task_id, &agent_id) {
+            Ok(t) => t,
+            Err(e) => {
+                // Return a tool output explaining why completion failed, rather than an error.
+                // This gives the teammate a clear error in the TUI instead of generic failure.
+                let err_msg = e.to_string();
+                tracing::warn!(
+                    agent_id = %agent_id,
+                    task_id = %task_id,
+                    team_name = %team_name,
+                    error = %err_msg,
+                    "team_task_complete failed"
+                );
+                return Ok(ToolOutput {
+                    content: format!(
+                        "Failed to mark task '{}' as completed: {}\n\
+                         This usually means the task doesn't exist, is already completed, \
+                         or is assigned to a different agent.",
+                        task_id, err_msg
+                    ),
+                    metadata: Some(json!({
+                        "team_name": team_name,
+                        "task_id": task_id,
+                        "completed": false,
+                        "agent_id": agent_id,
+                        "error": err_msg
+                    })),
+                });
+            }
+        };
 
         // Run TaskCompleted hook with task metadata on stdin.
         let hook_stdin = json!({
@@ -93,7 +142,8 @@ impl Tool for TeamTaskCompleteTool {
                     "team_name": team_name,
                     "task_id": task_id,
                     "hook_rejected": true,
-                    "feedback": feedback
+                    "feedback": feedback,
+                    "completed": false
                 })),
             });
         }
@@ -108,7 +158,8 @@ impl Tool for TeamTaskCompleteTool {
                 "task_id": task.id,
                 "title": task.title,
                 "completed_by": agent_id,
-                "completed_at": task.completed_at.map(|t| t.to_rfc3339())
+                "completed_at": task.completed_at.map(|t| t.to_rfc3339()),
+                "completed": true
             })),
         })
     }

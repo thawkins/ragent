@@ -54,6 +54,25 @@ impl Tool for TeamTaskClaimTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TaskStore::open(&team_dir)?;
+        
+        // Log current state for debugging
+        if let Ok(list) = store.read() {
+            let task_summary: Vec<String> = list.tasks.iter()
+                .map(|t| format!("{} ({})", t.id, match t.status {
+                    crate::team::TaskStatus::Pending => "pending",
+                    crate::team::TaskStatus::InProgress => "in-progress",
+                    crate::team::TaskStatus::Completed => "completed",
+                    crate::team::TaskStatus::Cancelled => "cancelled",
+                }))
+                .collect();
+            tracing::debug!(
+                agent_id = %agent_id,
+                team_name = %team_name,
+                tasks = ?task_summary,
+                "team_task_claim: available tasks"
+            );
+        }
+        
         let (claimed, already_had) = store.claim_next(&agent_id)?;
 
         match claimed {
