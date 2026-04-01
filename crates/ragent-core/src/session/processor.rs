@@ -269,17 +269,20 @@ impl SessionProcessor {
                  3. **Bounded prompt per teammate.** Each teammate's `prompt` must reference \
                     **only its one assigned item** — never a list.  Keep the prompt under \
                     ~500 words; link to files rather than pasting large content.\n\
-                 4. **Then wait.** After all spawns, call `team_wait` once to block until \
+                 4. **Pre-assign tasks.** When spawning, always include `task_id` parameter \
+                    to pre-claim the work item on the teammate's behalf. This ensures they \
+                    start with a claimed task and can focus on work instead of claiming.\n\
+                 5. **Then wait.** After all spawns, call `team_wait` once to block until \
                     all teammates report idle or complete.\n\
-                 5. **Synthesise.** Read each teammate's output and combine results yourself.\n\
-                 6. **Iterate if needed.** If you have more items than available teammates, \
+                 6. **Synthesise.** Read each teammate's output and combine results yourself.\n\
+                 7. **Iterate if needed.** If you have more items than available teammates, \
                     distribute in waves — spawn a batch, wait, synthesise, then spawn the \
                     next batch with freshly-idle teammates.\n\n\
                  **Example — analysing 3 competitors A, B, C:**\n\
                  ```\n\
-                 team_spawn(teammate_name: \"analyst-A\", prompt: \"Analyse competitor A only …\")\n\
-                 team_spawn(teammate_name: \"analyst-B\", prompt: \"Analyse competitor B only …\")\n\
-                 team_spawn(teammate_name: \"analyst-C\", prompt: \"Analyse competitor C only …\")\n\
+                 team_spawn(teammate_name: \"analyst-A\", task_id: \"s1\", prompt: \"Analyse competitor A only …\")\n\
+                 team_spawn(teammate_name: \"analyst-B\", task_id: \"s2\", prompt: \"Analyse competitor B only …\")\n\
+                 team_spawn(teammate_name: \"analyst-C\", task_id: \"s3\", prompt: \"Analyse competitor C only …\")\n\
                  team_wait()\n\
                  ```\n\
                  Never: `team_spawn(prompt: \"Analyse competitors A, B, and C …\")`\n\n\

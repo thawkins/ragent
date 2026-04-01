@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Product review — create product_review.md",
+      "description": "Perform a comprehensive review of the current product in the repository (assume working directory is the product root). Produce a self-contained markdown file target/temp/swarmout/product_review.md with these sections: 1) Executive summary: short description of what the product is and its main value proposition. 2) Feature inventory: enumerated list of all user-facing and developer-facing features (CLI commands, APIs, plugin system, UI screens, integrations, etc.). 3) Architecture & components: high-level architecture diagram or textual description (modules, main services, data flow). 4) Developer experience: build/test/run steps, extension points, code quality observations. 5) Documentation & onboarding: docs, README, tutorials, examples, gaps. 6) Known limitations/bugs (from code, tests, issues if present). 7) Preliminary gap list vs. market expectations: quick bullets of missing or weak areas (no prioritization required here). 8) Evidence & references: file paths, key files, lines or README excerpts used as evidence. Output must be saved to target/temp/swarmout/product_review.md. If any files or build steps cannot be inspected because of missing files, clearly document that in the Evidence section.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:42:58.102182241Z",
+      "claimed_at": "2026-04-01T15:43:05.614499837Z",
+      "completed_at": "2026-04-01T15:43:48.864806230Z"
+    },
+    {
+      "id": "s2",
+      "title": "Competitor analysis — claude-code (use ../claude-code-sourcemap)",
+      "description": "Analyze the competitor 'claude-code' using the source code located at ../claude-code-sourcemap. Create target/temp/swarmout/claude_analysis.md with these sections: 1) Overview: what the product does and target users. 2) Feature list: enumerate features and capabilities with short descriptions. 3) Strengths: what it does particularly well. 4) Weaknesses/gaps. 5) Unique differentiators. 6) Implementation notes: key architectural or implementation approaches discovered (modules, APIs, language/framework choices), and any relevant code paths or files (include file names and brief snippets or references). 7) Integration points or extensibility mechanisms. 8) Suggested feature ideas (preliminary) that our product could adopt or adapt from claude-code. 9) Limitations in the analysis (e.g., missing files). Save the file to target/temp/swarmout/claude_analysis.md. Do not assume network access; rely on the provided ../claude-code-sourcemap directory. If portions of the source are missing, document what could not be inspected.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:42:58.102482633Z",
+      "claimed_at": "2026-04-01T15:43:05.233179583Z",
+      "completed_at": "2026-04-01T15:44:55.966184338Z"
+    },
+    {
+      "id": "s3",
+      "title": "Competitor analysis — copilot-cli",
+      "description": "Analyze the competitor 'copilot-cli'. First check for a local copy at ../copilot-cli and analyze that if present. If local source is not available, attempt to use README/docs found in the working environment; if network access is available, you may consult the public repository or documentation to gather feature information. Produce target/temp/swarmout/copilot_analysis.md with these sections: 1) Overview and target users. 2) Feature inventory and UX flow (CLI commands, flags, workflows). 3) Strengths and weaknesses. 4) Notable implementation or integration approaches. 5) Unique capabilities that we should consider. 6) Quick list of feature gaps relative to our product. 7) Evidence & references (local file paths or URLs). 8) Analysis limitations (noting if network access was required and whether it succeeded). Save the file to target/temp/swarmout/copilot_analysis.md. If internet access is not available and no local copy exists, produce a best-effort document explaining what could not be analyzed and include any high-level feature info obtainable from available local docs.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:42:58.102973404Z",
+      "claimed_at": "2026-04-01T15:43:06.801054600Z",
+      "completed_at": "2026-04-01T15:46:22.138564155Z"
+    },
+    {
+      "id": "s4",
+      "title": "Competitor analysis — OpenCode (use ../opencode)",
+      "description": "Analyze the competitor 'OpenCode' using the source code located at ../opencode. Produce target/temp/swarmout/opencode_analysis.md with these sections: 1) Overview and positioning. 2) Detailed feature list. 3) Strengths and weaknesses. 4) Architecture and notable implementation patterns (files, modules to reference). 5) Extensibility/integration features. 6) Feature ideas that our product could adopt. 7) Evidence & file references. 8) Any analysis limitations. Save the file to target/temp/swarmout/opencode_analysis.md. If sections of the repo are missing, clearly state what could not be inspected.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:42:58.103970519Z",
+      "claimed_at": "2026-04-01T15:43:10.175653577Z",
+      "completed_at": "2026-04-01T15:44:17.532109812Z"
+    },
+    {
+      "id": "s5",
+      "title": "Competitor analysis — roocode",
+      "description": "Analyze the competitor 'roocode'. First check for a local copy at ../roocode and analyze that if present. If not present, attempt to use local docs or (if allowed) public online resources to build the analysis. Produce target/temp/swarmout/roocode_analysis.md containing: 1) Overview and target audience. 2) Feature inventory (focus on developer workflows, CLI/API, editor integrations). 3) Strengths and weaknesses. 4) Unique technical approaches. 5) Feature ideas and gaps relevant to our product. 6) Evidence and references (local files or URLs). 7) Limitations of your analysis. Save the file to target/temp/swarmout/roocode_analysis.md. If analysis is constrained due to missing files or lack of network access, explicitly document that and provide the best high-level summary you can.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-01T15:42:58.112703463Z",
+      "claimed_at": "2026-04-01T15:43:05.016501782Z",
+      "completed_at": "2026-04-01T15:43:44.566886650Z"
+    },
+    {
+      "id": "s6",
+      "title": "Assemble SWARMOUT2.md — synthesize findings and produce roadmap",
+      "description": "Combine the product review and the four competitor analyses (files created by s1..s5) into a single comprehensive output document target/temp/swarmout/SWARMOUT2.md. This task depends_on s1, s2, s3, s4, s5. The assembled document must include: 1) Executive summary synthesizing how our product compares to competitors. 2) Consolidated list of missing features and opportunities — merge and deduplicate gaps found in the product review and competitor analyses. 3) For each suggested feature addition: a clear description, why it matters (user/market rationale), estimated priority (High/Med/Low), estimated engineering complexity (Tiny/Small/Medium/Large), suggested owner role(s) (e.g., backend, CLI, frontend, docs), and acceptance criteria. 4) A milestone-based implementation plan: at least 4 milestones (e.g., Discovery & Design, Core Engine, Integrations & CLI, UX & Docs, QA & Release), with each milestone containing specific tasks (developer-level tasks), estimated durations (in days or weeks), dependencies between tasks, and suggested team composition. 5) A proposed timeline and resource estimate for completing all high-priority features (e.g., sprints or weeks with assumed team size). 6) Risk analysis and mitigation suggestions for the major items. 7) Appendices: short summaries (1–2 paragraphs) of each competitor (pulling from their analysis files) and a pointer to the detailed analysis files in the same folder. 8) Final checklist of actionable next steps (who to assign first, immediate 1-2 week goals). Write the output file to target/temp/swarmout/SWARMOUT2.md. Ensure all referenced files (product_review.md, claude_analysis.md, copilot_analysis.md, opencode_analysis.md, roocode_analysis.md) are present in target/temp/swarmout and list them in the Appendices with relative paths. If any dependency file is missing, fail with a clear error section at top of SWARMOUT2.md explaining which analysis was not available and why.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-01T15:42:58.114072507Z",
+      "claimed_at": "2026-04-01T15:46:17.429282237Z",
+      "completed_at": "2026-04-01T15:46:17.429283372Z"
+    }
+  ]
+}

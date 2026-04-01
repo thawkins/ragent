@@ -46,6 +46,10 @@ impl Tool for TeamSpawnTool {
                     "type": "string",
                     "description": "Initial task prompt for the teammate. Must be scoped to a SINGLE work item — never list multiple items. Keep under ~500 words; reference files by path rather than pasting content."
                 },
+                "task_id": {
+                    "type": "string",
+                    "description": "Optional task ID to pre-assign to this teammate. If provided, the task is claimed on their behalf; they should use team_task_complete when done."
+                },
                 "model": {
                     "type": "string",
                     "description": "Optional model override in 'provider_id/model_id' format (e.g. 'anthropic/claude-sonnet-4-20250514'). If omitted, the teammate inherits the lead session's model."
@@ -183,6 +187,37 @@ impl Tool for TeamSpawnTool {
             )
             .await?;
 
+        // Extract optional task_id and pre-assign to the teammate if provided.
+        let task_id = input.get("task_id").and_then(|v| v.as_str());
+        let mut task_assignment_msg = String::new();
+        
+        if let Some(task_id) = task_id {
+            if let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name) {
+                if let Ok(task_store) = crate::team::task::TaskStore::open(&team_dir) {
+                    match task_store.pre_assign_task(task_id, &agent_id) {
+                        Ok(_) => {
+                            task_assignment_msg = format!("\n📋 Task '{}' pre-assigned to this teammate.", task_id);
+                            tracing::info!(
+                                agent_id = %agent_id,
+                                task_id = %task_id,
+                                team = %team_name,
+                                "Task pre-assigned to teammate"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_id = %agent_id,
+                                task_id = %task_id,
+                                error = %e,
+                                "Failed to pre-assign task to teammate"
+                            );
+                            task_assignment_msg = format!("\n⚠️ Failed to pre-assign task '{}': {}", task_id, e);
+                        }
+                    }
+                }
+            }
+        }
+
         // Persist memory scope on the member record.
         if memory_scope != crate::team::MemoryScope::None {
             if let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name) {
@@ -204,7 +239,7 @@ impl Tool for TeamSpawnTool {
         Ok(ToolOutput {
             content: format!(
                 "Teammate '{teammate_name}' spawned in team '{team_name}'.\nAgent ID: {agent_id}\n\
-                 Model: {model_display}\n\
+                 Model: {model_display}{task_assignment_msg}\n\
                  ⏳ Teammate is now working. Call `team_wait` (not `wait_tasks`) after all spawns \
                  to block until teammates finish before the lead continues."
             ),
@@ -213,6 +248,7 @@ impl Tool for TeamSpawnTool {
                 "teammate_name": teammate_name,
                 "agent_id": agent_id,
                 "model": model_display,
+                "task_id": task_id,
                 "status": "spawned"
             })),
         })
