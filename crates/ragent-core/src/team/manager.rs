@@ -35,11 +35,32 @@ use crate::team::store::TeamStore;
 use crate::team::TeamMember;
 use crate::tool::TeamManagerInterface;
 
+/// Check if an error message indicates a context-window / token-count overflow.
+///
+/// These errors come from Anthropic, OpenAI, and GitHub Copilot when the prompt
+/// is too long for the model's context window.  They are *not* permanent failures —
+/// the session can be compacted and then retried successfully.
+fn is_token_overflow_error(error_msg: &str) -> bool {
+    let msg = error_msg.to_lowercase();
+    // Anthropic: "prompt token count of N exceeds the limit of M"
+    // OpenAI / Copilot: "context_length_exceeded", "maximum context length"
+    // Generic fallback phrases
+    msg.contains("prompt token count") && msg.contains("exceeds")
+        || msg.contains("context_length_exceeded")
+        || msg.contains("maximum context length")
+        || msg.contains("prompt is too long")
+        || msg.contains("input too large")
+}
+
 /// Check if an error message indicates a permanent (non-retryable) API error.
 ///
-/// Matches HTTP 4xx errors (except 429 Too Many Requests and 408 Timeout)
-/// where retrying won't help (e.g. 401 Unauthorized, 403 Forbidden, 404 Not Found).
+/// Matches HTTP 4xx errors (except 429 Too Many Requests, 408 Timeout, and
+/// token-overflow errors which can be resolved by compacting the session).
 fn is_permanent_api_error(error_msg: &str) -> bool {
+    // Token overflow is recoverable via compaction — never treat as permanent.
+    if is_token_overflow_error(error_msg) {
+        return false;
+    }
     // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
     if let Some(rest) = error_msg.strip_prefix("HTTP ") {
         if let Some(code_str) = rest.split(':').next().or_else(|| rest.split_whitespace().next()) {
@@ -49,6 +70,108 @@ fn is_permanent_api_error(error_msg: &str) -> bool {
         }
     }
     false
+}
+
+/// Compact a teammate session's history by running the compaction agent.
+///
+/// Runs the compaction agent against `session_id`, then replaces the entire
+/// session message history with the resulting summary.  Returns `true` if
+/// compaction succeeded, `false` if it failed (caller should still retry the
+/// original task — even a partial compact may help).
+async fn compact_teammate_session(
+    proc: &Arc<crate::session::processor::SessionProcessor>,
+    session_id: &str,
+    agent: &AgentInfo,
+) -> bool {
+    tracing::info!(session_id, "Compacting teammate session due to token overflow");
+
+    // Use the compaction agent with the same provider/model as the teammate so
+    // it works regardless of which provider is active (Copilot, OpenAI, Ollama …).
+    let mut compact_agent =
+        crate::agent::resolve_agent("compaction", &Default::default()).unwrap_or_else(|_| agent.clone());
+    if let Some(model_ref) = agent.model.clone() {
+        compact_agent.model = Some(model_ref);
+    }
+
+    let summary_prompt =
+        "Summarise the conversation so far into a concise representation that \
+         preserves all important context, decisions, code changes, file paths, \
+         and outstanding tasks. Output only the summary — no preamble."
+            .to_string();
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let compact_result = proc
+        .process_message(session_id, &summary_prompt, &compact_agent, cancel)
+        .await;
+
+    match compact_result {
+        Err(e) => {
+            tracing::warn!(session_id, error = %e, "Compaction LLM call failed");
+            return false;
+        }
+        Ok(_) => {
+            tracing::info!(session_id, "Compaction LLM call completed — replacing history");
+        }
+    }
+
+    // Read back the summary that was just produced (last assistant message).
+    let storage = proc.session_manager.storage().clone();
+    let sid_owned = session_id.to_string();
+    let messages_result = tokio::task::spawn_blocking(move || storage.get_messages(&sid_owned))
+        .await
+        .ok()
+        .and_then(|r| r.ok());
+
+    let summary_text = messages_result
+        .as_ref()
+        .and_then(|msgs| {
+            msgs.iter()
+                .rev()
+                .find(|m| m.role == crate::message::Role::Assistant)
+                .map(|m| m.text_content())
+        });
+
+    let Some(summary) = summary_text else {
+        tracing::warn!(session_id, "Compaction produced no assistant message");
+        return false;
+    };
+    if summary.trim().is_empty() {
+        tracing::warn!(session_id, "Compaction summary is empty");
+        return false;
+    }
+
+    // Replace history: delete all messages, then insert the summary.
+    let storage = proc.session_manager.storage().clone();
+    let sid_owned = session_id.to_string();
+    let summary_msg = crate::message::Message::new(
+        &sid_owned,
+        crate::message::Role::Assistant,
+        vec![crate::message::MessagePart::Text {
+            text: format!("[Conversation compacted]\n\n{}", summary),
+        }],
+    );
+
+    let replace_result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        storage.delete_messages(&sid_owned)?;
+        storage.create_message(&summary_msg)?;
+        Ok(())
+    })
+    .await;
+
+    match replace_result {
+        Ok(Ok(())) => {
+            tracing::info!(session_id, "Teammate session history replaced with summary");
+            true
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(session_id, error = %e, "Failed to replace teammate session history");
+            false
+        }
+        Err(e) => {
+            tracing::warn!(session_id, error = %e, "Storage task panicked during compaction");
+            false
+        }
+    }
 }
 
 // ── System prompt addition for teammate sessions ──────────────────────────────
@@ -571,8 +694,11 @@ impl TeamManager {
         let event_bus_clone = self.event_bus.clone();
         tokio::spawn(async move {
             // Retry with linear backoff for transient API errors (e.g. rate limits).
+            // Token overflow errors get one free compaction attempt before counting
+            // as a retry, so the teammate can resume with a smaller context window.
             const MAX_RETRIES: u32 = 3;
             let mut last_error = String::new();
+            let mut compacted = false; // only compact once per spawn
             for attempt in 0..=MAX_RETRIES {
                 if attempt > 0 {
                     let backoff = std::time::Duration::from_millis(500 * attempt as u64);
@@ -621,7 +747,27 @@ impl TeamManager {
                             "Teammate agent loop error"
                         );
 
-                        // Don't retry permanent errors (4xx except 429 Too Many Requests).
+                        // Token overflow: compact the session history then retry
+                        // without burning a retry attempt (first overflow only).
+                        if is_token_overflow_error(&last_error) && !compacted {
+                            compacted = true;
+                            tracing::warn!(
+                                team = %team_name_clone,
+                                agent_id = %agent_id_clone,
+                                "Token overflow — compacting teammate session before retry"
+                            );
+                            event_bus_clone.publish(Event::AgentError {
+                                session_id: child_sid_clone.clone(),
+                                error: format!(
+                                    "Context window full — compacting history and retrying ({agent_id_clone})"
+                                ),
+                            });
+                            compact_teammate_session(&proc, &child_sid_clone, &agent_clone).await;
+                            // Don't increment attempt — retry immediately after compact
+                            continue;
+                        }
+
+                        // Don't retry permanent errors (4xx except 429 / 408 / token overflow).
                         if is_permanent_api_error(&last_error) {
                             tracing::error!(
                                 team = %team_name_clone,
