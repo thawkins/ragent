@@ -11,6 +11,7 @@
 
 pub mod agent;
 pub mod config;
+pub mod github;
 pub mod error;
 pub mod event;
 pub mod file_ops;
@@ -25,10 +26,10 @@ pub mod permission;
 pub mod provider;
 /// @ file reference parsing, resolution, and fuzzy matching (SPEC §3.34).
 pub mod reference;
-/// Input sanitization and secret redaction utilities.
-pub mod sanitize;
 /// Process resource limits — bounded concurrency for child process spawns.
 pub mod resource;
+/// Input sanitization and secret redaction utilities.
+pub mod sanitize;
 pub mod session;
 /// Skill discovery, loading, argument substitution, and invocation.
 pub mod skill;

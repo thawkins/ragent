@@ -4,13 +4,24 @@
 
 use std::path::Path;
 
-use ragent_core::tool::office_common::{detect_format, resolve_path, truncate_output, OfficeFormat, MAX_OUTPUT_BYTES};
+use ragent_core::tool::office_common::{
+    MAX_OUTPUT_BYTES, OfficeFormat, detect_format, resolve_path, truncate_output,
+};
 
 #[test]
 fn test_detect_format_supported_extensions() {
-    assert_eq!(detect_format(Path::new("/tmp/test.docx")).unwrap(), OfficeFormat::Docx);
-    assert_eq!(detect_format(Path::new("/tmp/test.xlsx")).unwrap(), OfficeFormat::Xlsx);
-    assert_eq!(detect_format(Path::new("/tmp/test.pptx")).unwrap(), OfficeFormat::Pptx);
+    assert_eq!(
+        detect_format(Path::new("/tmp/test.docx")).unwrap(),
+        OfficeFormat::Docx
+    );
+    assert_eq!(
+        detect_format(Path::new("/tmp/test.xlsx")).unwrap(),
+        OfficeFormat::Xlsx
+    );
+    assert_eq!(
+        detect_format(Path::new("/tmp/test.pptx")).unwrap(),
+        OfficeFormat::Pptx
+    );
 }
 
 #[test]

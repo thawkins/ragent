@@ -17,11 +17,11 @@ impl Tool for CancelTaskTool {
         "cancel_task"
     }
 
-        /// Returns a human-readable description of what the tool does.
-        fn description(&self) -> &str {
-            "Cancel a running background sub-agent task. Requires the task_id \
+    /// Returns a human-readable description of what the tool does.
+    fn description(&self) -> &str {
+        "Cancel a running background sub-agent task. Requires the task_id \
                returned by new_task when background: true was used."
-        }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

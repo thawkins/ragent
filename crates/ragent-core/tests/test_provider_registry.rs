@@ -17,6 +17,10 @@ fn test_default_provider_registry_has_all_providers() {
         "Missing generic_openai provider"
     );
     assert!(ids.contains(&"copilot"), "Missing copilot provider");
+    assert!(
+        ids.contains(&"ollama_cloud"),
+        "Missing ollama_cloud provider"
+    );
     assert!(ids.contains(&"ollama"), "Missing ollama provider");
 }
 
@@ -52,6 +56,10 @@ fn test_provider_registry_get() {
     let copilot = registry.get("copilot");
     assert!(copilot.is_some());
     assert_eq!(copilot.unwrap().name(), "GitHub Copilot");
+
+    let ollama_cloud = registry.get("ollama_cloud");
+    assert!(ollama_cloud.is_some());
+    assert_eq!(ollama_cloud.unwrap().name(), "Ollama Cloud");
 
     let ollama = registry.get("ollama");
     assert!(ollama.is_some());

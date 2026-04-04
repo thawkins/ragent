@@ -1,0 +1,105 @@
+{
+  "name": "swarm-20260404-123549",
+  "lead_session_id": "2ad8e79f-091c-48cc-9074-2659e9e87300",
+  "created_at": "2026-04-04T12:35:49.326654519Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "b274617c-995b-4a71-a44f-555623189c47",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.333676681Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze ClaudeCode Competitor\n\n**Task ID:** s1\n**Title:** Analyze ClaudeCode Competitor\n\nReview the source code in ../claude-code-sourcemap to identify key features and capabilities of ClaudeCode. Document the findings including unique functionalities, user interface elements, and technical implementations that could be valuable additions to our product.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "e2b5ecba-2d4c-4d9f-9b5e-24349cd0aac3",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.334223457Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Copilot-CLI Competitor\n\n**Task ID:** s2\n**Title:** Analyze Copilot-CLI Competitor\n\nResearch and analyze the copilot-cli product to understand its features, capabilities, and user experience. Document key functionalities, command-line interface patterns, and any innovative approaches that could enhance our product.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "90e639a9-bebc-4c4a-b61f-10635283fa94",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.334808233Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze OpenCode Competitor\n\n**Task ID:** s3\n**Title:** Analyze OpenCode Competitor\n\nExamine the source code in ../opencode to identify core features and architectural decisions of OpenCode. Document significant functionalities, development workflows, and technical implementations that might benefit our product.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "1c1bff3d-0156-420e-bcce-d373d176de32",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.335546235Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Roocode Competitor\n\n**Task ID:** s4\n**Title:** Analyze Roocode Competitor\n\nInvestigate the roocode product to understand its feature set, user experience, and technical approach. Document notable capabilities, interface designs, and implementation strategies that could be incorporated into our solution.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "d9c2b618-ec18-4f5b-aa50-4a5d925a61e3",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.336395552Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Product Review and Gap Analysis\n\n**Task ID:** s5\n**Title:** Product Review and Gap Analysis\n\nConduct a comprehensive review of our current product to identify existing features and limitations. Compare against documented competitor analyses to determine gaps and opportunities for improvement.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "200c32e5-4c8d-4a6e-b6dd-2c25f35e34f0",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.337462331Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Create SWARMOUT2.md Feature Recommendations\n\n**Task ID:** s6\n**Title:** Create SWARMOUT2.md Feature Recommendations\n\nBased on all competitor analyses and product review, create a document called SWARMOUT2.md in target/temp/swarmout/ directory. Include detailed feature suggestions, implementation priorities, and rationale for each proposed addition.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s7",
+      "agent_id": "tm-007",
+      "session_id": "9430574f-6c50-4e27-95fc-8038ae0651c2",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:35:49.338819784Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Generate Implementation Plan with Milestones\n\n**Task ID:** s7\n**Title:** Generate Implementation Plan with Milestones\n\nCreate a detailed implementation plan within SWARMOUT2.md that includes specific milestones, tasks, estimated effort, and dependencies for implementing all recommended features. Organize by priority and logical development sequence.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s7\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

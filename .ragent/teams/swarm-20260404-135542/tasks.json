@@ -1,0 +1,78 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze ClaudeCode Competitor",
+      "description": "Review the source code in ../claude-code-sourcemap to analyze ClaudeCode features. Identify key functionalities, user interface elements, and unique selling points. Document your findings in a competitive analysis report focusing on what makes this product distinctive.",
+      "status": "completed",
+      "assigned_to": "tm-001",
+      "depends_on": [],
+      "created_at": "2026-04-04T13:55:42.203147789Z",
+      "claimed_at": "2026-04-04T13:59:34.386478618Z",
+      "completed_at": "2026-04-04T13:59:34.386479810Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze Copilot-CLI Competitor",
+      "description": "Research and analyze the Copilot-CLI product (no source code provided). Focus on its command-line interface capabilities, automation features, integration methods, and user experience. Document these findings in a competitive analysis report.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-04T13:55:42.203301591Z",
+      "claimed_at": "2026-04-04T13:59:45.478147644Z",
+      "completed_at": "2026-04-04T13:59:45.478148610Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze OpenCode Competitor",
+      "description": "Review the source code in ../opencode to analyze OpenCode features. Identify core functionalities, development tools, supported languages, and workflow capabilities. Create a comprehensive analysis of this competitor's strengths and weaknesses.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-04T13:55:42.203519630Z",
+      "claimed_at": "2026-04-04T14:04:20.826530187Z",
+      "completed_at": "2026-04-04T14:04:20.826531547Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze RooCode Competitor",
+      "description": "Research and analyze the RooCode product. Focus on its development environment features, collaboration tools, deployment capabilities, and target audience. Document your findings in a competitive analysis report covering its market positioning.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-04T13:55:42.203735626Z",
+      "claimed_at": "2026-04-04T13:57:53.337751338Z",
+      "completed_at": "2026-04-04T13:57:53.337752396Z"
+    },
+    {
+      "id": "s5",
+      "title": "Product Review and Feature Gap Analysis",
+      "description": "Review our current product thoroughly. Compare it against the competitor analysis reports from tasks s1-s4. Identify missing features, areas for improvement, and opportunities for differentiation. Document these gaps in a comprehensive feature gap analysis.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "created_at": "2026-04-04T13:55:42.203983093Z",
+      "claimed_at": "2026-04-04T14:10:44.615091608Z",
+      "completed_at": "2026-04-04T14:10:44.615092957Z"
+    },
+    {
+      "id": "s6",
+      "title": "Create SWARMOUT2.md Implementation Plan",
+      "description": "Using the feature gap analysis from task s5, create a detailed document called SWARMOUT2.md in the target/temp/swarmout directory. Include suggested feature additions, implementation milestones, specific tasks for each milestone, estimated effort levels, and priority rankings. Structure the document with clear sections for executive summary, feature recommendations, milestone plans, and implementation roadmap.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s5"
+      ],
+      "created_at": "2026-04-04T13:55:42.204278834Z",
+      "claimed_at": "2026-04-04T14:14:09.027714129Z",
+      "completed_at": "2026-04-04T14:14:09.027716335Z"
+    }
+  ]
+}

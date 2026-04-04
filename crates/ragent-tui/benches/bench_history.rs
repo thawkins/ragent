@@ -51,25 +51,21 @@ fn bench_save_history(c: &mut Criterion) {
     let mut group = c.benchmark_group("save_history");
 
     for &count in &[100, 500, 2_000] {
-        group.bench_with_input(
-            BenchmarkId::new("entries", count),
-            &count,
-            |b, &n| {
-                let dir = tempfile::tempdir().expect("tmpdir");
-                let hist_path = dir.path().join("bench_history.txt");
-                let mut app = make_app();
-                app.set_history_file(hist_path.clone());
-                // Populate history
-                for i in 0..n {
-                    app.input_history.push(format!(
-                        "benchmark entry {i} with some typical length content 🦀"
-                    ));
-                }
-                b.iter(|| {
-                    let _ = app.save_history();
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("entries", count), &count, |b, &n| {
+            let dir = tempfile::tempdir().expect("tmpdir");
+            let hist_path = dir.path().join("bench_history.txt");
+            let mut app = make_app();
+            app.set_history_file(hist_path.clone());
+            // Populate history
+            for i in 0..n {
+                app.input_history.push(format!(
+                    "benchmark entry {i} with some typical length content 🦀"
+                ));
+            }
+            b.iter(|| {
+                let _ = app.save_history();
+            });
+        });
     }
     group.finish();
 }
@@ -78,28 +74,24 @@ fn bench_load_history(c: &mut Criterion) {
     let mut group = c.benchmark_group("load_history");
 
     for &count in &[100, 500, 2_000] {
-        group.bench_with_input(
-            BenchmarkId::new("entries", count),
-            &count,
-            |b, &n| {
-                let dir = tempfile::tempdir().expect("tmpdir");
-                let hist_path = dir.path().join("bench_history.txt");
-                // Pre-populate and save
-                let mut app = make_app();
-                app.set_history_file(hist_path.clone());
-                for i in 0..n {
-                    app.input_history.push(format!(
-                        "benchmark entry {i} with some typical length content 🦀"
-                    ));
-                }
-                let _ = app.save_history();
+        group.bench_with_input(BenchmarkId::new("entries", count), &count, |b, &n| {
+            let dir = tempfile::tempdir().expect("tmpdir");
+            let hist_path = dir.path().join("bench_history.txt");
+            // Pre-populate and save
+            let mut app = make_app();
+            app.set_history_file(hist_path.clone());
+            for i in 0..n {
+                app.input_history.push(format!(
+                    "benchmark entry {i} with some typical length content 🦀"
+                ));
+            }
+            let _ = app.save_history();
 
-                b.iter(|| {
-                    app.input_history.clear();
-                    let _ = app.load_history();
-                });
-            },
-        );
+            b.iter(|| {
+                app.input_history.clear();
+                let _ = app.load_history();
+            });
+        });
     }
     group.finish();
 }

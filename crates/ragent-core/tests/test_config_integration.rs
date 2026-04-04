@@ -2,8 +2,6 @@
 
 use ragent_core::config::*;
 
-
-
 // ── Config merging sequences ─────────────────────────────────────
 
 #[test]

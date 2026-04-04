@@ -23,8 +23,15 @@ fn ctx() -> ToolContext {
 
 #[tokio::test]
 async fn test_grep_basic_no_glob() {
-    let result = GrepTool.execute(json!({"pattern": "GrepTool"}), &ctx()).await.unwrap();
-    assert!(result.content.contains("match"), "Expected matches but got: {}", result.content);
+    let result = GrepTool
+        .execute(json!({"pattern": "GrepTool"}), &ctx())
+        .await
+        .unwrap();
+    assert!(
+        result.content.contains("match"),
+        "Expected matches but got: {}",
+        result.content
+    );
 }
 
 /// Regression: old implementation matched include globs against full absolute path,
@@ -32,21 +39,40 @@ async fn test_grep_basic_no_glob() {
 /// gitignore semantics (filename-only matching for patterns without '/').
 #[tokio::test]
 async fn test_grep_include_single_star_matches_subdirs() {
-    let result = GrepTool.execute(json!({"pattern": "GrepTool", "include": "*.rs"}), &ctx()).await.unwrap();
-    assert!(result.content.contains("match"),
+    let result = GrepTool
+        .execute(json!({"pattern": "GrepTool", "include": "*.rs"}), &ctx())
+        .await
+        .unwrap();
+    assert!(
+        result.content.contains("match"),
         "include '*.rs' should match files in subdirectories (gitignore semantics), got: {}",
-        result.content);
+        result.content
+    );
 }
 
 #[tokio::test]
 async fn test_grep_include_doublestar() {
-    let result = GrepTool.execute(json!({"pattern": "GrepTool", "include": "**/*.rs"}), &ctx()).await.unwrap();
-    assert!(result.content.contains("match"), "Expected matches with **/*.rs but got: {}", result.content);
+    let result = GrepTool
+        .execute(json!({"pattern": "GrepTool", "include": "**/*.rs"}), &ctx())
+        .await
+        .unwrap();
+    assert!(
+        result.content.contains("match"),
+        "Expected matches with **/*.rs but got: {}",
+        result.content
+    );
 }
 
 /// .git/ internals should not appear in search results.
 #[tokio::test]
 async fn test_grep_skips_git_dir() {
-    let result = GrepTool.execute(json!({"pattern": "GrepTool"}), &ctx()).await.unwrap();
-    assert!(!result.content.contains(".git/"), "Should not search .git/ internals, got: {}", result.content);
+    let result = GrepTool
+        .execute(json!({"pattern": "GrepTool"}), &ctx())
+        .await
+        .unwrap();
+    assert!(
+        !result.content.contains(".git/"),
+        "Should not search .git/ internals, got: {}",
+        result.content
+    );
 }

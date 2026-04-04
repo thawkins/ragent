@@ -198,5 +198,9 @@ fn test_plan_enter_registered() {
     assert!(registry.get("plan_enter").is_some());
     // Ensure we register a reasonable number of built-in tools. Exact count may
     // vary as tools are added; require at least the historical baseline.
-    assert!(names.len() >= 31, "expected at least 31 tools, found {}", names.len());
+    assert!(
+        names.len() >= 31,
+        "expected at least 31 tools, found {}",
+        names.len()
+    );
 }

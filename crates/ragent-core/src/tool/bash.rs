@@ -2,13 +2,52 @@
 //!
 //! Provides [`BashTool`], which runs shell commands via `bash -c` in the
 //! agent's working directory with configurable timeouts.
+//!
+//! Shell state (current directory and exported environment variables) is
+//! persisted across invocations using a per-session state file so that
+//! `cd subdir` and `export FOO=bar` survive between tool calls.
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::time::Instant;
 use tokio::process::Command;
 
+use crate::event::Event;
 use super::{Tool, ToolContext, ToolOutput};
+
+/// Derive a filesystem-safe identifier from a session ID.
+///
+/// Replaces any character that is not alphanumeric or `-` with `_` so that
+/// the result is safe to embed directly in a file path.
+fn safe_session_id(session_id: &str) -> String {
+    session_id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect()
+}
+
+/// Return the path of the persistent state file for the given session.
+pub fn state_file_path(session_id: &str) -> String {
+    format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id))
+}
+
+/// Parse the current working directory from a state file's contents.
+///
+/// The state file may contain lines written by `export -p` (e.g.
+/// `declare -x PWD="/some/dir"`) **and** an explicit trailing line in the
+/// form `RAGENT_PWD=/some/dir` which we prefer because it is unambiguous.
+fn parse_cwd_from_state(state: &str) -> Option<String> {
+    // Prefer the explicit marker we append after every command.
+    for line in state.lines().rev() {
+        if let Some(val) = line.strip_prefix("RAGENT_PWD=") {
+            let v = val.trim_matches('"').trim_matches('\'');
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
 
 /// Executes shell commands via `bash -c` and returns combined stdout/stderr output.
 ///
@@ -18,32 +57,81 @@ pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
-// Safe commands: only these exact commands (or with specific args) are allowed without restrictions.
-// Used when "safe mode" is enabled in session config.
+// Safe commands: only these exact prefixes are auto-approved without user prompting.
+// The check is prefix-based: a command is safe if it equals the entry exactly OR starts
+// with the entry followed by a space (so "ls" matches "ls -la", "git" matches "git status", etc.).
 #[allow(dead_code)]
 const SAFE_COMMANDS: &[&str] = &[
-    "git status",
-    "git diff",
-    "git log",
-    "git branch",
+    // --- File management ---
+    "ls",
+    "cd",
     "pwd",
-    "tree",
+    "mkdir",
+    "touch",
+    "cp",
+    "mv",
+    // NOTE: "rm" is intentionally excluded — prefix matching cannot distinguish
+    // safe "rm file.txt" from destructive "rm -rf /". DENIED_PATTERNS blocks the
+    // destructive variants; individual rm calls go through normal permission flow.
+    // --- File reading & search ---
+    "cat",
+    "head",
+    "tail",
+    "grep",
+    "egrep",
+    "fgrep",
+    "find",
+    "rg",   // ripgrep
+    "wc",
+    // --- Version control ---
+    "git",  // covers all git subcommands (clone, add, commit, push, pull, status, diff, log …)
+    "gh",   // GitHub CLI
+    // --- Build / package management ---
+    "cargo",
+    "rustc",
+    "rustfmt",
+    "clippy-driver",
+    "npm",
+    "yarn",
+    "pnpm",
+    "node",
+    "npx",
+    "python3",
+    "python",
+    "pip",
+    "pip3",
+    "make",
+    "docker-compose",
+    // --- Text / data utilities ---
+    "echo",
+    "printf",
+    "chmod",
+    "jq",
+    "yq",
+    "sed",
+    "awk",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "xargs",
     "date",
     "which",
+    "tree",
+    "diff",
+    "patch",
 ];
 
 // Banned commands: these are never allowed (unless YOLO mode enabled).
 // High-risk tools that could exfiltrate data or connect to external systems.
 const BANNED_COMMANDS: &[&str] = &[
-    "curl",
-    "wget",
-    "nc",
-    "netcat",
-    "telnet",
-    "axel",
-    "aria2c",
-    "lynx",
-    "w3m",
+    "curl", "wget", "nc", "netcat", "telnet", "axel", "aria2c", "lynx", "w3m",
+    // Attack and exploitation tools
+    "nmap", "masscan", "nikto", "sqlmap", "hydra", "john", "hashcat",
+    "aircrack", "metasploit", "msfconsole", "msfvenom", "burpsuite",
+    "ettercap", "arpspoof",
+    // tcpdump and wireshark are blocked by default but can be enabled via YOLO mode
+    "tcpdump", "wireshark",
 ];
 
 const DENIED_PATTERNS: &[&str] = &[
@@ -77,43 +165,83 @@ const DENIED_PATTERNS: &[&str] = &[
     "insmod",
     "modprobe -r",
     "sysctl -w",
+    // Privilege escalation commands
+    "sudo ",
+    "sudo\t",
+    "su -",
+    "su root",
+    "doas ",
+    // User/group manipulation
+    "useradd",
+    "usermod",
+    "groupadd",
+    "passwd ",
+    // System configuration
+    "visudo",
+    "crontab -",
+    "systemctl disable",
+    "systemctl mask",
+    "chattr +i",
+    // Destructive git operations
+    "git push --force",
+    "git push -f ",
+    "git push origin --delete",
+    // Boot/firmware
+    "grub-install",
+    "efibootmgr",
+    // More destructive patterns
+    "rm -rf ~",
+    "rm -rf $HOME",
+    "rm -rf .",
+    "chmod 000 /",
+    "chmod -R 000",
+    // Data exfiltration via pipes
+    "> /dev/tcp",
+    "bash -i >&",
+    "/dev/tcp/",
+    "/dev/udp/",
 ];
 
 /// Check if command is in the safe whitelist (exact match or with allowed args).
-#[allow(dead_code)]
-fn is_safe_command(cmd: &str) -> bool {
+pub fn is_safe_command(cmd: &str) -> bool {
     let trimmed = cmd.trim();
-    SAFE_COMMANDS.iter().any(|safe| {
-        trimmed == *safe || trimmed.starts_with(&format!("{} ", safe))
-    })
+    SAFE_COMMANDS
+        .iter()
+        .any(|safe| trimmed == *safe || trimmed.starts_with(&format!("{} ", safe)))
 }
 
 /// Check if command uses a banned tool (e.g., curl, wget).
 fn contains_banned_command(cmd: &str) -> bool {
     let trimmed = cmd.trim().to_lowercase();
-    BANNED_COMMANDS.iter().any(|banned| {
-        trimmed.contains(banned)
-    })
+    BANNED_COMMANDS
+        .iter()
+        .any(|banned| trimmed.contains(banned))
 }
 
-/// Check if command tries to escape the working directory (e.g., cd ../).
-/// This is a basic guard; determined by checking if cd command contains `..` or `/`.
+/// Check if command tries to escape the working directory.
+/// Rejects cd/pushd with .., /, ~, $HOME, or ${HOME}.
 fn is_directory_escape_attempt(cmd: &str, _working_dir: &std::path::Path) -> bool {
     let cmd_lower = cmd.to_lowercase();
-    if !cmd_lower.contains("cd ") {
-        return false;
-    }
 
-    // Simple heuristic: reject "cd" with "..", "/", or paths starting with /
-    // (absolute paths would try to escape the working directory)
-    if cmd.contains("cd ..") {
-        return true;
+    for cd_cmd in &["cd ", "pushd "] {
+        if cmd_lower.contains(cd_cmd) {
+            if cmd.contains("cd ..") || cmd.contains("pushd ..") {
+                return true;
+            }
+            if cmd.contains("cd /") || cmd.contains("pushd /") {
+                return true;
+            }
+            if cmd.contains("cd ~") || cmd.contains("pushd ~") {
+                return true;
+            }
+            if cmd.contains("cd $HOME") || cmd.contains("pushd $HOME") {
+                return true;
+            }
+            if cmd.contains("cd ${HOME}") || cmd.contains("pushd ${HOME}") {
+                return true;
+            }
+        }
     }
-    if cmd.contains("cd /") {
-        return true;
-    }
-    // If cd argument doesn't look relative or is a special path, assume escape attempt
-    // For now, allow cd with relative paths (cd ./foo, cd foo)
     false
 }
 
@@ -122,11 +250,7 @@ fn is_directory_escape_attempt(cmd: &str, _working_dir: &std::path::Path) -> boo
 async fn validate_bash_syntax(cmd: &str) -> Result<()> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        Command::new("sh")
-            .arg("-n")
-            .arg("-c")
-            .arg(cmd)
-            .output(),
+        Command::new("sh").arg("-n").arg("-c").arg(cmd).output(),
     )
     .await;
 
@@ -149,11 +273,11 @@ impl Tool for BashTool {
         "bash"
     }
 
-        /// Returns a human-readable description of what the tool does.
-        fn description(&self) -> &str {
-            "Execute a shell command and return stdout and stderr. \
+    /// Returns a human-readable description of what the tool does.
+    fn description(&self) -> &str {
+        "Execute a shell command and return stdout and stderr. \
                Commands are run with bash -c in the working directory."
-        }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -194,6 +318,10 @@ impl Tool for BashTool {
             working_dir = %ctx.working_dir.display(),
             "Executing bash command"
         );
+
+        if is_safe_command(command) {
+            tracing::info!("Safe bash command auto-approved");
+        }
 
         // CC1-T4: Check for banned commands (curl, wget, nc, etc.)
         if contains_banned_command(command) {
@@ -239,19 +367,62 @@ impl Tool for BashTool {
         // Acquire a process-spawn permit to bound concurrency.
         let _permit = crate::resource::acquire_process_permit().await?;
 
+        // ── Persistent shell state ────────────────────────────────────────────
+        // Write the user command to a temporary script file so that we can
+        // source the persisted environment before running it without any
+        // quoting issues.
+        let state_file = state_file_path(&ctx.session_id);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros();
+        let script_file = format!(
+            "/tmp/ragent_cmd_{}_{}.sh",
+            safe_session_id(&ctx.session_id),
+            timestamp
+        );
+        std::fs::write(&script_file, command)
+            .context("Failed to write command to temporary script file")?;
+
+        // Wrapper: restore state → run user script → save new state.
+        // RAGENT_PWD is appended as an unambiguous marker for the cwd.
+        let wrapper = format!(
+            "STATE_FILE=\"{state_file}\"\n\
+             if [ -f \"$STATE_FILE\" ]; then\n\
+               . \"$STATE_FILE\" 2>/dev/null\n\
+               cd \"${{RAGENT_PWD:-}}\" 2>/dev/null || true\n\
+             fi\n\
+             bash \"{script_file}\"\n\
+             EXIT_CODE=$?\n\
+             export -p 2>/dev/null > \"$STATE_FILE\" || true\n\
+             printf 'RAGENT_PWD=%s\\n' \"$(pwd)\" >> \"$STATE_FILE\"\n\
+             rm -f \"{script_file}\"\n\
+             exit $EXIT_CODE\n"
+        );
+
         let start = Instant::now();
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(timeout_secs),
             Command::new("bash")
                 .arg("-c")
-                .arg(command)
+                .arg(&wrapper)
                 .current_dir(&ctx.working_dir)
                 .output(),
         )
         .await;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // After execution, read the saved cwd and publish ShellCwdChanged.
+        if let Ok(state_content) = std::fs::read_to_string(&state_file) {
+            if let Some(cwd) = parse_cwd_from_state(&state_content) {
+                ctx.event_bus.publish(Event::ShellCwdChanged {
+                    session_id: ctx.session_id.clone(),
+                    cwd,
+                });
+            }
+        }
 
         match result {
             Ok(Ok(output)) => {
@@ -278,7 +449,7 @@ impl Tool for BashTool {
                 const FIRST_CHARS: usize = 15_000;
                 const LAST_CHARS: usize = 15_000;
                 const MAX_OUTPUT: usize = FIRST_CHARS + LAST_CHARS + 1000; // allow for separator
-                
+
                 if content.len() > MAX_OUTPUT {
                     let first_part = &content[..FIRST_CHARS.min(content.len())];
                     let remainder_len = content.len() - FIRST_CHARS;
@@ -287,7 +458,7 @@ impl Tool for BashTool {
                     } else {
                         &content[FIRST_CHARS..]
                     };
-                    
+
                     let omitted = remainder_len.saturating_sub(LAST_CHARS);
                     content = format!(
                         "{}\n\n... ({} lines omitted) ...\n\n{}",

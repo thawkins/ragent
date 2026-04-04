@@ -249,6 +249,13 @@ impl LlmClient for AnthropicClient {
                 tracing::warn!(error = %e, "Failed to read response body");
                 String::new()
             });
+            tracing::warn!(
+                url = %url,
+                model = %request.model,
+                status = %status,
+                error = %body,
+                "Anthropic API error"
+            );
             bail!("Anthropic API error ({}): {}", status, body);
         }
 

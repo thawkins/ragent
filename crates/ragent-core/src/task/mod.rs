@@ -345,30 +345,31 @@ impl TaskManager {
             let start = Instant::now();
 
             let config = crate::config::Config::default();
-            let mut agent_info = match crate::agent::resolve_agent_with_customs(&agent, &config, &working_dir_buf) {
-                Ok(a) => a,
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    {
-                        let mut t = tasks.write().await;
-                        if let Some(entry) = t.get_mut(&tid) {
-                            entry.status = TaskStatus::Failed;
-                            entry.error = Some(error_msg.clone());
-                            entry.completed_at = Some(Utc::now());
+            let mut agent_info =
+                match crate::agent::resolve_agent_with_customs(&agent, &config, &working_dir_buf) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        {
+                            let mut t = tasks.write().await;
+                            if let Some(entry) = t.get_mut(&tid) {
+                                entry.status = TaskStatus::Failed;
+                                entry.error = Some(error_msg.clone());
+                                entry.completed_at = Some(Utc::now());
+                            }
                         }
+                        cancel_flags.write().await.remove(&tid);
+                        event_bus.publish(Event::SubagentComplete {
+                            session_id: parent_sid,
+                            task_id: tid,
+                            child_session_id: csid,
+                            summary: format!("Error: {error_msg}"),
+                            success: false,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        });
+                        return;
                     }
-                    cancel_flags.write().await.remove(&tid);
-                    event_bus.publish(Event::SubagentComplete {
-                        session_id: parent_sid,
-                        task_id: tid,
-                        child_session_id: csid,
-                        summary: format!("Error: {error_msg}"),
-                        success: false,
-                        duration_ms: start.elapsed().as_millis() as u64,
-                    });
-                    return;
-                }
-            };
+                };
             agent_info.mode = AgentMode::Subagent;
 
             if let Some(ref model_str) = model {

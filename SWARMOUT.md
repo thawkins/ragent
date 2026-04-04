@@ -1031,6 +1031,14 @@ ragent run --no-tui --yes "Fix bug"
 **Duration:** 6-8 weeks  
 **Goal:** Deliver high-impact, low-complexity features to close immediate gaps
 
+**Progress Tracker:** mark each task complete here as it lands.
+
+- [x] Task 1.1: Cost Tracking System
+- [x] Task 1.2: Git Context Auto-Injection
+- [x] Task 1.3: README Auto-Injection
+- [x] Task 1.4: Safe Command Whitelist
+- [x] Task 1.5: ThinkTool for Agent Reasoning
+
 #### Task 1.1: Cost Tracking System
 **Priority:** P0 | **Effort:** 5 days | **Assignee:** TBD | **Dependencies:** None
 

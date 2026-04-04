@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::Duration;
 
 use super::policy;

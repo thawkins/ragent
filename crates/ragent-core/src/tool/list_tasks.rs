@@ -20,11 +20,11 @@ impl Tool for ListTasksTool {
         "list_tasks"
     }
 
-        /// Returns a human-readable description of what the tool does.
-        fn description(&self) -> &str {
-            "List sub-agent tasks for the current session. Shows running and completed \
+    /// Returns a human-readable description of what the tool does.
+    fn description(&self) -> &str {
+        "List sub-agent tasks for the current session. Shows running and completed \
                background tasks with their status, agent, and result summary."
-        }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -120,7 +120,12 @@ impl Tool for ListTasksTool {
             .count();
 
         let mut output = String::new();
-        let _ = write!(output, "Sub-agent tasks ({} total, {} running):\n\n", filtered.len(), running_count);
+        let _ = write!(
+            output,
+            "Sub-agent tasks ({} total, {} running):\n\n",
+            filtered.len(),
+            running_count
+        );
         output.push_str("| ID (short) | Agent | Status | Background | Duration | Summary |\n");
         output.push_str("|------------|-------|--------|------------|----------|---------|");
 
@@ -159,7 +164,11 @@ impl Tool for ListTasksTool {
 
             let bg = if task.background { "yes" } else { "no" };
 
-            let _ = write!(output, "\n| {short_id} | {} | {status} | {bg} | {duration} | {summary_short} |", task.agent_name);
+            let _ = write!(
+                output,
+                "\n| {short_id} | {} | {status} | {bg} | {duration} | {summary_short} |",
+                task.agent_name
+            );
         }
 
         Ok(ToolOutput {

@@ -87,32 +87,20 @@ fn bench_cursor_byte_pos(c: &mut Criterion) {
 
         let mut app = make_app();
         app.input = mixed.clone();
-        group.bench_with_input(
-            BenchmarkId::new("mixed_mid", len),
-            &mid,
-            |b, &idx| {
-                b.iter(|| app.cursor_byte_pos_at_char_index(idx));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mixed_mid", len), &mid, |b, &idx| {
+            b.iter(|| app.cursor_byte_pos_at_char_index(idx));
+        });
 
         app.input = ascii.clone();
-        group.bench_with_input(
-            BenchmarkId::new("ascii_mid", len),
-            &mid,
-            |b, &idx| {
-                b.iter(|| app.cursor_byte_pos_at_char_index(idx));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("ascii_mid", len), &mid, |b, &idx| {
+            b.iter(|| app.cursor_byte_pos_at_char_index(idx));
+        });
 
         // Benchmark: look up position at the end (worst case for linear scan)
         app.input = mixed;
-        group.bench_with_input(
-            BenchmarkId::new("mixed_end", len),
-            &len,
-            |b, &idx| {
-                b.iter(|| app.cursor_byte_pos_at_char_index(idx));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mixed_end", len), &len, |b, &idx| {
+            b.iter(|| app.cursor_byte_pos_at_char_index(idx));
+        });
     }
     group.finish();
 }
@@ -127,31 +115,23 @@ fn bench_insert_char(c: &mut Criterion) {
     for &len in &[1_000, 10_000, 100_000] {
         let base = generate_mixed_string(len);
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", len),
-            &base,
-            |b, input| {
-                let mut app = make_app();
-                b.iter(|| {
-                    app.input.clone_from(input);
-                    app.input_cursor = len / 2;
-                    app.insert_char_at_cursor('Z');
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
+            let mut app = make_app();
+            b.iter(|| {
+                app.input.clone_from(input);
+                app.input_cursor = len / 2;
+                app.insert_char_at_cursor('Z');
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("end", len),
-            &base,
-            |b, input| {
-                let mut app = make_app();
-                b.iter(|| {
-                    app.input.clone_from(input);
-                    app.input_cursor = len;
-                    app.insert_char_at_cursor('Z');
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("end", len), &base, |b, input| {
+            let mut app = make_app();
+            b.iter(|| {
+                app.input.clone_from(input);
+                app.input_cursor = len;
+                app.insert_char_at_cursor('Z');
+            });
+        });
     }
     group.finish();
 }
@@ -163,18 +143,14 @@ fn bench_insert_text(c: &mut Criterion) {
     for &len in &[1_000, 10_000, 100_000] {
         let base = generate_mixed_string(len);
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", len),
-            &base,
-            |b, input| {
-                let mut app = make_app();
-                b.iter(|| {
-                    app.input.clone_from(input);
-                    app.input_cursor = len / 2;
-                    app.insert_text_at_cursor(paste);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
+            let mut app = make_app();
+            b.iter(|| {
+                app.input.clone_from(input);
+                app.input_cursor = len / 2;
+                app.insert_text_at_cursor(paste);
+            });
+        });
     }
     group.finish();
 }
@@ -185,18 +161,14 @@ fn bench_delete_prev_char(c: &mut Criterion) {
     for &len in &[1_000, 10_000, 100_000] {
         let base = generate_mixed_string(len);
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", len),
-            &base,
-            |b, input| {
-                let mut app = make_app();
-                b.iter(|| {
-                    app.input.clone_from(input);
-                    app.input_cursor = len / 2;
-                    app.delete_prev_char();
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
+            let mut app = make_app();
+            b.iter(|| {
+                app.input.clone_from(input);
+                app.input_cursor = len / 2;
+                app.delete_prev_char();
+            });
+        });
     }
     group.finish();
 }
@@ -207,18 +179,14 @@ fn bench_delete_next_char(c: &mut Criterion) {
     for &len in &[1_000, 10_000, 100_000] {
         let base = generate_mixed_string(len);
 
-        group.bench_with_input(
-            BenchmarkId::new("mid", len),
-            &base,
-            |b, input| {
-                let mut app = make_app();
-                b.iter(|| {
-                    app.input.clone_from(input);
-                    app.input_cursor = len / 2;
-                    app.delete_next_char();
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("mid", len), &base, |b, input| {
+            let mut app = make_app();
+            b.iter(|| {
+                app.input.clone_from(input);
+                app.input_cursor = len / 2;
+                app.delete_next_char();
+            });
+        });
     }
     group.finish();
 }

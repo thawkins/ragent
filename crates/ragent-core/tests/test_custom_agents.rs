@@ -13,9 +13,7 @@
 use ragent_core::agent::custom::{
     find_project_agents_dir, global_agents_dir, load_custom_agents, record_to_agent_info,
 };
-use ragent_core::agent::oasf::{
-    OasfAgentRecord, OasfModule, RAGENT_MODULE_TYPE,
-};
+use ragent_core::agent::oasf::{OasfAgentRecord, OasfModule, RAGENT_MODULE_TYPE};
 use ragent_core::agent::{AgentMode, build_system_prompt, create_builtin_agents};
 use ragent_core::permission::PermissionAction;
 use serde_json::json;
@@ -47,7 +45,11 @@ fn minimal_record(name: &str, description: &str, system_prompt: &str) -> OasfAge
 }
 
 /// Build a record with a custom payload value.
-fn record_with_payload(name: &str, description: &str, payload: serde_json::Value) -> OasfAgentRecord {
+fn record_with_payload(
+    name: &str,
+    description: &str,
+    payload: serde_json::Value,
+) -> OasfAgentRecord {
     OasfAgentRecord {
         name: name.to_string(),
         description: description.to_string(),
@@ -204,7 +206,10 @@ fn test_error_empty_system_prompt() {
         json!({ "system_prompt": "   " }),
     );
     let err = record_to_agent_info(&record, &PathBuf::from("x.json")).unwrap_err();
-    assert!(err.contains("system_prompt must not be empty"), "got: {err}");
+    assert!(
+        err.contains("system_prompt must not be empty"),
+        "got: {err}"
+    );
 }
 
 #[test]
@@ -318,7 +323,10 @@ fn test_permissions_allow_deny_ask_parse() {
     let agent = record_to_agent_info(&record, &PathBuf::from("x.json")).expect("should parse");
     assert_eq!(agent.permission.len(), 3);
 
-    assert!(matches!(agent.permission[0].action, PermissionAction::Allow));
+    assert!(matches!(
+        agent.permission[0].action,
+        PermissionAction::Allow
+    ));
     assert!(matches!(agent.permission[1].action, PermissionAction::Deny));
     assert!(matches!(agent.permission[2].action, PermissionAction::Ask));
 }
@@ -382,7 +390,10 @@ fn test_template_working_dir_substituted() {
     let result = build_system_prompt(&agent, &working_dir, "", None);
 
     assert!(result.contains("/tmp/test-project"), "got: {result}");
-    assert!(!result.contains("{{WORKING_DIR}}"), "variable not substituted: {result}");
+    assert!(
+        !result.contains("{{WORKING_DIR}}"),
+        "variable not substituted: {result}"
+    );
 }
 
 #[test]
@@ -399,7 +410,10 @@ fn test_template_file_tree_substituted() {
 
     assert!(result.contains("src/"), "got: {result}");
     assert!(result.contains("main.rs"), "got: {result}");
-    assert!(!result.contains("{{FILE_TREE}}"), "variable not substituted: {result}");
+    assert!(
+        !result.contains("{{FILE_TREE}}"),
+        "variable not substituted: {result}"
+    );
 }
 
 #[test]
@@ -413,14 +427,15 @@ fn test_template_date_substituted() {
 
     let result = build_system_prompt(&agent, &PathBuf::from("/tmp"), "", None);
 
-    assert!(!result.contains("{{DATE}}"), "variable not substituted: {result}");
+    assert!(
+        !result.contains("{{DATE}}"),
+        "variable not substituted: {result}"
+    );
     // Result should contain a date-like string (YYYY-MM-DD), possibly with trailing punctuation
-    let has_date = result
-        .split_whitespace()
-        .any(|w| {
-            let w = w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-');
-            w.len() == 10 && w.chars().nth(4) == Some('-') && w.chars().nth(7) == Some('-')
-        });
+    let has_date = result.split_whitespace().any(|w| {
+        let w = w.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '-');
+        w.len() == 10 && w.chars().nth(4) == Some('-') && w.chars().nth(7) == Some('-')
+    });
     assert!(has_date, "expected date in output, got: {result}");
 }
 
@@ -438,7 +453,10 @@ fn test_template_no_duplicate_working_dir_section() {
     let result = build_system_prompt(&agent, &PathBuf::from("/tmp/proj"), "", None);
 
     let count = result.matches("## Working Directory").count();
-    assert_eq!(count, 0, "auto-section should be suppressed when template var used, got: {result}");
+    assert_eq!(
+        count, 0,
+        "auto-section should be suppressed when template var used, got: {result}"
+    );
 }
 
 #[test]
@@ -454,7 +472,10 @@ fn test_template_no_duplicate_file_tree_section() {
     let result = build_system_prompt(&agent, &PathBuf::from("/tmp"), file_tree, None);
 
     let count = result.matches("## Project Structure").count();
-    assert_eq!(count, 0, "auto-section should be suppressed when template var used, got: {result}");
+    assert_eq!(
+        count, 0,
+        "auto-section should be suppressed when template var used, got: {result}"
+    );
 }
 
 // ── Discovery path resolution ──────────────────────────────────────────────────

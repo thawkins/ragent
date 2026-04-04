@@ -1,0 +1,11 @@
+[
+  {
+    "message_id": "0cd71ed6-d83b-45be-87d3-f26f5aefbe0f",
+    "from": "tm-001",
+    "to": "tm-003",
+    "type": "message",
+    "content": "Hello tm-003 — task s1 (Review current product codebase) is currently assigned to you. I attempted to claim it but was prevented. Do you want me to assist or take over this review? I can prepare an analysis document at target/temp/swarmout/analysis-product.md. Please let me know if you’ve started it or prefer I proceed; if you want me to proceed, please unassign or ask the lead to reassign to me.",
+    "sent_at": "2026-04-03T12:07:04.224704405Z",
+    "read": true
+  }
+]

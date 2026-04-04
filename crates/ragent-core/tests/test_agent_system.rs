@@ -196,6 +196,10 @@ fn test_build_system_prompt_with_tools() {
     assert!(prompt.contains("/my/project"));
     assert!(prompt.contains("main.rs"));
     assert!(prompt.contains("Guidelines"));
+    assert!(
+        prompt.contains("think"),
+        "prompt should mention the think tool"
+    );
 }
 
 #[test]
@@ -471,8 +475,6 @@ fn test_build_system_prompt_skills_order_after_agents_md() {
 
 #[test]
 fn test_resolve_agent_with_skills_config() {
-
-
     let mut config = Config::default();
     let mut agent_config = ragent_core::config::AgentConfig::default();
     agent_config.skills = vec!["deploy".to_string(), "review".to_string()];

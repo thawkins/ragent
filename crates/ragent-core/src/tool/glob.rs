@@ -72,7 +72,13 @@ impl Tool for GlobTool {
         let mut match_results = Vec::new();
         const MAX_MATCHES: usize = 1000;
 
-        collect_matches(&base_dir, &base_dir, &matcher, &mut match_results, MAX_MATCHES)?;
+        collect_matches(
+            &base_dir,
+            &base_dir,
+            &matcher,
+            &mut match_results,
+            MAX_MATCHES,
+        )?;
 
         match_results.sort();
 
@@ -141,23 +147,23 @@ fn collect_matches(
         if path.is_dir() {
             let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if matches!(
-                                  dir_name,
-                                  "node_modules" | "target" | "__pycache__" | "dist" | "build"
-                              ) {
-                                  continue;
-                              }
-                              collect_matches(root, &path, matcher, results, max)?;
-                          } else {
-                              // Match relative path against glob
-                              if let Ok(rel) = path.strip_prefix(root)
-                                  && matcher.is_match(rel)
-                              {
-                                  results.push(rel.display().to_string());
-                              }
-                          }
-                      }
-                      Ok(())
-                }
+                dir_name,
+                "node_modules" | "target" | "__pycache__" | "dist" | "build"
+            ) {
+                continue;
+            }
+            collect_matches(root, &path, matcher, results, max)?;
+        } else {
+            // Match relative path against glob
+            if let Ok(rel) = path.strip_prefix(root)
+                && matcher.is_match(rel)
+            {
+                results.push(rel.display().to_string());
+            }
+        }
+    }
+    Ok(())
+}
 /// Resolves a path string to an absolute `PathBuf` relative to the working directory.
 fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);

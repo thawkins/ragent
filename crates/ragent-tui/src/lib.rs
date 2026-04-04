@@ -195,6 +195,9 @@ pub async fn run_tui(
         // Check if active swarm has completed all tasks.
         app.poll_swarm_completion();
 
+        // Fire any pending autopilot continuation.
+        app.poll_autopilot_continue();
+
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 

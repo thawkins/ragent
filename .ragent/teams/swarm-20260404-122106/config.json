@@ -1,0 +1,79 @@
+{
+  "name": "swarm-20260404-122106",
+  "lead_session_id": "9b927e60-75ce-4930-9a1e-fad46f5ac560",
+  "created_at": "2026-04-04T12:21:06.501693336Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "55705439-8a96-4f8b-9fe9-83b49d3a184a",
+      "agent_type": "analysis",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:21:06.508082794Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze ClaudeCode competitor\n\n**Task ID:** s1\n**Title:** Analyze ClaudeCode competitor\n\nExamine the source code located in ../claude-code-sourcemap. Identify its key features, user workflows, and any unique capabilities. Summarize strengths, weaknesses, and notable implementation details that are relevant for our product. Output a concise markdown file named claudecode_analysis.md containing the findings.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "56013104-1e45-420f-934f-993633de8068",
+      "agent_type": "analysis",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:21:06.508671005Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Copilot-CLI competitor\n\n**Task ID:** s2\n**Title:** Analyze Copilot-CLI competitor\n\nReview the public repository or documentation for copilot-cli. Determine its major features, command-line interface design, integration points, and any performance or usability aspects that differentiate it. Produce a markdown file named copilotcli_analysis.md summarizing the analysis.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "f94ed77c-fc2a-49d1-8c33-2d0abc0586f2",
+      "agent_type": "analysis",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:21:06.509339048Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze OpenCode competitor\n\n**Task ID:** s3\n**Title:** Analyze OpenCode competitor\n\nExplore the source code located in ../opencode. Catalog its core functionalities, architecture, and any innovative features. Note gaps or areas where it falls short compared to our product. Write the results to a markdown file called opencode_analysis.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "d7588db9-1af3-48a8-8dec-5da3d8ec9a5c",
+      "agent_type": "analysis",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:21:06.510133714Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Roocode competitor\n\n**Task ID:** s4\n**Title:** Analyze Roocode competitor\n\nInvestigate the Roocode project (access method can be a provided repo URL or local copy). Identify its feature set, user experience, and technical approach. Summarize findings in a markdown file named roocode_analysis.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "3bf3e7cc-b227-4395-b63c-7c752df85de4",
+      "agent_type": "writer",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T12:21:06.511033105Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Synthesize analyses and create SWARMOUT2.md\n\n**Task ID:** s5\n**Title:** Synthesize analyses and create SWARMOUT2.md\n\nCollect the four analysis markdown files from tasks s1‑s4. Compare their feature sets with our current product, and generate a comprehensive document called SWARMOUT2.md. The document must:\n1. List suggested feature additions for our product, citing which competitor provides each feature.\n2. Provide a prioritized plan with clear Milestones and detailed tasks required to implement the missing features.\n3. Include references to the source competitor analyses.\n4. Save SWARMOUT2.md (and optionally the four analysis files) into the directory target/temp/swarmout.\nEnsure the output directory exists or is created before writing files.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

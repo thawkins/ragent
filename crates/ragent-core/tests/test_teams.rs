@@ -187,10 +187,7 @@ fn test_task_claim_concurrent() {
         .map(|h| h.join().expect("thread"))
         .collect();
 
-    let claims: Vec<_> = results
-        .into_iter()
-        .filter_map(|(opt, _)| opt)
-        .collect();
+    let claims: Vec<_> = results.into_iter().filter_map(|(opt, _)| opt).collect();
     assert_eq!(claims.len(), 1, "exactly one thread should claim the task");
 }
 
@@ -288,8 +285,7 @@ fn test_team_store_create_load() {
     let project = tmp.path().join("project");
     std::fs::create_dir_all(project.join(".ragent")).unwrap();
 
-    let store =
-        TeamStore::create("alpha", "sess-abc", &project, true).unwrap();
+    let store = TeamStore::create("alpha", "sess-abc", &project, true).unwrap();
     assert_eq!(store.config.name, "alpha");
     assert_eq!(store.config.lead_session_id, "sess-abc");
     assert!(store.dir.exists());
@@ -342,9 +338,7 @@ fn test_team_store_next_ids() {
     store.add_member(member).unwrap();
     assert_eq!(store.next_agent_id(), "tm-002");
 
-    store
-        .add_task(Task::new("task-001", "First task"))
-        .unwrap();
+    store.add_task(Task::new("task-001", "First task")).unwrap();
     assert_eq!(store.next_task_id().unwrap(), "task-002");
 }
 
@@ -385,7 +379,10 @@ fn test_team_config_serde_roundtrip() {
     assert_eq!(parsed.members[0].name, "planner");
     assert_eq!(parsed.members[0].status, MemberStatus::PlanPending);
     assert_eq!(parsed.members[0].plan_status, PlanStatus::Pending);
-    assert_eq!(parsed.members[0].current_task_id.as_deref(), Some("task-101"));
+    assert_eq!(
+        parsed.members[0].current_task_id.as_deref(),
+        Some("task-101")
+    );
 }
 
 // ── Plan approval state transitions ───────────────────────────────────────────
@@ -583,7 +580,10 @@ async fn test_team_lifecycle_with_tools() {
         .unwrap();
 
     cleanup
-        .execute(serde_json::json!({"team_name":"lifecycle","force":true}), &lead_ctx)
+        .execute(
+            serde_json::json!({"team_name":"lifecycle","force":true}),
+            &lead_ctx,
+        )
         .await
         .unwrap();
 
@@ -605,7 +605,10 @@ async fn test_team_create_without_name_auto_generates_name() {
     let lead_ctx = make_tool_ctx(project.clone(), "lead-001", None);
 
     let out = create
-        .execute(serde_json::json!({"blueprint": "test", "project_local": true}), &lead_ctx)
+        .execute(
+            serde_json::json!({"blueprint": "test", "project_local": true}),
+            &lead_ctx,
+        )
         .await
         .unwrap();
     let meta = out.metadata.expect("metadata");
@@ -618,7 +621,11 @@ async fn test_team_create_without_name_auto_generates_name() {
         team_name.starts_with("test-"),
         "expected auto-generated team name starting with blueprint prefix, got: {team_name}"
     );
-    assert_eq!(meta.get("auto_named").and_then(|v: &serde_json::Value| v.as_bool()), Some(true));
+    assert_eq!(
+        meta.get("auto_named")
+            .and_then(|v: &serde_json::Value| v.as_bool()),
+        Some(true)
+    );
 
     let loaded = TeamStore::load_by_name(&team_name, &project).expect("team should exist");
     assert_eq!(loaded.config.name, team_name);
@@ -648,7 +655,8 @@ async fn test_team_create_existing_team_returns_error() {
         .expect("team_create should succeed on existing team");
     let meta = out.metadata.expect("metadata");
     assert_eq!(
-        meta.get("team_name").and_then(|v: &serde_json::Value| v.as_str()),
+        meta.get("team_name")
+            .and_then(|v: &serde_json::Value| v.as_str()),
         Some("existing-team")
     );
 }
@@ -672,7 +680,11 @@ async fn test_team_create_recovers_when_existing_dir_missing_config() {
         .await
         .unwrap();
     let meta = out.metadata.expect("metadata");
-    assert_eq!(meta.get("team_name").and_then(|v: &serde_json::Value| v.as_str()), Some("tui-review"));
+    assert_eq!(
+        meta.get("team_name")
+            .and_then(|v: &serde_json::Value| v.as_str()),
+        Some("tui-review")
+    );
 
     let loaded = TeamStore::load_by_name("tui-review", &project).expect("team should load");
     assert_eq!(loaded.config.name, "tui-review");
@@ -732,14 +744,20 @@ async fn test_new_task_blocked_when_team_context_active() {
         .unwrap();
 
     assert!(
-        out.content.contains("Do not use `new_task` for team delegation"),
+        out.content
+            .contains("Do not use `new_task` for team delegation"),
         "expected team-context guard content, got: {}",
         out.content
     );
     let meta = out.metadata.expect("metadata");
-    assert_eq!(meta.get("blocked").and_then(|v: &serde_json::Value| v.as_bool()), Some(true));
     assert_eq!(
-        meta.get("reason").and_then(|v: &serde_json::Value| v.as_str()),
+        meta.get("blocked")
+            .and_then(|v: &serde_json::Value| v.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        meta.get("reason")
+            .and_then(|v: &serde_json::Value| v.as_str()),
         Some("team_context_active")
     );
 }
@@ -750,7 +768,9 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
     let project = tmp.path().join("proj-recent-team-request");
     std::fs::create_dir_all(project.join(".ragent")).unwrap();
     let storage = Arc::new(ragent_core::storage::Storage::open_in_memory().unwrap());
-    storage.create_session("sess-team-intent", &project.display().to_string()).unwrap();
+    storage
+        .create_session("sess-team-intent", &project.display().to_string())
+        .unwrap();
     storage
         .create_message(&Message::user_text(
             "sess-team-intent",
@@ -791,7 +811,8 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
     );
     let meta = out.metadata.expect("metadata");
     assert_eq!(
-        meta.get("reason").and_then(|v: &serde_json::Value| v.as_str()),
+        meta.get("reason")
+            .and_then(|v: &serde_json::Value| v.as_str()),
         Some("team_requested_no_active_team")
     );
 }

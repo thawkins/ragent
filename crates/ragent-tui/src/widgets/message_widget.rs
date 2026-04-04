@@ -179,62 +179,62 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .unwrap_or("all");
             format!("📋 filter: {}", status)
         }
-                  "todo_write" => {
-                      let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-                      let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                      let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                      match action {
-                          "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
-                          "update" => format!("📋 ~{}", id),
-                          "remove" => format!("📋 -{}", id),
-                          "clear" => "📋 clear all".to_string(),
-                          _ => format!("📋 {}", action),
-                      }
-                  }
-                  "new_task" => {
-                      let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
-                      let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-                      let truncated = truncate_str(task, 50);
-                      format!("{} → {}", agent, truncated)
-                  }
-                  "cancel_task" => {
-                      let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-                      format!("cancel task: {}", &task_id[..8.min(task_id.len())])
-                  }
-                  "list_tasks" => {
-                      let status = input
-                          .get("status")
-                          .and_then(|v| v.as_str())
-                          .unwrap_or("all");
-                      format!("filter: {}", status)
-                  }
-                  "wait_tasks" => {
-                      let task_ids = input
-                          .get("task_ids")
-                          .and_then(|v| v.as_array())
-                          .map(|a| a.len())
-                          .unwrap_or(0);
-                      if task_ids > 0 {
-                          format!("wait on {} task(s)", task_ids)
-                      } else {
-                          "wait on all tasks".to_string()
-                      }
-                  }
-                  "lsp_definition" => {
-                      let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
-                      let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
-                      format!("line {}, col {}", line, column)
-                  }
-                  "lsp_hover" => {
-                      let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
-                      let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
-                      format!("line {}, col {}", line, column)
-                  }
-                   "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
-                       .get("path")
-                       .and_then(|v| v.as_str())
-                       .map(|p| make_relative_path(p, cwd))
-                       .unwrap_or_default(),
+        "todo_write" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            match action {
+                "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
+                "update" => format!("📋 ~{}", id),
+                "remove" => format!("📋 -{}", id),
+                "clear" => "📋 clear all".to_string(),
+                _ => format!("📋 {}", action),
+            }
+        }
+        "new_task" => {
+            let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
+            let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
+            let truncated = truncate_str(task, 50);
+            format!("{} → {}", agent, truncated)
+        }
+        "cancel_task" => {
+            let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            format!("cancel task: {}", &task_id[..8.min(task_id.len())])
+        }
+        "list_tasks" => {
+            let status = input
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("all");
+            format!("filter: {}", status)
+        }
+        "wait_tasks" => {
+            let task_ids = input
+                .get("task_ids")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            if task_ids > 0 {
+                format!("wait on {} task(s)", task_ids)
+            } else {
+                "wait on all tasks".to_string()
+            }
+        }
+        "lsp_definition" => {
+            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+            let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("line {}, col {}", line, column)
+        }
+        "lsp_hover" => {
+            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+            let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("line {}, col {}", line, column)
+        }
+        "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
         t if t.starts_with("team_") => summarize_tool_args(input, 40),
         _ => summarize_tool_args(input, 40),
     }
@@ -361,21 +361,39 @@ pub(crate) fn tool_result_summary(
         }
         "bash" => {
             let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
-            let timed_out = out.get("timeout").and_then(|v| v.as_bool()).unwrap_or(false);
+            let timed_out = out
+                .get("timeout")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if timed_out {
                 Some("timed out".to_string())
             } else if let Some(code) = exit_code {
-                Some(format!("{}…  (exit {})", pluralize(line_count, "line", "lines"), code))
+                Some(format!(
+                    "{}…  (exit {})",
+                    pluralize(line_count, "line", "lines"),
+                    code
+                ))
             } else {
                 Some(format!("{}…", pluralize(line_count, "line", "lines")))
             }
         }
         "grep" => {
             let matches = out.get("matches").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let files = out.get("files_searched").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let truncated = out.get("truncated").and_then(|v| v.as_bool()).unwrap_or(false);
+            let files = out
+                .get("files_searched")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let truncated = out
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let trunc = if truncated { "+" } else { "" };
-            Some(format!("{}{} matched in {} searched", matches, trunc, pluralize(files, "file", "files")))
+            Some(format!(
+                "{}{} matched in {} searched",
+                matches,
+                trunc,
+                pluralize(files, "file", "files")
+            ))
         }
         "glob" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -383,7 +401,9 @@ pub(crate) fn tool_result_summary(
         }
         "list" => {
             let entries = out.get("entries").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let path = out.get("path").and_then(|v| v.as_str())
+            let path = out
+                .get("path")
+                .and_then(|v| v.as_str())
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
             let label = if entries == 1 { "entry" } else { "entries" };
@@ -468,7 +488,10 @@ pub(crate) fn tool_result_summary(
             if background {
                 Some(format!("spawned {} agent{}", agent, task_id))
             } else {
-                Some(format!("{} agent {} → {}{}", status, agent, status, task_id))
+                Some(format!(
+                    "{} agent {} → {}{}",
+                    status, agent, status, task_id
+                ))
             }
         }
         "cancel_task" => {
@@ -500,21 +523,37 @@ pub(crate) fn tool_result_summary(
         }
         "lsp_definition" | "lsp_references" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(count, "location", "locations")))
+            Some(format!(
+                "{} found",
+                pluralize(count, "location", "locations")
+            ))
         }
         "lsp_symbols" => {
-            let count = out.get("symbol_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let path = out.get("path").and_then(|v| v.as_str())
+            let count = out
+                .get("symbol_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let path = out
+                .get("path")
+                .and_then(|v| v.as_str())
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
-            Some(format!("{} in {}", pluralize(count, "symbol", "symbols"), path))
+            Some(format!(
+                "{} in {}",
+                pluralize(count, "symbol", "symbols"),
+                path
+            ))
         }
-        "lsp_hover" => {
-            Some(format!("{} of info", pluralize(line_count, "line", "lines")))
-        }
+        "lsp_hover" => Some(format!(
+            "{} of info",
+            pluralize(line_count, "line", "lines")
+        )),
         "lsp_diagnostics" => {
             let count = out.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(count, "diagnostic", "diagnostics")))
+            Some(format!(
+                "{} found",
+                pluralize(count, "diagnostic", "diagnostics")
+            ))
         }
         "team_task_claim" => {
             let claimed = out
@@ -732,73 +771,70 @@ impl<'a> MessageWidget<'a> {
                     }
                     lines.push(Line::from(spans));
 
-                                          if state.status == ToolCallStatus::Completed {
-                                              if tool == "wait_tasks" {
-                                                  // Special handling for wait_tasks: show indented list of tasks
-                                                  if let Some(tasks_array) = state
-                                                      .output
-                                                      .as_ref()
-                                                      .and_then(|out| out.get("tasks"))
-                                                      .and_then(|t| t.as_array())
-                                                  {
-                                                      for task in tasks_array {
-                                                          let agent = task
-                                                              .get("agent")
-                                                              .and_then(|a| a.as_str())
-                                                              .unwrap_or("unknown");
-                                                          let task_id = task
-                                                              .get("id")
-                                                              .and_then(|id| id.as_str())
-                                                              .map(|id| &id[..8.min(id.len())])
-                                                              .unwrap_or("unknown");
-                                                          let elapsed_ms = task
-                                                              .get("elapsed_ms")
-                                                              .and_then(|e| e.as_u64())
-                                                              .unwrap_or(0);
-                                                          let output_lines = task
-                                                              .get("output_lines")
-                                                              .and_then(|l| l.as_u64())
-                                                              .unwrap_or(0) as usize;
-                                                          let task_status = task
-                                                              .get("status")
-                                                              .and_then(|s| s.as_str())
-                                                              .unwrap_or("unknown");
-                    
-                                                          let status_icon = if task_status == "completed" {
-                                                              "✓"
-                                                          } else {
-                                                              "✗"
-                                                          };
-                    
-                                                          let elapsed_sec = elapsed_ms as f64 / 1000.0;
-                                                          let task_line = format!(
-                                                              "  {} {} ({}): {}s, {} line(s)",
-                                                              status_icon,
-                                                              agent,
-                                                              task_id,
-                                                              elapsed_sec,
-                                                              output_lines
-                                                          );
-                    
-                                                          lines.push(Line::from(Span::styled(
-                                                              task_line,
-                                                              if task_status == "completed" {
-                                                                  Style::default().fg(Color::Green)
-                                                              } else {
-                                                                  Style::default().fg(Color::Red)
-                                                              },
-                                                          )));
-                                                      }
-                                                  }
-                                              } else if let Some(result) =
-                                                  tool_result_summary(tool, &state.output, &state.input, self.cwd)
-                                              {
-                                                  lines.push(Line::from(Span::styled(
-                                                      format!("  └ {}", result),
-                                                      Style::default().fg(Color::DarkGray),
-                                                  )));
-                                              }
-                                          }
+                    if state.status == ToolCallStatus::Completed {
+                        if tool == "wait_tasks" {
+                            // Special handling for wait_tasks: show indented list of tasks
+                            if let Some(tasks_array) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("tasks"))
+                                .and_then(|t| t.as_array())
+                            {
+                                for task in tasks_array {
+                                    let agent = task
+                                        .get("agent")
+                                        .and_then(|a| a.as_str())
+                                        .unwrap_or("unknown");
+                                    let task_id = task
+                                        .get("id")
+                                        .and_then(|id| id.as_str())
+                                        .map(|id| &id[..8.min(id.len())])
+                                        .unwrap_or("unknown");
+                                    let elapsed_ms = task
+                                        .get("elapsed_ms")
+                                        .and_then(|e| e.as_u64())
+                                        .unwrap_or(0);
+                                    let output_lines = task
+                                        .get("output_lines")
+                                        .and_then(|l| l.as_u64())
+                                        .unwrap_or(0)
+                                        as usize;
+                                    let task_status = task
+                                        .get("status")
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("unknown");
+
+                                    let status_icon = if task_status == "completed" {
+                                        "✓"
+                                    } else {
+                                        "✗"
+                                    };
+
+                                    let elapsed_sec = elapsed_ms as f64 / 1000.0;
+                                    let task_line = format!(
+                                        "  {} {} ({}): {}s, {} line(s)",
+                                        status_icon, agent, task_id, elapsed_sec, output_lines
+                                    );
+
+                                    lines.push(Line::from(Span::styled(
+                                        task_line,
+                                        if task_status == "completed" {
+                                            Style::default().fg(Color::Green)
+                                        } else {
+                                            Style::default().fg(Color::Red)
+                                        },
+                                    )));
+                                }
+                            }
+                        } else if let Some(result) =
+                            tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                        {
+                            lines.push(Line::from(Span::styled(
+                                format!("  └ {}", result),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
+                    }
                     if state.status == ToolCallStatus::Error {
                         let err_msg = state
                             .error
@@ -869,7 +905,10 @@ mod tests {
         });
         let summary = tool_input_summary("team_spawn", &input, "/tmp");
         assert!(summary.contains("prompt=\""));
-        assert!(summary.contains("...\""), "summary should use three dots: {summary}");
+        assert!(
+            summary.contains("...\""),
+            "summary should use three dots: {summary}"
+        );
     }
 
     #[test]
@@ -890,6 +929,9 @@ mod tests {
         });
         let summary = tool_input_summary("some_new_tool", &input, "/tmp");
         assert!(summary.contains("note=\""));
-        assert!(summary.contains("...\""), "summary should truncate with three dots: {summary}");
+        assert!(
+            summary.contains("...\""),
+            "summary should truncate with three dots: {summary}"
+        );
     }
 }

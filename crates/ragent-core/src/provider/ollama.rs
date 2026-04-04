@@ -242,6 +242,20 @@ impl OllamaClient {
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
 
+        // Build a map of tool_use_id → tool_name so we can include both
+        // `tool_call_id` (OpenAI-compat) and `tool_name` (native Ollama format).
+        let mut tool_id_to_name: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for msg in &request.messages {
+            if let ChatContent::Parts(parts) = &msg.content {
+                for part in parts {
+                    if let ContentPart::ToolUse { id, name, .. } = part {
+                        tool_id_to_name.insert(id.clone(), name.clone());
+                    }
+                }
+            }
+        }
+
         if let Some(system) = &request.system {
             messages.push(json!({
                 "role": "system",
@@ -312,11 +326,18 @@ impl OllamaClient {
                                 content,
                             } = result
                             {
-                                messages.push(json!({
+                                // Include both `tool_call_id` (OpenAI-compat) and
+                                // `tool_name` (native Ollama format) so whichever
+                                // format the model expects is satisfied.
+                                let mut tool_msg = json!({
                                     "role": "tool",
                                     "tool_call_id": tool_use_id,
                                     "content": content
-                                }));
+                                });
+                                if let Some(name) = tool_id_to_name.get(tool_use_id) {
+                                    tool_msg["tool_name"] = json!(name);
+                                }
+                                messages.push(tool_msg);
                             }
                         }
                     } else {
@@ -410,6 +431,15 @@ impl LlmClient for OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
+            let body_str = serde_json::to_string_pretty(&body).unwrap_or_default();
+            tracing::warn!(
+                url = %url,
+                model = %request.model,
+                status = %status,
+                error = %error_body,
+                request_body = %body_str,
+                "Ollama API error — full request logged"
+            );
             bail!("Ollama API error ({}): {}", status, error_body);
         }
 

@@ -14,8 +14,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use crate::event::Event;
-use crate::team::config::{MemberStatus, TeamMember};
 use crate::team::TeamStore;
+use crate::team::config::{MemberStatus, TeamMember};
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -86,8 +86,7 @@ impl Tool for TeamWaitTool {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("No teams found in this project."))?;
-            TeamStore::load(&dir)
-                .map_err(|e| anyhow::anyhow!("Cannot load team store: {}", e))?
+            TeamStore::load(&dir).map_err(|e| anyhow::anyhow!("Cannot load team store: {}", e))?
         };
 
         let resolved_team_name = store.config.name.clone();
@@ -112,7 +111,10 @@ impl Tool for TeamWaitTool {
                 .filter(|m| {
                     matches!(
                         m.status,
-                        MemberStatus::Working | MemberStatus::Spawning | MemberStatus::PlanPending | MemberStatus::ShuttingDown
+                        MemberStatus::Working
+                            | MemberStatus::Spawning
+                            | MemberStatus::PlanPending
+                            | MemberStatus::ShuttingDown
                     )
                 })
                 .map(|m| m.agent_id.clone())
@@ -127,8 +129,10 @@ impl Tool for TeamWaitTool {
             .members
             .iter()
             .filter(|m| {
-                matches!(m.status, MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped)
-                    && waiting_for.contains(&m.agent_id)
+                matches!(
+                    m.status,
+                    MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped
+                ) && waiting_for.contains(&m.agent_id)
             })
             .map(|m| m.agent_id.clone())
             .collect();
@@ -184,8 +188,8 @@ impl Tool for TeamWaitTool {
         let timed_out = !waiting_for.is_empty();
 
         // Reload store for final statuses.
-        let final_store = TeamStore::load_by_name(&resolved_team_name, &working_dir)
-            .unwrap_or(store);
+        let final_store =
+            TeamStore::load_by_name(&resolved_team_name, &working_dir).unwrap_or(store);
         let summary = summarise_store(&final_store.config.members);
 
         let mut output = String::new();

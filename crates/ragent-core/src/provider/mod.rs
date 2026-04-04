@@ -7,6 +7,7 @@ pub mod anthropic;
 pub mod copilot;
 pub mod generic_openai;
 pub mod ollama;
+pub mod ollama_cloud;
 pub mod openai;
 
 use anyhow::Result;
@@ -224,6 +225,7 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(copilot::CopilotProvider::new()));
     registry.register(Box::new(openai::OpenAiProvider));
     registry.register(Box::new(generic_openai::GenericOpenAiProvider));
+    registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry
 }

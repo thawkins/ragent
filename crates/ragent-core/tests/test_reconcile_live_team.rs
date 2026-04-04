@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
+use ragent_core::event::EventBus;
+use ragent_core::session::SessionManager;
+use ragent_core::session::processor::SessionProcessor;
 use ragent_core::team::TeamStore;
 use ragent_core::team::manager::TeamManager;
-use ragent_core::event::EventBus;
-use ragent_core::session::processor::SessionProcessor;
-use ragent_core::session::SessionManager;
 
 #[tokio::test]
 async fn test_reconcile_against_existing_team_dir() {
@@ -49,14 +49,22 @@ async fn test_reconcile_against_existing_team_dir() {
         session_manager: session_manager.clone(),
         provider_registry: Arc::new(ragent_core::provider::create_default_registry()),
         tool_registry: Arc::new(ragent_core::tool::create_default_registry()),
-        permission_checker: Arc::new(tokio::sync::RwLock::new(ragent_core::permission::PermissionChecker::new(vec![]))),
+        permission_checker: Arc::new(tokio::sync::RwLock::new(
+            ragent_core::permission::PermissionChecker::new(vec![]),
+        )),
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
     });
 
-    let manager = Arc::new(TeamManager::new(store.config.name.clone(), "lead-test", team_dir.clone(), processor.clone(), event_bus.clone()));
+    let manager = Arc::new(TeamManager::new(
+        store.config.name.clone(),
+        "lead-test",
+        team_dir.clone(),
+        processor.clone(),
+        event_bus.clone(),
+    ));
     // Do NOT set processor.team_manager to mimic TUI timing; call reconcile directly
     manager.reconcile_spawning_members();
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;

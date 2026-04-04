@@ -296,6 +296,13 @@ impl LlmClient for OpenAiClient {
                 tracing::warn!(error = %e, "Failed to read response body");
                 String::new()
             });
+            tracing::warn!(
+                url = %url,
+                model = %request.model,
+                status = %status,
+                error = %body,
+                "OpenAI API error"
+            );
             bail!("OpenAI API error ({}): {}", status, body);
         }
 

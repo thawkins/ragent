@@ -64,6 +64,8 @@ impl Tool for RmTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
+        super::check_path_within_root(&path, &ctx.working_dir)?;
+
         if !path.exists() {
             bail!("File not found: {}", path.display());
         }

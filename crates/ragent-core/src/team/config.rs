@@ -164,7 +164,11 @@ pub struct TeamMember {
 
 impl TeamMember {
     /// Create a new member record in `Spawning` state.
-    pub fn new(name: impl Into<String>, agent_id: impl Into<String>, agent_type: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        agent_id: impl Into<String>,
+        agent_type: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             agent_id: agent_id.into(),
@@ -254,6 +258,8 @@ impl TeamConfig {
 
     /// Return an iterator over members that are currently active (not `Stopped`).
     pub fn active_members(&self) -> impl Iterator<Item = &TeamMember> {
-        self.members.iter().filter(|m| m.status != MemberStatus::Stopped)
+        self.members
+            .iter()
+            .filter(|m| m.status != MemberStatus::Stopped)
     }
 }

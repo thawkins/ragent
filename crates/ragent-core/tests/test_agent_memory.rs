@@ -110,7 +110,11 @@ fn test_memory_injection_with_file() {
     let tmp = tempfile::tempdir().unwrap();
     let mem_dir = tmp.path().join(".ragent/agent-memory/test-agent");
     std::fs::create_dir_all(&mem_dir).unwrap();
-    std::fs::write(mem_dir.join("MEMORY.md"), "# Previous notes\n\nFoo found a bug in bar.rs\n").unwrap();
+    std::fs::write(
+        mem_dir.join("MEMORY.md"),
+        "# Previous notes\n\nFoo found a bug in bar.rs\n",
+    )
+    .unwrap();
 
     let block = load_memory_block_for_test(&mem_dir);
     assert!(block.contains("Prior Memory"));
@@ -141,11 +145,11 @@ fn test_memory_injection_truncates_long_file() {
 
 #[tokio::test]
 async fn test_memory_write_and_read() {
-    use ragent_core::tool::{Tool, ToolContext};
-    use ragent_core::tool::team_memory_write::TeamMemoryWriteTool;
-    use ragent_core::tool::team_memory_read::TeamMemoryReadTool;
     use ragent_core::event::EventBus;
-    use ragent_core::team::{TeamStore, TeamMember, MemoryScope};
+    use ragent_core::team::{MemoryScope, TeamMember, TeamStore};
+    use ragent_core::tool::team_memory_read::TeamMemoryReadTool;
+    use ragent_core::tool::team_memory_write::TeamMemoryWriteTool;
+    use ragent_core::tool::{Tool, ToolContext};
     use std::sync::Arc;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -189,15 +193,16 @@ async fn test_memory_write_and_read() {
         )
         .await
         .unwrap();
-    assert!(result.content.contains("Wrote"), "Write should succeed: {}", result.content);
+    assert!(
+        result.content.contains("Wrote"),
+        "Write should succeed: {}",
+        result.content
+    );
 
     // Read back.
     let read_tool = TeamMemoryReadTool;
     let result = read_tool
-        .execute(
-            serde_json::json!({ "team_name": "test-team" }),
-            &ctx,
-        )
+        .execute(serde_json::json!({ "team_name": "test-team" }), &ctx)
         .await
         .unwrap();
     assert!(result.content.contains("Found issue in auth.rs"));
@@ -217,10 +222,7 @@ async fn test_memory_write_and_read() {
 
     // Read back after append.
     let result = read_tool
-        .execute(
-            serde_json::json!({ "team_name": "test-team" }),
-            &ctx,
-        )
+        .execute(serde_json::json!({ "team_name": "test-team" }), &ctx)
         .await
         .unwrap();
     assert!(result.content.contains("Found issue in auth.rs"));
@@ -229,10 +231,10 @@ async fn test_memory_write_and_read() {
 
 #[tokio::test]
 async fn test_memory_read_disabled() {
-    use ragent_core::tool::{Tool, ToolContext};
-    use ragent_core::tool::team_memory_read::TeamMemoryReadTool;
     use ragent_core::event::EventBus;
-    use ragent_core::team::{TeamStore, TeamMember};
+    use ragent_core::team::{TeamMember, TeamStore};
+    use ragent_core::tool::team_memory_read::TeamMemoryReadTool;
+    use ragent_core::tool::{Tool, ToolContext};
     use std::sync::Arc;
 
     let tmp = tempfile::tempdir().unwrap();
@@ -266,7 +268,11 @@ async fn test_memory_read_disabled() {
         .execute(serde_json::json!({ "team_name": "test-team" }), &ctx)
         .await
         .unwrap();
-    assert!(result.content.contains("not enabled"), "Should report disabled: {}", result.content);
+    assert!(
+        result.content.contains("not enabled"),
+        "Should report disabled: {}",
+        result.content
+    );
 }
 
 // ── T8.4: MemoryScope in agent profiles ──────────────────────────────────────

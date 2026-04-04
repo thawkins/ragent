@@ -1,7 +1,7 @@
 //! Example demonstrating orchestrator usage for coordinating multiple agent tasks
 
 use futures::future::FutureExt;
-use ragent_core::orchestrator::{AgentRegistry, Responder, Coordinator, JobDescriptor};
+use ragent_core::orchestrator::{AgentRegistry, Coordinator, JobDescriptor, Responder};
 use std::sync::Arc;
 use tokio::time::Duration;
 use tokio::time::sleep;

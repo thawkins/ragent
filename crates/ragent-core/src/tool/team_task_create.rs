@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{HookEvent, Task, TaskStore, TeamStore, find_team_dir, run_team_hook};
 use crate::team::manager::HookOutcome;
+use crate::team::{HookEvent, Task, TaskStore, TeamStore, find_team_dir, run_team_hook};
 
 /// Adds a new task to the team's shared task list (lead-only).
 pub struct TeamTaskCreateTool;
@@ -120,9 +120,7 @@ impl Tool for TeamTaskCreateTool {
         }
 
         Ok(ToolOutput {
-            content: format!(
-                "Task '{task_id}' created in team '{team_name}'.\nTitle: {title}"
-            ),
+            content: format!("Task '{task_id}' created in team '{team_name}'.\nTitle: {title}"),
             metadata: Some(json!({
                 "team_name": team_name,
                 "task_id": task_id,

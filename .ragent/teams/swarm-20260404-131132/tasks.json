@@ -1,0 +1,78 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze ClaudeCode Competitor",
+      "description": "Review the source code in ../claude-code-sourcemap to analyze ClaudeCode features. Identify key functionalities, strengths, and unique features. Document your findings in target/temp/swarmout/claudecode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:11:32.326313997Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s2",
+      "title": "Analyze Copilot-CLI Competitor",
+      "description": "Research and analyze copilot-cli features and capabilities. Identify key functionalities, strengths, and unique features. Document your findings in target/temp/swarmout/copilot_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:11:32.326579633Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s3",
+      "title": "Analyze OpenCode Competitor",
+      "description": "Review the source code in ../opencode to analyze OpenCode features. Identify key functionalities, strengths, and unique features. Document your findings in target/temp/swarmout/opencode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:11:32.326865639Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s4",
+      "title": "Analyze Roocode Competitor",
+      "description": "Research and analyze roocode features and capabilities. Identify key functionalities, strengths, and unique features. Document your findings in target/temp/swarmout/roocode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:11:32.327580193Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s5",
+      "title": "Product Review and Feature Gap Analysis",
+      "description": "Review our current product and compare it with competitor analyses from s1-s4. Identify missing features that should be implemented. Create a comprehensive list of suggested feature additions.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4"
+      ],
+      "created_at": "2026-04-04T13:11:32.327962747Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s6",
+      "title": "Create SWARMOUT2.md Implementation Plan",
+      "description": "Using the feature gap analysis from s5, create a document called SWARMOUT2.md in target/temp/swarmout/. Include: 1) Executive summary of recommended features, 2) Detailed milestone plan with phases, 3) Specific tasks for each milestone, 4) Prioritization of features. Structure the document clearly with headers and bullet points.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s5"
+      ],
+      "created_at": "2026-04-04T13:11:32.328374660Z",
+      "claimed_at": null,
+      "completed_at": null
+    }
+  ]
+}

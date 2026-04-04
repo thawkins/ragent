@@ -199,37 +199,37 @@ impl Tool for WaitTasksTool {
             ));
         }
 
-                                                            // Build metadata with task details for TUI display
-                                                            let mut task_details = Vec::new();
-                                                            for (task_id, (_, success)) in &results {
-                                                                let task = all_tasks.iter().find(|t| &t.id == task_id);
-                                                                if let Some(task) = task {
-                                                                    let elapsed_ms = if let Some(end) = task.completed_at {
-                                                                        (end.signed_duration_since(task.created_at)).num_milliseconds() as u64
-                                                                    } else {
-                                                                        0
-                                                                    };
-                                                                    
-                                                                    let output_lines = task.result.as_ref().map(|r| r.lines().count()).unwrap_or(0);
-                                                                    
-                                                                    task_details.push(json!({
-                                                                        "id": &task.id,
-                                                                        "agent": &task.agent_name,
-                                                                        "status": if *success { "completed" } else { "failed" },
-                                                                        "elapsed_ms": elapsed_ms,
-                                                                        "output_lines": output_lines,
-                                                                    }));
-                                                                }
-                                                            }
-                                                  
-                                                            Ok(ToolOutput {
-                                                                content: output,
-                                                                metadata: Some(json!({
-                                                                    "completed": results.len(),
-                                                                    "timed_out": timed_out,
-                                                                    "still_running": waiting_for.len(),
-                                                                    "tasks": task_details,
-                                                                })),
-                                                            })
-                                                        }
-                                                    }
+        // Build metadata with task details for TUI display
+        let mut task_details = Vec::new();
+        for (task_id, (_, success)) in &results {
+            let task = all_tasks.iter().find(|t| &t.id == task_id);
+            if let Some(task) = task {
+                let elapsed_ms = if let Some(end) = task.completed_at {
+                    (end.signed_duration_since(task.created_at)).num_milliseconds() as u64
+                } else {
+                    0
+                };
+
+                let output_lines = task.result.as_ref().map(|r| r.lines().count()).unwrap_or(0);
+
+                task_details.push(json!({
+                    "id": &task.id,
+                    "agent": &task.agent_name,
+                    "status": if *success { "completed" } else { "failed" },
+                    "elapsed_ms": elapsed_ms,
+                    "output_lines": output_lines,
+                }));
+            }
+        }
+
+        Ok(ToolOutput {
+            content: output,
+            metadata: Some(json!({
+                "completed": results.len(),
+                "timed_out": timed_out,
+                "still_running": waiting_for.len(),
+                "tasks": task_details,
+            })),
+        })
+    }
+}

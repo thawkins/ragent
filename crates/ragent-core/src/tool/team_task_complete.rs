@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{HookEvent, TaskStatus, TaskStore, find_team_dir, run_team_hook};
 use crate::team::manager::HookOutcome;
+use crate::team::{HookEvent, TaskStatus, TaskStore, find_team_dir, run_team_hook};
 
 /// Marks a task as completed by the calling agent.
 pub struct TeamTaskCompleteTool;
@@ -63,16 +63,24 @@ impl Tool for TeamTaskCompleteTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TaskStore::open(&team_dir)?;
-        
+
         // Log current state for debugging
         if let Ok(list) = store.read() {
-            let task_summary: Vec<String> = list.tasks.iter()
-                .map(|t| format!("{} ({})", t.id, match t.status {
-                    crate::team::TaskStatus::Pending => "pending",
-                    crate::team::TaskStatus::InProgress => "in-progress",
-                    crate::team::TaskStatus::Completed => "completed",
-                    crate::team::TaskStatus::Cancelled => "cancelled",
-                }))
+            let task_summary: Vec<String> = list
+                .tasks
+                .iter()
+                .map(|t| {
+                    format!(
+                        "{} ({})",
+                        t.id,
+                        match t.status {
+                            crate::team::TaskStatus::Pending => "pending",
+                            crate::team::TaskStatus::InProgress => "in-progress",
+                            crate::team::TaskStatus::Completed => "completed",
+                            crate::team::TaskStatus::Cancelled => "cancelled",
+                        }
+                    )
+                })
                 .collect();
             tracing::debug!(
                 agent_id = %agent_id,
@@ -82,7 +90,7 @@ impl Tool for TeamTaskCompleteTool {
                 "team_task_complete: attempting to complete"
             );
         }
-        
+
         let task = match store.complete(task_id, &agent_id) {
             Ok(t) => t,
             Err(e) => {

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 use ragent_core::team::mailbox::{
-    Mailbox, MailboxMessage, MessageType, register_notifier, deregister_notifier,
+    Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier,
 };
 
 /// Helper: create a temp team dir and return its path.
@@ -47,7 +47,12 @@ async fn test_notify_wakes_on_push() {
     // Push a message — should signal the notify.
     let mailbox = Mailbox::open(team_dir, agent_id).unwrap();
     mailbox
-        .push(MailboxMessage::new("lead", agent_id, MessageType::Message, "hello"))
+        .push(MailboxMessage::new(
+            "lead",
+            agent_id,
+            MessageType::Message,
+            "hello",
+        ))
         .unwrap();
 
     let elapsed = waiter.await.unwrap();
@@ -73,12 +78,20 @@ async fn test_deregister_prevents_signal() {
     // Push after deregister — notify should NOT fire.
     let mailbox = Mailbox::open(team_dir, agent_id).unwrap();
     mailbox
-        .push(MailboxMessage::new("lead", agent_id, MessageType::Message, "hello"))
+        .push(MailboxMessage::new(
+            "lead",
+            agent_id,
+            MessageType::Message,
+            "hello",
+        ))
         .unwrap();
 
     // If we wait briefly the notify should NOT have been signalled.
     let result = tokio::time::timeout(Duration::from_millis(100), notify.notified()).await;
-    assert!(result.is_err(), "notify should have timed out after deregister");
+    assert!(
+        result.is_err(),
+        "notify should have timed out after deregister"
+    );
 }
 
 // ── T6 latency benchmark ────────────────────────────────────────────────────
@@ -156,9 +169,7 @@ async fn test_notify_latency_benchmark() {
     sorted.sort();
     let p99 = sorted[p99_idx.min(total - 1)];
 
-    eprintln!(
-        "T6 Benchmark: {NUM_AGENTS} agents × {MSGS_PER_AGENT} msgs = {total} deliveries"
-    );
+    eprintln!("T6 Benchmark: {NUM_AGENTS} agents × {MSGS_PER_AGENT} msgs = {total} deliveries");
     eprintln!("  avg latency: {avg:?}");
     eprintln!("  p99 latency: {p99:?}");
     eprintln!("  max latency: {max:?}");
@@ -188,7 +199,12 @@ async fn test_push_without_notifier_succeeds() {
     // No register_notifier call — push should still work.
     let mailbox = Mailbox::open(team_dir, agent_id).unwrap();
     mailbox
-        .push(MailboxMessage::new("lead", agent_id, MessageType::Message, "hello"))
+        .push(MailboxMessage::new(
+            "lead",
+            agent_id,
+            MessageType::Message,
+            "hello",
+        ))
         .unwrap();
 
     let msgs = mailbox.read_all().unwrap();
@@ -221,8 +237,13 @@ async fn test_select_notify_beats_fallback() {
 
     // Push triggers the notify.
     let mb = Mailbox::open(team_dir, agent_id).unwrap();
-    mb.push(MailboxMessage::new("lead", agent_id, MessageType::Message, "fast"))
-        .unwrap();
+    mb.push(MailboxMessage::new(
+        "lead",
+        agent_id,
+        MessageType::Message,
+        "fast",
+    ))
+    .unwrap();
 
     let elapsed = waiter.await.unwrap();
     assert!(

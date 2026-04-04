@@ -3,8 +3,10 @@
 //! Tests dynamic context parsing with edge-case inputs: unicode, long commands,
 //! nested backticks, huge output, and concurrent execution.
 
+use ragent_core::resource::{
+    MAX_CONCURRENT_PROCESSES, acquire_process_permit, available_process_permits,
+};
 use ragent_core::skill::context::inject_dynamic_context;
-use ragent_core::resource::{acquire_process_permit, available_process_permits, MAX_CONCURRENT_PROCESSES};
 use std::path::Path;
 
 fn wd() -> &'static Path {
@@ -18,9 +20,18 @@ async fn test_inject_unicode_in_surrounding_text() {
     let result = inject_dynamic_context("日本語 !`echo ok` テスト", wd())
         .await
         .unwrap();
-    assert!(result.contains("ok"), "Command should execute in unicode context: {result}");
-    assert!(result.contains("日本語"), "Unicode prefix should be preserved");
-    assert!(result.contains("テスト"), "Unicode suffix should be preserved");
+    assert!(
+        result.contains("ok"),
+        "Command should execute in unicode context: {result}"
+    );
+    assert!(
+        result.contains("日本語"),
+        "Unicode prefix should be preserved"
+    );
+    assert!(
+        result.contains("テスト"),
+        "Unicode suffix should be preserved"
+    );
 }
 
 #[tokio::test]
@@ -28,7 +39,10 @@ async fn test_inject_emoji_in_text() {
     let result = inject_dynamic_context("🚀 Result: !`echo launch` 🎉", wd())
         .await
         .unwrap();
-    assert!(result.contains("launch"), "Command output present: {result}");
+    assert!(
+        result.contains("launch"),
+        "Command output present: {result}"
+    );
     assert!(result.contains("🚀"), "Emoji prefix preserved");
     assert!(result.contains("🎉"), "Emoji suffix preserved");
 }
@@ -40,8 +54,14 @@ async fn test_inject_nested_backticks_not_confused() {
         .await
         .unwrap();
     // Regular backticks preserved, exclamation pattern executed
-    assert!(result.contains("hello"), "Exclamation pattern should execute: {result}");
-    assert!(result.contains("`let x = 1;`"), "Regular backticks preserved: {result}");
+    assert!(
+        result.contains("hello"),
+        "Exclamation pattern should execute: {result}"
+    );
+    assert!(
+        result.contains("`let x = 1;`"),
+        "Regular backticks preserved: {result}"
+    );
 }
 
 #[tokio::test]
@@ -94,13 +114,21 @@ async fn test_inject_long_echo_command() {
     let input = format!("Out: !`echo {long_arg}`");
     let result = inject_dynamic_context(&input, wd()).await.unwrap();
     // Should either succeed or timeout, not panic
-    assert!(result.contains("Out:"), "Should handle long command: {result}");
+    assert!(
+        result.contains("Out:"),
+        "Should handle long command: {result}"
+    );
 }
 
 #[tokio::test]
 async fn test_inject_command_producing_large_output() {
     // Use printf with many repetitions via a pipeline (echo is allowlisted)
-    let result = inject_dynamic_context("Count: !`echo -e '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10'`", wd()).await.unwrap();
+    let result = inject_dynamic_context(
+        "Count: !`echo -e '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10'`",
+        wd(),
+    )
+    .await
+    .unwrap();
     assert!(result.contains("1"), "Output should be captured: {result}");
     assert!(result.contains("Count:"), "Surrounding text preserved");
 }

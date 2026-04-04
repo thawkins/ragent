@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0-alpha.21] - 2026-04-04
+
+### Added
+- **M4 Advanced Features & Differentiation:**
+  - **Persistent Shell (4.1+4.2):** Bash tool now preserves shell environment (env vars, cwd) between calls using temp state files; `BashResetTool` to wipe state; status bar shows shell cwd in yellow when it differs from project root via `ShellCwdChanged` event
+  - **GitHub OAuth & API Client (4.3):** Device flow OAuth (`/github login`), token stored at `~/.ragent/github_token` (chmod 600); `/github logout` and `/github status`; `GitHubClient` with GET/POST/PATCH/PUT, rate-limit handling, auto-detects repo from `git remote`
+  - **GitHub Issue Tools (4.4):** `github_list_issues`, `github_get_issue`, `github_create_issue`, `github_comment_issue`, `github_close_issue`
+  - **GitHub PR Tools (4.5):** `github_list_prs`, `github_get_pr`, `github_create_pr`, `github_merge_pr`, `github_review_pr`
+  - **Advanced Security (4.6):** 14 attack tools added to banned list (nmap, sqlmap, hydra, metasploit, etc.); 30+ new denied patterns (sudo, privilege escalation, /dev/tcp exfiltration, destructive git ops); `pushd`/`cd ~/$HOME` escape detection; `check_path_within_root` directory escape guard applied to create/edit/write/rm/patch tools
+
 ## [0.1.0-alpha.20] - 2026-05-21
 
 ### Added

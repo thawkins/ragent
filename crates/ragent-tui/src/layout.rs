@@ -39,10 +39,7 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
     let keep_left = (max_chars - 1) / 2;
     let keep_right = max_chars - 1 - keep_left;
     let left: String = s.chars().take(keep_left).collect();
-    let right: String = s
-        .chars()
-        .skip(total.saturating_sub(keep_right))
-        .collect();
+    let right: String = s.chars().skip(total.saturating_sub(keep_right)).collect();
     format!("{left}…{right}")
 }
 
@@ -96,7 +93,9 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     } else if agents_enabled {
         Style::default().fg(Color::White)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
     let teams_text_style = if teams_active {
         Style::default()
@@ -106,7 +105,9 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     } else if teams_enabled {
         Style::default().fg(Color::White)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
 
     let agents_border_style = if agents_active {
@@ -114,34 +115,38 @@ fn draw_input_side_buttons(frame: &mut Frame, app: &mut App, button_col_area: Re
     } else if agents_enabled {
         Style::default().fg(Color::DarkGray)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
     let teams_border_style = if teams_active {
         Style::default().fg(Color::Blue).bg(Color::Blue)
     } else if teams_enabled {
         Style::default().fg(Color::DarkGray)
     } else {
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
     };
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(" Agents ", agents_text_style)))
             .style(agents_text_style)
             .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(agents_border_style),
-        ),
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(agents_border_style),
+            ),
         app.agents_button_area,
     );
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(" Teams ", teams_text_style)))
             .style(teams_text_style)
             .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(teams_border_style),
-        ),
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(teams_border_style),
+            ),
         app.teams_button_area,
     );
 }
@@ -280,6 +285,11 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     // Context menu overlay
     if app.context_menu.is_some() {
         render_context_menu(frame, app);
+    }
+
+    // Plan approval dialog overlay
+    if app.plan_approval_pending.is_some() {
+        render_plan_approval_dialog(frame, app);
     }
 }
 
@@ -443,7 +453,9 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 50, frame.area());
     frame.render_widget(Clear, area);
 
-    let Some(step) = app.provider_setup.as_ref() else { return };
+    let Some(step) = app.provider_setup.as_ref() else {
+        return;
+    };
     match step {
         ProviderSetupStep::SelectProvider { selected } => {
             let mut lines: Vec<Line<'_>> = vec![
@@ -550,7 +562,9 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
 
             if provider_id == "generic_openai" {
                 lines.push(Line::from(""));
-                lines.push(Line::from("Endpoint URL (optional, e.g. http://localhost:11434/v1):"));
+                lines.push(Line::from(
+                    "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
+                ));
                 let endpoint_cursor_display = if *editing_endpoint {
                     *endpoint_cursor
                 } else {
@@ -703,12 +717,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 if models.len() > visible {
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
-                        format!(
-                            "Showing {}-{} of {}",
-                            start + 1,
-                            end,
-                            models.len()
-                        ),
+                        format!("Showing {}-{} of {}", start + 1, end, models.len()),
                         Style::default().fg(Color::DarkGray),
                     )));
                 }
@@ -1024,7 +1033,11 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     )]));
 
     let title = if let Some(ref dir) = menu.current_dir {
-        let hidden = if app.file_menu_show_hidden { " hidden:on" } else { "" };
+        let hidden = if app.file_menu_show_hidden {
+            " hidden:on"
+        } else {
+            ""
+        };
         format!(
             " @{}/ [{}/{}]{} ",
             dir.to_string_lossy(),
@@ -1135,7 +1148,11 @@ fn char_wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-fn input_cursor_display_pos(input: &str, cursor_chars: usize, inner_width: usize) -> (usize, usize) {
+fn input_cursor_display_pos(
+    input: &str,
+    cursor_chars: usize,
+    inner_width: usize,
+) -> (usize, usize) {
     let inner_width = inner_width.max(1);
     let mut display_row = 0usize;
     let mut char_idx = 0usize;
@@ -1336,10 +1353,10 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),                        // status bar
-            Constraint::Length(team_strip_h),             // teammate strip (0 when hidden)
-            Constraint::Min(3),                           // messages + optional log
-            Constraint::Length(input_height),             // input (dynamic)
+            Constraint::Length(1),            // status bar
+            Constraint::Length(team_strip_h), // teammate strip (0 when hidden)
+            Constraint::Min(3),               // messages + optional log
+            Constraint::Length(input_height), // input (dynamic)
         ])
         .split(chat_area);
 
@@ -1448,88 +1465,91 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
-      let block = Block::default()
-          .borders(Borders::ALL)
-          .border_style(Style::default().fg(Color::DarkGray))
-          .title(Span::styled(
-              " Log ",
-              Style::default()
-                  .fg(Color::Yellow)
-                  .add_modifier(Modifier::BOLD),
-          ));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Log ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
 
-      let inner = block.inner(area);
-      frame.render_widget(block, area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-      let log_inner = inner;
-      app.active_agents_area = Rect::default();
-      app.teams_area = Rect::default();
+    let log_inner = inner;
+    app.active_agents_area = Rect::default();
+    app.teams_area = Rect::default();
 
-      // Determine which session to display logs for.
-      // If a specific agent is selected, show its logs; otherwise show primary session.
-      let display_session = app
-          .selected_agent_session_id
-          .clone()
-          .or_else(|| app.session_id.clone());
+    // Determine which session to display logs for.
+    // If a specific agent is selected, show its logs; otherwise show primary session.
+    let display_session = app
+        .selected_agent_session_id
+        .clone()
+        .or_else(|| app.session_id.clone());
 
-      // Show all log entries from all sessions (not filtered by session).
-      // This allows viewing all agent activity in one view with agent_id labels.
-      let all_entries = &app.log_entries;
+    // Show all log entries from all sessions (not filtered by session).
+    // This allows viewing all agent activity in one view with agent_id labels.
+    let all_entries = &app.log_entries;
 
-      if all_entries.is_empty() {
-          app.log_max_scroll = 0;
-          let empty = Paragraph::new(Line::from(Span::styled(
-              "No log entries yet",
-              Style::default().fg(Color::DarkGray),
-          )));
-          frame.render_widget(empty, log_inner);
-          return;
-      }
+    if all_entries.is_empty() {
+        app.log_max_scroll = 0;
+        let empty = Paragraph::new(Line::from(Span::styled(
+            "No log entries yet",
+            Style::default().fg(Color::DarkGray),
+        )));
+        frame.render_widget(empty, log_inner);
+        return;
+    }
 
-      // Build lines from all log entries
-      let lines: Vec<Line> = all_entries
-          .iter()
-          .map(|entry| {
-              let ts = entry.timestamp.format("%H:%M:%S");
-              // If this is a compaction start/end/trigger message, render it in bright green
-              let msg_lower = entry.message.to_lowercase();
-              let is_compaction_highlight = msg_lower.contains("compaction") && (msg_lower.contains("started") || msg_lower.contains("completed") || msg_lower.contains("triggered"));
-              
-              let (level_str, level_color) = if is_compaction_highlight {
-                  ("CMP", Color::LightGreen)
-              } else {
-                  match entry.level {
-                      LogLevel::Info => ("INF", Color::Blue),
-                      LogLevel::Tool => ("TUL", Color::Cyan),
-                      LogLevel::Warn => ("WRN", Color::Yellow),
-                      LogLevel::Error => ("ERR", Color::Red),
-                  }
-              };
-              
-              // Build agent_id span if present
-              let mut spans = vec![
-                  Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
-                  Span::styled(
-                      format!("{level_str} "),
-                      Style::default()
-                          .fg(level_color)
-                          .add_modifier(Modifier::BOLD),
-                  ),
-              ];
-              
-              // Add agent_id label if present
-              if let Some(agent_id) = &entry.agent_id {
-                  spans.push(Span::styled(
-                      format!("[{}] ", agent_id),
-                      Style::default().fg(Color::Magenta),
-                  ));
-              }
-              
-              spans.push(Span::raw(&entry.message));
-              Line::from(spans)
-          })
-          .collect();
-              
+    // Build lines from all log entries
+    let lines: Vec<Line> = all_entries
+        .iter()
+        .map(|entry| {
+            let ts = entry.timestamp.format("%H:%M:%S");
+            // If this is a compaction start/end/trigger message, render it in bright green
+            let msg_lower = entry.message.to_lowercase();
+            let is_compaction_highlight = msg_lower.contains("compaction")
+                && (msg_lower.contains("started")
+                    || msg_lower.contains("completed")
+                    || msg_lower.contains("triggered"));
+
+            let (level_str, level_color) = if is_compaction_highlight {
+                ("CMP", Color::LightGreen)
+            } else {
+                match entry.level {
+                    LogLevel::Info => ("INF", Color::Blue),
+                    LogLevel::Tool => ("TUL", Color::Cyan),
+                    LogLevel::Warn => ("WRN", Color::Yellow),
+                    LogLevel::Error => ("ERR", Color::Red),
+                }
+            };
+
+            // Build agent_id span if present
+            let mut spans = vec![
+                Span::styled(format!("{ts} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{level_str} "),
+                    Style::default()
+                        .fg(level_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+
+            // Add agent_id label if present
+            if let Some(agent_id) = &entry.agent_id {
+                spans.push(Span::styled(
+                    format!("[{}] ", agent_id),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+
+            spans.push(Span::raw(&entry.message));
+            Line::from(spans)
+        })
+        .collect();
+
     // Cache plain-text content for text selection copy
     app.log_content_lines = lines
         .iter()
@@ -1565,7 +1585,6 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
             .style(Style::default().fg(Color::DarkGray));
         frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
     }
-
 }
 
 fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
@@ -1600,11 +1619,9 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         Option<String>,
         Option<(String, String, String)>,
     ) = match &view.target {
-        OutputViewTarget::Session { session_id, label } => (
-            format!(" Output: {label} "),
-            Some(session_id.clone()),
-            None,
-        ),
+        OutputViewTarget::Session { session_id, label } => {
+            (format!(" Output: {label} "), Some(session_id.clone()), None)
+        }
         OutputViewTarget::TeamMember {
             team_name,
             agent_id,
@@ -1663,7 +1680,9 @@ fn render_output_view_overlay(frame: &mut Frame, app: &mut App) {
         ))
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
-    let paragraph = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
 
     let total = paragraph.line_count(inner.width) as u16;
     let visible = inner.height;
@@ -1691,7 +1710,9 @@ fn render_agents_window_overlay(frame: &mut Frame, app: &mut App) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " Agents ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(area);
@@ -1732,7 +1753,9 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
         .borders(Borders::ALL)
         .title(Span::styled(
             " Teams ",
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
         ))
         .border_style(Style::default().fg(Color::Blue));
     let inner = block.inner(area);
@@ -1774,7 +1797,10 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
 
     let bg = Color::Rgb(30, 30, 40);
     let mut spans: Vec<Span<'_>> = Vec::new();
-    spans.push(Span::styled(" 👥 ", Style::default().fg(Color::Blue).bg(bg)));
+    spans.push(Span::styled(
+        " 👥 ",
+        Style::default().fg(Color::Blue).bg(bg),
+    ));
 
     for member in &app.team_members {
         let is_focused = app.focused_teammate.as_ref() == Some(&member.agent_id);
@@ -1790,8 +1816,16 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
             MemberStatus::Failed => ("✗", Color::Red),
         };
 
-        let pill_bg = if is_focused { Color::Rgb(50, 50, 80) } else { bg };
-        let name_color = if is_focused { Color::White } else { Color::Gray };
+        let pill_bg = if is_focused {
+            Color::Rgb(50, 50, 80)
+        } else {
+            bg
+        };
+        let name_color = if is_focused {
+            Color::White
+        } else {
+            Color::Gray
+        };
         let border_char = if is_focused { "▸" } else { " " };
 
         spans.push(Span::styled(
@@ -1805,7 +1839,11 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
             Style::default()
                 .fg(name_color)
                 .bg(pill_bg)
-                .add_modifier(if is_focused { Modifier::BOLD } else { Modifier::empty() }),
+                .add_modifier(if is_focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                }),
         ));
         spans.push(Span::styled(" ", Style::default().bg(bg)));
     }
@@ -1814,10 +1852,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     let hint = " Alt+↑↓:cycle ";
     let used: usize = spans.iter().map(|s| s.content.len()).sum();
     let remaining = (area.width as usize).saturating_sub(used + hint.len());
-    spans.push(Span::styled(
-        " ".repeat(remaining),
-        Style::default().bg(bg),
-    ));
+    spans.push(Span::styled(" ".repeat(remaining), Style::default().bg(bg)));
     spans.push(Span::styled(
         hint,
         Style::default().fg(Color::DarkGray).bg(bg),
@@ -1858,6 +1893,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     ];
+
+    // Show shell cwd when it differs from the project working directory.
+    if let Some(ref shell_cwd) = app.shell_cwd {
+        if *shell_cwd != app.cwd {
+            left_spans.push(Span::styled(
+                format!(" → {}", shell_cwd),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+    }
 
     if let Some(ref branch) = app.git_branch {
         left_spans.push(Span::styled(
@@ -2157,20 +2205,20 @@ fn messages_to_lines<'a>(
 }
 
 fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
-      // Determine which session to display messages for.
-      // If a specific agent is selected, show its messages; otherwise show primary session.
-      let _display_session = app
-          .selected_agent_session_id
-          .clone()
-          .or_else(|| app.session_id.clone());
+    // Determine which session to display messages for.
+    // If a specific agent is selected, show its messages; otherwise show primary session.
+    let _display_session = app
+        .selected_agent_session_id
+        .clone()
+        .or_else(|| app.session_id.clone());
 
-      // Filter messages to the selected agent's session.
-      // For now, messages are still stored globally, so we match by session_id if available.
-      // TODO: Implement proper multi-session message storage to filter by _display_session.
-      // This is a placeholder for future multi-session message handling.
-      let messages_to_show = &app.messages;
+    // Filter messages to the selected agent's session.
+    // For now, messages are still stored globally, so we match by session_id if available.
+    // TODO: Implement proper multi-session message storage to filter by _display_session.
+    // This is a placeholder for future multi-session message handling.
+    let messages_to_show = &app.messages;
 
-      let lines = messages_to_lines(messages_to_show, &app.tool_step_map, &app.cwd);
+    let lines = messages_to_lines(messages_to_show, &app.tool_step_map, &app.cwd);
 
     // Cache plain-text content for text selection copy
     app.message_content_lines = lines
@@ -2221,18 +2269,24 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Build title: show focused teammate or staged attachments in the block title.
     let (title, title_style) = if let Some(ref focused_id) = app.focused_teammate {
-        let name = app.team_members.iter()
+        let name = app
+            .team_members
+            .iter()
             .find(|m| m.agent_id == *focused_id)
             .map(|m| m.name.as_str())
             .unwrap_or("?");
         (
             format!(" → {name} (focused) "),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
     } else if app.pending_attachments.is_empty() {
         (
             " Input ".to_string(),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
     } else {
         let names: Vec<String> = app
@@ -2246,7 +2300,9 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
             .collect();
         (
             format!(" Input  {} ", names.join("  ")),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )
     };
 
@@ -2286,7 +2342,10 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("@", "Mention a file — opens file picker"),
     ("/", "Slash command — opens command menu"),
     ("?", "Show this keybindings help panel"),
-    ("Shift+Enter / Alt+Enter", "Insert a newline (multiline input)"),
+    (
+        "Shift+Enter / Alt+Enter",
+        "Insert a newline (multiline input)",
+    ),
     ("Left/Right", "Move cursor within the input line"),
     ("Shift+Left/Right", "Extend/shrink keyboard selection"),
     ("Ctrl+Left/Right", "Move cursor by word"),
@@ -2532,7 +2591,9 @@ fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the interactive LSP discovery dialog overlay.
 fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
-    let Some(state) = app.lsp_discover.as_ref() else { return };
+    let Some(state) = app.lsp_discover.as_ref() else {
+        return;
+    };
 
     // Size the dialog: taller when there are more servers.
     let server_rows = state.servers.len().max(1) as u16;
@@ -2680,7 +2741,9 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
 
 /// Render the interactive MCP discovery dialog overlay.
 fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
-    let Some(state) = app.mcp_discover.as_ref() else { return };
+    let Some(state) = app.mcp_discover.as_ref() else {
+        return;
+    };
 
     // Size the dialog: taller when there are more servers.
     let server_rows = state.servers.len().max(1) as u16;
@@ -2883,12 +2946,15 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
         .take(visible_height)
         .map(|(i, entry)| {
             let truncated = if entry.len() > (popup.width as usize).saturating_sub(4) {
-                format!("{}…", &entry[..entry
-                    .char_indices()
-                    .map(|(pos, _)| pos)
-                    .take_while(|&pos| pos < (popup.width as usize).saturating_sub(5))
-                    .last()
-                    .unwrap_or(0)])
+                format!(
+                    "{}…",
+                    &entry[..entry
+                        .char_indices()
+                        .map(|(pos, _)| pos)
+                        .take_while(|&pos| pos < (popup.width as usize).saturating_sub(5))
+                        .last()
+                        .unwrap_or(0)]
+                )
             } else {
                 entry.clone()
             };
@@ -2910,7 +2976,12 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
     );
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            title,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
         .border_style(Style::default().fg(Color::Cyan));
 
     let list = List::new(items).block(block);
@@ -2930,4 +3001,96 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
         };
         frame.render_stateful_widget(scrollbar, sb_area, &mut sb_state);
     }
+}
+
+/// Render the plan approval dialog overlay.
+///
+/// Shows the plan text (scrollable) with Approve / Reject buttons. The user
+/// presses Enter to approve or `r`/Esc to reject.
+fn render_plan_approval_dialog(frame: &mut Frame, app: &App) {
+    let Some(ref state) = app.plan_approval_pending else {
+        return;
+    };
+
+    let full = frame.area();
+    let w = full.width.min(90);
+    let h = full.height.saturating_sub(4).min(30);
+    let area = Rect {
+        x: (full.width.saturating_sub(w)) / 2,
+        y: (full.height.saturating_sub(h)) / 2,
+        width: w,
+        height: h,
+    };
+    frame.render_widget(Clear, area);
+
+    // Plan text lines (truncated to fit)
+    let inner_width = area.width.saturating_sub(4) as usize;
+    let text_height = area.height.saturating_sub(6) as usize;
+    let mut plan_lines: Vec<Line<'_>> = state
+        .plan_text
+        .lines()
+        .flat_map(|l| {
+            if l.len() <= inner_width {
+                vec![Line::from(l.to_string())]
+            } else {
+                l.chars()
+                    .collect::<Vec<_>>()
+                    .chunks(inner_width)
+                    .map(|c| Line::from(c.iter().collect::<String>()))
+                    .collect()
+            }
+        })
+        .take(text_height)
+        .collect();
+    if state.plan_text.lines().count() > text_height {
+        plan_lines.push(Line::from(Span::styled(
+            "  … (scroll not yet wired — approve/reject below) …",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    // Approve/Reject buttons
+    let (approve_style, reject_style) = if state.cursor_approve {
+        (
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::DarkGray),
+        )
+    } else {
+        (
+            Style::default().fg(Color::DarkGray),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+
+    plan_lines.push(Line::from(""));
+    plan_lines.push(Line::from(vec![
+        Span::styled(" ✓ Approve ", approve_style),
+        Span::raw("   "),
+        Span::styled(" ✗ Reject ", reject_style),
+        Span::styled(
+            "       ←/→ toggle  Enter confirm  Esc cancel",
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(Span::styled(
+            " 📋 Plan Review ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(plan_lines)
+        .block(block)
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, area);
 }

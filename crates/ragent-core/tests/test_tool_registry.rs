@@ -29,6 +29,8 @@ fn test_default_registry_has_all_tools() {
         "lsp_hover",
         "lsp_references",
         "lsp_symbols",
+        "memory_read",
+        "memory_write",
         "multiedit",
         "new_task",
         "office_info",
@@ -42,6 +44,7 @@ fn test_default_registry_has_all_tools() {
         "question",
         "read",
         "rm",
+        "task_complete",
         "team_approve_plan",
         "team_assign_task",
         "team_broadcast",
@@ -62,6 +65,7 @@ fn test_default_registry_has_all_tools() {
         "team_task_create",
         "team_task_list",
         "team_wait",
+        "think",
         "todo_read",
         "todo_write",
         "wait_tasks",
@@ -128,7 +132,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 55);
+    assert_eq!(defs.len(), 59);
 
     for def in &defs {
         assert!(
@@ -146,6 +150,17 @@ fn test_tool_definitions_have_required_fields() {
             def.name
         );
     }
+}
+
+#[test]
+fn test_read_tool_schema_is_strict() {
+    let registry = create_default_registry();
+    let tool = registry.get("read").unwrap();
+    let schema = tool.parameters_schema();
+
+    assert_eq!(schema["additionalProperties"], false);
+    assert_eq!(schema["properties"]["start_line"]["minimum"], 1);
+    assert_eq!(schema["properties"]["end_line"]["minimum"], 1);
 }
 
 #[test]

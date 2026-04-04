@@ -191,23 +191,39 @@ fn write_docx(path: &Path, content: &Value) -> Result<()> {
 
         match elem_type {
             "heading" => {
-                let text = elem["text"].as_str().or_else(|| elem["heading"].as_str()).unwrap_or("");
+                let text = elem["text"]
+                    .as_str()
+                    .or_else(|| elem["heading"].as_str())
+                    .unwrap_or("");
                 let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
-                paras.push(ParaEntry { text: text.to_owned(), style_id: format!("Heading{level}") });
+                paras.push(ParaEntry {
+                    text: text.to_owned(),
+                    style_id: format!("Heading{level}"),
+                });
             }
             "bullet_list" => {
                 if let Some(items) = elem["items"].as_array() {
                     for item in items {
-                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
-                        paras.push(ParaEntry { text: text.to_owned(), style_id: "ListBullet".to_owned() });
+                        let text = item
+                            .as_str()
+                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(ParaEntry {
+                            text: text.to_owned(),
+                            style_id: "ListBullet".to_owned(),
+                        });
                     }
                 }
             }
             "ordered_list" | "numbered_list" => {
                 if let Some(items) = elem["items"].as_array() {
                     for item in items {
-                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
-                        paras.push(ParaEntry { text: text.to_owned(), style_id: "ListNumber".to_owned() });
+                        let text = item
+                            .as_str()
+                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(ParaEntry {
+                            text: text.to_owned(),
+                            style_id: "ListNumber".to_owned(),
+                        });
                     }
                 }
             }
@@ -220,13 +236,22 @@ fn write_docx(path: &Path, content: &Value) -> Result<()> {
             _ => {
                 // "paragraph" or unknown — also handles legacy {heading, level} without "type"
                 if elem["heading"].as_str().is_some() || elem["level"].as_u64().is_some() {
-                    let heading_text = elem["heading"].as_str().or_else(|| elem["text"].as_str()).unwrap_or("");
+                    let heading_text = elem["heading"]
+                        .as_str()
+                        .or_else(|| elem["text"].as_str())
+                        .unwrap_or("");
                     let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
-                    paras.push(ParaEntry { text: heading_text.to_owned(), style_id: format!("Heading{level}") });
+                    paras.push(ParaEntry {
+                        text: heading_text.to_owned(),
+                        style_id: format!("Heading{level}"),
+                    });
                 } else {
                     let text = elem["text"].as_str().unwrap_or("");
                     let style = elem["style"].as_str().unwrap_or("Normal");
-                    paras.push(ParaEntry { text: text.to_owned(), style_id: style_canonical(style).to_owned() });
+                    paras.push(ParaEntry {
+                        text: text.to_owned(),
+                        style_id: style_canonical(style).to_owned(),
+                    });
                 }
             }
         }
@@ -245,10 +270,18 @@ fn write_docx(path: &Path, content: &Value) -> Result<()> {
 
         for (seg_text, bold, italic, code) in parse_inline_formatting(&entry.text) {
             let mut cp = CharacterProperty::default();
-            if bold { cp = cp.bold(true); }
-            if italic { cp = cp.italics(true); }
-            if code { cp = cp.style_id("Code"); }
-            let run = docx_rust::document::Run::default().property(cp).push_text(seg_text);
+            if bold {
+                cp = cp.bold(true);
+            }
+            if italic {
+                cp = cp.italics(true);
+            }
+            if code {
+                cp = cp.style_id("Code");
+            }
+            let run = docx_rust::document::Run::default()
+                .property(cp)
+                .push_text(seg_text);
             para = para.push(run);
         }
         docx.document.push(para);

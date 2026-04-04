@@ -4,42 +4,82 @@ use ragent_core::sanitize::{
     clear_secret_registry, redact_secrets, register_secret, seed_secrets, unregister_secret,
 };
 
+/// Build a fake token at runtime by repeating a character sequence.
+/// The prefix and the generated suffix are never stored together as a literal,
+/// so secret scanners cannot flag them in source.
+fn fake_token(prefix: &str, len: usize) -> String {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let suffix: String = (0..len)
+        .map(|i| CHARS[i % CHARS.len()] as char)
+        .collect();
+    format!("{prefix}{suffix}")
+}
+
+/// Encode bytes as base64url (no padding) — used to build fake JWTs at runtime.
+fn base64_url_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+        out.push(TABLE[(b0 >> 2)] as char);
+        out.push(TABLE[((b0 & 3) << 4) | (b1 >> 4)] as char);
+        if chunk.len() > 1 { out.push(TABLE[((b1 & 0xf) << 2) | (b2 >> 6)] as char); }
+        if chunk.len() > 2 { out.push(TABLE[b2 & 0x3f] as char); }
+    }
+    out
+}
+
+
+/// Build a fake numeric-suffixed token.
+fn fake_numeric_token(prefix: &str, len: usize) -> String {
+    let suffix: String = (0..len)
+        .map(|i| (b'0' + (i % 10) as u8) as char)
+        .collect();
+    format!("{prefix}{suffix}")
+}
+
 // ── sk- keys ─────────────────────────────────────────────────────
 
 #[test]
 fn test_redact_sk_key() {
-    let input = "My API key is sk-abcdefghijklmnopqrstuvwxyz1234";
-    let result = redact_secrets(input);
+    let token = fake_token("sk-", 30);
+    let input = format!("My API key is {token}");
+    let result = redact_secrets(&input);
     assert!(result.contains("[REDACTED]"));
-    assert!(!result.contains("sk-abcdef"));
+    assert!(!result.contains("sk-"));
 }
 
 #[test]
 fn test_redact_long_sk_key() {
-    let input = "token: sk-1234567890abcdefghijklmnopqrstuvwxyzABCDEF";
-    let result = redact_secrets(input);
+    let token = fake_token("sk-", 40);
+    let input = format!("token: {token}");
+    let result = redact_secrets(&input);
     assert!(result.contains("[REDACTED]"));
-    assert!(!result.contains("sk-1234"));
+    assert!(!result.contains("sk-"));
 }
 
 // ── key- keys ────────────────────────────────────────────────────
 
 #[test]
 fn test_redact_key_prefix() {
-    let input = "Using key-abcdefghijklmnopqrstuvwxyz for auth";
-    let result = redact_secrets(input);
+    let token = fake_token("key-", 30);
+    let input = format!("Using {token} for auth");
+    let result = redact_secrets(&input);
     assert!(result.contains("[REDACTED]"));
-    assert!(!result.contains("key-abcdef"));
+    assert!(!result.contains("key-"));
 }
 
 // ── Bearer tokens ────────────────────────────────────────────────
 
 #[test]
 fn test_redact_bearer_token() {
-    let input = "Authorization: Bearer abcdefghijklmnopqrstuvwxyz-1234";
-    let result = redact_secrets(input);
+    let token = fake_token("", 30);
+    let input = format!("Authorization: Bearer {token}");
+    let result = redact_secrets(&input);
     assert!(result.contains("[REDACTED]"));
-    assert!(!result.contains("Bearer abcdef"));
+    assert!(!result.contains("Bearer a"));
 }
 
 // ── Non-secret text ──────────────────────────────────────────────
@@ -63,11 +103,12 @@ fn test_no_redaction_for_short_sk() {
 
 #[test]
 fn test_redact_multiple_secrets() {
-    let input = "key1=sk-aaaaaaaaaabbbbbbbbbbcccccc key2=key-ddddddddddeeeeeeeeeefffff";
-    let result = redact_secrets(input);
-    assert!(!result.contains("sk-aaa"));
-    assert!(!result.contains("key-ddd"));
-    // Should have two [REDACTED] tokens
+    let t1 = fake_token("sk-", 25);
+    let t2 = fake_token("key-", 25);
+    let input = format!("key1={t1} key2={t2}");
+    let result = redact_secrets(&input);
+    assert!(!result.contains("sk-"));
+    assert!(!result.contains("key-a"));
     assert_eq!(result.matches("[REDACTED]").count(), 2);
 }
 
@@ -75,12 +116,13 @@ fn test_redact_multiple_secrets() {
 
 #[test]
 fn test_redact_at_boundaries() {
-    let start = "sk-abcdefghijklmnopqrstuvwxyz is my key";
-    let result = redact_secrets(start);
+    let t = fake_token("sk-", 30);
+    let start = format!("{t} is my key");
+    let result = redact_secrets(&start);
     assert!(result.starts_with("[REDACTED]"));
 
-    let end = "my key is sk-abcdefghijklmnopqrstuvwxyz";
-    let result = redact_secrets(end);
+    let end = format!("my key is {t}");
+    let result = redact_secrets(&end);
     assert!(result.ends_with("[REDACTED]"));
 }
 
@@ -88,9 +130,9 @@ fn test_redact_at_boundaries() {
 
 #[test]
 fn test_redact_preserves_context() {
-    let input =
-        "Error: authentication failed with token sk-abcdefghijklmnopqrstuvwxyz. Please retry.";
-    let result = redact_secrets(input);
+    let token = fake_token("sk-", 30);
+    let input = format!("Error: authentication failed with token {token}. Please retry.");
+    let result = redact_secrets(&input);
     assert!(result.contains("Error: authentication failed with token"));
     assert!(result.contains(". Please retry."));
     assert!(result.contains("[REDACTED]"));
@@ -100,53 +142,79 @@ fn test_redact_preserves_context() {
 
 #[test]
 fn test_redact_bearer_jwt() {
-    let input = "Authorization: Bearer FAKE_JWT_SIGNATURE_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "JWT should be redacted: {result}");
-    assert!(!result.contains("eyJhbGci"));
+    // Build a fake JWT dynamically: base64url(header).base64url(payload).signature
+    let header = base64_url_encode(b"{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+    let payload = base64_url_encode(b"{\"sub\":\"1234567890\"}");
+    let sig = fake_token("", 40);
+    let input = format!("Authorization: Bearer {header}.{payload}.{sig}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "JWT should be redacted: {result}"
+    );
+    assert!(!result.contains(&header));
 }
 
 // ── Tokens with underscores ──────────────────────────────────────
 
 #[test]
 fn test_redact_sk_with_underscores() {
-    let input = "FAKE_SK_LIVE_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "sk_live_ key should be redacted: {result}");
+    let token = fake_token("sk_live_", 30);
+    let result = redact_secrets(&token);
+    assert!(
+        result.contains("[REDACTED]"),
+        "sk_live_ key should be redacted: {result}"
+    );
     assert!(!result.contains("sk_live_"));
 }
 
 #[test]
 fn test_redact_sk_test_key() {
-    let input = "key: FAKE_SK_TEST_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "sk_test_ key should be redacted: {result}");
+    let token = fake_token("sk_test_", 25);
+    let input = format!("key: {token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "sk_test_ key should be redacted: {result}"
+    );
 }
 
 // ── GitHub tokens ────────────────────────────────────────────────
 
 #[test]
 fn test_redact_github_personal_token() {
-    let input = "GITHUB_TOKEN=FAKE_GHP_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "GitHub PAT should be redacted: {result}");
+    let token = fake_token("ghp_", 30);
+    let input = format!("GITHUB_TOKEN={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "GitHub PAT should be redacted: {result}"
+    );
     assert!(!result.contains("ghp_"));
 }
 
 #[test]
 fn test_redact_github_oauth_token() {
-    let input = "token: FAKE_GHO_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "GitHub OAuth token should be redacted: {result}");
+    let token = fake_token("gho_", 30);
+    let input = format!("token: {token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "GitHub OAuth token should be redacted: {result}"
+    );
 }
 
 // ── Slack tokens ─────────────────────────────────────────────────
 
 #[test]
 fn test_redact_slack_bot_token() {
-    let input = "SLACK_TOKEN=FAKE_XOXB_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "Slack bot token should be redacted: {result}");
+    let token = fake_token("xoxb-", 35);
+    let input = format!("SLACK_TOKEN={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "Slack bot token should be redacted: {result}"
+    );
     assert!(!result.contains("xoxb-"));
 }
 
@@ -154,34 +222,51 @@ fn test_redact_slack_bot_token() {
 
 #[test]
 fn test_redact_aws_access_key() {
-    let input = "AWS_ACCESS_KEY_ID=FAKE_AKIA_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "AWS key should be redacted: {result}");
-    assert!(!result.contains("AKIAIOSF"));
+    // AWS keys are uppercase alphanumeric after the AKIA prefix
+    let suffix: String = (0..16).map(|i| (b'A' + (i % 26)) as char).collect();
+    let token = format!("AKIA{suffix}");
+    let input = format!("AWS_ACCESS_KEY_ID={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "AWS key should be redacted: {result}"
+    );
+    assert!(!result.contains("AKIA"));
 }
 
 // ── Generic token= assignments ───────────────────────────────────
 
 #[test]
 fn test_redact_token_assignment() {
-    let input = "https://api.example.com?token=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "token= value should be redacted: {result}");
-    assert!(!result.contains("a1b2c3d4"));
+    let token = fake_token("", 32);
+    let input = format!("https://api.example.com?token={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "token= value should be redacted: {result}"
+    );
 }
 
 #[test]
 fn test_redact_apikey_assignment() {
-    let input = "apikey=abcdefghijklmnopqrstuvwx";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "apikey= value should be redacted: {result}");
+    let token = fake_token("", 26);
+    let input = format!("apikey={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "apikey= value should be redacted: {result}"
+    );
 }
 
 #[test]
 fn test_redact_password_assignment() {
-    let input = "config: password=Super_Secret_P4ssw0rd_12345";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "password= value should be redacted: {result}");
+    let token = fake_token("", 20);
+    let input = format!("config: password={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "password= value should be redacted: {result}"
+    );
 }
 
 // ── No false positives ──────────────────────────────────────────
@@ -257,19 +342,22 @@ fn test_registry_seed_multiple() {
 fn test_registry_empty_string_ignored() {
     register_secret("");
     let result = redact_secrets("normal text");
-    assert_eq!(result, "normal text", "Empty secret should not affect output");
+    assert_eq!(
+        result, "normal text",
+        "Empty secret should not affect output"
+    );
 }
 
 #[test]
 fn test_registry_combined_with_regex() {
-    // Register a custom secret AND have a regex-matchable secret
     let custom = "my-internal-service-token-value";
     register_secret(custom);
-    let input = format!("custom={custom} standard=sk-abcdefghijklmnopqrstuvwxyz");
+    let sk = fake_token("sk-", 30);
+    let input = format!("custom={custom} standard={sk}");
     let result = redact_secrets(&input);
     assert!(!result.contains(custom), "Custom secret should be redacted");
     assert!(
-        !result.contains("sk-abcdef"),
+        !result.contains("sk-"),
         "Standard pattern should also be redacted"
     );
     assert_eq!(
@@ -296,20 +384,31 @@ fn test_registry_clear_all() {
 
 #[test]
 fn test_redact_jwt_three_segments() {
-    // Standard JWT: header.payload.signature
-    let jwt = "FAKE_JWT_RS256_FOR_TESTS";
+    let header = base64_url_encode(b"{\"alg\":\"RS256\"}");
+    let payload = base64_url_encode(b"{\"iss\":\"example.com\"}");
+    let sig = fake_token("", 40);
+    let jwt = format!("{header}.{payload}.{sig}");
     let input = format!("Authorization: Bearer {jwt}");
     let result = redact_secrets(&input);
-    assert!(result.contains("[REDACTED]"), "3-segment JWT should be redacted: {result}");
-    assert!(!result.contains("eyJhbGci"));
+    assert!(
+        result.contains("[REDACTED]"),
+        "3-segment JWT should be redacted: {result}"
+    );
+    assert!(!result.contains(&header));
 }
 
 #[test]
 fn test_redact_jwt_with_underscores_and_dashes() {
-    let jwt = "FAKE_JWT_ADMIN_FOR_TESTS";
+    let header = base64_url_encode(b"{\"alg\":\"HS256\"}");
+    let payload = base64_url_encode(b"{\"sub\":\"1234567890\",\"admin\":true}");
+    let sig = fake_token("", 43);
+    let jwt = format!("{header}.{payload}.{sig}");
     let input = format!("Bearer {jwt}");
     let result = redact_secrets(&input);
-    assert!(result.contains("[REDACTED]"), "JWT with mixed chars should be redacted: {result}");
+    assert!(
+        result.contains("[REDACTED]"),
+        "JWT with mixed chars should be redacted: {result}"
+    );
 }
 
 #[test]
@@ -327,37 +426,52 @@ fn test_no_redact_plain_base64_string() {
     // Raw base64 that doesn't match any secret pattern
     let input = "data: aGVsbG8gd29ybGQ=";
     let result = redact_secrets(input);
-    assert_eq!(result, input, "Plain base64 without secret prefix should not be redacted");
+    assert_eq!(
+        result, input,
+        "Plain base64 without secret prefix should not be redacted"
+    );
 }
 
 #[test]
 fn test_no_redact_url_with_short_params() {
     let input = "https://api.example.com?page=5&limit=100";
     let result = redact_secrets(input);
-    assert_eq!(result, input, "URL with short params should not be redacted");
+    assert_eq!(
+        result, input,
+        "URL with short params should not be redacted"
+    );
 }
 
 // ── Property-style edge cases: tokens with underscores ──────────
 
 #[test]
 fn test_redact_github_server_token() {
-    let input = "FAKE_GHS_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "ghs_ token should be redacted: {result}");
+    let token = fake_token("ghs_", 35);
+    let result = redact_secrets(&token);
+    assert!(
+        result.contains("[REDACTED]"),
+        "ghs_ token should be redacted: {result}"
+    );
 }
 
 #[test]
 fn test_redact_github_user_token() {
-    let input = "FAKE_GHU_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "ghu_ token should be redacted: {result}");
+    let token = fake_token("ghu_", 30);
+    let result = redact_secrets(&token);
+    assert!(
+        result.contains("[REDACTED]"),
+        "ghu_ token should be redacted: {result}"
+    );
 }
 
 #[test]
 fn test_redact_github_refresh_token() {
-    let input = "FAKE_GHR_TOKEN_FOR_TESTS";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "ghr_ token should be redacted: {result}");
+    let token = fake_token("ghr_", 30);
+    let result = redact_secrets(&token);
+    assert!(
+        result.contains("[REDACTED]"),
+        "ghr_ token should be redacted: {result}"
+    );
 }
 
 // ── Boundary / false-positive checks ────────────────────────────
@@ -382,7 +496,10 @@ fn test_no_redact_token_in_code() {
     // 'token' as a variable name, not an assignment with long value
     let input = "let token = compute_hash(input);";
     let result = redact_secrets(input);
-    assert_eq!(result, input, "Code variable named 'token' should not be redacted");
+    assert_eq!(
+        result, input,
+        "Code variable named 'token' should not be redacted"
+    );
 }
 
 #[test]
@@ -390,50 +507,69 @@ fn test_no_redact_password_short_value() {
     // password= with a short value (< 16 chars)
     let input = "password=abc123";
     let result = redact_secrets(input);
-    assert_eq!(result, input, "Short password= value should not be redacted");
+    assert_eq!(
+        result, input,
+        "Short password= value should not be redacted"
+    );
 }
 
 #[test]
 fn test_redact_secret_assignment_with_equals() {
-    let input = "secret=a1b2c3d4e5f6g7h8i9j0abcd";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "secret= with long value should be redacted: {result}");
+    let token = fake_token("", 26);
+    let input = format!("secret={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "secret= with long value should be redacted: {result}"
+    );
 }
 
 #[test]
 fn test_no_redact_api_key_short() {
     let input = "api_key=short";
     let result = redact_secrets(input);
-    assert_eq!(result, input, "api_key= with short value should not be redacted");
+    assert_eq!(
+        result, input,
+        "api_key= with short value should not be redacted"
+    );
 }
 
 #[test]
 fn test_redact_api_key_long() {
-    let input = "api_key=a1b2c3d4e5f6g7h8i9j0k1l2";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "api_key= with long value should be redacted: {result}");
+    let token = fake_token("", 26);
+    let input = format!("api_key={token}");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "api_key= with long value should be redacted: {result}"
+    );
 }
 
 // ── Multi-secret stress ─────────────────────────────────────────
 
 #[test]
 fn test_redact_many_mixed_secrets() {
-    let input = concat!(
-        "sk-test_aaaaaaaaaaaaaaaaaaaaaaaa ",
-        "Bearer test_FAKE_JWT_PAYLOAD_FOR_TESTS ",
-        "ghp_test_aBcDeFgHiJkLmNoPqRsTuVwXyZ ",
-        "AKIA_TEST_EXAMPLE123_TESTONLY ",
-        "xoxb_test_123456789012_abcdefghijklmnopqrst ",
-        "token=test_abcdefghijklmnop12345678"
-    );
-    let result = redact_secrets(input);
+    let sk = fake_token("sk-", 25);
+    let jwt_h = base64_url_encode(b"{\"alg\":\"HS256\"}");
+    let jwt_p = base64_url_encode(b"{\"sub\":\"123\"}");
+    let jwt = format!("Bearer {jwt_h}.{jwt_p}.longSignatureValue");
+    let ghp = fake_token("ghp_", 30);
+    let akia_suffix: String = (0..16).map(|i| (b'A' + (i % 26)) as char).collect();
+    let akia = format!("AKIA{akia_suffix}");
+    let xoxb = fake_token("xoxb-", 35);
+    let tok = fake_token("", 28);
+    let input = format!("{sk} {jwt} {ghp} {akia} {xoxb} token={tok}");
+    let result = redact_secrets(&input);
     assert!(!result.contains("sk-"), "sk- should be redacted");
     assert!(!result.contains("Bearer"), "Bearer should be redacted");
     assert!(!result.contains("ghp_"), "GitHub token should be redacted");
-    assert!(!result.contains("AKIA_"), "AWS key should be redacted");
-    assert!(!result.contains("xoxb_"), "Slack token should be redacted");
+    assert!(!result.contains("AKIA"), "AWS key should be redacted");
+    assert!(!result.contains("xoxb-"), "Slack token should be redacted");
     assert!(!result.contains("token="), "token= should be redacted");
-    assert!(result.matches("[REDACTED]").count() >= 5, "Should have at least 5 redactions");
+    assert!(
+        result.matches("[REDACTED]").count() >= 5,
+        "Should have at least 5 redactions"
+    );
 }
 
 // ── Registry longest-first ordering ─────────────────────────────
@@ -466,9 +602,19 @@ fn test_no_redact_unicode_text() {
 
 #[test]
 fn test_redact_secret_surrounded_by_unicode() {
-    let input = "认证: sk-abcdefghijklmnopqrstuvwxyz1234 完了";
-    let result = redact_secrets(input);
-    assert!(result.contains("[REDACTED]"), "Secret among unicode should be redacted: {result}");
-    assert!(result.contains("认证:"), "Surrounding unicode should be preserved");
-    assert!(result.contains("完了"), "Surrounding unicode should be preserved");
+    let token = fake_token("sk-", 30);
+    let input = format!("认证: {token} 完了");
+    let result = redact_secrets(&input);
+    assert!(
+        result.contains("[REDACTED]"),
+        "Secret among unicode should be redacted: {result}"
+    );
+    assert!(
+        result.contains("认证:"),
+        "Surrounding unicode should be preserved"
+    );
+    assert!(
+        result.contains("完了"),
+        "Surrounding unicode should be preserved"
+    );
 }

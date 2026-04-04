@@ -144,6 +144,13 @@ pub enum Event {
         /// Summary/output from the sub-agent to pass back.
         summary: String,
     },
+    /// The agent signalled that its current autonomous task is complete.
+    TaskCompleted {
+        /// Session in which task completion was signalled.
+        session_id: String,
+        /// Human-readable summary of what was accomplished.
+        summary: String,
+    },
     /// An unrecoverable error occurred in the agentic loop.
     AgentError {
         /// Session in which the error occurred.
@@ -182,6 +189,10 @@ pub enum Event {
         text: String,
         /// Wall-clock time from request sent to stream complete, in milliseconds.
         elapsed_ms: u64,
+        /// Number of tokens in the prompt/input for this response.
+        input_tokens: u64,
+        /// Number of tokens in the completion/output for this response.
+        output_tokens: u64,
     },
     /// A tool call has been fully assembled with its arguments.
     ToolCallArgs {
@@ -373,6 +384,15 @@ pub enum Event {
         /// The new status.
         status: crate::lsp::LspStatus,
     },
+
+    // ── Shell state events ───────────────────────────────────────────────
+    /// The shell working directory changed after a bash command.
+    ShellCwdChanged {
+        /// Session this event belongs to.
+        session_id: String,
+        /// The new working directory path.
+        cwd: String,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.
@@ -406,6 +426,7 @@ impl Event {
             Self::AgentSwitched { .. } => "AgentSwitched",
             Self::AgentSwitchRequested { .. } => "AgentSwitchRequested",
             Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
+            Self::TaskCompleted { .. } => "TaskCompleted",
             Self::AgentError { .. } => "AgentError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
@@ -428,6 +449,7 @@ impl Event {
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::LspStatusChanged { .. } => "LspStatusChanged",
+            Self::ShellCwdChanged { .. } => "ShellCwdChanged",
         }
     }
 
@@ -452,6 +474,7 @@ impl Event {
             | Self::AgentSwitched { session_id, .. }
             | Self::AgentSwitchRequested { session_id, .. }
             | Self::AgentRestoreRequested { session_id, .. }
+            | Self::TaskCompleted { session_id, .. }
             | Self::AgentError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
             | Self::ToolsSent { session_id, .. }
@@ -474,6 +497,7 @@ impl Event {
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::LspStatusChanged { .. } => None,
+            Self::ShellCwdChanged { session_id, .. } => Some(session_id.as_str()),
         }
     }
 }

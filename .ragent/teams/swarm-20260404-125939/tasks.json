@@ -1,0 +1,104 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze Claude Code competitor",
+      "description": "Review the Claude Code source code located at ../claude-code-sourcemap. Analyze its architecture, key features, UI/UX patterns, capabilities, and unique differentiators. Document findings in a structured format including: core features, technical approach, strengths, and gaps. Output a JSON file to target/temp/swarmout/claude-code-analysis.json with your findings.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-04T12:59:39.385893089Z",
+      "claimed_at": "2026-04-04T13:01:12.072685033Z",
+      "completed_at": "2026-04-04T13:03:02.995189479Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze OpenCode competitor",
+      "description": "Review the OpenCode source code located at ../opencode. Analyze its architecture, key features, UI/UX patterns, capabilities, and unique differentiators. Document findings in a structured format including: core features, technical approach, strengths, and gaps. Output a JSON file to target/temp/swarmout/opencode-analysis.json with your findings.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-04T12:59:39.386146808Z",
+      "claimed_at": "2026-04-04T13:01:36.711417051Z",
+      "completed_at": "2026-04-04T13:01:36.711418652Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze Copilot CLI competitor",
+      "description": "Research and document Copilot CLI's features, capabilities, command-line interface design, integration patterns, and user experience. Since source code may not be available, use public documentation, GitHub repos, and API specifications. Document findings in a structured format including: core features, CLI commands, strengths, and gaps. Output a JSON file to target/temp/swarmout/copilot-cli-analysis.json with your findings.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-04T12:59:39.386427413Z",
+      "claimed_at": "2026-04-04T13:02:26.907718775Z",
+      "completed_at": "2026-04-04T13:02:26.907720069Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze Roocode competitor",
+      "description": "Research and document Roocode's features, capabilities, architecture, UI/UX patterns, and unique selling points. Use public documentation, GitHub repos, and product information. Document findings in a structured format including: core features, technical approach, strengths, and gaps. Output a JSON file to target/temp/swarmout/roocode-analysis.json with your findings.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-04T12:59:39.386629476Z",
+      "claimed_at": "2026-04-04T12:59:48.330640987Z",
+      "completed_at": "2026-04-04T13:01:09.184976108Z"
+    },
+    {
+      "id": "s5",
+      "title": "Review current product",
+      "description": "Conduct a comprehensive review of the current product. Document its existing features, architecture, capabilities, limitations, and current user experience. Create a detailed assessment of what the product currently does well and where it lacks functionality compared to industry standards. Output findings as target/temp/swarmout/current-product-analysis.json.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-04T12:59:39.386835680Z",
+      "claimed_at": "2026-04-04T13:02:48.939275728Z",
+      "completed_at": "2026-04-04T13:02:48.939276960Z"
+    },
+    {
+      "id": "s6",
+      "title": "Synthesize analyses and generate feature recommendations",
+      "description": "Wait for all competitor analyses (s1, s2, s3, s4) and current product review (s5) to complete. Read all JSON analysis files from target/temp/swarmout/. Compare the current product against each competitor, identify feature gaps, and consolidate unique features that competitors have but the current product lacks. Generate a comprehensive list of recommended feature additions with rationale. Output as target/temp/swarmout/feature-recommendations.json.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-04T12:59:39.387086541Z",
+      "claimed_at": "2026-04-04T13:03:06.034367691Z",
+      "completed_at": "2026-04-04T13:05:15.820367477Z"
+    },
+    {
+      "id": "s7",
+      "title": "Create implementation plan with milestones",
+      "description": "Read the feature-recommendations.json file. Prioritize recommended features based on impact, feasibility, and strategic value. Create a detailed implementation plan that includes: feature prioritization rationale, milestone breakdown (Q1, Q2, Q3, Q4 or similar), specific implementation tasks for each milestone, resource requirements, and risk assessment. Organize the plan in a clear structure with dependencies between tasks. Output as target/temp/swarmout/implementation-plan.json.",
+      "status": "completed",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s6"
+      ],
+      "created_at": "2026-04-04T12:59:39.387545196Z",
+      "claimed_at": "2026-04-04T13:05:38.938223003Z",
+      "completed_at": "2026-04-04T13:06:58.319184012Z"
+    },
+    {
+      "id": "s8",
+      "title": "Generate final SWARMOUT2.md document",
+      "description": "Read all analysis files and the implementation plan. Create the final comprehensive SWARMOUT2.md document at target/temp/swarmout/SWARMOUT2.md. Structure it with: Executive Summary, Current Product Overview, Competitive Landscape Analysis (section for each competitor), Feature Gap Analysis, Recommended Features (with business rationale), Implementation Plan with Milestones and Tasks (organized by priority/timeline), Risk Assessment, and Conclusion. Use clear formatting, tables, and hierarchical structure for readability.",
+      "status": "inprogress",
+      "assigned_to": "tm-006",
+      "depends_on": [
+        "s6",
+        "s7"
+      ],
+      "created_at": "2026-04-04T12:59:39.395854451Z",
+      "claimed_at": "2026-04-04T13:07:02.052090982Z",
+      "completed_at": null
+    }
+  ]
+}

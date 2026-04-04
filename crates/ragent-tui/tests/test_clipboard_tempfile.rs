@@ -194,7 +194,10 @@ fn test_save_clipboard_image_rejects_oversized_buffer() {
 
     let err = save_clipboard_image_to_temp(&img).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("too large"), "error should mention size: {msg}");
+    assert!(
+        msg.contains("too large"),
+        "error should mention size: {msg}"
+    );
 }
 
 #[test]

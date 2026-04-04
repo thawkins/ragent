@@ -64,10 +64,7 @@ impl Tool for TeamTaskListTool {
                 TaskStatus::Completed => "✅",
                 TaskStatus::Cancelled => "❌",
             };
-            let assignee = task
-                .assigned_to
-                .as_deref()
-                .unwrap_or("unassigned");
+            let assignee = task.assigned_to.as_deref().unwrap_or("unassigned");
             let deps = if task.depends_on.is_empty() {
                 String::new()
             } else {

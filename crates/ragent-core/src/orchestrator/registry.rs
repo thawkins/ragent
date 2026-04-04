@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 
 /// Identifier for an agent.
 pub type AgentId = String;
@@ -134,11 +134,7 @@ impl AgentRegistry {
             .iter()
             .filter_map(|(k, v)| {
                 if let Some(last) = v.last_heartbeat {
-                    if last < cutoff {
-                        Some(k.clone())
-                    } else {
-                        None
-                    }
+                    if last < cutoff { Some(k.clone()) } else { None }
                 } else {
                     Some(k.clone())
                 }

@@ -34,90 +34,18 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// gathering project context (VCS info, file listings, etc.).
 const ALLOWED_EXECUTABLES: &[&str] = &[
     // Version control
-    "git",
-    "gh",
-    "svn",
-    "hg",
-    // File inspection (read-only)
-    "cat",
-    "head",
-    "tail",
-    "less",
-    "wc",
-    "ls",
-    "find",
-    "tree",
-    "file",
-    "stat",
-    "du",
-    "df",
-    "readlink",
-    "realpath",
-    "basename",
-    "dirname",
-    // Text processing (read-only)
-    "grep",
-    "rg",
-    "awk",
-    "sed",
-    "cut",
-    "sort",
-    "uniq",
-    "tr",
-    "diff",
-    "comm",
-    "paste",
-    "column",
-    "fmt",
-    "fold",
-    "jq",
-    "yq",
-    "xargs",
-    // Shell builtins / utilities
-    "echo",
-    "printf",
-    "date",
-    "env",
-    "printenv",
-    "whoami",
-    "hostname",
-    "uname",
-    "id",
-    "pwd",
-    "which",
-    "test",
-    "[",
-    "true",
-    "false",
-    // Build tool queries (read-only)
-    "cargo",
-    "rustc",
-    "npm",
-    "node",
-    "python",
-    "python3",
-    "pip",
-    "make",
-    "cmake",
-    "go",
-    "java",
-    "javac",
-    "dotnet",
-    // Package / project info
-    "dpkg",
-    "rpm",
-    "brew",
-    "apt",
-    // Networking (read-only queries)
-    "curl",
-    "wget",
-    "dig",
-    "nslookup",
-    "ping",
-    // Docker / container inspection
-    "docker",
-    "podman",
-    "kubectl",
+    "git", "gh", "svn", "hg", // File inspection (read-only)
+    "cat", "head", "tail", "less", "wc", "ls", "find", "tree", "file", "stat", "du", "df",
+    "readlink", "realpath", "basename", "dirname", // Text processing (read-only)
+    "grep", "rg", "awk", "sed", "cut", "sort", "uniq", "tr", "diff", "comm", "paste", "column",
+    "fmt", "fold", "jq", "yq", "xargs", // Shell builtins / utilities
+    "echo", "printf", "date", "env", "printenv", "whoami", "hostname", "uname", "id", "pwd",
+    "which", "test", "[", "true", "false", // Build tool queries (read-only)
+    "cargo", "rustc", "npm", "node", "python", "python3", "pip", "make", "cmake", "go", "java",
+    "javac", "dotnet", // Package / project info
+    "dpkg", "rpm", "brew", "apt", // Networking (read-only queries)
+    "curl", "wget", "dig", "nslookup", "ping", // Docker / container inspection
+    "docker", "podman", "kubectl",
 ];
 
 /// Execute all `` !`command` `` placeholders in the skill body and replace

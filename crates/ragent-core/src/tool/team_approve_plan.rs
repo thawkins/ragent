@@ -4,7 +4,9 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TeamStore, find_team_dir};
+use crate::team::{
+    Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TeamStore, find_team_dir,
+};
 
 /// Lead approves or rejects a teammate's plan.
 pub struct TeamApprovePlanTool;
@@ -69,7 +71,11 @@ impl Tool for TeamApprovePlanTool {
         let feedback = input
             .get("feedback")
             .and_then(|v| v.as_str())
-            .unwrap_or(if approved { "Plan approved. Proceed with implementation." } else { "Plan rejected." });
+            .unwrap_or(if approved {
+                "Plan approved. Proceed with implementation."
+            } else {
+                "Plan rejected."
+            });
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;

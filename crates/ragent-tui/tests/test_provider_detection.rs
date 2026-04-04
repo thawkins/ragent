@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use ragent_core::storage::Storage;
-use ragent_tui::app::ProviderSource;
 use ragent_tui::App;
+use ragent_tui::app::ProviderSource;
 
 // =========================================================================
 // Helpers
@@ -49,7 +49,10 @@ fn test_detect_provider_preferred_from_db() {
         .expect("store preferred");
 
     let result = App::detect_provider(&storage);
-    assert!(result.is_some(), "should find anthropic via DB key + preferred");
+    assert!(
+        result.is_some(),
+        "should find anthropic via DB key + preferred"
+    );
     let p = result.unwrap();
     assert_eq!(p.id, "anthropic");
     assert_eq!(p.source, ProviderSource::Database);
@@ -98,10 +101,7 @@ fn test_detect_provider_disabled_flag_skips_provider() {
     let result = App::detect_provider(&storage);
     assert!(result.is_some());
     let p = result.unwrap();
-    assert_ne!(
-        p.id, "anthropic",
-        "disabled anthropic should be skipped"
-    );
+    assert_ne!(p.id, "anthropic", "disabled anthropic should be skipped");
 }
 
 #[test]
@@ -152,9 +152,12 @@ fn test_detect_provider_db_keys_follow_provider_list_order() {
     // Anthropic should win because it appears first in PROVIDER_LIST,
     // unless an env var overrides or copilot auto-discovers.
     assert!(
-        p.id == "anthropic" || p.source == ProviderSource::EnvVar || p.source == ProviderSource::AutoDiscovered,
+        p.id == "anthropic"
+            || p.source == ProviderSource::EnvVar
+            || p.source == ProviderSource::AutoDiscovered,
         "expected anthropic (from DB) or an env/auto-discovered provider, got: {} ({:?})",
-        p.id, p.source
+        p.id,
+        p.source
     );
 }
 
@@ -185,6 +188,9 @@ fn test_detect_provider_preferred_without_db_key() {
 fn test_provider_source_equality() {
     assert_eq!(ProviderSource::EnvVar, ProviderSource::EnvVar);
     assert_eq!(ProviderSource::Database, ProviderSource::Database);
-    assert_eq!(ProviderSource::AutoDiscovered, ProviderSource::AutoDiscovered);
+    assert_eq!(
+        ProviderSource::AutoDiscovered,
+        ProviderSource::AutoDiscovered
+    );
     assert_ne!(ProviderSource::EnvVar, ProviderSource::Database);
 }

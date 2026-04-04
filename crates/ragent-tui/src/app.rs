@@ -113,7 +113,6 @@ impl MentionSpan {
     }
 }
 
-
 impl App {
     fn is_ascii_table_line(line: &str) -> bool {
         let trimmed = line.trim();
@@ -327,18 +326,23 @@ impl App {
         let cycleable_agents: Vec<AgentInfo> = builtin_agents
             .into_iter()
             .filter(|a| !a.hidden)
-            .chain(custom_defs.iter().filter(|d| !d.agent_info.hidden).map(|d| {
-                let mut info = d.agent_info.clone();
-                if builtin_names.contains(&info.name) {
-                    let new_name = format!("custom:{}", info.name);
-                    all_diagnostics.push(format!(
+            .chain(
+                custom_defs
+                    .iter()
+                    .filter(|d| !d.agent_info.hidden)
+                    .map(|d| {
+                        let mut info = d.agent_info.clone();
+                        if builtin_names.contains(&info.name) {
+                            let new_name = format!("custom:{}", info.name);
+                            all_diagnostics.push(format!(
                         "custom agent '{}' collides with a built-in agent name — loaded as '{}'",
                         info.name, new_name
                     ));
-                    info.name = new_name;
-                }
-                info
-            }))
+                            info.name = new_name;
+                        }
+                        info
+                    }),
+            )
             .collect();
         let current_agent_index = cycleable_agents
             .iter()
@@ -362,11 +366,13 @@ impl App {
             status: "ready".to_string(),
             permission_pending: None,
             token_usage: (0, 0),
+            llm_request_stats: Vec::new(),
             last_input_tokens: 0,
             quota_percent: None,
             current_screen: ScreenMode::Home,
             tip: tips::random_tip(),
             cwd,
+            shell_cwd: None,
             git_branch,
             provider_setup: None,
             configured_provider,
@@ -427,34 +433,41 @@ impl App {
             compact_in_progress: false,
             auto_compact_failed: false,
             pending_send_after_compact: None,
-                          agent_halted: false,
-                          tool_step_map: HashMap::new(),
+            agent_halted: false,
+            tool_step_map: HashMap::new(),
             active_tasks: Vec::new(),
             show_shortcuts: false,
             quit_armed: false,
             context_menu: None,
             pending_attachments: Vec::new(),
-                          history_file_path: None,
-                          history_picker: None,
-                          selected_agent_session_id: None,
-                          selected_agent_index: None,
-                          custom_agent_defs: custom_defs,
-                          custom_agent_diagnostics: all_diagnostics.clone(),
-                          active_team: None,
-                          team_members: Vec::new(),
-                          team_message_counts: HashMap::new(),
-                          show_teams: false,
-                          teams_scroll_offset: 0,
-                          teams_max_scroll: 0,
-                          focused_teammate: None,
-                          swarm_state: None,
-                          swarm_result: Arc::new(std::sync::Mutex::new(None)),
-                          output_view: None,
-                          opt_result: Arc::new(std::sync::Mutex::new(None)),
-                          history_dirty: false,
-                          history_save_deadline: None,
-                          md_render_cache: HashMap::new(),
-                      };
+            history_file_path: None,
+            history_picker: None,
+            selected_agent_session_id: None,
+            selected_agent_index: None,
+            custom_agent_defs: custom_defs,
+            custom_agent_diagnostics: all_diagnostics.clone(),
+            active_team: None,
+            team_members: Vec::new(),
+            team_message_counts: HashMap::new(),
+            show_teams: false,
+            teams_scroll_offset: 0,
+            teams_max_scroll: 0,
+            focused_teammate: None,
+            swarm_state: None,
+            swarm_result: Arc::new(std::sync::Mutex::new(None)),
+            output_view: None,
+            opt_result: Arc::new(std::sync::Mutex::new(None)),
+            history_dirty: false,
+            history_save_deadline: None,
+            md_render_cache: HashMap::new(),
+            autopilot_enabled: false,
+            autopilot_token_budget: None,
+            autopilot_time_limit_secs: None,
+            autopilot_started_at: None,
+            autopilot_pending_continue: None,
+            plan_approval_pending: None,
+            role_mode: None,
+        };
 
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
@@ -515,21 +528,19 @@ impl App {
         };
         let Some(outcome) = outcome else { return };
         match outcome {
-            Ok(raw_json) => {
-                match ragent_core::team::parse_decomposition(&raw_json) {
-                    Ok(decomposition) => {
-                        self.execute_swarm_decomposition(decomposition);
-                    }
-                    Err(msg) => {
-                        self.status = "⚠ swarm: decomposition parse error".to_string();
-                        self.append_assistant_text(&format!(
-                            "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
-                            msg
-                        ));
-                        self.push_log_no_agent(LogLevel::Warn, format!("Swarm parse error: {}", msg));
-                    }
+            Ok(raw_json) => match ragent_core::team::parse_decomposition(&raw_json) {
+                Ok(decomposition) => {
+                    self.execute_swarm_decomposition(decomposition);
                 }
-            }
+                Err(msg) => {
+                    self.status = "⚠ swarm: decomposition parse error".to_string();
+                    self.append_assistant_text(&format!(
+                        "From: /swarm\n## ❌ Decomposition Failed\n\n{}\n",
+                        msg
+                    ));
+                    self.push_log_no_agent(LogLevel::Warn, format!("Swarm parse error: {}", msg));
+                }
+            },
             Err(msg) => {
                 self.status = format!("⚠ swarm failed: {}", msg);
                 self.append_assistant_text(&format!(
@@ -569,6 +580,19 @@ impl App {
             .resolve_model(provider_id, model_id)
             .map(|m| m.context_window)
             .filter(|w| *w > 0)
+    }
+
+    fn ollama_cloud_api_key(&self) -> Option<String> {
+        self.storage
+            .get_provider_auth("ollama_cloud")
+            .ok()
+            .flatten()
+            .filter(|k| !k.is_empty())
+            .or_else(|| {
+                std::env::var("OLLAMA_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+            })
     }
 
     fn should_auto_compact_before_send(&self) -> bool {
@@ -612,7 +636,10 @@ impl App {
             .selected_model
             .as_deref()
             .and_then(|s| s.split_once('/'))
-            .map(|(p, m)| ModelRef { provider_id: p.to_string(), model_id: m.to_string() })
+            .map(|(p, m)| ModelRef {
+                provider_id: p.to_string(),
+                model_id: m.to_string(),
+            })
             .or_else(|| self.agent_info.model.clone());
         if let Some(model_ref) = resolved_model {
             agent.model = Some(model_ref);
@@ -642,7 +669,12 @@ impl App {
         let event_bus = self.event_bus.clone();
         tokio::spawn(async move {
             match processor
-                .process_message(&sid, &summary_prompt, &agent, Arc::new(AtomicBool::new(false)))
+                .process_message(
+                    &sid,
+                    &summary_prompt,
+                    &agent,
+                    Arc::new(AtomicBool::new(false)),
+                )
                 .await
             {
                 Ok(_) => {
@@ -663,12 +695,7 @@ impl App {
         true
     }
 
-
-    fn dispatch_user_message(
-        &mut self,
-        text: String,
-        image_paths: Vec<std::path::PathBuf>,
-    ) {
+    fn dispatch_user_message(&mut self, text: String, image_paths: Vec<std::path::PathBuf>) {
         self.auto_compact_failed = false;
         let Some(sid) = self.session_id.clone() else {
             self.status = "⚠ No active session".to_string();
@@ -741,6 +768,15 @@ impl App {
             });
         }
 
+        // Inject role-mode system prompt addition when a role mode is active.
+        if let Some(ref mode) = self.role_mode {
+            let addition = mode.system_prompt_addition();
+            if !addition.is_empty() {
+                let existing = agent.prompt.clone().unwrap_or_default();
+                agent.prompt = Some(format!("{}\n\n{}", existing, addition));
+            }
+        }
+
         let processor = self.session_processor.clone();
         let flag = Arc::new(AtomicBool::new(false));
         self.cancel_flag = Some(flag.clone());
@@ -759,7 +795,10 @@ impl App {
             };
 
             if image_paths.is_empty() {
-                if let Err(e) = processor.process_message(&sid, &final_text, &agent, flag).await {
+                if let Err(e) = processor
+                    .process_message(&sid, &final_text, &agent, flag)
+                    .await
+                {
                     tracing::debug!(error = %e, "Failed to process message");
                 }
             } else {
@@ -834,8 +873,7 @@ impl App {
         // so that e.g. selecting Ollama doesn't get overwritten by Copilot IDE tokens.
         if let Ok(Some(preferred)) = storage.get_setting("preferred_provider") {
             if !preferred.is_empty() && !is_disabled(&preferred) {
-                if let Some(&(pid, pname)) = PROVIDER_LIST.iter().find(|(id, _)| *id == preferred)
-                {
+                if let Some(&(pid, pname)) = PROVIDER_LIST.iter().find(|(id, _)| *id == preferred) {
                     return Some(ConfiguredProvider {
                         id: pid.to_string(),
                         name: pname.to_string(),
@@ -924,6 +962,17 @@ impl App {
                     return Some(ConfiguredProvider {
                         id: "ollama".into(),
                         name: "Ollama (Local)".into(),
+                        source: ProviderSource::EnvVar,
+                    });
+                }
+            }
+        }
+        if !is_disabled("ollama_cloud") {
+            if let Ok(key) = std::env::var("OLLAMA_API_KEY") {
+                if !key.is_empty() {
+                    return Some(ConfiguredProvider {
+                        id: "ollama_cloud".into(),
+                        name: "Ollama Cloud".into(),
                         source: ProviderSource::EnvVar,
                     });
                 }
@@ -1253,7 +1302,9 @@ impl App {
     pub(crate) fn cursor_move_up_logical_line(&mut self) {
         let byte = self.cursor_byte_pos();
         let before = &self.input[..byte];
-        let Some(nl_pos) = before.rfind('\n') else { return };
+        let Some(nl_pos) = before.rfind('\n') else {
+            return;
+        };
 
         // Column (char count) within current line
         let line_start_byte = nl_pos + 1;
@@ -1273,7 +1324,9 @@ impl App {
     pub(crate) fn cursor_move_down_logical_line(&mut self) {
         let byte = self.cursor_byte_pos();
         let after = &self.input[byte..];
-        let Some(nl_offset) = after.find('\n') else { return };
+        let Some(nl_offset) = after.find('\n') else {
+            return;
+        };
 
         // Column within current line
         let before = &self.input[..byte];
@@ -1338,6 +1391,48 @@ impl App {
             }
             let clean: String = text.chars().filter(|&c| c != '\r').collect();
             self.insert_text_at_cursor(&clean);
+        }
+    }
+
+    /// Paste text into the active provider-setup input field.
+    pub fn paste_text_into_provider_setup(&mut self, text: &str) {
+        let clean: String = text.chars().filter(|&c| c != '\r').collect();
+        let Some(step) = self.provider_setup.as_mut() else {
+            return;
+        };
+        if let ProviderSetupStep::EnterKey {
+            key_input,
+            key_cursor,
+            endpoint_input,
+            endpoint_cursor,
+            editing_endpoint,
+            ..
+        } = step
+        {
+            if *editing_endpoint {
+                let insert_pos = endpoint_input
+                    .char_indices()
+                    .nth(*endpoint_cursor)
+                    .map(|(byte, _)| byte)
+                    .unwrap_or_else(|| endpoint_input.len());
+                endpoint_input.insert_str(insert_pos, &clean);
+                *endpoint_cursor += clean.chars().count();
+            } else {
+                let insert_pos = key_input
+                    .char_indices()
+                    .nth(*key_cursor)
+                    .map(|(byte, _)| byte)
+                    .unwrap_or_else(|| key_input.len());
+                key_input.insert_str(insert_pos, &clean);
+                *key_cursor += clean.chars().count();
+            }
+        }
+    }
+
+    /// Paste clipboard text into the active provider-setup input field.
+    pub(crate) fn paste_provider_setup_from_clipboard(&mut self) {
+        if let Some(text) = Self::get_clipboard() {
+            self.paste_text_into_provider_setup(&text);
         }
     }
 
@@ -1534,10 +1629,11 @@ impl App {
         // Parse the currently selected model so teammates inherit it in the reconcile loop.
         let active_model: Option<ragent_core::agent::ModelRef> =
             self.selected_model.as_deref().and_then(|s| {
-                s.split_once('/').map(|(pid, mid)| ragent_core::agent::ModelRef {
-                    provider_id: pid.to_string(),
-                    model_id: mid.to_string(),
-                })
+                s.split_once('/')
+                    .map(|(pid, mid)| ragent_core::agent::ModelRef {
+                        provider_id: pid.to_string(),
+                        model_id: mid.to_string(),
+                    })
             });
 
         let mut manager = TeamManager::new(
@@ -1550,7 +1646,12 @@ impl App {
         manager.active_model = active_model;
         let manager = Arc::new(manager);
 
-        if self.session_processor.team_manager.set(manager.clone()).is_ok() {
+        if self
+            .session_processor
+            .team_manager
+            .set(manager.clone())
+            .is_ok()
+        {
             self.push_log_no_agent(
                 LogLevel::Info,
                 format!("TeamManager initialised for team '{team_name}'"),
@@ -1741,6 +1842,24 @@ impl App {
                 }
             }
         }
+        if provider_id == "ollama_cloud" {
+            if let Some(token) = self.ollama_cloud_api_key() {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle.block_on(
+                            ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
+                                &token, None,
+                            ),
+                        )
+                    });
+                    if let Ok(models) = result
+                        && !models.is_empty()
+                    {
+                        return models.into_iter().map(|m| (m.id, m.name)).collect();
+                    }
+                }
+            }
+        }
         if provider_id == "copilot" {
             // Prefer DB-stored device flow token (works for token exchange),
             // then fall back to other token sources for model discovery.
@@ -1799,6 +1918,158 @@ impl App {
             .map(|(_, m)| m)
             .unwrap_or(model_str);
         Some(format!("{} / {}", provider_name, model_id))
+    }
+
+    /// Returns the active `provider/model` identifier for the current session, if any.
+    fn active_model_ref_string(&self) -> Option<String> {
+        self.selected_model.clone().or_else(|| {
+            self.agent_info
+                .model
+                .as_ref()
+                .map(|model| format!("{}/{}", model.provider_id, model.model_id))
+        })
+    }
+
+    /// Summarise `/llmstats` samples for the currently active model.
+    ///
+    /// The summary is based on completed request samples recorded from the
+    /// current session only.
+    pub fn llm_stats_summary(&self) -> Option<LlmStatsSummary> {
+        let model_ref = self.active_model_ref_string()?;
+        let samples: Vec<&LlmRequestStat> = self
+            .llm_request_stats
+            .iter()
+            .filter(|sample| sample.model_ref == model_ref)
+            .collect();
+        if samples.is_empty() {
+            return None;
+        }
+
+        let count = samples.len() as f64;
+        let avg_elapsed_ms = samples.iter().map(|s| s.elapsed_ms as f64).sum::<f64>() / count;
+        let avg_prompt_tps = samples
+            .iter()
+            .map(|s| Self::tokens_per_second(s.input_tokens, s.elapsed_ms))
+            .sum::<f64>()
+            / count;
+        let avg_output_tps = samples
+            .iter()
+            .map(|s| Self::tokens_per_second(s.output_tokens, s.elapsed_ms))
+            .sum::<f64>()
+            / count;
+
+        Some(LlmStatsSummary {
+            samples: samples.len(),
+            avg_elapsed_ms,
+            avg_prompt_tps,
+            avg_output_tps,
+        })
+    }
+
+    /// Build a cost summary for the current session.
+    pub fn cost_summary(&self) -> Option<String> {
+        if self.llm_request_stats.is_empty() {
+            return None;
+        }
+
+        #[derive(Default)]
+        struct ProviderCost {
+            input_tokens: u64,
+            output_tokens: u64,
+            samples: usize,
+            cost_usd: f64,
+        }
+
+        let mut total_input_tokens = 0u64;
+        let mut total_output_tokens = 0u64;
+        let mut total_cost = 0.0f64;
+        let mut by_provider: std::collections::HashMap<String, ProviderCost> =
+            std::collections::HashMap::new();
+
+        for sample in &self.llm_request_stats {
+            let (provider_id, model_id) = sample
+                .model_ref
+                .split_once('/')
+                .unwrap_or((&sample.model_ref, ""));
+            let model = self.provider_registry.resolve_model(provider_id, model_id);
+            let cost = model
+                .map(|m| {
+                    (sample.input_tokens as f64 * m.cost.input / 1_000_000.0)
+                        + (sample.output_tokens as f64 * m.cost.output / 1_000_000.0)
+                })
+                .unwrap_or(0.0);
+
+            total_input_tokens += sample.input_tokens;
+            total_output_tokens += sample.output_tokens;
+            total_cost += cost;
+
+            let entry = by_provider.entry(provider_id.to_string()).or_default();
+            entry.input_tokens += sample.input_tokens;
+            entry.output_tokens += sample.output_tokens;
+            entry.samples += 1;
+            entry.cost_usd += cost;
+        }
+
+        let session_duration = self
+            .session_id
+            .as_deref()
+            .and_then(|sid| {
+                self.session_processor
+                    .session_manager
+                    .get_session(sid)
+                    .ok()
+                    .flatten()
+            })
+            .map(|session| chrono::Utc::now() - session.created_at)
+            .map(|duration| {
+                let seconds = duration.num_seconds().max(0);
+                let hours = seconds / 3600;
+                let minutes = (seconds % 3600) / 60;
+                let secs = seconds % 60;
+                if hours > 0 {
+                    format!("{hours}h {minutes}m {secs}s")
+                } else if minutes > 0 {
+                    format!("{minutes}m {secs}s")
+                } else {
+                    format!("{secs}s")
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        let mut providers: Vec<_> = by_provider.into_iter().collect();
+        providers.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut out = String::from("From: /cost\n");
+        out.push_str(&format!("Samples: {}\n", self.llm_request_stats.len()));
+        out.push_str(&format!("Session duration: {}\n", session_duration));
+        out.push_str(&format!(
+            "Total tokens: {} input / {} output\n",
+            total_input_tokens, total_output_tokens
+        ));
+        out.push_str(&format!("Estimated cost: ${:.6}\n", total_cost));
+        if !providers.is_empty() {
+            out.push_str("\nBy provider:\n");
+            for (provider, summary) in providers {
+                out.push_str(&format!(
+                    "  - {}: ${:.6} ({} in / {} out, {} samples)\n",
+                    provider,
+                    summary.cost_usd,
+                    summary.input_tokens,
+                    summary.output_tokens,
+                    summary.samples
+                ));
+            }
+        }
+
+        Some(out)
+    }
+
+    /// Convert token counts and elapsed milliseconds into tokens per second.
+    fn tokens_per_second(tokens: u64, elapsed_ms: u64) -> f64 {
+        if elapsed_ms == 0 {
+            return 0.0;
+        }
+        tokens as f64 / (elapsed_ms as f64 / 1000.0)
     }
 
     /// Spawn an async health check for the currently configured provider.
@@ -1927,17 +2198,9 @@ impl App {
         }
 
         // Compute context-window usage % from last request's input token count.
-        let context_pct: Option<f32> = self
-            .selected_model
-            .as_deref()
-            .and_then(|m| {
-                let mut parts = m.splitn(2, '/');
-                let pid = parts.next()?;
-                let mid = parts.next()?;
-                self.provider_registry.resolve_model(pid, mid)
-            })
-            .filter(|m| m.context_window > 0)
-            .map(|m| (self.last_input_tokens as f32 / m.context_window as f32 * 100.0).min(100.0));
+        let context_pct: Option<f32> = self.selected_model_context_window().map(|context_window| {
+            (self.last_input_tokens as f32 / context_window as f32 * 100.0).min(100.0)
+        });
 
         if provider_id == "copilot" {
             let plan = ragent_core::provider::copilot::cached_copilot_plan()
@@ -1951,6 +2214,11 @@ impl App {
             match context_pct {
                 Some(p) => (format!("local ctx: {:.0}%", p), false),
                 None => ("local".to_string(), false),
+            }
+        } else if provider_id == "ollama_cloud" {
+            match context_pct {
+                Some(p) => (format!("cloud ctx: {:.0}%", p), false),
+                None => ("cloud".to_string(), false),
             }
         } else if let Some(p) = context_pct {
             (format!("ctx: {:.0}%", p), false)
@@ -2210,7 +2478,11 @@ impl App {
     /// file was inserted into the input (menu closed), or `false` if the menu
     /// remains open due to directory navigation.
     pub fn accept_file_menu_selection(&mut self) -> bool {
-        if self.file_menu.as_ref().is_some_and(|m| m.matches.is_empty()) {
+        if self
+            .file_menu
+            .as_ref()
+            .is_some_and(|m| m.matches.is_empty())
+        {
             return false;
         }
         // Clone the selected entry out of the menu to avoid holding an
@@ -2234,9 +2506,10 @@ impl App {
                 let path = entry.display.clone();
                 if let Some(active) = self.active_mention_span() {
                     let replacement = format!("@{path}");
-                    self.input.replace_range(active.at_start..active.token_end, &replacement);
-                    let cursor_chars = self.input[..active.at_start].chars().count()
-                        + replacement.chars().count();
+                    self.input
+                        .replace_range(active.at_start..active.token_end, &replacement);
+                    let cursor_chars =
+                        self.input[..active.at_start].chars().count() + replacement.chars().count();
                     self.set_cursor_char_index_clamped(cursor_chars);
                 } else {
                     self.file_menu = None;
@@ -2393,8 +2666,8 @@ impl App {
                         .cycleable_agents
                         .iter()
                         .map(|a| {
-                            let is_custom = custom_names.contains(&a.name)
-                                || a.name.starts_with("custom:");
+                            let is_custom =
+                                custom_names.contains(&a.name) || a.name.starts_with("custom:");
                             (a.name.clone(), a.description.clone(), is_custom)
                         })
                         .collect();
@@ -2447,10 +2720,14 @@ impl App {
                     .collect();
 
                 for agent in &self.cycleable_agents {
-                    let is_custom = custom_names.contains(&agent.name)
-                        || agent.name.starts_with("custom:");
+                    let is_custom =
+                        custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
                     if !is_custom {
-                        let active = if agent.name == self.agent_name { " ●" } else { "" };
+                        let active = if agent.name == self.agent_name {
+                            " ●"
+                        } else {
+                            ""
+                        };
                         output.push_str(&format!(
                             "  {:<18} {}{}\n",
                             agent.name, agent.description, active
@@ -2465,15 +2742,20 @@ impl App {
                 } else {
                     output.push_str("\nCustom Agents:\n\n");
                     for def in &self.custom_agent_defs {
-                        let scope = if def.is_project_local { "project" } else { "global" };
+                        let scope = if def.is_project_local {
+                            "project"
+                        } else {
+                            "global"
+                        };
                         let name = &def.agent_info.name;
                         let desc = &def.agent_info.description;
                         let active = if *name == self.agent_name { " ●" } else { "" };
-                        let fmt = if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
-                            "profile"
-                        } else {
-                            "oasf"
-                        };
+                        let fmt =
+                            if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                "profile"
+                            } else {
+                                "oasf"
+                            };
                         output.push_str(&format!(
                             "  {:<18} {} [{}/{}]{}\n",
                             name, desc, scope, fmt, active
@@ -2494,16 +2776,117 @@ impl App {
                 }
                 self.status = "agents".to_string();
             }
+            "context" => {
+                match args.trim() {
+                    "refresh" => {
+                        ragent_core::agent::clear_prompt_context_cache();
+                        self.append_assistant_text(
+                            "From: /context\n🔄 Context cache cleared — next message will recompute file tree, git status, and README."
+                        );
+                        self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
+                        self.status = "context refreshed".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "From: /context\nUsage: `/context refresh` — clears cached file tree, git status, and README context"
+                        );
+                    }
+                }
+            }
+
+            // ── /init ────────────────────────────────────────────────────────
+            "init" => {
+                let sid = self.session_id.clone().unwrap_or_default();
+                self.append_assistant_text(
+                    "From: /init\n🔍 **Analysing project…**\n\n\
+                     The explore agent will examine the project structure, README, build files, \
+                     and test layout, then write a summary to `.ragent/memory/PROJECT_ANALYSIS.md`. \
+                     Future sessions will automatically load this context."
+                );
+                self.push_log_no_agent(LogLevel::Info, "init: starting project analysis".to_string());
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+
+                // Find the explore agent and dispatch the analysis task directly
+                // (no agent-stack push — init runs as a one-shot subagent that writes memory).
+                let explore_agent = self
+                    .cycleable_agents
+                    .iter()
+                    .find(|a| a.name == "explore")
+                    .cloned();
+
+                let mut agent = explore_agent.unwrap_or_else(|| {
+                    // Fallback: use current agent with a suitable prompt
+                    self.agent_info.clone()
+                });
+
+                // Apply current model override
+                if let Some(ref model_str) = self.selected_model {
+                    if let Some((provider, model)) = model_str.split_once('/') {
+                        agent.model = Some(ModelRef {
+                            provider_id: provider.to_string(),
+                            model_id: model.to_string(),
+                        });
+                    }
+                }
+
+                // Allow file writes so the agent can call memory_write
+                agent.permission = ragent_core::agent::default_permissions();
+
+                let task = "\
+You are performing a one-time project analysis to build persistent memory for this codebase.\n\n\
+Analyse the following aspects of the project:\n\
+1. Programming language(s), frameworks, and key dependencies\n\
+2. Overall architecture and module structure\n\
+3. Entry points and main execution flow\n\
+4. Build system and how to build/test the project\n\
+5. Key conventions: naming, error handling, testing patterns\n\
+6. Important files a developer should know about\n\n\
+After your analysis, call the `memory_write` tool with:\n\
+- scope: \"project\"\n\
+- path: \"PROJECT_ANALYSIS.md\"\n\
+- content: a well-structured markdown summary of your findings\n\n\
+Be concise but comprehensive. This will be injected into future agent sessions automatically.\
+".to_string();
+
+                let msg = Message::user_text(&sid, &task);
+                self.messages.push(msg);
+
+                let processor = self.session_processor.clone();
+                let flag = Arc::new(AtomicBool::new(false));
+                self.cancel_flag = Some(flag.clone());
+                self.is_processing = true;
+                self.status = "init: analysing project…".to_string();
+
+                let event_bus = self.event_bus.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = processor
+                        .process_message(&sid, &task, &agent, flag)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "init: analysis failed");
+                        event_bus.publish(ragent_core::event::Event::AgentError {
+                            session_id: sid,
+                            error: format!("init analysis failed: {e}"),
+                        });
+                    }
+                });
+            }
             "clear" => {
                 self.messages.clear();
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
+                ragent_core::agent::clear_prompt_context_cache();
                 self.status = "messages cleared".to_string();
                 self.push_log_no_agent(LogLevel::Info, "Message history cleared".to_string());
             }
             "browse_refresh" => {
                 self.refresh_project_files_cache();
-                self.status = format!("browse index refreshed ({})", self.project_files_cache_count);
+                self.status = format!(
+                    "browse index refreshed ({})",
+                    self.project_files_cache_count
+                );
                 self.push_log_no_agent(
                     LogLevel::Info,
                     format!(
@@ -2545,6 +2928,23 @@ impl App {
             }
             "compact" => {
                 let _ = self.start_compaction(false);
+            }
+            "cost" => {
+                let Some(output) = self.cost_summary() else {
+                    self.append_assistant_text(
+                        "From: /cost\nNo completed LLM responses yet for this session.\n",
+                    );
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
+                    }
+                    self.status = "cost unavailable".to_string();
+                    return;
+                };
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "cost summary".to_string();
             }
             "help" => {
                 let mut help_lines = String::from("From: /help\nAvailable commands:\n");
@@ -2610,25 +3010,31 @@ impl App {
                     Some(m) => m,
                     None => {
                         self.status = format!("⚠ Unknown optimization method: {}", method_str);
-                        self.push_log_no_agent(LogLevel::Warn, format!("opt: unknown method '{}'", method_str));
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!("opt: unknown method '{}'", method_str),
+                        );
                         return;
                     }
                 };
 
                 // Resolve provider / model from session config
-                let (provider_id, model_id) = match self.selected_model.as_deref()
+                let (provider_id, model_id) = match self
+                    .selected_model
+                    .as_deref()
                     .and_then(|s| s.split_once('/'))
                     .map(|(p, m)| (p.to_string(), m.to_string()))
                 {
                     Some(pair) => pair,
                     None => {
-                        self.status = "⚠ /opt requires a configured model (use /provider)".to_string();
+                        self.status =
+                            "⚠ /opt requires a configured model (use /provider)".to_string();
                         return;
                     }
                 };
 
                 let registry = Arc::clone(&self.provider_registry);
-                let storage  = Arc::clone(&self.storage);
+                let storage = Arc::clone(&self.storage);
                 let opt_result = Arc::clone(&self.opt_result);
                 let user_prompt = rest.to_string();
                 let method_name = method.name().to_string();
@@ -2639,8 +3045,14 @@ impl App {
                 }
 
                 tokio::spawn(async move {
-                    let completer = RagentCompleter { registry, storage, provider_id, model_id };
-                    let outcome = optimize(method, &user_prompt, &completer).await
+                    let completer = RagentCompleter {
+                        registry,
+                        storage,
+                        provider_id,
+                        model_id,
+                    };
+                    let outcome = optimize(method, &user_prompt, &completer)
+                        .await
                         .map(|text| format!("[opt: {}]\n\n{}", method_name, text))
                         .map_err(|e| e.to_string());
                     if let Ok(mut guard) = opt_result.lock() {
@@ -2721,13 +3133,50 @@ impl App {
                     "log panel hidden".to_string()
                 };
             }
+            "llmstats" => {
+                let Some(model_ref) = self.active_model_ref_string() else {
+                    self.status = "⚠ No active model selected".to_string();
+                    self.push_log_no_agent(LogLevel::Warn, "llmstats: no active model".to_string());
+                    return;
+                };
+
+                let Some(summary) = self.llm_stats_summary() else {
+                    self.append_assistant_text(&format!(
+                        "From: /llmstats\nNo completed LLM responses yet for {}.\n",
+                        model_ref
+                    ));
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
+                    }
+                    self.status = "llm stats unavailable".to_string();
+                    return;
+                };
+
+                let output = format!(
+                    "From: /llmstats\n\
+                     Model: {}\n\
+                     Samples: {}\n\
+                     Average round-trip: {:.1} ms\n\
+                     Average prompt parsing tokens/sec: {:.2}\n\
+                     Average output tokens/sec: {:.2}\n",
+                    model_ref,
+                    summary.samples,
+                    summary.avg_elapsed_ms,
+                    summary.avg_prompt_tps,
+                    summary.avg_output_tps
+                );
+                self.append_assistant_text(&output);
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+                self.status = "llm stats".to_string();
+            }
             "history" => {
                 if self.input_history.is_empty() {
                     self.status = "No input history yet".to_string();
                 } else {
                     // Show newest entries first
-                    let entries: Vec<String> =
-                        self.input_history.iter().rev().cloned().collect();
+                    let entries: Vec<String> = self.input_history.iter().rev().cloned().collect();
                     self.history_picker = Some(crate::app::state::HistoryPickerState {
                         entries,
                         selected: 0,
@@ -2781,10 +3230,8 @@ impl App {
                         ragent_core::agent::custom::load_custom_agents(&cwd_path);
 
                     // Rebuild cycleable list: builtins (non-hidden) + custom
-                    let mut new_cycleable: Vec<_> = builtin_agents
-                        .into_iter()
-                        .filter(|a| !a.hidden)
-                        .collect();
+                    let mut new_cycleable: Vec<_> =
+                        builtin_agents.into_iter().filter(|a| !a.hidden).collect();
                     for def in &new_defs {
                         let mut info = def.agent_info.clone();
                         if builtin_names.contains(&info.name) {
@@ -2837,11 +3284,17 @@ impl App {
                             self.selected_model =
                                 self.storage.get_setting("selected_model").ok().flatten();
                             report.push_str("✓ Config reloaded (ragent.json)\n");
-                            self.push_log_no_agent(LogLevel::Info, "reload config: ragent.json reloaded".to_string());
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                "reload config: ragent.json reloaded".to_string(),
+                            );
                         }
                         Err(e) => {
                             report.push_str(&format!("✗ Config reload failed: {}\n", e));
-                            self.push_log_no_agent(LogLevel::Warn, format!("reload config failed: {}", e));
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                format!("reload config failed: {}", e),
+                            );
                         }
                     }
                 }
@@ -2893,7 +3346,10 @@ impl App {
                         }
                         Err(e) => {
                             report.push_str(&format!("✗ MCP reload failed: {}\n", e));
-                            self.push_log_no_agent(LogLevel::Warn, format!("reload mcp failed: {}", e));
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                format!("reload mcp failed: {}", e),
+                            );
                         }
                     }
                 }
@@ -2905,7 +3361,10 @@ impl App {
                     report.push_str(
                         "✓ Skills will be reloaded from disk on next use (no cache to clear)\n",
                     );
-                    self.push_log_no_agent(LogLevel::Info, "reload skills: confirmed (on-demand)".to_string());
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        "reload skills: confirmed (on-demand)".to_string(),
+                    );
                 }
 
                 if !matches!(sub, "all" | "agents" | "config" | "mcp" | "skills") {
@@ -3006,7 +3465,9 @@ impl App {
                     let mut params_w = "Params".len();
                     for def in &built_tools {
                         name_w = name_w.max(def.name.len());
-                        let params = if let Some(props) = def.parameters.get("properties").and_then(|v| v.as_object()) {
+                        let params = if let Some(props) =
+                            def.parameters.get("properties").and_then(|v| v.as_object())
+                        {
                             let keys: Vec<&str> = props.keys().map(|k| k.as_str()).collect();
                             keys.join(", ")
                         } else {
@@ -3020,13 +3481,16 @@ impl App {
 
                     // Helper: wrap text into lines no longer than `w` (word wrap)
                     fn wrap_text(s: &str, w: usize) -> Vec<String> {
-                        if w == 0 { return vec![s.to_string()]; }
+                        if w == 0 {
+                            return vec![s.to_string()];
+                        }
                         let mut lines: Vec<String> = Vec::new();
                         let mut cur = String::new();
                         for word in s.split_whitespace() {
                             if cur.is_empty() {
-                                if word.len() <= w { cur.push_str(word); }
-                                else {
+                                if word.len() <= w {
+                                    cur.push_str(word);
+                                } else {
                                     // split long word
                                     let mut rem = word;
                                     while !rem.is_empty() {
@@ -3041,8 +3505,9 @@ impl App {
                             } else {
                                 lines.push(cur);
                                 cur = String::new();
-                                if word.len() <= w { cur.push_str(word); }
-                                else {
+                                if word.len() <= w {
+                                    cur.push_str(word);
+                                } else {
                                     let mut rem = word;
                                     while !rem.is_empty() {
                                         let take = rem.chars().take(w).collect::<String>();
@@ -3052,8 +3517,12 @@ impl App {
                                 }
                             }
                         }
-                        if !cur.is_empty() { lines.push(cur); }
-                        if lines.is_empty() { lines.push(String::new()); }
+                        if !cur.is_empty() {
+                            lines.push(cur);
+                        }
+                        if lines.is_empty() {
+                            lines.push(String::new());
+                        }
                         lines
                     }
 
@@ -3100,9 +3569,16 @@ impl App {
                         let name_lines = wrap_text(&def.name, name_w);
                         let params_lines = wrap_text(&params_display, params_w);
                         let desc_lines = wrap_text(&def.description, desc_w);
-                        let row_lines = name_lines.len().max(params_lines.len()).max(desc_lines.len());
+                        let row_lines = name_lines
+                            .len()
+                            .max(params_lines.len())
+                            .max(desc_lines.len());
                         for r in 0..row_lines {
-                            let no_cell = if r == 0 { format!("{}", i + 1) } else { String::new() };
+                            let no_cell = if r == 0 {
+                                format!("{}", i + 1)
+                            } else {
+                                String::new()
+                            };
                             let name_cell = name_lines.get(r).cloned().unwrap_or_default();
                             let params_cell = params_lines.get(r).cloned().unwrap_or_default();
                             let desc_cell = desc_lines.get(r).cloned().unwrap_or_default();
@@ -3154,13 +3630,16 @@ impl App {
 
                     // Helper wrap (reuse same as above)
                     fn wrap_text(s: &str, w: usize) -> Vec<String> {
-                        if w == 0 { return vec![s.to_string()]; }
+                        if w == 0 {
+                            return vec![s.to_string()];
+                        }
                         let mut lines: Vec<String> = Vec::new();
                         let mut cur = String::new();
                         for word in s.split_whitespace() {
                             if cur.is_empty() {
-                                if word.len() <= w { cur.push_str(word); }
-                                else {
+                                if word.len() <= w {
+                                    cur.push_str(word);
+                                } else {
                                     let mut rem = word;
                                     while !rem.is_empty() {
                                         let take = rem.chars().take(w).collect::<String>();
@@ -3174,8 +3653,9 @@ impl App {
                             } else {
                                 lines.push(cur);
                                 cur = String::new();
-                                if word.len() <= w { cur.push_str(word); }
-                                else {
+                                if word.len() <= w {
+                                    cur.push_str(word);
+                                } else {
                                     let mut rem = word;
                                     while !rem.is_empty() {
                                         let take = rem.chars().take(w).collect::<String>();
@@ -3185,8 +3665,12 @@ impl App {
                                 }
                             }
                         }
-                        if !cur.is_empty() { lines.push(cur); }
-                        if lines.is_empty() { lines.push(String::new()); }
+                        if !cur.is_empty() {
+                            lines.push(cur);
+                        }
+                        if lines.is_empty() {
+                            lines.push(String::new());
+                        }
                         lines
                     }
 
@@ -3232,9 +3716,16 @@ impl App {
                             let name_lines = wrap_text(&tool.name, name_w);
                             let server_lines = wrap_text(&format!("[{}]", server.id), server_w);
                             let desc_lines = wrap_text(&tool.description, desc_w);
-                            let row_lines = name_lines.len().max(server_lines.len()).max(desc_lines.len());
+                            let row_lines = name_lines
+                                .len()
+                                .max(server_lines.len())
+                                .max(desc_lines.len());
                             for r in 0..row_lines {
-                                let no_cell = if r == 0 { format!("{}", idx) } else { String::new() };
+                                let no_cell = if r == 0 {
+                                    format!("{}", idx)
+                                } else {
+                                    String::new()
+                                };
                                 let name_cell = name_lines.get(r).cloned().unwrap_or_default();
                                 let server_cell = server_lines.get(r).cloned().unwrap_or_default();
                                 let desc_cell = desc_lines.get(r).cloned().unwrap_or_default();
@@ -3667,7 +4158,9 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     let status = format!("{:?}", m.status).to_lowercase();
                                     let task =
                                         m.current_task_id.as_deref().unwrap_or("—").to_string();
-                                    let model_str = m.model_override.as_ref()
+                                    let model_str = m
+                                        .model_override
+                                        .as_ref()
                                         .map(|mr| format!("{}/{}", mr.provider_id, mr.model_id))
                                         .unwrap_or_else(|| "(inherited)".to_string());
                                     output.push_str(&format!(
@@ -3676,10 +4169,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     ));
                                 }
                             }
-                            output.push_str(&format!(
-                                "\n{} teammate(s)\n",
-                                self.team_members.len()
-                            ));
+                            output
+                                .push_str(&format!("\n{} teammate(s)\n", self.team_members.len()));
                         } else {
                             output.push_str("No active team.\n\nUse `/team create <blueprint> [name]` to start a team (blueprint required).");
                         }
@@ -3704,7 +4195,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
 
                         // If no name provided, generate one from blueprint + timestamp
                         if name.is_none() {
-                            let generated_name = format!("{}-{}", blueprint, chrono::Utc::now().format("%Y%m%d-%H-%M-%S"));
+                            let generated_name = format!(
+                                "{}-{}",
+                                blueprint,
+                                chrono::Utc::now().format("%Y%m%d-%H-%M-%S")
+                            );
                             name = Some(generated_name);
                         }
                         let name = name.expect("name guaranteed Some above");
@@ -3743,21 +4238,25 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     // Capture the currently selected model so teammates inherit it.
                                     let active_model_clone: Option<ragent_core::agent::ModelRef> =
                                         self.selected_model.as_deref().and_then(|s| {
-                                            s.split_once('/').map(|(pid, mid)| ragent_core::agent::ModelRef {
-                                                provider_id: pid.to_string(),
-                                                model_id: mid.to_string(),
+                                            s.split_once('/').map(|(pid, mid)| {
+                                                ragent_core::agent::ModelRef {
+                                                    provider_id: pid.to_string(),
+                                                    model_id: mid.to_string(),
+                                                }
                                             })
                                         });
                                     std::thread::spawn(move || {
-                                            // Create a small runtime for seeding if there is no existing Tokio runtime
-                                            let rt = match tokio::runtime::Runtime::new() {
-                                                Ok(rt) => rt,
-                                                Err(e) => {
-                                                    tracing::error!("Failed to create tokio runtime for team seed: {e}");
-                                                    return;
-                                                }
-                                            };
-                                            rt.block_on(async move {
+                                        // Create a small runtime for seeding if there is no existing Tokio runtime
+                                        let rt = match tokio::runtime::Runtime::new() {
+                                            Ok(rt) => rt,
+                                            Err(e) => {
+                                                tracing::error!(
+                                                    "Failed to create tokio runtime for team seed: {e}"
+                                                );
+                                                return;
+                                            }
+                                        };
+                                        rt.block_on(async move {
                                                 let registry = ragent_core::tool::create_default_registry();
                                                 if let Some(tool) = registry.get("team_create") {
                                                     let input = serde_json::json!({
@@ -3779,7 +4278,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                     let _ = tool.execute(input, &ctx).await;
                                                 }
                                             });
-                                        });
+                                    });
                                 }
                             }
                             Err(e) => {
@@ -3806,8 +4305,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     match TeamStore::load(&dir) {
                                         Ok(store) => {
                                             let team = store.config;
-                                            let scope =
-                                                if is_project_local { "project" } else { "global" };
+                                            let scope = if is_project_local {
+                                                "project"
+                                            } else {
+                                                "global"
+                                            };
                                             output.push_str(&format!(
                                                 "  ● {:<18} {:<10} lead:{} teammates:{}\n",
                                                 team.name,
@@ -3887,7 +4389,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.team_message_counts.clear();
                             self.show_teams = false;
                             self.focused_teammate = None;
-                            if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                            if self
+                                .swarm_state
+                                .as_ref()
+                                .is_some_and(|s| s.team_name == team_name)
+                            {
                                 self.swarm_state = None;
                             }
                             self.push_log_no_agent(
@@ -3936,7 +4442,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                         self.team_message_counts.clear();
                                         self.show_teams = false;
                                         self.focused_teammate = None;
-                                        if self.swarm_state.as_ref().is_some_and(|s| s.team_name == rest) {
+                                        if self
+                                            .swarm_state
+                                            .as_ref()
+                                            .is_some_and(|s| s.team_name == rest)
+                                        {
                                             self.swarm_state = None;
                                         }
                                     }
@@ -3971,8 +4481,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         let working_dir = std::env::current_dir().unwrap_or_default();
 
                         // Collect all blueprint directories from project-local and global paths.
-                        let mut blueprint_dirs: Vec<(String, std::path::PathBuf, String)> = Vec::new();
-                        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+                        let mut blueprint_dirs: Vec<(String, std::path::PathBuf, String)> =
+                            Vec::new();
+                        let mut seen_names: std::collections::HashSet<String> =
+                            std::collections::HashSet::new();
 
                         // Walk up to find project .ragent/blueprints/teams/
                         let mut cur_opt: Option<&std::path::Path> = Some(working_dir.as_path());
@@ -3982,9 +4494,14 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 if let Ok(entries) = std::fs::read_dir(&bp_root) {
                                     for entry in entries.flatten() {
                                         if entry.path().is_dir() {
-                                            let name = entry.file_name().to_string_lossy().to_string();
+                                            let name =
+                                                entry.file_name().to_string_lossy().to_string();
                                             if seen_names.insert(name.clone()) {
-                                                blueprint_dirs.push((name, entry.path(), "project".to_string()));
+                                                blueprint_dirs.push((
+                                                    name,
+                                                    entry.path(),
+                                                    "project".to_string(),
+                                                ));
                                             }
                                         }
                                     }
@@ -4000,9 +4517,14 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 if let Ok(entries) = std::fs::read_dir(&bp_root) {
                                     for entry in entries.flatten() {
                                         if entry.path().is_dir() {
-                                            let name = entry.file_name().to_string_lossy().to_string();
+                                            let name =
+                                                entry.file_name().to_string_lossy().to_string();
                                             if seen_names.insert(name.clone()) {
-                                                blueprint_dirs.push((name, entry.path(), "global".to_string()));
+                                                blueprint_dirs.push((
+                                                    name,
+                                                    entry.path(),
+                                                    "global".to_string(),
+                                                ));
                                             }
                                         }
                                     }
@@ -4013,31 +4535,45 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
 
                         if rest.is_empty() {
                             // List all blueprints as a markdown table.
-                            let mut output = String::from("From: /team blueprint\n\n## Installed Team Blueprints\n\n");
+                            let mut output = String::from(
+                                "From: /team blueprint\n\n## Installed Team Blueprints\n\n",
+                            );
                             if blueprint_dirs.is_empty() {
                                 output.push_str("No blueprints found.\n\nInstall blueprints to:\n- `[project]/.ragent/blueprints/teams/<name>/`\n- `~/.ragent/blueprints/teams/<name>/`\n");
                             } else {
-                                output.push_str("| Blueprint | Scope | Teammates | Tasks | Description |\n");
-                                output.push_str("|-----------|-------|-----------|-------|-------------|\n");
+                                output.push_str(
+                                    "| Blueprint | Scope | Teammates | Tasks | Description |\n",
+                                );
+                                output.push_str(
+                                    "|-----------|-------|-----------|-------|-------------|\n",
+                                );
                                 for (name, path, scope) in &blueprint_dirs {
                                     // Count teammates from spawn-prompts.json
-                                    let teammate_count = std::fs::read_to_string(path.join("spawn-prompts.json"))
-                                        .ok()
-                                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                                        .and_then(|v| v.as_array().map(|a| a.len()))
-                                        .unwrap_or(0);
+                                    let teammate_count =
+                                        std::fs::read_to_string(path.join("spawn-prompts.json"))
+                                            .ok()
+                                            .and_then(|raw| {
+                                                serde_json::from_str::<serde_json::Value>(&raw).ok()
+                                            })
+                                            .and_then(|v| v.as_array().map(|a| a.len()))
+                                            .unwrap_or(0);
                                     // Count tasks from task-seed.json
-                                    let task_count = std::fs::read_to_string(path.join("task-seed.json"))
-                                        .ok()
-                                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                                        .and_then(|v| v.as_array().map(|a| a.len()))
-                                        .unwrap_or(0);
+                                    let task_count =
+                                        std::fs::read_to_string(path.join("task-seed.json"))
+                                            .ok()
+                                            .and_then(|raw| {
+                                                serde_json::from_str::<serde_json::Value>(&raw).ok()
+                                            })
+                                            .and_then(|v| v.as_array().map(|a| a.len()))
+                                            .unwrap_or(0);
                                     // Description from first line of README.md (skip heading)
                                     let desc = std::fs::read_to_string(path.join("README.md"))
                                         .ok()
                                         .and_then(|raw| {
                                             raw.lines()
-                                                .find(|l| !l.trim().is_empty() && !l.starts_with('#'))
+                                                .find(|l| {
+                                                    !l.trim().is_empty() && !l.starts_with('#')
+                                                })
                                                 .map(|l| l.trim().to_string())
                                         })
                                         .unwrap_or_else(|| "-".to_string());
@@ -4060,30 +4596,46 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 );
 
                                 // README.md
-                                if let Ok(readme) = std::fs::read_to_string(path.join("README.md")) {
+                                if let Ok(readme) = std::fs::read_to_string(path.join("README.md"))
+                                {
                                     output.push_str("### Description\n\n");
                                     output.push_str(&readme);
                                     output.push_str("\n\n");
                                 }
 
                                 // Teammates from spawn-prompts.json
-                                if let Ok(raw) = std::fs::read_to_string(path.join("spawn-prompts.json")) {
-                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                                if let Ok(raw) =
+                                    std::fs::read_to_string(path.join("spawn-prompts.json"))
+                                {
+                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
+                                    {
                                         if let Some(items) = val.as_array() {
                                             output.push_str("### Teammates\n\n");
                                             output.push_str("| Name | Type | Prompt |\n");
                                             output.push_str("|------|------|--------|\n");
                                             for item in items {
-                                                let tname = item.get("teammate_name")
-                                                    .or_else(|| item.get("args").and_then(|a| a.get("teammate_name")))
+                                                let tname = item
+                                                    .get("teammate_name")
+                                                    .or_else(|| {
+                                                        item.get("args")
+                                                            .and_then(|a| a.get("teammate_name"))
+                                                    })
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("auto");
-                                                let atype = item.get("agent_type")
-                                                    .or_else(|| item.get("args").and_then(|a| a.get("agent_type")))
+                                                let atype = item
+                                                    .get("agent_type")
+                                                    .or_else(|| {
+                                                        item.get("args")
+                                                            .and_then(|a| a.get("agent_type"))
+                                                    })
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("general");
-                                                let prompt = item.get("prompt")
-                                                    .or_else(|| item.get("args").and_then(|a| a.get("prompt")))
+                                                let prompt = item
+                                                    .get("prompt")
+                                                    .or_else(|| {
+                                                        item.get("args")
+                                                            .and_then(|a| a.get("prompt"))
+                                                    })
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("-");
                                                 // Truncate long prompts for the table
@@ -4103,24 +4655,44 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 }
 
                                 // Tasks from task-seed.json
-                                if let Ok(raw) = std::fs::read_to_string(path.join("task-seed.json")) {
-                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                                if let Ok(raw) =
+                                    std::fs::read_to_string(path.join("task-seed.json"))
+                                {
+                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
+                                    {
                                         if let Some(items) = val.as_array() {
                                             output.push_str("### Seed Tasks\n\n");
                                             output.push_str("| Title | Description |\n");
                                             output.push_str("|-------|-------------|\n");
                                             for item in items {
-                                                let title = item.get("title")
-                                                    .or_else(|| item.get("input").and_then(|a| a.get("title")))
-                                                    .or_else(|| item.get("args").and_then(|a| a.get("title")))
+                                                let title = item
+                                                    .get("title")
+                                                    .or_else(|| {
+                                                        item.get("input")
+                                                            .and_then(|a| a.get("title"))
+                                                    })
+                                                    .or_else(|| {
+                                                        item.get("args")
+                                                            .and_then(|a| a.get("title"))
+                                                    })
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("-");
-                                                let desc = item.get("description")
-                                                    .or_else(|| item.get("input").and_then(|a| a.get("description")))
-                                                    .or_else(|| item.get("args").and_then(|a| a.get("description")))
+                                                let desc = item
+                                                    .get("description")
+                                                    .or_else(|| {
+                                                        item.get("input")
+                                                            .and_then(|a| a.get("description"))
+                                                    })
+                                                    .or_else(|| {
+                                                        item.get("args")
+                                                            .and_then(|a| a.get("description"))
+                                                    })
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("-");
-                                                output.push_str(&format!("| {} | {} |\n", title, desc));
+                                                output.push_str(&format!(
+                                                    "| {} | {} |\n",
+                                                    title, desc
+                                                ));
                                             }
                                             output.push('\n');
                                         }
@@ -4140,8 +4712,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             .split_once(char::is_whitespace)
                             .map_or((rest, ""), |(n, t)| (n.trim(), t.trim()));
                         if name.is_empty() || text.is_empty() {
-                            self.status =
-                                "Usage: /team message <teammate-name> <text>".to_string();
+                            self.status = "Usage: /team message <teammate-name> <text>".to_string();
                             return;
                         }
                         let member = self.team_members.iter().find(|m| m.name == name).cloned();
@@ -4162,17 +4733,14 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                     Ok(_) => {
                                                         self.push_log_no_agent(
                                                             LogLevel::Info,
-                                                            format!(
-                                                                "📨 lead → {name}: {text}"
-                                                            ),
+                                                            format!("📨 lead → {name}: {text}"),
                                                         );
                                                         self.status =
                                                             format!("message sent to {name}");
                                                     }
                                                     Err(e) => {
-                                                        self.status = format!(
-                                                            "Failed to send message: {e}"
-                                                        );
+                                                        self.status =
+                                                            format!("Failed to send message: {e}");
                                                     }
                                                 }
                                             }
@@ -4225,10 +4793,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         TaskStatus::Completed => "completed",
                                                         TaskStatus::Cancelled => "cancelled",
                                                     };
-                                                    let assignee = task
-                                                        .assigned_to
-                                                        .as_deref()
-                                                        .unwrap_or("—");
+                                                    let assignee =
+                                                        task.assigned_to.as_deref().unwrap_or("—");
                                                     output.push_str(&format!(
                                                         "  {:<12}  {:<34}  {:<12}  {}\n",
                                                         task.id, task.title, status, assignee
@@ -4252,9 +4818,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 }
                             }
                         } else {
-                            self.append_assistant_text(
-                                "From: /team tasks\nNo active team.",
-                            );
+                            self.append_assistant_text("From: /team tasks\nNo active team.");
                             self.status = "no active team".to_string();
                         }
                     }
@@ -4295,7 +4859,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                             self.status = format!("Failed to clear tasks: {e}");
                                             self.push_log_no_agent(
                                                 LogLevel::Error,
-                                                format!("team clear failed for '{}': {}", team.name, e),
+                                                format!(
+                                                    "team clear failed for '{}': {}",
+                                                    team.name, e
+                                                ),
                                             );
                                         }
                                     }
@@ -4305,9 +4872,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 }
                             }
                         } else {
-                            self.append_assistant_text(
-                                "From: /team clear\nNo active team.",
-                            );
+                            self.append_assistant_text("From: /team clear\nNo active team.");
                             self.status = "no active team".to_string();
                         }
                     }
@@ -4341,14 +4906,20 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 );
 
                                 // Also show a message in the chat window listing active teammates
-                                let mut msg = format!("From: /team cleanup\nCannot clean up team '{}' because the following teammate(s) are still active:\n\n", team.name);
+                                let mut msg = format!(
+                                    "From: /team cleanup\nCannot clean up team '{}' because the following teammate(s) are still active:\n\n",
+                                    team.name
+                                );
                                 for name in &active_names {
                                     msg.push_str(&format!("  - {}\n", name));
                                 }
                                 msg.push_str("\nYou can shut them down individually with team_shutdown_teammate, or run `/team forcecleanup` to deactivate and remove them.");
                                 self.append_assistant_text(&msg);
 
-                                self.status = format!("{} teammate(s) still active — shut them down first", active_count);
+                                self.status = format!(
+                                    "{} teammate(s) still active — shut them down first",
+                                    active_count
+                                );
                                 return;
                             }
 
@@ -4363,7 +4934,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             self.team_message_counts.clear();
                             self.show_teams = false;
                             self.focused_teammate = None;
-                            if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                            if self
+                                .swarm_state
+                                .as_ref()
+                                .is_some_and(|s| s.team_name == team_name)
+                            {
                                 self.swarm_state = None;
                             }
                             if removed {
@@ -4426,7 +5001,10 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             msg.push_str("Press Enter to confirm or Esc to cancel.");
 
                             self.append_assistant_text(&msg);
-                            self.push_log_no_agent(LogLevel::Info, "forcecleanup confirmation required (modal)".to_string());
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                "forcecleanup confirmation required (modal)".to_string(),
+                            );
                             self.status = "forcecleanup confirmation required".to_string();
                             return;
                         }
@@ -4451,8 +5029,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                 let m_name = m.name.clone();
                                                 let m_agent_type = m.agent_type.clone();
                                                 let working_dir_clone = store.dir.clone();
-                                                let active_model: Option<&ragent_core::agent::ModelRef> = None;
-                                                if let Some(tm_arc) = self.session_processor.team_manager.get() {
+                                                let active_model: Option<
+                                                    &ragent_core::agent::ModelRef,
+                                                > = None;
+                                                if let Some(tm_arc) =
+                                                    self.session_processor.team_manager.get()
+                                                {
                                                     let tm = tm_arc.clone();
                                                     tokio::spawn(async move {
                                                         let _ = tm
@@ -4491,14 +5073,21 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     self.team_message_counts.clear();
                                     self.show_teams = false;
                                     self.focused_teammate = None;
-                                    if self.swarm_state.as_ref().is_some_and(|s| s.team_name == team_name) {
+                                    if self
+                                        .swarm_state
+                                        .as_ref()
+                                        .is_some_and(|s| s.team_name == team_name)
+                                    {
                                         self.swarm_state = None;
                                     }
 
                                     if !deactivated.is_empty() {
                                         self.push_log_no_agent(
                                             LogLevel::Info,
-                                            format!("Deactivated teammates: {}", deactivated.join(", ")),
+                                            format!(
+                                                "Deactivated teammates: {}",
+                                                deactivated.join(", ")
+                                            ),
                                         );
                                     }
 
@@ -4507,7 +5096,9 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                             LogLevel::Info,
                                             format!("🗑️  Team '{team_name}' force cleaned up"),
                                         );
-                                        let mut msg = format!("From: /team forcecleanup\nTeam '{team_name}' force cleaned up. The following teammate(s) were deactivated and removed:\n\n");
+                                        let mut msg = format!(
+                                            "From: /team forcecleanup\nTeam '{team_name}' force cleaned up. The following teammate(s) were deactivated and removed:\n\n"
+                                        );
                                         for d in &deactivated {
                                             msg.push_str(&format!("  - {}\n", d));
                                         }
@@ -4515,9 +5106,13 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                     } else {
                                         self.push_log_no_agent(
                                             LogLevel::Warn,
-                                            format!("Team '{team_name}' state cleared (dir not found)"),
+                                            format!(
+                                                "Team '{team_name}' state cleared (dir not found)"
+                                            ),
                                         );
-                                        let mut msg = format!("From: /team forcecleanup\nTeam '{team_name}' state cleared. The following teammate(s) were deactivated:\n\n");
+                                        let mut msg = format!(
+                                            "From: /team forcecleanup\nTeam '{team_name}' state cleared. The following teammate(s) were deactivated:\n\n"
+                                        );
                                         for d in &deactivated {
                                             msg.push_str(&format!("  - {}\n", d));
                                         }
@@ -4537,7 +5132,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         } else {
                             self.status = "No active team to clean up".to_string();
                         }
-                    },
+                    }
                     "focus" => {
                         if self.active_team.is_none() {
                             self.status = "No active team".to_string();
@@ -4552,8 +5147,12 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         } else {
                             match self.focus_teammate_by_name(rest) {
                                 Ok(()) => {
-                                    let name = self.focused_teammate.as_ref()
-                                        .and_then(|id| self.team_members.iter().find(|m| m.agent_id == *id))
+                                    let name = self
+                                        .focused_teammate
+                                        .as_ref()
+                                        .and_then(|id| {
+                                            self.team_members.iter().find(|m| m.agent_id == *id)
+                                        })
                                         .map(|m| m.name.clone())
                                         .unwrap_or_default();
                                     self.append_assistant_text(&format!(
@@ -4564,7 +5163,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                 Err(e) => {
                                     self.append_assistant_text(&format!(
                                         "From: /team focus\n{e}\n\nAvailable teammates: {}",
-                                        self.team_members.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", ")
+                                        self.team_members
+                                            .iter()
+                                            .map(|m| m.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
                                     ));
                                     self.status = format!("team focus: {e}");
                                 }
@@ -4640,7 +5243,11 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
             }
             "yolo" => {
                 let new_state = ragent_core::yolo::toggle();
-                let label = if new_state { "ENABLED ⚠️" } else { "disabled" };
+                let label = if new_state {
+                    "ENABLED ⚠️"
+                } else {
+                    "disabled"
+                };
                 let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
                 if new_state {
                     output.push_str(
@@ -4661,13 +5268,18 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                 }
                 self.status = format!("YOLO mode {label}");
                 self.push_log_no_agent(
-                    if new_state { LogLevel::Warn } else { LogLevel::Info },
+                    if new_state {
+                        LogLevel::Warn
+                    } else {
+                        LogLevel::Info
+                    },
                     format!("YOLO mode {label}"),
                 );
             }
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
-                let (sub, rest) = args.split_once(char::is_whitespace)
+                let (sub, rest) = args
+                    .split_once(char::is_whitespace)
                     .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
 
                 match sub {
@@ -4716,24 +5328,34 @@ Type `/swarm help` for more info.\n";
                         }
 
                         if self.swarm_state.is_some() {
-                            self.status = "⚠ A swarm is already active — use /swarm cancel first".to_string();
+                            self.status =
+                                "⚠ A swarm is already active — use /swarm cancel first".to_string();
                             return;
                         }
 
                         // Require provider + model
-                        let (provider_id, model_id) = match self.selected_model.as_deref()
+                        let (provider_id, model_id) = match self
+                            .selected_model
+                            .as_deref()
                             .and_then(|s| s.split_once('/'))
                             .map(|(p, m)| (p.to_string(), m.to_string()))
                         {
                             Some(pair) => pair,
                             None => {
-                                self.status = "⚠ /swarm requires a configured model — use /model".to_string();
+                                self.status =
+                                    "⚠ /swarm requires a configured model — use /model".to_string();
                                 return;
                             }
                         };
 
                         self.status = "⏳ swarm: decomposing goal…".to_string();
-                        self.push_log_no_agent(LogLevel::Info, format!("Swarm: decomposing — {}", &full_prompt[..full_prompt.len().min(80)]));
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            format!(
+                                "Swarm: decomposing — {}",
+                                &full_prompt[..full_prompt.len().min(80)]
+                            ),
+                        );
 
                         if self.current_screen == ScreenMode::Home {
                             self.current_screen = ScreenMode::Chat;
@@ -4767,7 +5389,8 @@ Type `/swarm help` for more info.\n";
                             };
 
                             let system = ragent_core::team::DECOMPOSITION_SYSTEM_PROMPT;
-                            let user = ragent_core::team::build_decomposition_user_prompt(&full_prompt);
+                            let user =
+                                ragent_core::team::build_decomposition_user_prompt(&full_prompt);
 
                             let outcome = match completer.complete(system, &user).await {
                                 Ok(text) => Ok(text),
@@ -4781,6 +5404,314 @@ Type `/swarm help` for more info.\n";
                     }
                 }
             }
+
+            // ── /autopilot ──────────────────────────────────────────────────
+            "autopilot" => {
+                let sub = args.split_whitespace().next().unwrap_or("").to_lowercase();
+                match sub.as_str() {
+                    "on" => {
+                        // Parse optional flags: --max-tokens N  --max-time N
+                        let mut token_budget: Option<u64> = None;
+                        let mut time_secs: Option<u64> = None;
+                        let parts: Vec<&str> = args.split_whitespace().collect();
+                        let mut i = 1; // skip "on"
+                        while i < parts.len() {
+                            match parts[i] {
+                                "--max-tokens" if i + 1 < parts.len() => {
+                                    token_budget = parts[i + 1].parse().ok();
+                                    i += 2;
+                                }
+                                "--max-time" if i + 1 < parts.len() => {
+                                    time_secs = parts[i + 1].parse().ok();
+                                    i += 2;
+                                }
+                                _ => { i += 1; }
+                            }
+                        }
+                        self.autopilot_enabled = true;
+                        self.autopilot_token_budget = token_budget;
+                        self.autopilot_time_limit_secs = time_secs;
+                        self.autopilot_started_at = Some(std::time::Instant::now());
+                        let mut msg = "⚡ **Autopilot ON** — agent will run autonomously.".to_string();
+                        if let Some(t) = token_budget { msg.push_str(&format!(" Token budget: {t}.")); }
+                        if let Some(s) = time_secs { msg.push_str(&format!(" Time limit: {s}s.")); }
+                        msg.push_str("\nCall `task_complete` to signal completion, or `/autopilot off` to stop.");
+                        self.append_assistant_text(&format!("From: /autopilot\n{msg}"));
+                        self.status = "⚡ autopilot".to_string();
+                        self.push_log_no_agent(LogLevel::Info, "autopilot enabled".to_string());
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "off" => {
+                        self.autopilot_enabled = false;
+                        self.autopilot_token_budget = None;
+                        self.autopilot_time_limit_secs = None;
+                        self.autopilot_started_at = None;
+                        self.autopilot_pending_continue = None;
+                        self.append_assistant_text("From: /autopilot\n⚡ **Autopilot OFF** — returning to interactive mode.");
+                        self.status = "ready".to_string();
+                        self.push_log_no_agent(LogLevel::Info, "autopilot disabled".to_string());
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "status" => {
+                        let state = if self.autopilot_enabled {
+                            let elapsed = self.autopilot_started_at
+                                .map(|s| s.elapsed().as_secs())
+                                .unwrap_or(0);
+                            format!("⚡ Autopilot: **ON** (running for {}s)", elapsed)
+                        } else {
+                            "⚡ Autopilot: **OFF**".to_string()
+                        };
+                        self.append_assistant_text(&format!("From: /autopilot status\n{state}"));
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "From: /autopilot\n\
+                             Usage: `/autopilot on [--max-tokens N] [--max-time N]` | `off` | `status`"
+                        );
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                }
+            }
+
+            // ── /plan ────────────────────────────────────────────────────────
+            "plan" => {
+                if args.is_empty() {
+                    self.append_assistant_text(
+                        "From: /plan\n\
+                         Usage: `/plan <task description>`\n\n\
+                         The plan agent will analyse the codebase and produce a plan for your task. \
+                         You will be asked to approve or reject the plan before implementation begins."
+                    );
+                } else {
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    self.execute_plan_delegation(
+                        &sid,
+                        args.to_string(),
+                        String::new(),
+                    );
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
+            // ── /mode ────────────────────────────────────────────────────────
+            "mode" => {
+                let sub = args.trim().to_lowercase();
+                if sub.is_empty() || sub == "status" {
+                    let current = self.role_mode.as_ref()
+                        .map(|m| format!("{} {}", m.icon(), m.label()))
+                        .unwrap_or_else(|| "normal (no role mode active)".to_string());
+                    self.append_assistant_text(&format!(
+                        "From: /mode\nCurrent mode: **{current}**\n\n\
+                         Available modes: `architect` `coder` `reviewer` `debugger` `tester`\n\
+                         Use `/mode off` to return to normal mode."
+                    ));
+                } else if sub == "off" || sub == "normal" {
+                    self.role_mode = None;
+                    self.status = "mode: normal".to_string();
+                    self.append_assistant_text("From: /mode\n✅ Role mode cleared — back to normal mode.");
+                    self.push_log_no_agent(LogLevel::Info, "role mode cleared".to_string());
+                } else if let Some(mode) = RoleMode::from_str(&sub) {
+                    let label = mode.label().to_string();
+                    let icon = mode.icon().to_string();
+                    self.role_mode = Some(mode);
+                    self.status = format!("{icon} mode: {label}");
+                    self.append_assistant_text(&format!(
+                        "From: /mode\n{icon} **{label} mode** activated.\n\
+                         The agent will now focus on {} tasks.",
+                        label
+                    ));
+                    self.push_log_no_agent(LogLevel::Info, format!("role mode: {label}"));
+                } else {
+                    self.append_assistant_text(&format!(
+                        "From: /mode\nUnknown mode '{}'. \
+                         Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
+                        sub
+                    ));
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
+            "memory" => {
+                let project_mem = std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(".ragent")
+                    .join("memory")
+                    .join("MEMORY.md");
+                let project_analysis = std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(".ragent")
+                    .join("memory")
+                    .join("PROJECT_ANALYSIS.md");
+                let user_mem = dirs::home_dir()
+                    .map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+
+                match args.trim() {
+                    "show" | "" => {
+                        let mut output = String::from("From: /memory show\n\n");
+
+                        let proj_content = std::fs::read_to_string(&project_mem)
+                            .unwrap_or_else(|_| "(no project memory)".to_string());
+                        output.push_str(&format!(
+                            "## Project Memory ({})\n{}\n\n",
+                            project_mem.display(),
+                            proj_content
+                        ));
+
+                        if project_analysis.exists() {
+                            let analysis =
+                                std::fs::read_to_string(&project_analysis).unwrap_or_default();
+                            output.push_str(&format!("## Project Analysis\n{}\n\n", analysis));
+                        }
+
+                        if let Some(path) = user_mem {
+                            let user_content = std::fs::read_to_string(&path)
+                                .unwrap_or_else(|_| "(no user memory)".to_string());
+                            output.push_str(&format!(
+                                "## User Memory ({})\n{}\n\n",
+                                path.display(),
+                                user_content
+                            ));
+                        }
+
+                        self.append_assistant_text(&output);
+                    }
+                    sub if sub.starts_with("clear") => {
+                        let scope = sub.strip_prefix("clear").unwrap_or("").trim();
+                        let path = match scope {
+                            "user" => dirs::home_dir()
+                                .map(|h| h.join(".ragent").join("memory").join("MEMORY.md")),
+                            _ => Some(
+                                std::env::current_dir()
+                                    .unwrap_or_default()
+                                    .join(".ragent")
+                                    .join("memory")
+                                    .join("MEMORY.md"),
+                            ),
+                        };
+                        if let Some(p) = path {
+                            if p.exists() {
+                                let _ = std::fs::remove_file(&p);
+                                self.append_assistant_text(&format!(
+                                    "From: /memory clear\nMemory cleared: {}",
+                                    p.display()
+                                ));
+                            } else {
+                                self.append_assistant_text(
+                                    "From: /memory clear\nNo memory file found.",
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "From: /memory\nUsage: `/memory show` | `/memory clear [project|user]`",
+                        );
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
+            "github" => {
+                match args.trim() {
+                    "login" => {
+                        self.append_assistant_text(
+                            "From: /github login\n🔐 Starting GitHub OAuth device flow…\n\nPlease wait for the authorization URL…",
+                        );
+                        let event_bus = self.event_bus.clone();
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        tokio::spawn(async move {
+                            let client_id = ragent_core::github::GitHubClient::client_id();
+                            let result = ragent_core::github::auth::device_flow_login(
+                                &client_id,
+                                |user_code, verification_uri| {
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                                        session_id: sid.clone(),
+                                        error: format!(
+                                            "GitHub Login — visit: {verification_uri}\nEnter code: {user_code}\n\nWaiting for authorization…"
+                                        ),
+                                    });
+                                },
+                            )
+                            .await;
+
+                            match result {
+                                Ok(token) => {
+                                    match ragent_core::github::auth::save_token(&token) {
+                                        Ok(_) => {
+                                            event_bus.publish(
+                                                ragent_core::event::Event::AgentError {
+                                                    session_id: sid,
+                                                    error: "✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.".to_string(),
+                                                },
+                                            );
+                                        }
+                                        Err(e) => {
+                                            event_bus.publish(ragent_core::event::Event::AgentError {
+                                                session_id: sid,
+                                                error: format!("Failed to save GitHub token: {e}"),
+                                            });
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                                        session_id: sid,
+                                        error: format!("GitHub login failed: {e}"),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    "logout" => {
+                        match ragent_core::github::auth::delete_token() {
+                            Ok(_) => self.append_assistant_text(
+                                "From: /github\n✅ GitHub token removed.",
+                            ),
+                            Err(e) => self.append_assistant_text(&format!(
+                                "From: /github\n❌ Failed to remove token: {e}"
+                            )),
+                        }
+                    }
+                    "status" | "" => {
+                        match ragent_core::github::auth::load_token() {
+                            Some(_) => {
+                                self.append_assistant_text(
+                                    "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
+                                );
+                            }
+                            None => {
+                                self.append_assistant_text(
+                                    "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
+                        );
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
@@ -4856,14 +5787,15 @@ Type `/swarm help` for more info.\n";
                     // Show the skill invocation as a user message in the chat
                     let display_text = if args.is_empty() {
                         format!("/{}", cmd)
-                                          } else {
-                                              format!("/{} {}", cmd, args)
-                                          };
-                                          let user_msg = Message::user_text(&sid, &display_text);
-                                          self.messages.push(user_msg);
-                                          self.add_to_history(display_text);
-                    
-                                          let flag = Arc::new(AtomicBool::new(false));                    self.cancel_flag = Some(flag.clone());
+                    } else {
+                        format!("/{} {}", cmd, args)
+                    };
+                    let user_msg = Message::user_text(&sid, &display_text);
+                    self.messages.push(user_msg);
+                    self.add_to_history(display_text);
+
+                    let flag = Arc::new(AtomicBool::new(false));
+                    self.cancel_flag = Some(flag.clone());
 
                     tokio::spawn(async move {
                         match ragent_core::skill::invoke::invoke_skill(
@@ -5006,7 +5938,8 @@ Type `/swarm help` for more info.\n";
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_output_view_by(-3);
-                } else if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                } else if self.show_log && self.log_area.contains((event.column, event.row).into())
+                {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_add(3);
@@ -5019,7 +5952,8 @@ Type `/swarm help` for more info.\n";
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_output_view_by(3);
-                } else if self.show_log && self.log_area.contains((event.column, event.row).into()) {
+                } else if self.show_log && self.log_area.contains((event.column, event.row).into())
+                {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                 } else if self.message_area.contains((event.column, event.row).into()) {
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
@@ -5074,7 +6008,8 @@ Type `/swarm help` for more info.\n";
                     let row = event
                         .row
                         .saturating_sub(self.active_agents_area.y.saturating_add(1));
-                    let absolute_row = row.saturating_add(self.active_agents_scroll_offset) as usize;
+                    let absolute_row =
+                        row.saturating_add(self.active_agents_scroll_offset) as usize;
                     if absolute_row == 1 {
                         if let Some(ref sid) = self.session_id {
                             self.selected_agent_index = Some(0);
@@ -5132,145 +6067,163 @@ Type `/swarm help` for more info.\n";
                     self.scrollbar_drag = Some(ScrollbarDragPane::Log);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Log);
-                                } else {
-                                      // If the file menu is open and the click falls within its popup,
-                                      // handle file/directory selection via mouse.
-                                      if let Some(_menu_state) = self.file_menu.as_ref() {
-                                          // Compute popup rect used by the renderer so clicks map to rows.
-                                      }
-                
-                                      if self.file_menu.is_some() {
-                                          // Recompute popup geometry identical to layout::render_file_menu
-                                          let Some(menu) = self.file_menu.as_ref() else { return };
-                                          let input_area = self.active_input_widget_area();
-                                          let item_count = menu.matches.len() as u16;
-                                          let visible_items = item_count.max(1).min(8);
-                                          let height = (visible_items + 1 + 2).min(input_area.y);
-                                          let width = input_area.width.min(60);
-                                          let popup_x = input_area.x;
-                                          let popup_y = input_area.y.saturating_sub(height);
-                
-                                          // If click is inside the popup, determine which row was clicked.
-                                          if event.column >= popup_x
-                                              && event.column < popup_x.saturating_add(width)
-                                              && event.row >= popup_y
-                                              && event.row < popup_y.saturating_add(height)
-                                          {
-                                              // Content lines start one row below the popup top (inside the border)
-                                              let clicked_row = event.row.saturating_sub(popup_y + 1) as usize;
-                                              let absolute_row = menu.scroll_offset + clicked_row;
-                                              if absolute_row < menu.matches.len() {
-                                                  // Set the selected index (drop borrow immediately)
-                                                  {
-                                                      if let Some(ref mut m) = self.file_menu.as_mut() {
-                                                          m.selected = absolute_row;
-                                                      }
-                                                  }
-                
-                                                  // Accept the selection: this will navigate into directories
-                                                  // or insert a file path into the input. We do not auto-send
-                                                  // the message on mouse click; pressing Enter still sends.
-                                                  let _ = self.accept_file_menu_selection();
-                                                  return;
-                                              }
-                                          } else {
-                                              // Click outside popup dismisses the file menu.
-                                              self.file_menu = None;
-                                              return;
-                                          }
-                                      }
-                
-                                      // Start text selection in whichever pane the click is in
-                                      let pane = self.pane_at(event.column, event.row);
-                                      if let Some(pane) = pane {
-                                          self.text_selection = Some(TextSelection {
-                                              pane,
-                                              anchor: pos,
-                                              endpoint: pos,
-                                          });
-                                      } else {
-                                          self.text_selection = None;
-                                      }
-                                  }            }
-                          MouseEventKind::Drag(MouseButton::Left) => {
-                              if let Some(pane) = self.scrollbar_drag {
-                                  self.apply_scrollbar_drag(event.row, pane);
-                              } else if let Some(ref mut sel) = self.text_selection {
-                                  sel.endpoint = (event.column, event.row);
-                              }
-                          }
-            
-                          // Mouse move -> used for hover highlighting of file menu entries
-                          MouseEventKind::Moved => {
-                              // If file menu is open, update the highlighted row under the cursor.
-                              if self.file_menu.is_some() {
-                                  // Snapshot needed values without holding immutable borrows while mutating.
-                                  let input_area = self.active_input_widget_area();
-                                  let item_count = self.file_menu.as_ref().map(|m| m.matches.len()).unwrap_or(0) as u16;
-                                  let visible_items = item_count.max(1).min(8);
-                                  let height = (visible_items + 1 + 2).min(input_area.y);
-                                  let width = input_area.width.min(60);
-                                  let popup_x = input_area.x;
-                                  let popup_y = input_area.y.saturating_sub(height);
-            
-                                  if event.column >= popup_x
-                                      && event.column < popup_x.saturating_add(width)
-                                      && event.row >= popup_y
-                                      && event.row < popup_y.saturating_add(height)
-                                  {
-                                      let hovered_row = event.row.saturating_sub(popup_y + 1) as usize;
-                                      let absolute_row =
-                                          self.file_menu.as_ref().map(|m| m.scroll_offset).unwrap_or(0)
-                                              + hovered_row;
-                                      if absolute_row < (item_count as usize) {
-                                          // Update selection if changed.
-                                          if let Some(ref mut m) = self.file_menu.as_mut() {
-                                              if m.selected != absolute_row {
-                                                  m.selected = absolute_row;
-                                              }
-                                          }
-                                      }
-                                  }
-                              }
-                          }
-            
-                          MouseEventKind::Up(MouseButton::Left) => {
-                              self.scrollbar_drag = None;
-                              // Keep text_selection alive so it stays highlighted until right-click or next click
-                          }
-                          MouseEventKind::Down(MouseButton::Right) => {
-                              // Right-click contract: always open context menu when inside a pane.
-                              // Actions are enabled only when valid for that pane + selection context.
-                              let col = event.column;
-                              let row = event.row;
-                              let Some(pane) = self.pane_at(col, row) else {
-                                  self.context_menu = None;
-                                  return;
-                              };
+                } else {
+                    // If the file menu is open and the click falls within its popup,
+                    // handle file/directory selection via mouse.
+                    if let Some(_menu_state) = self.file_menu.as_ref() {
+                        // Compute popup rect used by the renderer so clicks map to rows.
+                    }
 
-                              let selection_for_pane = self
-                                  .text_selection
-                                  .as_ref()
-                                  .is_some_and(|s| s.pane == pane);
-                              let in_input =
-                                  matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
-                              let has_clipboard = Self::get_clipboard().is_some_and(|s| !s.is_empty());
+                    if self.file_menu.is_some() {
+                        // Recompute popup geometry identical to layout::render_file_menu
+                        let Some(menu) = self.file_menu.as_ref() else {
+                            return;
+                        };
+                        let input_area = self.active_input_widget_area();
+                        let item_count = menu.matches.len() as u16;
+                        let visible_items = item_count.max(1).min(8);
+                        let height = (visible_items + 1 + 2).min(input_area.y);
+                        let width = input_area.width.min(60);
+                        let popup_x = input_area.x;
+                        let popup_y = input_area.y.saturating_sub(height);
 
-                              let items = vec![
-                                  (ContextAction::Cut, selection_for_pane && in_input),
-                                  (ContextAction::Copy, selection_for_pane),
-                                  (ContextAction::Paste, in_input && has_clipboard),
-                              ];
-                              let selected = items.iter().position(|(_, en)| *en).unwrap_or(0);
+                        // If click is inside the popup, determine which row was clicked.
+                        if event.column >= popup_x
+                            && event.column < popup_x.saturating_add(width)
+                            && event.row >= popup_y
+                            && event.row < popup_y.saturating_add(height)
+                        {
+                            // Content lines start one row below the popup top (inside the border)
+                            let clicked_row = event.row.saturating_sub(popup_y + 1) as usize;
+                            let absolute_row = menu.scroll_offset + clicked_row;
+                            if absolute_row < menu.matches.len() {
+                                // Set the selected index (drop borrow immediately)
+                                {
+                                    if let Some(ref mut m) = self.file_menu.as_mut() {
+                                        m.selected = absolute_row;
+                                    }
+                                }
 
-                              self.context_menu = Some(ContextMenuState {
-                                  x: col,
-                                  y: row,
-                                  pane,
-                                  selected,
-                                  items,
-                              });
-                          }
+                                // Accept the selection: this will navigate into directories
+                                // or insert a file path into the input. We do not auto-send
+                                // the message on mouse click; pressing Enter still sends.
+                                let _ = self.accept_file_menu_selection();
+                                return;
+                            }
+                        } else {
+                            // Click outside popup dismisses the file menu.
+                            self.file_menu = None;
+                            return;
+                        }
+                    }
+
+                    // Start text selection in whichever pane the click is in
+                    let pane = self.pane_at(event.column, event.row);
+                    if let Some(pane) = pane {
+                        self.text_selection = Some(TextSelection {
+                            pane,
+                            anchor: pos,
+                            endpoint: pos,
+                        });
+                    } else {
+                        self.text_selection = None;
+                    }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let Some(pane) = self.scrollbar_drag {
+                    self.apply_scrollbar_drag(event.row, pane);
+                } else if let Some(ref mut sel) = self.text_selection {
+                    sel.endpoint = (event.column, event.row);
+                }
+            }
+
+            // Mouse move -> used for hover highlighting of file menu entries
+            MouseEventKind::Moved => {
+                // If file menu is open, update the highlighted row under the cursor.
+                if self.file_menu.is_some() {
+                    // Snapshot needed values without holding immutable borrows while mutating.
+                    let input_area = self.active_input_widget_area();
+                    let item_count = self
+                        .file_menu
+                        .as_ref()
+                        .map(|m| m.matches.len())
+                        .unwrap_or(0) as u16;
+                    let visible_items = item_count.max(1).min(8);
+                    let height = (visible_items + 1 + 2).min(input_area.y);
+                    let width = input_area.width.min(60);
+                    let popup_x = input_area.x;
+                    let popup_y = input_area.y.saturating_sub(height);
+
+                    if event.column >= popup_x
+                        && event.column < popup_x.saturating_add(width)
+                        && event.row >= popup_y
+                        && event.row < popup_y.saturating_add(height)
+                    {
+                        let hovered_row = event.row.saturating_sub(popup_y + 1) as usize;
+                        let absolute_row = self
+                            .file_menu
+                            .as_ref()
+                            .map(|m| m.scroll_offset)
+                            .unwrap_or(0)
+                            + hovered_row;
+                        if absolute_row < (item_count as usize) {
+                            // Update selection if changed.
+                            if let Some(ref mut m) = self.file_menu.as_mut() {
+                                if m.selected != absolute_row {
+                                    m.selected = absolute_row;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.scrollbar_drag = None;
+                // Keep text_selection alive so it stays highlighted until right-click or next click
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                // Right-click contract: always open context menu when inside a pane.
+                // Actions are enabled only when valid for that pane + selection context.
+                let col = event.column;
+                let row = event.row;
+                let Some(pane) = self.pane_at(col, row) else {
+                    self.context_menu = None;
+                    return;
+                };
+
+                let selection_for_pane =
+                    self.text_selection.as_ref().is_some_and(|s| s.pane == pane);
+                let in_input = matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
+                let has_clipboard = Self::get_clipboard().is_some_and(|s| !s.is_empty());
+                let provider_setup_input = matches!(
+                    self.provider_setup,
+                    Some(ProviderSetupStep::EnterKey { .. })
+                );
+
+                let items = vec![
+                    (ContextAction::Cut, selection_for_pane && in_input),
+                    (ContextAction::Copy, selection_for_pane),
+                    (
+                        ContextAction::Paste,
+                        if provider_setup_input {
+                            true
+                        } else {
+                            in_input && has_clipboard
+                        },
+                    ),
+                ];
+                let selected = items.iter().position(|(_, en)| *en).unwrap_or(0);
+
+                self.context_menu = Some(ContextMenuState {
+                    x: col,
+                    y: row,
+                    pane,
+                    selected,
+                    items,
+                });
+            }
             _ => {}
         }
         self.assert_ui_invariants();
@@ -5536,15 +6489,18 @@ Type `/swarm help` for more info.\n";
                 }
             }
             ContextAction::Paste => {
-                // Only paste into input panes.
                 if matches!(
+                    self.provider_setup,
+                    Some(ProviderSetupStep::EnterKey { .. })
+                ) {
+                    self.paste_provider_setup_from_clipboard();
+                } else if matches!(
                     pane,
                     Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
                 ) {
                     if let Some(text) = Self::get_clipboard() {
                         // Strip carriage returns but keep newlines (multiline input supported).
-                        let clean: String =
-                            text.chars().filter(|&c| c != '\r').collect();
+                        let clean: String = text.chars().filter(|&c| c != '\r').collect();
                         if let Some(sel) = selection.as_ref()
                             && let Some((start, end)) = self.input_selection_char_range(sel)
                         {
@@ -5645,15 +6601,28 @@ Type `/swarm help` for more info.\n";
                     // When a teammate is focused, route the message to their
                     // mailbox instead of the lead session.
                     if let Some(ref focused_id) = self.focused_teammate.clone() {
-                        if let Some(member) = self.team_members.iter().find(|m| m.agent_id == *focused_id).cloned() {
-                            let team_name = self.active_team.as_ref().map(|t| t.name.clone()).unwrap_or_default();
+                        if let Some(member) = self
+                            .team_members
+                            .iter()
+                            .find(|m| m.agent_id == *focused_id)
+                            .cloned()
+                        {
+                            let team_name = self
+                                .active_team
+                                .as_ref()
+                                .map(|t| t.name.clone())
+                                .unwrap_or_default();
                             self.send_teammate_message(&team_name, &member.name, &text);
                             self.input.clear();
                             self.input_cursor = 0;
                             self.history_index = None;
                             self.push_log_no_agent(
                                 LogLevel::Info,
-                                format!("→ {} (focused): {}", member.name, &text[..text.len().min(60)]),
+                                format!(
+                                    "→ {} (focused): {}",
+                                    member.name,
+                                    &text[..text.len().min(60)]
+                                ),
                             );
                             return;
                         }
@@ -5923,9 +6892,42 @@ Type `/swarm help` for more info.\n";
                 InputAction::CancelForceCleanup => {
                     if self.pending_forcecleanup.is_some() {
                         self.pending_forcecleanup = None;
-                        self.append_assistant_text("From: /team forcecleanup\nForce-cleanup cancelled.");
-                        self.push_log_no_agent(LogLevel::Info, "forcecleanup cancelled".to_string());
+                        self.append_assistant_text(
+                            "From: /team forcecleanup\nForce-cleanup cancelled.",
+                        );
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            "forcecleanup cancelled".to_string(),
+                        );
                         self.status = "forcecleanup cancelled".to_string();
+                    }
+                }
+                InputAction::ApprovePlan => {
+                    if let Some(state) = self.plan_approval_pending.take() {
+                        if let Some(ref session_id) = self.session_id.clone() {
+                            self.push_log_no_agent(LogLevel::Info, "plan approved".to_string());
+                            self.execute_plan_restore(session_id, &state.plan_text);
+                        }
+                    }
+                }
+                InputAction::RejectPlan => {
+                    if let Some(state) = self.plan_approval_pending.take() {
+                        if let Some(ref session_id) = self.session_id.clone() {
+                            self.push_log_no_agent(LogLevel::Info, "plan rejected — re-delegating".to_string());
+                            self.append_assistant_text(
+                                "From: /plan\n🔄 **Plan rejected** — re-delegating to plan agent for revision.\n",
+                            );
+                            self.execute_plan_delegation(
+                                session_id,
+                                "Revise the plan based on this feedback: please provide an improved plan".to_string(),
+                                state.plan_text,
+                            );
+                        }
+                    }
+                }
+                InputAction::TogglePlanCursor => {
+                    if let Some(ref mut state) = self.plan_approval_pending {
+                        state.cursor_approve = !state.cursor_approve;
                     }
                 }
                 InputAction::FocusNextTeammate => {
@@ -6048,7 +7050,7 @@ Type `/swarm help` for more info.\n";
             // Offer /swarm as an execution option after plan completion
             self.append_assistant_text(
                 "\n💡 **Tip:** You can execute this plan in parallel with `/swarm <goal>`, \
-                 or implement it step-by-step.\n"
+                 or implement it step-by-step.\n",
             );
             self.force_new_message = true;
         } else {
@@ -6187,7 +7189,10 @@ Type `/swarm help` for more info.\n";
                         self.status = "ready".to_string();
                     }
                     self.force_new_message = true;
-                    self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("response finished ({reason:?})"),
+                    );
 
                     // After compaction: replace session message history with just the summary.
                     // The summary is the last assistant message in self.messages.
@@ -6223,7 +7228,8 @@ Type `/swarm help` for more info.\n";
                                     self.messages = vec![summary_msg];
                                     self.push_log_no_agent(
                                         LogLevel::Info,
-                                        "Compaction: session history replaced with summary".to_string(),
+                                        "Compaction: session history replaced with summary"
+                                            .to_string(),
                                     );
                                 }
                             }
@@ -6237,14 +7243,36 @@ Type `/swarm help` for more info.\n";
                         self.execute_plan_delegation(session_id, task, context);
                     }
 
-                    // Handle pending agent restore: pop stack and inject summary
-                    if let Some(summary) = self.pending_plan_restore.take() {
-                        self.execute_plan_restore(session_id, &summary);
+                    // Autopilot auto-continue: after agent completes a turn without calling
+                    // task_complete, automatically send a continuation prompt so the agent
+                    // keeps working towards its goal.
+                    if self.autopilot_enabled && *reason != FinishReason::Cancelled {
+                        // Check time limit
+                        let time_exceeded = self.autopilot_time_limit_secs
+                            .and_then(|limit| self.autopilot_started_at.map(|s| s.elapsed().as_secs() >= limit))
+                            .unwrap_or(false);
+                        if time_exceeded {
+                            self.autopilot_enabled = false;
+                            self.autopilot_started_at = None;
+                            self.autopilot_pending_continue = None;
+                            self.status = "autopilot: time limit reached".to_string();
+                            self.append_assistant_text("⚡ **Autopilot stopped** — time limit reached.");
+                            self.push_log_no_agent(LogLevel::Warn, "autopilot stopped: time limit".to_string());
+                        } else {
+                            // Schedule a continuation on the next render tick
+                            self.autopilot_pending_continue = Some(
+                                "Continue working on the task. When fully done, call task_complete with a summary.".to_string()
+                            );
+                            self.status = "⚡ autopilot".to_string();
+                        }
                     }
 
                     if was_auto_compaction {
                         self.auto_compact_in_progress = false;
-                        self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            "Auto-compaction completed".to_string(),
+                        );
                         if let Some((queued_text, queued_images)) =
                             self.pending_send_after_compact.take()
                         {
@@ -6296,7 +7324,10 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.agent_name = to.clone();
-                    self.push_log_no_agent(LogLevel::Info, format!("agent switched: {} → {}", from, to));
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("agent switched: {} → {}", from, to),
+                    );
                 }
             }
             Event::AgentSwitchRequested {
@@ -6322,7 +7353,29 @@ Type `/swarm help` for more info.\n";
                         LogLevel::Info,
                         format!("agent restore requested ({} chars)", summary.len()),
                     );
-                    self.pending_plan_restore = Some(summary.clone());
+                    // Show plan approval dialog instead of immediately restoring.
+                    // The user presses Approve/Reject (Enter/r) to proceed.
+                    self.plan_approval_pending = Some(PlanApprovalState {
+                        plan_text: summary.clone(),
+                        cursor_approve: true,
+                    });
+                }
+            }
+            Event::TaskCompleted {
+                ref session_id,
+                ref summary,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
+                    // Exit autopilot mode on task completion
+                    if self.autopilot_enabled {
+                        self.autopilot_enabled = false;
+                        self.autopilot_started_at = None;
+                        self.autopilot_pending_continue = None;
+                        self.status = "task complete".to_string();
+                        self.push_log_no_agent(LogLevel::Info, "autopilot stopped: task complete".to_string());
+                    }
+                    self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
                 }
             }
             Event::AgentError {
@@ -6372,10 +7425,7 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.quota_percent = Some(percent);
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("quota: {:.1}% used", percent),
-                    );
+                    self.push_log_no_agent(LogLevel::Info, format!("quota: {:.1}% used", percent));
                 }
             }
             Event::ToolsSent {
@@ -6398,9 +7448,22 @@ Type `/swarm help` for more info.\n";
                 ref session_id,
                 ref text,
                 elapsed_ms,
+                input_tokens,
+                output_tokens,
             } => {
                 if self.is_current_session(session_id) {
-                    self.push_log_no_agent(LogLevel::Info, format!("model response ({elapsed_ms}ms): {text}"));
+                    if let Some(model_ref) = self.active_model_ref_string() {
+                        self.llm_request_stats.push(LlmRequestStat {
+                            model_ref,
+                            elapsed_ms,
+                            input_tokens,
+                            output_tokens,
+                        });
+                    }
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("model response ({elapsed_ms}ms): {text}"),
+                    );
                 }
             }
             Event::ToolCallArgs {
@@ -6434,7 +7497,10 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     } else {
-                        self.push_log_no_agent(LogLevel::Tool, format!("{}→ {}({})", step_tag, tool, args));
+                        self.push_log_no_agent(
+                            LogLevel::Tool,
+                            format!("{}→ {}({})", step_tag, tool, args),
+                        );
                     }
                 }
             }
@@ -6595,11 +7661,8 @@ Type `/swarm help` for more info.\n";
                 if self.is_current_session(session_id) {
                     // Add new member to team_members if not already present.
                     if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
-                        let member = TeamMember::new(
-                            teammate_name.as_str(),
-                            agent_id.as_str(),
-                            "teammate",
-                        );
+                        let member =
+                            TeamMember::new(teammate_name.as_str(), agent_id.as_str(), "teammate");
                         self.team_members.push(member);
                         self.team_message_counts
                             .entry(agent_id.clone())
@@ -6608,12 +7671,18 @@ Type `/swarm help` for more info.\n";
                     // Always refresh the stored values (session id, status, current task)
                     // from disk so races between UI hydration and spawn events don't
                     // leave the UI showing an outdated state.
-                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id)
+                    if let Some(m) = self
+                        .team_members
+                        .iter_mut()
+                        .find(|m| m.agent_id == *agent_id)
                     {
                         let working_dir = std::env::current_dir().unwrap_or_default();
                         if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
-                            && let Some(stored) =
-                                store.config.members.iter().find(|x| x.agent_id == *agent_id)
+                            && let Some(stored) = store
+                                .config
+                                .members
+                                .iter()
+                                .find(|x| x.agent_id == *agent_id)
                         {
                             m.session_id = stored.session_id.clone();
                             m.status = stored.status.clone();
@@ -6623,9 +7692,7 @@ Type `/swarm help` for more info.\n";
                     self.show_teams = true;
                     self.push_log_no_agent(
                         LogLevel::Info,
-                        format!(
-                            "🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"
-                        ),
+                        format!("🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
                     );
                 }
             }
@@ -6669,10 +7736,7 @@ Type `/swarm help` for more info.\n";
                         .or_insert((0, 0));
                     from_counts.0 = from_counts.0.saturating_add(1);
                     // Track received count for recipient.
-                    let to_counts = self
-                        .team_message_counts
-                        .entry(to.clone())
-                        .or_insert((0, 0));
+                    let to_counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
                     to_counts.1 = to_counts.1.saturating_add(1);
                     self.push_log_no_agent(
                         LogLevel::Info,
@@ -6686,7 +7750,11 @@ Type `/swarm help` for more info.\n";
                 ref agent_id,
             } => {
                 if self.is_current_session(session_id) {
-                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                    if let Some(m) = self
+                        .team_members
+                        .iter_mut()
+                        .find(|m| m.agent_id == *agent_id)
+                    {
                         m.status = MemberStatus::Idle;
                     }
                     self.push_log_no_agent(
@@ -6702,11 +7770,23 @@ Type `/swarm help` for more info.\n";
                 ref error,
             } => {
                 if self.is_current_session(session_id) {
-                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                    if let Some(m) = self
+                        .team_members
+                        .iter_mut()
+                        .find(|m| m.agent_id == *agent_id)
+                    {
                         m.status = MemberStatus::Failed;
                         m.last_spawn_error = Some(error.clone());
                     }
-                    let short_err = if error.len() > 80 { &error[..80] } else { error };
+                    let short_err = if error.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !error.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}…", &error[..end])
+                    } else {
+                        error.to_string()
+                    };
                     self.push_log_no_agent(
                         LogLevel::Error,
                         format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
@@ -6720,7 +7800,11 @@ Type `/swarm help` for more info.\n";
                 ref task_id,
             } => {
                 if self.is_current_session(session_id) {
-                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                    if let Some(m) = self
+                        .team_members
+                        .iter_mut()
+                        .find(|m| m.agent_id == *agent_id)
+                    {
                         m.status = MemberStatus::Working;
                         m.current_task_id = Some(task_id.clone());
                     }
@@ -6737,7 +7821,11 @@ Type `/swarm help` for more info.\n";
                 ref task_id,
             } => {
                 if self.is_current_session(session_id) {
-                    if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+                    if let Some(m) = self
+                        .team_members
+                        .iter_mut()
+                        .find(|m| m.agent_id == *agent_id)
+                    {
                         m.current_task_id = None;
                     }
                     self.push_log_no_agent(
@@ -6756,13 +7844,25 @@ Type `/swarm help` for more info.\n";
                     self.team_message_counts.clear();
                     self.show_teams = false;
                     self.focused_teammate = None;
-                    if self.swarm_state.as_ref().is_some_and(|s| &s.team_name == team_name) {
+                    if self
+                        .swarm_state
+                        .as_ref()
+                        .is_some_and(|s| &s.team_name == team_name)
+                    {
                         self.swarm_state = None;
                     }
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("🗑️  Team '{team_name}' cleaned up"),
                     );
+                }
+            }
+            Event::ShellCwdChanged {
+                ref session_id,
+                ref cwd,
+            } => {
+                if self.is_current_session(session_id) {
+                    self.shell_cwd = Some(cwd.clone());
                 }
             }
             _ => {}
@@ -6801,25 +7901,25 @@ Type `/swarm help` for more info.\n";
     /// ```rust,no_run
     /// # use ragent_tui::App;
     /// # use ragent_tui::app::LogLevel;
-          /// # fn example(app: &mut App) {
-          /// app.push_log_no_agent(LogLevel::Info, "Session started".to_string());
-          /// # }
-          /// ```
-          pub fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
-              self.log_entries.push(LogEntry {
-                  timestamp: chrono::Utc::now(),
-                  level,
-                  message,
-                  session_id: self.session_id.clone(),
-                  agent_id,
-              });
-          }
+    /// # fn example(app: &mut App) {
+    /// app.push_log_no_agent(LogLevel::Info, "Session started".to_string());
+    /// # }
+    /// ```
+    pub fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {
+        self.log_entries.push(LogEntry {
+            timestamp: chrono::Utc::now(),
+            level,
+            message,
+            session_id: self.session_id.clone(),
+            agent_id,
+        });
+    }
 
-          /// Helper: push log with no agent_id (for backwards compatibility during transition).
-          #[allow(dead_code)]
-          fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
-              self.push_log(level, message, None);
-          }
+    /// Helper: push log with no agent_id (for backwards compatibility during transition).
+    #[allow(dead_code)]
+    fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
+        self.push_log(level, message, None);
+    }
 
     fn open_output_view_session(&mut self, session_id: String, label: String) {
         self.selected_agent_session_id = Some(session_id.clone());
@@ -6880,16 +7980,31 @@ Type `/swarm help` for more info.\n";
             self.focused_teammate = None;
             return;
         }
-        let ids: Vec<String> = self.team_members.iter().map(|m| m.agent_id.clone()).collect();
-        let current_idx = self.focused_teammate.as_ref().and_then(|f| ids.iter().position(|id| id == f));
+        let ids: Vec<String> = self
+            .team_members
+            .iter()
+            .map(|m| m.agent_id.clone())
+            .collect();
+        let current_idx = self
+            .focused_teammate
+            .as_ref()
+            .and_then(|f| ids.iter().position(|id| id == f));
         let next = match (current_idx, forward) {
             (None, true) => Some(0),
             (None, false) => Some(ids.len() - 1),
             (Some(i), true) => {
-                if i + 1 >= ids.len() { None } else { Some(i + 1) }
+                if i + 1 >= ids.len() {
+                    None
+                } else {
+                    Some(i + 1)
+                }
             }
             (Some(i), false) => {
-                if i == 0 { None } else { Some(i - 1) }
+                if i == 0 {
+                    None
+                } else {
+                    Some(i - 1)
+                }
             }
         };
         match next {
@@ -6907,10 +8022,18 @@ Type `/swarm help` for more info.\n";
 
     /// Focus a specific teammate by agent_id, opening their output view.
     fn focus_teammate_by_id(&mut self, agent_id: &str) {
-        let member = self.team_members.iter().find(|m| m.agent_id == agent_id).cloned();
+        let member = self
+            .team_members
+            .iter()
+            .find(|m| m.agent_id == agent_id)
+            .cloned();
         if let Some(m) = member {
             self.focused_teammate = Some(m.agent_id.clone());
-            let team_name = self.active_team.as_ref().map(|t| t.name.clone()).unwrap_or_default();
+            let team_name = self
+                .active_team
+                .as_ref()
+                .map(|t| t.name.clone())
+                .unwrap_or_default();
             self.open_output_view_team_member(
                 team_name,
                 m.agent_id.clone(),
@@ -6924,8 +8047,12 @@ Type `/swarm help` for more info.\n";
     /// Focus a teammate by name (partial match supported).
     fn focus_teammate_by_name(&mut self, name: &str) -> Result<(), String> {
         let lower = name.to_lowercase();
-        let matches: Vec<_> = self.team_members.iter()
-            .filter(|m| m.name.to_lowercase().contains(&lower) || m.agent_id.to_lowercase().contains(&lower))
+        let matches: Vec<_> = self
+            .team_members
+            .iter()
+            .filter(|m| {
+                m.name.to_lowercase().contains(&lower) || m.agent_id.to_lowercase().contains(&lower)
+            })
             .cloned()
             .collect();
         match matches.len() {
@@ -6944,41 +8071,43 @@ Type `/swarm help` for more info.\n";
 
     /// Send a message to a teammate's mailbox.
     fn send_teammate_message(&mut self, team_name: &str, teammate_name: &str, text: &str) {
-        let member = self.team_members.iter().find(|m| m.name == teammate_name).cloned();
+        let member = self
+            .team_members
+            .iter()
+            .find(|m| m.name == teammate_name)
+            .cloned();
         let working_dir = std::env::current_dir().unwrap_or_default();
         match (self.active_team.as_ref(), member) {
-            (Some(_team), Some(member)) => {
-                match TeamStore::load_by_name(team_name, &working_dir) {
-                    Ok(store) => match Mailbox::open(&store.dir, &member.agent_id) {
-                        Ok(mb) => {
-                            let msg = MailboxMessage::new(
-                                "lead",
-                                &member.agent_id,
-                                MessageType::Message,
-                                text,
-                            );
-                            match mb.push(msg) {
-                                Ok(_) => {
-                                    self.push_log_no_agent(
-                                        LogLevel::Info,
-                                        format!("📨 lead → {teammate_name}: {text}"),
-                                    );
-                                    self.status = format!("message sent to {teammate_name}");
-                                }
-                                Err(e) => {
-                                    self.status = format!("Failed to send message: {e}");
-                                }
+            (Some(_team), Some(member)) => match TeamStore::load_by_name(team_name, &working_dir) {
+                Ok(store) => match Mailbox::open(&store.dir, &member.agent_id) {
+                    Ok(mb) => {
+                        let msg = MailboxMessage::new(
+                            "lead",
+                            &member.agent_id,
+                            MessageType::Message,
+                            text,
+                        );
+                        match mb.push(msg) {
+                            Ok(_) => {
+                                self.push_log_no_agent(
+                                    LogLevel::Info,
+                                    format!("📨 lead → {teammate_name}: {text}"),
+                                );
+                                self.status = format!("message sent to {teammate_name}");
+                            }
+                            Err(e) => {
+                                self.status = format!("Failed to send message: {e}");
                             }
                         }
-                        Err(e) => {
-                            self.status = format!("Failed to open mailbox: {e}");
-                        }
-                    },
-                    Err(e) => {
-                        self.status = format!("Failed to load team: {e}");
                     }
+                    Err(e) => {
+                        self.status = format!("Failed to open mailbox: {e}");
+                    }
+                },
+                Err(e) => {
+                    self.status = format!("Failed to load team: {e}");
                 }
-            }
+            },
             (None, _) => {
                 self.status = "No active team".to_string();
             }
@@ -6991,14 +8120,19 @@ Type `/swarm help` for more info.\n";
     // ── Swarm helpers ───────────────────────────────────────────────────────
 
     /// Process a successful decomposition and create the ephemeral swarm team.
-    fn execute_swarm_decomposition(&mut self, decomposition: ragent_core::team::SwarmDecomposition) {
-        use ragent_core::team::{SwarmState, TaskStore, TeamStore};
+    fn execute_swarm_decomposition(
+        &mut self,
+        decomposition: ragent_core::team::SwarmDecomposition,
+    ) {
         use ragent_core::team::task::Task;
+        use ragent_core::team::{SwarmState, TaskStore, TeamStore};
 
         let task_count = decomposition.tasks.len();
         if task_count == 0 {
             self.status = "⚠ swarm: LLM returned 0 subtasks".to_string();
-            self.append_assistant_text("From: /swarm\n## ⚠ No subtasks\n\nThe LLM returned an empty task list.\n");
+            self.append_assistant_text(
+                "From: /swarm\n## ⚠ No subtasks\n\nThe LLM returned an empty task list.\n",
+            );
             return;
         }
 
@@ -7006,7 +8140,10 @@ Type `/swarm help` for more info.\n";
         let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
         let team_name = format!("swarm-{ts}");
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let lead_sid = self.session_id.clone().unwrap_or_else(|| "unknown".to_string());
+        let lead_sid = self
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
 
         // Create the team
         match TeamStore::create(&team_name, &lead_sid, &working_dir, true) {
@@ -7018,7 +8155,10 @@ Type `/swarm help` for more info.\n";
                         task.description = st.description.clone();
                         task.depends_on = st.depends_on.clone();
                         if let Err(e) = task_store.add_task(task) {
-                            self.push_log_no_agent(LogLevel::Warn, format!("Swarm: failed to add task {}: {e}", st.id));
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                format!("Swarm: failed to add task {}: {e}", st.id),
+                            );
                         }
                     }
                 }
@@ -7078,7 +8218,11 @@ Type `/swarm help` for more info.\n";
 
         for subtask in &decomposition.tasks {
             let teammate_name = format!("swarm-{}", subtask.id);
-            let agent_type = subtask.agent_type.as_deref().unwrap_or("general").to_string();
+            let agent_type = subtask
+                .agent_type
+                .as_deref()
+                .unwrap_or("general")
+                .to_string();
 
             // Build a rich prompt with task context
             let prompt = format!(
@@ -7086,8 +8230,13 @@ Type `/swarm help` for more info.\n";
                 **Task ID:** {}\n\
                 **Title:** {}\n\n\
                 {}\n\n\
-                You are part of a swarm team. Complete this specific task. \
-                When done, use `team_task_complete` to mark task \"{}\" as completed.\n\
+                You are part of a swarm team. Complete this specific task.\n\n\
+                IMPORTANT: Your VERY FIRST action must be a tool call. \
+                Call `team_read_messages` with team_name set to the team name from your context. \
+                Do NOT respond with text first — call the tool immediately.\n\n\
+                After reading messages, do the work described above using tool calls \
+                (glob, read, bash, etc.). \
+                When done, call `team_task_complete` to mark task \"{}\" as completed.\n\
                 Focus only on your assigned task — other teammates are handling other parts.",
                 subtask.title, subtask.id, subtask.title, subtask.description, subtask.id
             );
@@ -7095,12 +8244,12 @@ Type `/swarm help` for more info.\n";
             // Parse per-subtask model override
             let teammate_model: Option<ragent_core::agent::ModelRef> =
                 subtask.model.as_deref().and_then(|s| {
-                    s.split_once('/').or_else(|| s.split_once(':')).map(|(p, m)| {
-                        ragent_core::agent::ModelRef {
+                    s.split_once('/')
+                        .or_else(|| s.split_once(':'))
+                        .map(|(p, m)| ragent_core::agent::ModelRef {
                             provider_id: p.to_string(),
                             model_id: m.to_string(),
-                        }
-                    })
+                        })
                 });
 
             // Tasks with unresolved dependencies start as Blocked; others as Spawning
@@ -7113,10 +8262,16 @@ Type `/swarm help` for more info.\n";
 
             // Record member in config
             {
-                if let Ok(mut store) = ragent_core::team::TeamStore::load_by_name(team_name, &working_dir) {
+                if let Ok(mut store) =
+                    ragent_core::team::TeamStore::load_by_name(team_name, &working_dir)
+                {
                     if store.config.member_by_name(&teammate_name).is_none() {
                         let agent_id = store.next_agent_id();
-                        let mut member = ragent_core::team::TeamMember::new(&teammate_name, &agent_id, &agent_type);
+                        let mut member = ragent_core::team::TeamMember::new(
+                            &teammate_name,
+                            &agent_id,
+                            &agent_type,
+                        );
                         member.spawn_prompt = Some(prompt.clone());
                         member.model_override = teammate_model.clone();
                         member.status = initial_status;
@@ -7129,10 +8284,17 @@ Type `/swarm help` for more info.\n";
                 }
             }
 
-            let status_label = if has_deps { "blocked (deps)" } else { "spawning" };
+            let status_label = if has_deps {
+                "blocked (deps)"
+            } else {
+                "spawning"
+            };
             self.push_log_no_agent(
                 LogLevel::Info,
-                format!("🐝 Swarm teammate: {} ({}) — {}", teammate_name, subtask.id, status_label),
+                format!(
+                    "🐝 Swarm teammate: {} ({}) — {}",
+                    teammate_name, subtask.id, status_label
+                ),
             );
         }
 
@@ -7148,7 +8310,11 @@ Type `/swarm help` for more info.\n";
             swarm.spawned = true;
         }
 
-        let ready = decomposition.tasks.iter().filter(|t| t.depends_on.is_empty()).count();
+        let ready = decomposition
+            .tasks
+            .iter()
+            .filter(|t| t.depends_on.is_empty())
+            .count();
         let blocked = decomposition.tasks.len() - ready;
         self.status = format!("🐝 swarm: {ready} spawning, {blocked} blocked");
     }
@@ -7160,18 +8326,19 @@ Type `/swarm help` for more info.\n";
         }
 
         let Some(ref swarm) = self.swarm_state else {
-            self.append_assistant_text("From: /swarm status\n\nNo active swarm. Use `/swarm <prompt>` to start one.\n");
+            self.append_assistant_text(
+                "From: /swarm status\n\nNo active swarm. Use `/swarm <prompt>` to start one.\n",
+            );
             return;
         };
 
-        let mut output = format!(
-            "From: /swarm status\n## 🐝 Swarm: {}\n\n",
-            swarm.team_name
-        );
+        let mut output = format!("From: /swarm status\n## 🐝 Swarm: {}\n\n", swarm.team_name);
 
         // Load tasks from disk for current status
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let tasks = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&swarm.team_name, &working_dir) {
+        let tasks = if let Ok(store) =
+            ragent_core::team::TeamStore::load_by_name(&swarm.team_name, &working_dir)
+        {
             if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
                 ts.read().ok()
             } else {
@@ -7183,9 +8350,21 @@ Type `/swarm help` for more info.\n";
 
         let total = swarm.decomposition.tasks.len();
         let (completed, in_progress, pending) = if let Some(ref tl) = tasks {
-            let c = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Completed).count();
-            let ip = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::InProgress).count();
-            let p = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Pending).count();
+            let c = tl
+                .tasks
+                .iter()
+                .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
+                .count();
+            let ip = tl
+                .tasks
+                .iter()
+                .filter(|t| t.status == ragent_core::team::TaskStatus::InProgress)
+                .count();
+            let p = tl
+                .tasks
+                .iter()
+                .filter(|t| t.status == ragent_core::team::TaskStatus::Pending)
+                .count();
             (c, ip, p)
         } else {
             (0, 0, total)
@@ -7193,7 +8372,11 @@ Type `/swarm help` for more info.\n";
 
         // Progress bar
         let bar_width = 30;
-        let filled = if total > 0 { (completed * bar_width) / total } else { 0 };
+        let filled = if total > 0 {
+            (completed * bar_width) / total
+        } else {
+            0
+        };
         let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
         output.push_str(&format!(
             "**Progress:** [{bar}] {completed}/{total} ({} in progress, {} pending)\n\n",
@@ -7230,7 +8413,10 @@ Type `/swarm help` for more info.\n";
                 } else {
                     st.depends_on.join(", ")
                 };
-                output.push_str(&format!("| {} | {} | ⏳ | — | {} |\n", st.id, st.title, deps));
+                output.push_str(&format!(
+                    "| {} | {} | ⏳ | — | {} |\n",
+                    st.id, st.title, deps
+                ));
             }
         }
 
@@ -7283,34 +8469,47 @@ Type `/swarm help` for more info.\n";
     /// have been completed by their respective teammates (member status Idle/Stopped,
     /// or task status Completed in the TaskStore).
     pub fn poll_swarm_unblock(&mut self) {
-        let Some(ref swarm) = self.swarm_state else { return };
-        if swarm.completed { return; }
+        let Some(ref swarm) = self.swarm_state else {
+            return;
+        };
+        if swarm.completed {
+            return;
+        }
 
         // Clone what we need from swarm_state to avoid borrow issues
         let team_name = swarm.team_name.clone();
         let decomp_tasks = swarm.decomposition.tasks.clone();
 
         // Find blocked members
-        let blocked_members: Vec<(String, String)> = self.team_members.iter()
+        let blocked_members: Vec<(String, String)> = self
+            .team_members
+            .iter()
             .filter(|m| m.status == MemberStatus::Blocked)
             .map(|m| (m.name.clone(), m.agent_id.clone()))
             .collect();
 
-        if blocked_members.is_empty() { return; }
+        if blocked_members.is_empty() {
+            return;
+        }
 
         // Build set of completed task IDs from member status.
         // A task ID is the suffix after "swarm-" in the teammate name.
-        let completed_task_ids: std::collections::HashSet<String> = self.team_members.iter()
+        let completed_task_ids: std::collections::HashSet<String> = self
+            .team_members
+            .iter()
             .filter(|m| matches!(m.status, MemberStatus::Idle | MemberStatus::Stopped))
             .filter_map(|m| m.name.strip_prefix("swarm-").map(|s| s.to_string()))
             .collect();
 
         // Also check TaskStore for explicitly completed tasks
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let task_completed_ids: std::collections::HashSet<String> = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+        let task_completed_ids: std::collections::HashSet<String> = if let Ok(store) =
+            ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
+        {
             if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
                 if let Ok(tl) = ts.read() {
-                    tl.tasks.iter()
+                    tl.tasks
+                        .iter()
                         .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
                         .map(|t| t.id.clone())
                         .collect()
@@ -7324,19 +8523,27 @@ Type `/swarm help` for more info.\n";
             std::collections::HashSet::new()
         };
 
-        let all_completed: std::collections::HashSet<String> = completed_task_ids.union(&task_completed_ids).cloned().collect();
+        let all_completed: std::collections::HashSet<String> = completed_task_ids
+            .union(&task_completed_ids)
+            .cloned()
+            .collect();
 
         // Check each blocked member's dependencies
         let mut unblocked = Vec::new();
         for (member_name, agent_id) in &blocked_members {
             let task_id = member_name.strip_prefix("swarm-").unwrap_or(member_name);
             // Find the task's depends_on from decomposition
-            let deps = decomp_tasks.iter()
+            let deps = decomp_tasks
+                .iter()
                 .find(|t| t.id == task_id)
                 .map(|t| &t.depends_on);
 
             if let Some(deps) = deps {
-                let missing: Vec<_> = deps.iter().filter(|d| !all_completed.contains(*d)).cloned().collect();
+                let missing: Vec<_> = deps
+                    .iter()
+                    .filter(|d| !all_completed.contains(*d))
+                    .cloned()
+                    .collect();
                 tracing::debug!(
                     task = %task_id,
                     deps = ?deps,
@@ -7353,29 +8560,41 @@ Type `/swarm help` for more info.\n";
             }
         }
 
-        if unblocked.is_empty() { return; }
+        if unblocked.is_empty() {
+            return;
+        }
 
         // Transition unblocked members from Blocked → Spawning
         for (member_name, agent_id, task_id) in &unblocked {
             // Update local state
-            if let Some(m) = self.team_members.iter_mut().find(|m| m.agent_id == *agent_id) {
+            if let Some(m) = self
+                .team_members
+                .iter_mut()
+                .find(|m| m.agent_id == *agent_id)
+            {
                 m.status = MemberStatus::Spawning;
             }
             // Update persisted config
-            if let Ok(mut store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+            if let Ok(mut store) =
+                ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
+            {
                 if let Some(m) = store.config.member_by_id_mut(agent_id) {
                     m.status = MemberStatus::Spawning;
                 }
                 let _ = store.save();
             }
             // Log with actual deps for debugging
-            let dep_info = decomp_tasks.iter()
+            let dep_info = decomp_tasks
+                .iter()
                 .find(|t| t.id == *task_id)
                 .map(|t| t.depends_on.join(", "))
                 .unwrap_or_default();
             self.push_log_no_agent(
                 LogLevel::Info,
-                format!("🔓 Unblocking {} ({}) — deps [{}] all in {:?}", member_name, task_id, dep_info, all_completed),
+                format!(
+                    "🔓 Unblocking {} ({}) — deps [{}] all in {:?}",
+                    member_name, task_id, dep_info, all_completed
+                ),
             );
         }
 
@@ -7386,7 +8605,11 @@ Type `/swarm help` for more info.\n";
 
         let remaining_blocked = blocked_members.len() - unblocked.len();
         if remaining_blocked > 0 {
-            self.status = format!("🐝 swarm: {} unblocked, {} still blocked", unblocked.len(), remaining_blocked);
+            self.status = format!(
+                "🐝 swarm: {} unblocked, {} still blocked",
+                unblocked.len(),
+                remaining_blocked
+            );
         } else {
             self.status = format!("🐝 swarm: all teammates spawned");
         }
@@ -7399,26 +8622,36 @@ Type `/swarm help` for more info.\n";
     /// 2. All teammates are idle/failed/stopped — they finished their agent loop but may not have
     ///    called `team_task_complete`. In this case we auto-complete their tasks.
     pub fn poll_swarm_completion(&mut self) {
-        let Some(ref swarm) = self.swarm_state else { return };
-        if swarm.completed || !swarm.spawned { return; }
+        let Some(ref swarm) = self.swarm_state else {
+            return;
+        };
+        if swarm.completed || !swarm.spawned {
+            return;
+        }
         let team_name = swarm.team_name.clone();
 
         let working_dir = std::env::current_dir().unwrap_or_default();
 
         // Check member status — if all non-lead members are terminal (idle/failed/stopped),
         // the swarm is effectively done regardless of task store state.
-        let members: Vec<_> = self.team_members.iter()
+        let members: Vec<_> = self
+            .team_members
+            .iter()
             .filter(|m| m.name != "lead" && !m.name.is_empty())
             .collect();
         let has_members = !members.is_empty();
-        let all_members_terminal = has_members && members.iter().all(|m| matches!(
-            m.status,
-            MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped
-        ));
+        let all_members_terminal = has_members
+            && members.iter().all(|m| {
+                matches!(
+                    m.status,
+                    MemberStatus::Idle | MemberStatus::Failed | MemberStatus::Stopped
+                )
+            });
 
         // If all members are terminal, auto-complete any non-completed tasks in the task store
         if all_members_terminal {
-            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
+            {
                 if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
                     if let Ok(tl) = ts.read() {
                         for task in &tl.tasks {
@@ -7437,7 +8670,9 @@ Type `/swarm help` for more info.\n";
         }
 
         // Now check task store for final tally
-        let tasks = if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir) {
+        let tasks = if let Ok(store) =
+            ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
+        {
             if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
                 ts.read().ok()
             } else {
@@ -7459,22 +8694,46 @@ Type `/swarm help` for more info.\n";
             self.finalize_swarm_completion(&team_name, 0, 0, 0);
             return;
         }
-        if total == 0 { return; }
+        if total == 0 {
+            return;
+        }
 
-        let completed = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Completed).count();
-        let cancelled = tl.tasks.iter().filter(|t| t.status == ragent_core::team::TaskStatus::Cancelled).count();
-        let failed_members = members.iter().filter(|m| m.status == MemberStatus::Failed).count();
+        let completed = tl
+            .tasks
+            .iter()
+            .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
+            .count();
+        let cancelled = tl
+            .tasks
+            .iter()
+            .filter(|t| t.status == ragent_core::team::TaskStatus::Cancelled)
+            .count();
+        let failed_members = members
+            .iter()
+            .filter(|m| m.status == MemberStatus::Failed)
+            .count();
 
         if completed + cancelled >= total {
             self.finalize_swarm_completion(&team_name, total, completed, cancelled);
         } else if all_members_terminal {
             // Members done but tasks not all completed — report partial completion
-            self.finalize_swarm_completion(&team_name, total, completed, cancelled + failed_members);
+            self.finalize_swarm_completion(
+                &team_name,
+                total,
+                completed,
+                cancelled + failed_members,
+            );
         }
     }
 
     /// Build the swarm completion summary and mark the swarm as done.
-    fn finalize_swarm_completion(&mut self, team_name: &str, total: usize, completed: usize, cancelled: usize) {
+    fn finalize_swarm_completion(
+        &mut self,
+        team_name: &str,
+        total: usize,
+        completed: usize,
+        cancelled: usize,
+    ) {
         let working_dir = std::env::current_dir().unwrap_or_default();
 
         let mut output = format!(
@@ -7494,7 +8753,10 @@ Type `/swarm help` for more info.\n";
                                 ragent_core::team::TaskStatus::Cancelled => "❌",
                                 _ => "⚠️",
                             };
-                            output.push_str(&format!("| {} | {} | {} |\n", task.id, task.title, icon));
+                            output.push_str(&format!(
+                                "| {} | {} | {} |\n",
+                                task.id, task.title, icon
+                            ));
                         }
                         output.push('\n');
                     }
@@ -7506,7 +8768,10 @@ Type `/swarm help` for more info.\n";
 
         self.append_assistant_text(&output);
         self.status = format!("🎉 swarm complete: {team_name}");
-        self.push_log_no_agent(LogLevel::Info, format!("Swarm complete: {team_name} — {completed}/{total} tasks done"));
+        self.push_log_no_agent(
+            LogLevel::Info,
+            format!("Swarm complete: {team_name} — {completed}/{total} tasks done"),
+        );
 
         if let Some(ref mut s) = self.swarm_state {
             s.completed = true;
@@ -7551,9 +8816,7 @@ Type `/swarm help` for more info.\n";
             let msg = Message::new(
                 sid,
                 Role::Assistant,
-                vec![MessagePart::Text {
-                    text: rendered,
-                }],
+                vec![MessagePart::Text { text: rendered }],
             );
             self.messages.push(msg);
         }
@@ -7696,6 +8959,20 @@ Type `/swarm help` for more info.\n";
                     return;
                 }
             }
+        }
+    }
+
+    /// Fire a pending autopilot continuation if the agent is idle.
+    ///
+    /// Called every render tick; sends the queued continuation text to the
+    /// agent so it keeps working autonomously.
+    pub fn poll_autopilot_continue(&mut self) {
+        if !self.autopilot_enabled || self.is_processing {
+            self.autopilot_pending_continue = None;
+            return;
+        }
+        if let Some(text) = self.autopilot_pending_continue.take() {
+            self.dispatch_user_message(text, vec![]);
         }
     }
 }

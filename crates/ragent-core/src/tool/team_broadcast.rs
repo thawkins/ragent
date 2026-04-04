@@ -82,9 +82,7 @@ impl Tool for TeamBroadcastTool {
         }
 
         Ok(ToolOutput {
-            content: format!(
-                "Broadcast sent to {sent} active teammate(s) in team '{team_name}'."
-            ),
+            content: format!("Broadcast sent to {sent} active teammate(s) in team '{team_name}'."),
             metadata: Some(json!({
                 "team_name": team_name,
                 "recipients": active,

@@ -160,14 +160,14 @@ async fn auth_middleware(
                     StatusCode::UNAUTHORIZED,
                     Json(serde_json::json!({ "error": "unauthorized" })),
                 )
-                .into_response()
+                    .into_response()
             }
         }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({ "error": "unauthorized" })),
         )
-        .into_response(),
+            .into_response(),
     }
 }
 
@@ -878,7 +878,8 @@ fn get_task_manager(
     state
         .session_processor
         .task_manager
-        .get().cloned()
+        .get()
+        .cloned()
         .ok_or_else(|| {
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,

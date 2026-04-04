@@ -83,16 +83,23 @@ impl TeamStore {
         project_local: bool,
     ) -> Result<Self> {
         let base = if project_local {
-            find_project_teams_dir(working_dir)
-                .ok_or_else(|| anyhow!("no .ragent/ directory found in or above {}", working_dir.display()))?
+            find_project_teams_dir(working_dir).ok_or_else(|| {
+                anyhow!(
+                    "no .ragent/ directory found in or above {}",
+                    working_dir.display()
+                )
+            })?
         } else {
-            global_teams_dir()
-                .ok_or_else(|| anyhow!("cannot determine home directory"))?
+            global_teams_dir().ok_or_else(|| anyhow!("cannot determine home directory"))?
         };
 
         let team_dir = base.join(name);
         if team_dir.exists() {
-            return Err(anyhow!("team '{}' already exists at {}", name, team_dir.display()));
+            return Err(anyhow!(
+                "team '{}' already exists at {}",
+                name,
+                team_dir.display()
+            ));
         }
 
         fs::create_dir_all(&team_dir)
@@ -101,7 +108,10 @@ impl TeamStore {
             .with_context(|| "create mailbox subdirectory")?;
 
         let config = TeamConfig::new(name, lead_session_id);
-        let store = Self { dir: team_dir, config };
+        let store = Self {
+            dir: team_dir,
+            config,
+        };
         store.save()?;
         Ok(store)
     }
@@ -114,8 +124,8 @@ impl TeamStore {
         lead_session_id: &str,
         working_dir: &Path,
     ) -> Result<Self> {
-        let team_dir = find_team_dir(working_dir, name)
-            .ok_or_else(|| anyhow!("team '{name}' not found"))?;
+        let team_dir =
+            find_team_dir(working_dir, name).ok_or_else(|| anyhow!("team '{name}' not found"))?;
         let config_path = team_dir.join("config.json");
         if config_path.exists() {
             return Err(anyhow!(
@@ -129,7 +139,10 @@ impl TeamStore {
             .with_context(|| "create mailbox subdirectory")?;
 
         let config = TeamConfig::new(name, lead_session_id);
-        let store = Self { dir: team_dir, config };
+        let store = Self {
+            dir: team_dir,
+            config,
+        };
         store.save()?;
         Ok(store)
     }
@@ -149,8 +162,8 @@ impl TeamStore {
 
     /// Load a team by name from the standard discovery directories.
     pub fn load_by_name(name: &str, working_dir: &Path) -> Result<Self> {
-        let team_dir = find_team_dir(working_dir, name)
-            .ok_or_else(|| anyhow!("team '{name}' not found"))?;
+        let team_dir =
+            find_team_dir(working_dir, name).ok_or_else(|| anyhow!("team '{name}' not found"))?;
         Self::load(&team_dir)
     }
 
@@ -159,10 +172,10 @@ impl TeamStore {
         let config_path = self.dir.join("config.json");
         let tmp_path = self.dir.join("config.json.tmp");
         let json = serde_json::to_string_pretty(&self.config)?;
-        fs::write(&tmp_path, json)
-            .with_context(|| format!("write {}", tmp_path.display()))?;
-        fs::rename(&tmp_path, &config_path)
-            .with_context(|| format!("rename {} -> {}", tmp_path.display(), config_path.display()))?;
+        fs::write(&tmp_path, json).with_context(|| format!("write {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, &config_path).with_context(|| {
+            format!("rename {} -> {}", tmp_path.display(), config_path.display())
+        })?;
         Ok(())
     }
 

@@ -1,9 +1,9 @@
 use anyhow::Result;
 use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
-use super::registry::{AgentRegistry, OrchestrationRequest};
 use super::coordinator::OrchestrationMessage;
+use super::registry::{AgentRegistry, OrchestrationRequest};
 
 /// Router trait abstracts request delivery to agents.
 #[async_trait::async_trait]

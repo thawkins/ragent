@@ -24,9 +24,15 @@ pub mod task;
 
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
-pub use config::{HookEntry, HookEvent, MemberStatus, MemoryScope, PlanStatus, TeamConfig, TeamMember, TeamSettings, TeamStatus, resolve_memory_dir};
-pub use mailbox::{Mailbox, MailboxMessage, MessageType, register_notifier, deregister_notifier};
+pub use config::{
+    HookEntry, HookEvent, MemberStatus, MemoryScope, PlanStatus, TeamConfig, TeamMember,
+    TeamSettings, TeamStatus, resolve_memory_dir,
+};
+pub use mailbox::{Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier};
 pub use manager::{HookOutcome, TeamManager, build_team_prompt_addition, run_hook, run_team_hook};
-pub use store::{TeamStore, find_team_dir, find_project_teams_dir, global_teams_dir};
-pub use swarm::{SwarmDecomposition, SwarmState, SwarmSubtask, parse_decomposition, build_decomposition_user_prompt, DECOMPOSITION_SYSTEM_PROMPT};
+pub use store::{TeamStore, find_project_teams_dir, find_team_dir, global_teams_dir};
+pub use swarm::{
+    DECOMPOSITION_SYSTEM_PROMPT, SwarmDecomposition, SwarmState, SwarmSubtask,
+    build_decomposition_user_prompt, parse_decomposition,
+};
 pub use task::{Task, TaskList, TaskStatus, TaskStore};

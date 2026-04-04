@@ -288,5 +288,9 @@ async fn test_websearch_mock_auth_error() {
 async fn test_websearch_registered() {
     let registry = create_default_registry();
     assert!(registry.get("websearch").is_some());
-    assert!(registry.list().len() >= 31, "expected at least 31 tools, found {}", registry.list().len());
+    assert!(
+        registry.list().len() >= 31,
+        "expected at least 31 tools, found {}",
+        registry.list().len()
+    );
 }

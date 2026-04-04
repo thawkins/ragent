@@ -4,8 +4,8 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{HookEvent, MemberStatus, TaskStore, TeamStore, find_team_dir, run_team_hook};
 use crate::team::manager::HookOutcome;
+use crate::team::{HookEvent, MemberStatus, TaskStore, TeamStore, find_team_dir, run_team_hook};
 
 /// Teammate notifies lead it has no more work (idle state).
 pub struct TeamIdleTool;

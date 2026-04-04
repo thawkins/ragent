@@ -94,9 +94,18 @@ impl Tool for TeamSpawnTool {
         // Guard: detect multi-item prompts that violate the "one per spawn" rule.
         // Common patterns: "1.", "2.", "3.", "- Competitor A", "- Item B", "and", "also"
         let multi_item_patterns = [
-            "1.", "2.", "3.", "4.", "5.",  // Numbered lists
-            "a)", "b)", "c)", "d)", "e)",  // Letter lists
-            "- ", "* ",                     // Bullet lists
+            "1.",
+            "2.",
+            "3.",
+            "4.",
+            "5.", // Numbered lists
+            "a)",
+            "b)",
+            "c)",
+            "d)",
+            "e)", // Letter lists
+            "- ",
+            "* ", // Bullet lists
             ", and ",
             " and ",
             " or ",
@@ -131,10 +140,8 @@ impl Tool for TeamSpawnTool {
         }
 
         // Parse optional per-teammate model override ("provider_id/model_id").
-        let teammate_model: Option<ModelRef> = input
-            .get("model")
-            .and_then(|v| v.as_str())
-            .and_then(|s| {
+        let teammate_model: Option<ModelRef> =
+            input.get("model").and_then(|v| v.as_str()).and_then(|s| {
                 s.split_once('/')
                     .or_else(|| s.split_once(':'))
                     .map(|(p, m)| ModelRef {
@@ -190,13 +197,14 @@ impl Tool for TeamSpawnTool {
         // Extract optional task_id and pre-assign to the teammate if provided.
         let task_id = input.get("task_id").and_then(|v| v.as_str());
         let mut task_assignment_msg = String::new();
-        
+
         if let Some(task_id) = task_id {
             if let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name) {
                 if let Ok(task_store) = crate::team::task::TaskStore::open(&team_dir) {
                     match task_store.pre_assign_task(task_id, &agent_id) {
                         Ok(_) => {
-                            task_assignment_msg = format!("\n📋 Task '{}' pre-assigned to this teammate.", task_id);
+                            task_assignment_msg =
+                                format!("\n📋 Task '{}' pre-assigned to this teammate.", task_id);
                             tracing::info!(
                                 agent_id = %agent_id,
                                 task_id = %task_id,
@@ -211,7 +219,8 @@ impl Tool for TeamSpawnTool {
                                 error = %e,
                                 "Failed to pre-assign task to teammate"
                             );
-                            task_assignment_msg = format!("\n⚠️ Failed to pre-assign task '{}': {}", task_id, e);
+                            task_assignment_msg =
+                                format!("\n⚠️ Failed to pre-assign task '{}': {}", task_id, e);
                         }
                     }
                 }
@@ -233,7 +242,11 @@ impl Tool for TeamSpawnTool {
         let model_display = teammate_model
             .as_ref()
             .map(|m| format!("{}/{}", m.provider_id, m.model_id))
-            .or_else(|| ctx.active_model.as_ref().map(|m| format!("{}/{} (inherited)", m.provider_id, m.model_id)))
+            .or_else(|| {
+                ctx.active_model
+                    .as_ref()
+                    .map(|m| format!("{}/{} (inherited)", m.provider_id, m.model_id))
+            })
             .unwrap_or_else(|| "default".to_string());
 
         Ok(ToolOutput {

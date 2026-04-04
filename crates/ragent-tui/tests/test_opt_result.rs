@@ -152,7 +152,12 @@ fn test_poll_pending_opt_poisoned_mutex_with_result() {
     app.poll_pending_opt();
 
     assert_eq!(app.status, "opt: done");
-    assert!(app.opt_result.lock().unwrap_or_else(|e| e.into_inner()).is_none());
+    assert!(
+        app.opt_result
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+    );
 }
 
 // =========================================================================
@@ -172,6 +177,9 @@ fn test_opt_result_deposit_and_poll_cycle() {
         }
         app.poll_pending_opt();
         assert_eq!(app.status, "opt: done");
-        assert!(app.opt_result.lock().unwrap().is_none(), "result should be consumed");
+        assert!(
+            app.opt_result.lock().unwrap().is_none(),
+            "result should be consumed"
+        );
     }
 }

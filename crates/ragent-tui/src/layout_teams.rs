@@ -104,7 +104,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Column widths (tight but readable).
     // id=8, name=35, status=10, model=18, elapsed=7, steps=5, claimed=7, done=6, sent=5, recv=5
-    let dim = Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM);
+    let dim = Style::default()
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::DIM);
 
     // ── header ────────────────────────────────────────────────────────────
     lines.push(Line::from(vec![
@@ -124,7 +126,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     // ── lead row ─────────────────────────────────────────────────────────
     let lead_status_color = Color::Green;
     let lead_agent_id = app.agent_name.clone();
-    let (lead_sent, lead_recv) = app.team_message_counts.get(&lead_agent_id)
+    let (lead_sent, lead_recv) = app
+        .team_message_counts
+        .get(&lead_agent_id)
         .or_else(|| app.team_message_counts.get("lead"))
         .copied()
         .unwrap_or((0, 0));
@@ -132,7 +136,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled("● ", Style::default().fg(lead_status_color)),
         Span::styled(
             format!("{:<8} ", short_id(&lead_session)),
-            Style::default().fg(lead_status_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(lead_status_color)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("{:<35} ", app.agent_name.as_str()),
@@ -142,13 +148,50 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             format!("{:<10} ", "active"),
             Style::default().fg(lead_status_color),
         ),
-        Span::styled(format!("{:<18} ", "lead"), Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{:>7} ", lead_elapsed), Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{:>5} ", lead_steps), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:<18} ", "lead"),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!("{:>7} ", lead_elapsed),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!("{:>5} ", lead_steps),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::styled(format!("{:>7} ", "-"), Style::default().fg(Color::DarkGray)),
         Span::styled(format!("{:>6} ", "-"), Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{:>5} ", if lead_sent > 0 { lead_sent.to_string() } else { "-".to_string() }), Style::default().fg(if lead_sent > 0 { Color::Cyan } else { Color::DarkGray })),
-        Span::styled(format!("{:>5} ", if lead_recv > 0 { lead_recv.to_string() } else { "-".to_string() }), Style::default().fg(if lead_recv > 0 { Color::Cyan } else { Color::DarkGray })),
+        Span::styled(
+            format!(
+                "{:>5} ",
+                if lead_sent > 0 {
+                    lead_sent.to_string()
+                } else {
+                    "-".to_string()
+                }
+            ),
+            Style::default().fg(if lead_sent > 0 {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            }),
+        ),
+        Span::styled(
+            format!(
+                "{:>5} ",
+                if lead_recv > 0 {
+                    lead_recv.to_string()
+                } else {
+                    "-".to_string()
+                }
+            ),
+            Style::default().fg(if lead_recv > 0 {
+                Color::Cyan
+            } else {
+                Color::DarkGray
+            }),
+        ),
     ]));
 
     // ── teammate rows ─────────────────────────────────────────────────────
@@ -173,20 +216,30 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             steps = assistant_msgs.max(steps);
         }
 
-        let (claimed, done) = task_counts
-            .get(&member.agent_id)
-            .copied()
-            .unwrap_or((0, 0));
+        let (claimed, done) = task_counts.get(&member.agent_id).copied().unwrap_or((0, 0));
 
-        let (sent, recv) = app.team_message_counts
+        let (sent, recv) = app
+            .team_message_counts
             .get(&member.agent_id)
             .or_else(|| app.team_message_counts.get(&member.name))
             .copied()
             .unwrap_or((0, 0));
 
-        let connector = if i + 1 == members.len() { "└ " } else { "├ " };
-        let name_color = if is_focused { Color::Yellow } else { Color::White };
-        let name_mod = if is_focused { Modifier::BOLD | Modifier::UNDERLINED } else { Modifier::empty() };
+        let connector = if i + 1 == members.len() {
+            "└ "
+        } else {
+            "├ "
+        };
+        let name_color = if is_focused {
+            Color::Yellow
+        } else {
+            Color::White
+        };
+        let name_mod = if is_focused {
+            Modifier::BOLD | Modifier::UNDERLINED
+        } else {
+            Modifier::empty()
+        };
         let focus_marker = if is_focused { "▸" } else { " " };
 
         let mut spans = vec![
@@ -207,13 +260,19 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         ];
 
         // Model column: show override or "(inherited)"
-        let model_label: String = member.model_override.as_ref()
+        let model_label: String = member
+            .model_override
+            .as_ref()
             .map(|mr| {
                 let full = format!("{}/{}", mr.provider_id, mr.model_id);
                 full.chars().take(17).collect()
             })
             .unwrap_or_else(|| "(inherited)".to_string());
-        let model_color = if member.model_override.is_some() { Color::Magenta } else { Color::DarkGray };
+        let model_color = if member.model_override.is_some() {
+            Color::Magenta
+        } else {
+            Color::DarkGray
+        };
         spans.push(Span::styled(
             format!("{:<18} ", model_label),
             Style::default().fg(model_color),
@@ -230,26 +289,58 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
             Span::styled(
                 format!("{:>7} ", claimed),
-                Style::default().fg(if claimed > 0 { Color::Yellow } else { Color::DarkGray }),
+                Style::default().fg(if claimed > 0 {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
                 format!("{:>6} ", done),
-                Style::default().fg(if done > 0 { Color::Green } else { Color::DarkGray }),
+                Style::default().fg(if done > 0 {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
-                format!("{:>5} ", if sent > 0 { sent.to_string() } else { "0".to_string() }),
-                Style::default().fg(if sent > 0 { Color::Cyan } else { Color::DarkGray }),
+                format!(
+                    "{:>5} ",
+                    if sent > 0 {
+                        sent.to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                ),
+                Style::default().fg(if sent > 0 {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                }),
             ),
             Span::styled(
-                format!("{:>5} ", if recv > 0 { recv.to_string() } else { "0".to_string() }),
-                Style::default().fg(if recv > 0 { Color::Cyan } else { Color::DarkGray }),
+                format!(
+                    "{:>5} ",
+                    if recv > 0 {
+                        recv.to_string()
+                    } else {
+                        "0".to_string()
+                    }
+                ),
+                Style::default().fg(if recv > 0 {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                }),
             ),
         ]);
 
         // [T] badge — clickable hint
         spans.push(Span::styled(
             " [T]",
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
         ));
 
         lines.push(Line::from(spans));
@@ -259,7 +350,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     if members.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "  (no teammates yet — use team_spawn tool or blueprint)",
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         )]));
     }
 
@@ -300,4 +393,3 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     }
 }
-

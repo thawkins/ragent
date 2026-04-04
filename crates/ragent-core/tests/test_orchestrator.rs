@@ -453,9 +453,7 @@ async fn test_inprocess_router_send_agent_not_found() {
 #[tokio::test]
 async fn test_inprocess_router_send_agent_no_mailbox() {
     let registry = AgentRegistry::new();
-    registry
-        .register("a", vec!["cap".to_string()], None)
-        .await;
+    registry.register("a", vec!["cap".to_string()], None).await;
     let router = InProcessRouter::new(registry);
 
     let res = router

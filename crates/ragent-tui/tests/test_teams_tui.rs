@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use ratatui::{Terminal, backend::TestBackend};
 use ragent_core::{
     agent,
     event::{Event, EventBus},
@@ -28,6 +27,7 @@ use ragent_core::{
 };
 use ragent_tui::App;
 use ragent_tui::app::{LogEntry, LogLevel};
+use ratatui::{Terminal, backend::TestBackend};
 
 static CWD_LOCK: Mutex<()> = Mutex::new(());
 
@@ -148,7 +148,6 @@ fn test_team_create_no_name_shows_usage() {
     );
 }
 
-
 // ── /team show ───────────────────────────────────────────────────────────────
 
 #[test]
@@ -170,9 +169,18 @@ fn test_team_show_no_name_lists_all_registered_teams() {
 
     assert_eq!(app.status, "team: show all");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Registered teams"), "should include heading: {text}");
-    assert!(text.contains("show-all-a"), "should list first team: {text}");
-    assert!(text.contains("show-all-b"), "should list second team: {text}");
+    assert!(
+        text.contains("Registered teams"),
+        "should include heading: {text}"
+    );
+    assert!(
+        text.contains("show-all-a"),
+        "should list first team: {text}"
+    );
+    assert!(
+        text.contains("show-all-b"),
+        "should list second team: {text}"
+    );
     assert!(text.contains("lead-a"), "should include lead info: {text}");
     assert!(text.contains("lead-b"), "should include lead info: {text}");
 }
@@ -193,7 +201,10 @@ fn test_team_show_no_name_empty_registry_message() {
 
     assert_eq!(app.status, "team: show all (0)");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("No registered teams"), "should show empty message: {text}");
+    assert!(
+        text.contains("No registered teams"),
+        "should show empty message: {text}"
+    );
 }
 
 #[test]
@@ -204,8 +215,8 @@ fn test_team_show_loads_named_team_details() {
     std::env::set_current_dir(tmp.path()).unwrap();
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
-    let mut store = TeamStore::create("show-team", "lead-session", tmp.path(), true)
-        .expect("create show team");
+    let mut store =
+        TeamStore::create("show-team", "lead-session", tmp.path(), true).expect("create show team");
     let mut member = TeamMember::new("writer", "tm-001", "general");
     member.current_task_id = Some("task-007".to_string());
     store.add_member(member).expect("add member");
@@ -218,7 +229,10 @@ fn test_team_show_loads_named_team_details() {
 
     assert_eq!(app.status, "team: show show-team");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Team: show-team"), "should show team name: {text}");
+    assert!(
+        text.contains("Team: show-team"),
+        "should show team name: {text}"
+    );
     assert!(
         text.contains("lead-session"),
         "should show lead session: {text}"
@@ -247,7 +261,10 @@ fn test_teams_alias_show_loads_named_team_details() {
 
     assert_eq!(app.status, "team: show alias-team");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Team: alias-team"), "alias should resolve: {text}");
+    assert!(
+        text.contains("Team: alias-team"),
+        "alias should resolve: {text}"
+    );
 }
 
 #[test]
@@ -268,7 +285,10 @@ fn test_teams_alias_show_no_name_lists_all_registered_teams() {
 
     assert_eq!(app.status, "team: show all");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("alias-all-a"), "alias should show all teams: {text}");
+    assert!(
+        text.contains("alias-all-a"),
+        "alias should show all teams: {text}"
+    );
 }
 
 // ── /team help ───────────────────────────────────────────────────────────────
@@ -283,13 +303,24 @@ fn test_team_help_shows_command_reference() {
     assert_eq!(app.status, "team: help");
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("/team status"), "should list status: {text}");
-    assert!(text.contains("/team show [name]"), "should list show: {text}");
     assert!(
-        text.contains("/team message") && text.contains("<teammate-name>") && text.contains("<text>"),
+        text.contains("/team show [name]"),
+        "should list show: {text}"
+    );
+    assert!(
+        text.contains("/team message")
+            && text.contains("<teammate-name>")
+            && text.contains("<text>"),
         "should list message args even with wrapped table cells: {text}"
     );
-    assert!(text.contains("Alias:"), "should include alias section: {text}");
-    assert!(text.contains("/teams ..."), "should mention teams alias: {text}");
+    assert!(
+        text.contains("Alias:"),
+        "should include alias section: {text}"
+    );
+    assert!(
+        text.contains("/teams ..."),
+        "should mention teams alias: {text}"
+    );
 }
 
 #[test]
@@ -301,7 +332,10 @@ fn test_teams_alias_help_shows_command_reference() {
 
     assert_eq!(app.status, "team: help");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("/team cleanup"), "alias help should route to team help: {text}");
+    assert!(
+        text.contains("/team cleanup"),
+        "alias help should route to team help: {text}"
+    );
 }
 
 #[test]
@@ -314,7 +348,10 @@ fn test_team_help_creates_session_when_missing() {
     assert!(app.session_id.is_some(), "help should create a session");
     assert_eq!(app.status, "team: help");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("/team status"), "help text should render: {text}");
+    assert!(
+        text.contains("/team status"),
+        "help text should render: {text}"
+    );
 }
 
 // ── /team close ──────────────────────────────────────────────────────────────
@@ -334,7 +371,8 @@ fn test_team_close_clears_active_team_state() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
-    app.team_members.push(TeamMember::new("bob", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
     app.execute_slash_command("/team close");
@@ -370,8 +408,8 @@ fn test_team_delete_removes_existing_team() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let team_name = unique_team_name("delete-me");
-    let _store = TeamStore::create(&team_name, "lead-session", tmp.path(), true)
-        .expect("create team");
+    let _store =
+        TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
     assert!(team_path.exists(), "team dir should exist before delete");
 
@@ -399,14 +437,15 @@ fn test_team_delete_active_team_clears_session_state() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let team_name = unique_team_name("active-delete");
-    let _store = TeamStore::create(&team_name, "lead-session", tmp.path(), true)
-        .expect("create team");
+    let _store =
+        TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new(&team_name, "s1"));
-    app.team_members.push(TeamMember::new("bob", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
     app.execute_slash_command(&format!("/team delete {team_name}"));
@@ -434,8 +473,8 @@ fn test_team_delete_active_team_blocked_when_teammates_working() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let team_name = unique_team_name("busy-delete");
-    let _store = TeamStore::create(&team_name, "lead-session", tmp.path(), true)
-        .expect("create team");
+    let _store =
+        TeamStore::create(&team_name, "lead-session", tmp.path(), true).expect("create team");
     let team_path = tmp.path().join(".ragent/teams").join(&team_name);
 
     let mut app = make_app();
@@ -494,7 +533,9 @@ fn test_team_create_sets_active_team() {
     );
     // Log entry should mention team creation.
     assert!(
-        app.log_entries.iter().any(|e| e.message.contains("my-test-team")),
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("my-test-team")),
         "log should mention team name"
     );
 }
@@ -510,7 +551,10 @@ fn test_team_tasks_no_active_team() {
 
     assert_eq!(app.status, "no active team");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("No active team"), "should indicate no team: {text}");
+    assert!(
+        text.contains("No active team"),
+        "should indicate no team: {text}"
+    );
 }
 
 #[test]
@@ -544,11 +588,23 @@ fn test_team_tasks_renders_table_with_status() {
 
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("ID"), "should include table header: {text}");
-    assert!(text.contains("Status"), "should include status column: {text}");
+    assert!(
+        text.contains("Status"),
+        "should include status column: {text}"
+    );
     assert!(text.contains("task-001"), "should include task id: {text}");
-    assert!(text.contains("pending"), "should show pending status: {text}");
-    assert!(text.contains("task-002"), "should include second task: {text}");
-    assert!(text.contains("in-progress"), "should show in-progress status: {text}");
+    assert!(
+        text.contains("pending"),
+        "should show pending status: {text}"
+    );
+    assert!(
+        text.contains("task-002"),
+        "should include second task: {text}"
+    );
+    assert!(
+        text.contains("in-progress"),
+        "should show in-progress status: {text}"
+    );
     assert!(text.contains("tm-001"), "should show assignee: {text}");
 }
 
@@ -563,7 +619,10 @@ fn test_team_clear_no_active_team() {
 
     assert_eq!(app.status, "no active team");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("No active team"), "should indicate no team: {text}");
+    assert!(
+        text.contains("No active team"),
+        "should indicate no team: {text}"
+    );
 }
 
 #[test]
@@ -591,7 +650,10 @@ fn test_team_clear_removes_tasks_for_active_team() {
 
     let _ = std::env::set_current_dir(original_dir);
 
-    assert!(!tasks_path.exists(), "tasks.json should be removed after clear");
+    assert!(
+        !tasks_path.exists(),
+        "tasks.json should be removed after clear"
+    );
     assert_eq!(app.status, "team tasks cleared");
 }
 
@@ -657,14 +719,18 @@ fn test_team_cleanup_clears_state() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
     app.active_team = Some(TeamConfig::new("my-team", "s1"));
-    app.team_members.push(TeamMember::new("bob", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("bob", "tm-001", "general"));
     app.show_teams = true;
 
     // Team dir does not exist on disk — cleanup should still clear in-memory state.
     app.execute_slash_command("/team cleanup");
 
     assert!(app.active_team.is_none(), "active_team should be cleared");
-    assert!(app.team_members.is_empty(), "team_members should be cleared");
+    assert!(
+        app.team_members.is_empty(),
+        "team_members should be cleared"
+    );
     assert!(!app.show_teams, "show_teams should be disabled");
     assert_eq!(app.status, "team cleaned up");
 }
@@ -758,9 +824,7 @@ fn test_event_teammate_spawned_adds_member_and_shows_panel() {
 
     // Log should mention the spawn.
     assert!(
-        app.log_entries
-            .iter()
-            .any(|e| e.message.contains("writer")),
+        app.log_entries.iter().any(|e| e.message.contains("writer")),
         "log should mention teammate name"
     );
 }
@@ -796,7 +860,8 @@ fn test_event_teammate_spawned_hydrates_session_id_from_store() {
     std::fs::create_dir_all(tmp.path().join(".ragent/teams")).unwrap();
 
     let team_name = unique_team_name("spawn-hydrate");
-    let mut store = TeamStore::create(&team_name, "sess-lead", tmp.path(), true).expect("create team");
+    let mut store =
+        TeamStore::create(&team_name, "sess-lead", tmp.path(), true).expect("create team");
     let mut member = TeamMember::new("writer", "tm-001", "general");
     member.session_id = Some("tm-s1".to_string());
     member.status = MemberStatus::Working;
@@ -851,7 +916,10 @@ async fn test_event_tool_result_team_create_updates_active_team_and_panel() {
 
     let _ = std::env::set_current_dir(original_dir);
 
-    assert!(app.active_team.is_some(), "tool result should activate team");
+    assert!(
+        app.active_team.is_some(),
+        "tool result should activate team"
+    );
     assert!(app.show_teams, "teams panel should be visible");
 }
 
@@ -888,7 +956,8 @@ fn test_event_team_task_claimed_sets_current_task() {
     let mut app = make_app();
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
-    app.team_members.push(TeamMember::new("tm-a", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("tm-a", "tm-001", "general"));
 
     app.handle_event(Event::TeamTaskClaimed {
         session_id: sid.clone(),
@@ -935,7 +1004,8 @@ fn test_event_team_cleaned_up_resets_state() {
     let sid = "s1".to_string();
     app.session_id = Some(sid.clone());
     app.active_team = Some(TeamConfig::new("gone-team", "s1"));
-    app.team_members.push(TeamMember::new("a", "tm-001", "general"));
+    app.team_members
+        .push(TeamMember::new("a", "tm-001", "general"));
     app.show_teams = true;
 
     app.handle_event(Event::TeamCleanedUp {
@@ -989,14 +1059,29 @@ fn test_teams_panel_renders_table_with_elapsed_and_steps_columns() {
         text.push('\n');
     }
 
-    assert!(text.contains("Teams"), "should show teams popup title: {text}");
-    assert!(text.contains("Close"), "should show close button label: {text}");
-    assert!(text.contains("lead + 1 teammate"), "should show explicit teammate count: {text}");
-    assert!(text.contains("elapsed"), "should show elapsed column: {text}");
+    assert!(
+        text.contains("Teams"),
+        "should show teams popup title: {text}"
+    );
+    assert!(
+        text.contains("Close"),
+        "should show close button label: {text}"
+    );
+    assert!(
+        text.contains("lead + 1 teammate"),
+        "should show explicit teammate count: {text}"
+    );
+    assert!(
+        text.contains("elapsed"),
+        "should show elapsed column: {text}"
+    );
     assert!(text.contains("steps"), "should show steps column: {text}");
     assert!(text.contains("sent"), "should show sent column: {text}");
     assert!(text.contains("recv"), "should show recv column: {text}");
-    assert!(text.contains("reviewer"), "should include teammate row: {text}");
+    assert!(
+        text.contains("reviewer"),
+        "should include teammate row: {text}"
+    );
 }
 
 #[test]
@@ -1110,8 +1195,14 @@ fn test_buttons_render_dimmed_when_unavailable() {
         text.push('\n');
     }
 
-    assert!(text.contains("Agent"), "agents button should always be visible: {text}");
-    assert!(text.contains("Team"), "teams button should always be visible: {text}");
+    assert!(
+        text.contains("Agent"),
+        "agents button should always be visible: {text}"
+    );
+    assert!(
+        text.contains("Team"),
+        "teams button should always be visible: {text}"
+    );
 }
 
 #[test]
@@ -1207,8 +1298,14 @@ fn test_agents_popup_renders_tidy_table_columns() {
     assert!(text.contains("id"), "should include id column: {text}");
     assert!(text.contains("name"), "should include name column: {text}");
     assert!(text.contains("type"), "should include type column: {text}");
-    assert!(text.contains("elapsed"), "should include elapsed column: {text}");
-    assert!(text.contains("steps"), "should include steps column: {text}");
+    assert!(
+        text.contains("elapsed"),
+        "should include elapsed column: {text}"
+    );
+    assert!(
+        text.contains("steps"),
+        "should include steps column: {text}"
+    );
 }
 
 // ── Event handling — TeammateMessage ─────────────────────────────────────────

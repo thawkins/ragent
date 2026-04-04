@@ -483,8 +483,7 @@ impl LlmClient for CopilotClient {
             tracing::error!(status = %status, body = %error_body, "copilot chat error");
             // Extract a clean message from the JSON error response if possible.
             // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
-            let detail =
-                parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
+            let detail = parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
             bail!("HTTP {}: {}", status.as_u16(), detail);
         }
 
@@ -938,7 +937,9 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 
     // Check the cache first
     {
-        let cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = SESSION_TOKEN_CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(cached) = cache.as_ref() {
             let now = chrono::Utc::now().timestamp();
             if cached.source_hash == source_hash
@@ -987,7 +988,9 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
 
     // Cache the new session token (including discovered API base)
     {
-        let mut cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = SESSION_TOKEN_CACHE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         *cache = Some(CachedSessionToken {
             token: body.token.clone(),
             expires_at: body.expires_at,
@@ -1216,10 +1219,7 @@ impl CopilotModelEntry {
                 || e.contains("chat.completions")
         };
 
-        if let Some(endpoints) = self
-            .supported_endpoints
-            .as_ref()
-            .or(self.api.as_ref())
+        if let Some(endpoints) = self.supported_endpoints.as_ref().or(self.api.as_ref())
             && !endpoints.is_empty()
         {
             return endpoints.iter().any(|e| endpoint_matches(e));
@@ -1388,7 +1388,9 @@ fn plan_label_from_api_base(api_base: &str) -> String {
 /// }
 /// ```
 pub fn cached_copilot_plan() -> Option<String> {
-    let cache = SESSION_TOKEN_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = SESSION_TOKEN_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let cached = cache.as_ref()?;
     let api_base = cached.api_base.as_deref()?;
     Some(plan_label_from_api_base(api_base))

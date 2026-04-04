@@ -71,17 +71,15 @@ where
 
     updater(&mut json)?;
 
-    let out = serde_json::to_string_pretty(&json)
-        .map_err(|e| format!("serialise config: {e}"))?;
+    let out = serde_json::to_string_pretty(&json).map_err(|e| format!("serialise config: {e}"))?;
 
     // Write to a unique temp file in the same directory, then rename.
     let parent = config_path
         .parent()
         .ok_or_else(|| "config path has no parent directory".to_string())?;
-    let tmp = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|e| format!("create temp file: {e}"))?;
-    std::fs::write(tmp.path(), &out)
-        .map_err(|e| format!("write temp file: {e}"))?;
+    let tmp =
+        tempfile::NamedTempFile::new_in(parent).map_err(|e| format!("create temp file: {e}"))?;
+    std::fs::write(tmp.path(), &out).map_err(|e| format!("write temp file: {e}"))?;
     tmp.persist(config_path)
         .map_err(|e| format!("rename temp → {}: {e}", config_path.display()))?;
 
@@ -158,9 +156,7 @@ const MAX_CLIPBOARD_IMAGE_DIM: u32 = 16_384;
 /// - The image exceeds the maximum allowed size or dimensions
 /// - The image dimensions don't match the pixel buffer size
 /// - The temporary file cannot be created or written
-pub fn save_clipboard_image_to_temp(
-    img_data: &ImageData<'_>,
-) -> Result<std::path::PathBuf> {
+pub fn save_clipboard_image_to_temp(img_data: &ImageData<'_>) -> Result<std::path::PathBuf> {
     let buf_len = img_data.bytes.len();
     if buf_len > MAX_CLIPBOARD_IMAGE_BYTES {
         anyhow::bail!(
@@ -228,6 +224,32 @@ pub struct LogEntry {
     pub agent_id: Option<String>,
 }
 
+/// A single completed LLM request used for `/llmstats` aggregation.
+#[derive(Debug, Clone)]
+pub struct LlmRequestStat {
+    /// Provider/model identifier captured when the response completed.
+    pub model_ref: String,
+    /// Round-trip time for the request in milliseconds.
+    pub elapsed_ms: u64,
+    /// Prompt/input tokens reported by the provider.
+    pub input_tokens: u64,
+    /// Output/completion tokens reported by the provider.
+    pub output_tokens: u64,
+}
+
+/// Aggregated LLM performance metrics for a single model in the current session.
+#[derive(Debug, Clone, Copy)]
+pub struct LlmStatsSummary {
+    /// Number of completed request samples.
+    pub samples: usize,
+    /// Average round-trip latency in milliseconds.
+    pub avg_elapsed_ms: f64,
+    /// Average prompt/input throughput in tokens per second.
+    pub avg_prompt_tps: f64,
+    /// Average output throughput in tokens per second.
+    pub avg_output_tps: f64,
+}
+
 /// Which screen the TUI is currently showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenMode {
@@ -243,6 +265,7 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("openai", "OpenAI (GPT)"),
     ("generic_openai", "Generic OpenAI API"),
     ("copilot", "GitHub Copilot"),
+    ("ollama_cloud", "Ollama Cloud"),
     ("ollama", "Ollama (Local)"),
 ];
 
@@ -370,8 +393,16 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Cancel a background task (/cancel <task_id_prefix>)",
     },
     SlashCommandDef {
+        trigger: "context",
+        description: "Manage context cache: /context refresh",
+    },
+    SlashCommandDef {
         trigger: "compact",
         description: "Summarise and compact the conversation history",
+    },
+    SlashCommandDef {
+        trigger: "cost",
+        description: "Show session token usage and estimated cost",
     },
     SlashCommandDef {
         trigger: "help",
@@ -388,6 +419,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "log",
         description: "Toggle the log panel on/off",
+    },
+    SlashCommandDef {
+        trigger: "llmstats",
+        description: "Show average LLM response time and token throughput",
     },
     SlashCommandDef {
         trigger: "model",
@@ -464,6 +499,30 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "yolo",
         description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
+    },
+    SlashCommandDef {
+        trigger: "autopilot",
+        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
+    },
+    SlashCommandDef {
+        trigger: "plan",
+        description: "Delegate planning to the plan agent: /plan <task description>",
+    },
+    SlashCommandDef {
+        trigger: "mode",
+        description: "Set agent role mode: /mode architect|coder|reviewer|debugger|tester|off",
+    },
+    SlashCommandDef {
+        trigger: "memory",
+        description: "View or clear agent memory: /memory show | /memory clear [project|user]",
+    },
+    SlashCommandDef {
+        trigger: "github",
+        description: "GitHub integration: /github login | logout | status",
+    },
+    SlashCommandDef {
+        trigger: "init",
+        description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
 ];
 
@@ -717,6 +776,8 @@ pub struct App {
     pub permission_pending: Option<PermissionRequest>,
     /// Cumulative (input, output) token counts.
     pub token_usage: (u64, u64),
+    /// Completed LLM request samples used to compute `/llmstats`.
+    pub llm_request_stats: Vec<LlmRequestStat>,
     /// Input token count from the most recent LLM request (used for context-window % display).
     pub last_input_tokens: u64,
     /// Latest quota usage percentage from provider rate-limit headers (0.0–100.0).
@@ -728,6 +789,11 @@ pub struct App {
     pub tip: &'static str,
     /// Current working directory displayed on the home screen.
     pub cwd: String,
+    /// Shell working directory as reported after each bash command.
+    ///
+    /// Updated by `ShellCwdChanged` events. `None` until the first bash
+    /// command is executed in this session.
+    pub shell_cwd: Option<String>,
     /// Git branch name if the cwd is inside a git repository.
     pub git_branch: Option<String>,
     /// Provider setup dialog state, if the dialog is open.
@@ -874,55 +940,169 @@ pub struct App {
     pub context_menu: Option<ContextMenuState>,
     /// Image files staged to be sent with the next message (populated by Alt+V).
     pub pending_attachments: Vec<std::path::PathBuf>,
-                /// Path to the persistent input history file.
-                pub history_file_path: Option<std::path::PathBuf>,
-                /// Active history picker dialog, if any.
-                pub history_picker: Option<HistoryPickerState>,
-                /// Session ID of the currently selected agent in the agents panel.
-                /// When set, messages and logs are filtered to show only from this session.
-                /// When `None`, shows primary session messages/logs.
-                pub selected_agent_session_id: Option<String>,
-                /// Index of the selected agent in the agents panel (for keyboard/mouse navigation).
-                /// 0 = primary agent, 1+ = sub-agents in order.
-                /// When `None`, no agent is selected (or selection is disabled).
-                pub selected_agent_index: Option<usize>,
-                /// Custom agent definitions loaded from disk at startup.
-                pub custom_agent_defs: Vec<CustomAgentDef>,
-                /// Diagnostics from custom agent loading (parse errors, validation failures, collisions).
-                pub custom_agent_diagnostics: Vec<String>,
-                /// The currently active team config, if the lead is managing a team.
-                pub active_team: Option<TeamConfig>,
-                /// Current members of the active team (updated from events).
-                pub team_members: Vec<TeamMember>,
-                /// Per-teammate message counters: `agent_id -> (sent, received)`.
-                pub team_message_counts: HashMap<String, (u32, u32)>,
-                /// Whether the Teams panel is visible in the sidebar.
-                pub show_teams: bool,
-                /// Scroll offset for the Teams panel.
-                pub teams_scroll_offset: u16,
-                 /// Max scroll for the Teams panel.
-                 pub teams_max_scroll: u16,
-                 /// Currently focused teammate (agent_id). When set, the status
-                 /// bar shows a focus indicator and the input box routes messages
-                 /// to this teammate's mailbox instead of the lead session.
-                 pub focused_teammate: Option<String>,
-                 /// Active swarm state (if a /swarm is running).
-                 pub swarm_state: Option<ragent_core::team::SwarmState>,
-                 /// Pending result from an async `/swarm` LLM decomposition call.
-                 pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-                 /// Active output overlay state.
-                 pub output_view: Option<OutputViewState>,
-                 /// Pending result from an async `/opt` LLM call.
-                 pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
-                 /// Whether input history has been modified since last save.
-                 pub history_dirty: bool,
-                 /// Deadline after which a dirty history should be flushed to disk.
-                 /// Set on the first modification; cleared after each flush.
-                 pub history_save_deadline: Option<std::time::Instant>,
-                  /// Cache for rendered markdown output, keyed by FNV-style hash of input text.
-                  /// Cleared when messages change.
-                  pub md_render_cache: HashMap<u64, String>,
-            }impl App {
+    /// Path to the persistent input history file.
+    pub history_file_path: Option<std::path::PathBuf>,
+    /// Active history picker dialog, if any.
+    pub history_picker: Option<HistoryPickerState>,
+    /// Session ID of the currently selected agent in the agents panel.
+    /// When set, messages and logs are filtered to show only from this session.
+    /// When `None`, shows primary session messages/logs.
+    pub selected_agent_session_id: Option<String>,
+    /// Index of the selected agent in the agents panel (for keyboard/mouse navigation).
+    /// 0 = primary agent, 1+ = sub-agents in order.
+    /// When `None`, no agent is selected (or selection is disabled).
+    pub selected_agent_index: Option<usize>,
+    /// Custom agent definitions loaded from disk at startup.
+    pub custom_agent_defs: Vec<CustomAgentDef>,
+    /// Diagnostics from custom agent loading (parse errors, validation failures, collisions).
+    pub custom_agent_diagnostics: Vec<String>,
+    /// The currently active team config, if the lead is managing a team.
+    pub active_team: Option<TeamConfig>,
+    /// Current members of the active team (updated from events).
+    pub team_members: Vec<TeamMember>,
+    /// Per-teammate message counters: `agent_id -> (sent, received)`.
+    pub team_message_counts: HashMap<String, (u32, u32)>,
+    /// Whether the Teams panel is visible in the sidebar.
+    pub show_teams: bool,
+    /// Scroll offset for the Teams panel.
+    pub teams_scroll_offset: u16,
+    /// Max scroll for the Teams panel.
+    pub teams_max_scroll: u16,
+    /// Currently focused teammate (agent_id). When set, the status
+    /// bar shows a focus indicator and the input box routes messages
+    /// to this teammate's mailbox instead of the lead session.
+    pub focused_teammate: Option<String>,
+    /// Active swarm state (if a /swarm is running).
+    pub swarm_state: Option<ragent_core::team::SwarmState>,
+    /// Pending result from an async `/swarm` LLM decomposition call.
+    pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Active output overlay state.
+    pub output_view: Option<OutputViewState>,
+    /// Pending result from an async `/opt` LLM call.
+    pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Whether input history has been modified since last save.
+    pub history_dirty: bool,
+    /// Deadline after which a dirty history should be flushed to disk.
+    /// Set on the first modification; cleared after each flush.
+    pub history_save_deadline: Option<std::time::Instant>,
+    /// Cache for rendered markdown output, keyed by FNV-style hash of input text.
+    /// Cleared when messages change.
+    pub md_render_cache: HashMap<u64, String>,
+
+    // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
+    /// True when autopilot mode is active. Agent continues autonomously until
+    /// task_complete is called, limits are hit, or the user runs /autopilot off.
+    pub autopilot_enabled: bool,
+    /// Maximum number of tokens to consume before stopping autopilot.
+    pub autopilot_token_budget: Option<u64>,
+    /// Maximum wall-clock seconds to run before stopping autopilot.
+    pub autopilot_time_limit_secs: Option<u64>,
+    /// Wall-clock instant when autopilot was started (for time-limit enforcement).
+    pub autopilot_started_at: Option<std::time::Instant>,
+    /// Pending autopilot continuation: when Some, the next render tick will
+    /// auto-send this text to the agent to continue processing.
+    pub autopilot_pending_continue: Option<String>,
+
+    // ── Plan approval (M2 Task 2.2) ─────────────────────────────────────────
+    /// When Some, the plan approval overlay is shown. Holds the plan text and
+    /// the agent to restore on approval.
+    pub plan_approval_pending: Option<PlanApprovalState>,
+
+    // ── Agent role mode (M2 Task 2.3) ───────────────────────────────────────
+    /// Currently active role mode. None = normal (general-purpose) mode.
+    pub role_mode: Option<RoleMode>,
+}
+
+/// State held while waiting for the user to approve or reject a plan.
+#[derive(Debug, Clone)]
+pub struct PlanApprovalState {
+    /// The plan text produced by the plan agent.
+    pub plan_text: String,
+    /// Whether the dialog cursor is on Approve (true) or Reject (false).
+    pub cursor_approve: bool,
+}
+
+/// Specialised agent behaviour modes (M2 Task 2.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoleMode {
+    /// Focus on architecture, design, and high-level planning. Read-only posture.
+    Architect,
+    /// Focus on implementation with full tool access.
+    Coder,
+    /// Focus on code review and suggestions. Read-only posture.
+    Reviewer,
+    /// Focus on root-cause analysis and targeted fixes.
+    Debugger,
+    /// Focus on writing and running tests.
+    Tester,
+}
+
+impl RoleMode {
+    /// The display name shown in the status bar.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        match self {
+            Self::Architect => "architect",
+            Self::Coder => "coder",
+            Self::Reviewer => "reviewer",
+            Self::Debugger => "debugger",
+            Self::Tester => "tester",
+        }
+    }
+
+    /// An emoji indicator for the status bar.
+    #[must_use]
+    pub fn icon(&self) -> &str {
+        match self {
+            Self::Architect => "🏛",
+            Self::Coder => "💻",
+            Self::Reviewer => "🔍",
+            Self::Debugger => "🐛",
+            Self::Tester => "🧪",
+        }
+    }
+
+    /// Additional system-prompt text injected when this mode is active.
+    #[must_use]
+    pub fn system_prompt_addition(&self) -> &str {
+        match self {
+            Self::Architect =>
+                "You are in ARCHITECT mode. Focus exclusively on design, architecture, \
+                 and high-level planning. Produce written plans and diagrams. \
+                 Do NOT modify any files — use only read-only tools (read, list, glob, grep, bash \
+                 for read-only commands). When you have produced a plan, summarise it clearly.",
+            Self::Coder =>
+                "You are in CODER mode. Focus on implementation. Write clean, tested, idiomatic \
+                 code. Use all available tools. Follow existing conventions in the codebase.",
+            Self::Reviewer =>
+                "You are in REVIEWER mode. Review the code for correctness, security, performance, \
+                 and style. Do NOT modify files — read and report only. Provide specific, actionable \
+                 feedback with file and line references.",
+            Self::Debugger =>
+                "You are in DEBUGGER mode. Systematically investigate the reported issue. \
+                 Identify root causes with evidence. Make targeted, minimal fixes. \
+                 Add regression tests where appropriate.",
+            Self::Tester =>
+                "You are in TESTER mode. Write comprehensive tests covering edge cases, \
+                 error paths, and happy paths. Follow the existing test style and conventions. \
+                 Run tests and report results.",
+        }
+    }
+
+    /// Parse a role mode from a string (case-insensitive).
+    #[must_use]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "architect" => Some(Self::Architect),
+            "coder" => Some(Self::Coder),
+            "reviewer" => Some(Self::Reviewer),
+            "debugger" => Some(Self::Debugger),
+            "tester" => Some(Self::Tester),
+            _ => None,
+        }
+    }
+}
+impl App {
     /// Set the path for persisting input history.
     pub fn set_history_file(&mut self, path: std::path::PathBuf) {
         self.history_file_path = Some(path);
@@ -947,9 +1127,14 @@ pub struct App {
                 }
                 // Trim to 100 entries
                 if self.input_history.len() > 100 {
-                    self.input_history.drain(0..(self.input_history.len() - 100));
+                    self.input_history
+                        .drain(0..(self.input_history.len() - 100));
                 }
-                tracing::debug!("Loaded {} history entries from {:?}", self.input_history.len(), path);
+                tracing::debug!(
+                    "Loaded {} history entries from {:?}",
+                    self.input_history.len(),
+                    path
+                );
             }
         }
         Ok(())
@@ -970,7 +1155,11 @@ pub struct App {
             }
             let content = history_entries_to_string(&self.input_history);
             std::fs::write(path, content)?;
-            tracing::debug!("Saved {} history entries to {:?}", self.input_history.len(), path);
+            tracing::debug!(
+                "Saved {} history entries to {:?}",
+                self.input_history.len(),
+                path
+            );
         }
         Ok(())
     }

@@ -155,11 +155,11 @@ fn scan_dir(
 /// Returns a human-readable error string when the file cannot be read, parsed,
 /// or fails validation.
 fn load_agent_file(path: &Path, is_project_local: bool) -> Result<CustomAgentDef, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("could not read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
 
-    let record: OasfAgentRecord = serde_json::from_str(&content)
-        .map_err(|e| format!("JSON parse error: {}", e))?;
+    let record: OasfAgentRecord =
+        serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))?;
 
     record_to_agent_info(&record, path).map(|agent_info| CustomAgentDef {
         record: record.clone(),
@@ -224,8 +224,8 @@ struct ProfileFrontmatter {
 ///
 /// Returns a human-readable string when parsing or validation fails.
 fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgentDef, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("could not read file: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
 
     let (frontmatter, body) = parse_json_frontmatter(&content)
         .ok_or_else(|| "missing JSON frontmatter (expected --- delimiters)".to_string())?;
@@ -287,15 +287,22 @@ fn parse_json_frontmatter(text: &str) -> Option<(&str, &str)> {
         return None;
     }
     // Skip past the opening "---" line.
-    let after_open = trimmed.strip_prefix("---")?.trim_start_matches(|c: char| c == '-');
-    let after_open = after_open.strip_prefix('\n').or_else(|| after_open.strip_prefix("\r\n"))?;
+    let after_open = trimmed
+        .strip_prefix("---")?
+        .trim_start_matches(|c: char| c == '-');
+    let after_open = after_open
+        .strip_prefix('\n')
+        .or_else(|| after_open.strip_prefix("\r\n"))?;
     // Find the closing "---".
     let close_pos = after_open.find("\n---")?;
     let frontmatter = after_open[..close_pos].trim();
     let rest_start = close_pos + 4; // skip "\n---"
     // Skip any trailing dashes and newline on the closing delimiter.
     let rest = after_open[rest_start..].trim_start_matches('-');
-    let body = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n")).unwrap_or(rest);
+    let body = rest
+        .strip_prefix('\n')
+        .or_else(|| rest.strip_prefix("\r\n"))
+        .unwrap_or(rest);
     Some((frontmatter, body))
 }
 
@@ -310,9 +317,7 @@ pub fn record_to_agent_info(
 ) -> Result<AgentInfo, String> {
     // ── Validate core fields ───────────────────────────────────────────────
     if record.name.is_empty() || record.name.contains(' ') {
-        return Err(
-            "agent name must be non-empty and contain no spaces".to_string(),
-        );
+        return Err("agent name must be non-empty and contain no spaces".to_string());
     }
 
     if record.description.trim().is_empty() {
@@ -324,14 +329,10 @@ pub fn record_to_agent_info(
         .modules
         .iter()
         .find(|m| m.module_type == RAGENT_MODULE_TYPE)
-        .ok_or_else(|| {
-            format!("missing required module type '{}'", RAGENT_MODULE_TYPE)
-        })?;
+        .ok_or_else(|| format!("missing required module type '{}'", RAGENT_MODULE_TYPE))?;
 
-    let payload: RagentAgentPayload =
-        serde_json::from_value(ragent_module.payload.clone()).map_err(|e| {
-            format!("invalid '{}' payload: {}", RAGENT_MODULE_TYPE, e)
-        })?;
+    let payload: RagentAgentPayload = serde_json::from_value(ragent_module.payload.clone())
+        .map_err(|e| format!("invalid '{}' payload: {}", RAGENT_MODULE_TYPE, e))?;
 
     // ── Validate payload fields ────────────────────────────────────────────
     if payload.system_prompt.trim().is_empty() {
@@ -353,25 +354,19 @@ pub fn record_to_agent_info(
             return Err(format!(
                 "unknown mode '{}'; expected primary, subagent, or all",
                 other
-            ))
+            ));
         }
     };
 
     if let Some(temp) = payload.temperature {
         if !(0.0..=2.0).contains(&temp) {
-            return Err(format!(
-                "temperature {} out of range [0.0, 2.0]",
-                temp
-            ));
+            return Err(format!("temperature {} out of range [0.0, 2.0]", temp));
         }
     }
 
     if let Some(top_p) = payload.top_p {
         if !(0.0..=1.0).contains(&top_p) {
-            return Err(format!(
-                "top_p {} out of range [0.0, 1.0]",
-                top_p
-            ));
+            return Err(format!("top_p {} out of range [0.0, 1.0]", top_p));
         }
     }
 
@@ -387,7 +382,7 @@ pub fn record_to_agent_info(
                 return Err(format!(
                     "model '{}' must be in 'provider:model' format",
                     model_str
-                ))
+                ));
             }
         }
     } else {
@@ -413,7 +408,7 @@ pub fn record_to_agent_info(
                         return Err(format!(
                             "unknown action '{}'; expected allow, deny, or ask",
                             other
-                        ))
+                        ));
                     }
                 };
                 Ok(PermissionRule {

@@ -23,17 +23,12 @@ use tower::ServiceExt;
 fn test_state(token: &str) -> AppState {
     let storage = Arc::new(Storage::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new(16));
-    let session_manager = Arc::new(SessionManager::new(
-        storage.clone(),
-        event_bus.clone(),
-    ));
+    let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     let processor = Arc::new(SessionProcessor {
         session_manager,
         provider_registry: Arc::new(ProviderRegistry::new()),
         tool_registry: Arc::new(ToolRegistry::new()),
-        permission_checker: Arc::new(tokio::sync::RwLock::new(
-            PermissionChecker::new(vec![]),
-        )),
+        permission_checker: Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(vec![]))),
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
@@ -281,7 +276,9 @@ async fn test_create_session_invalid_path() {
         .uri("/sessions")
         .header("Authorization", "Bearer tok")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"directory":"/nonexistent/path/that/does/not/exist"}"#))
+        .body(Body::from(
+            r#"{"directory":"/nonexistent/path/that/does/not/exist"}"#,
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);

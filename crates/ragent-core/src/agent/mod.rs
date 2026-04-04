@@ -14,6 +14,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::permission::{Permission, PermissionAction, PermissionRule, PermissionRuleset};
 
@@ -21,6 +23,312 @@ pub mod custom;
 pub mod oasf;
 
 pub use custom::CustomAgentDef;
+
+#[derive(Debug, Clone, Default)]
+struct PromptContextCache {
+    git: String,
+    readme: String,
+    agents_md: String,
+    file_tree: String,
+    cached_at: Option<std::time::Instant>,
+}
+
+static PROMPT_CONTEXT_CACHE: OnceLock<Mutex<HashMap<String, PromptContextCache>>> = OnceLock::new();
+static NO_GIT_CONTEXT: AtomicBool = AtomicBool::new(false);
+static NO_README_CONTEXT: AtomicBool = AtomicBool::new(false);
+
+fn prompt_context_cache() -> &'static Mutex<HashMap<String, PromptContextCache>> {
+    PROMPT_CONTEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn prompt_context_cache_key(working_dir: &Path) -> String {
+    let cwd = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
+    format!(
+        "{}|git:{}|readme:{}",
+        cwd.display(),
+        NO_GIT_CONTEXT.load(Ordering::Relaxed),
+        NO_README_CONTEXT.load(Ordering::Relaxed)
+    )
+}
+
+/// Clear cached prompt-context snippets.
+pub fn clear_prompt_context_cache() {
+    if let Ok(mut cache) = prompt_context_cache().lock() {
+        cache.clear();
+    }
+}
+
+/// Disable automatic git prompt context injection.
+pub fn disable_git_prompt_context() {
+    NO_GIT_CONTEXT.store(true, Ordering::Relaxed);
+}
+
+/// Disable automatic README prompt context injection.
+pub fn disable_readme_prompt_context() {
+    NO_README_CONTEXT.store(true, Ordering::Relaxed);
+}
+
+fn truncate_lines(text: &str, max_lines: usize) -> String {
+    let mut lines = text.lines();
+    let mut out = Vec::new();
+    for _ in 0..max_lines {
+        if let Some(line) = lines.next() {
+            out.push(line);
+        } else {
+            return text.to_string();
+        }
+    }
+    if lines.next().is_some() {
+        out.push("... (truncated)");
+    }
+    out.join("\n")
+}
+
+async fn run_command_with_timeout(
+    working_dir: &Path,
+    program: &str,
+    args: &[&str],
+) -> Option<String> {
+    use tokio::process::Command;
+    use tokio::time::{Duration, timeout};
+
+    let output = timeout(
+        Duration::from_secs(1),
+        Command::new(program)
+            .args(args)
+            .current_dir(working_dir)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+async fn collect_git_context(working_dir: &Path) -> String {
+    if NO_GIT_CONTEXT.load(Ordering::Relaxed) {
+        return String::new();
+    }
+
+    let branch = run_command_with_timeout(working_dir, "git", &["branch", "--show-current"]);
+    let origin_head = run_command_with_timeout(
+        working_dir,
+        "git",
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+    );
+    let status = run_command_with_timeout(working_dir, "git", &["status", "--short"]);
+    let recent = run_command_with_timeout(working_dir, "git", &["log", "--oneline", "-n5"]);
+    let authors = run_command_with_timeout(
+        working_dir,
+        "git",
+        &["shortlog", "-sn", "--all", "--no-merges"],
+    );
+
+    let (branch, origin_head, status, recent, authors) =
+        tokio::join!(branch, origin_head, status, recent, authors);
+
+    let mut output = String::new();
+    if let Some(branch) = branch {
+        output.push_str(&format!("**Branch:** {}\n", branch));
+    }
+    if let Some(origin_head) = origin_head {
+        let cleaned = origin_head
+            .trim()
+            .strip_prefix("refs/remotes/origin/")
+            .unwrap_or(origin_head.trim());
+        output.push_str(&format!("**Origin HEAD:** {}\n", cleaned));
+    }
+    if let Some(status) = status {
+        output.push_str("**Status:**\n```\n");
+        output.push_str(&status);
+        output.push_str("\n```\n");
+    }
+    if let Some(recent) = recent {
+        output.push_str("**Recent Commits:**\n```\n");
+        output.push_str(&recent);
+        output.push_str("\n```\n");
+    }
+    if let Some(authors) = authors {
+        output.push_str("**Top Authors:**\n```\n");
+        output.push_str(&authors);
+        output.push_str("\n```\n");
+    }
+
+    truncate_lines(&output, 200)
+}
+
+fn find_readme_path(working_dir: &Path) -> Option<std::path::PathBuf> {
+    let wanted = ["readme.md", "readme.txt", "readme.rst"];
+    let mut current = Some(working_dir);
+    for _ in 0..=3 {
+        let dir = current?;
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if wanted
+                    .iter()
+                    .any(|needle| name.eq_ignore_ascii_case(needle))
+                {
+                    return Some(path);
+                }
+            }
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+async fn collect_readme_context(working_dir: &Path) -> String {
+    if NO_README_CONTEXT.load(Ordering::Relaxed) {
+        return String::new();
+    }
+
+    let Some(path) = find_readme_path(working_dir) else {
+        return String::new();
+    };
+
+    let path_for_read = path.clone();
+    let content = tokio::task::spawn_blocking(move || {
+        std::fs::read_to_string(&path_for_read).ok().map(|content| {
+            let mut lines = content.lines();
+            let mut preview = Vec::new();
+            for _ in 0..500 {
+                if let Some(line) = lines.next() {
+                    preview.push(line);
+                } else {
+                    break;
+                }
+            }
+            let truncated = lines.next().is_some();
+            let mut output = format!(
+                "**File:** {}\n```\n{}\n```",
+                path.display(),
+                preview.join("\n")
+            );
+            if truncated {
+                output.push_str("\n*(truncated to first 500 lines)*");
+            }
+            output
+        })
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+
+    content
+}
+
+/// Collect git, README, and agents-md context snippets for prompt injection.
+pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, String, String) {
+    const TTL: std::time::Duration = std::time::Duration::from_secs(30);
+    let key = prompt_context_cache_key(working_dir);
+    if let Ok(cache) = prompt_context_cache().lock()
+        && let Some(entry) = cache.get(&key)
+        && entry.cached_at.map(|t| t.elapsed() < TTL).unwrap_or(false)
+    {
+        return (
+            entry.git.clone(),
+            entry.readme.clone(),
+            entry.agents_md.clone(),
+            entry.file_tree.clone(),
+        );
+    }
+
+    let git = collect_git_context(working_dir);
+    let readme = collect_readme_context(working_dir);
+    let (git, readme) = tokio::join!(git, readme);
+
+    let wd = working_dir.to_path_buf();
+    let agents_md = tokio::task::spawn_blocking(move || collect_agents_md_content(&wd))
+        .await
+        .unwrap_or_default();
+
+    let wd2 = working_dir.to_path_buf();
+    let file_tree = tokio::task::spawn_blocking(move || build_file_tree(&wd2, 2))
+        .await
+        .unwrap_or_default();
+
+    if let Ok(mut cache) = prompt_context_cache().lock() {
+        cache.insert(
+            key,
+            PromptContextCache {
+                git: git.clone(),
+                readme: readme.clone(),
+                agents_md: agents_md.clone(),
+                file_tree: file_tree.clone(),
+                cached_at: Some(std::time::Instant::now()),
+            },
+        );
+    }
+
+    (git, readme, agents_md, file_tree)
+}
+
+fn build_file_tree(dir: &Path, max_depth: usize) -> String {
+    let mut lines = Vec::new();
+    build_tree_recursive(dir, "", 0, max_depth, &mut lines);
+    lines.join("\n")
+}
+
+fn build_tree_recursive(
+    dir: &Path,
+    prefix: &str,
+    depth: usize,
+    max_depth: usize,
+    lines: &mut Vec<String>,
+) {
+    if depth >= max_depth {
+        return;
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    entries.retain(|e| {
+        let name = e.file_name();
+        let name_str = name.to_string_lossy();
+        !name_str.starts_with('.')
+            && !matches!(
+                name_str.as_ref(),
+                "node_modules" | "target" | "__pycache__" | "dist" | "build" | ".git"
+            )
+    });
+
+    let count = entries.len();
+    for (i, entry) in entries.iter().enumerate() {
+        let is_last = i == count - 1;
+        let connector = if is_last { "└── " } else { "├── " };
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let path = entry.path();
+
+        if path.is_dir() {
+            lines.push(format!("{}{}{}/", prefix, connector, name_str));
+            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
+            build_tree_recursive(&path, &new_prefix, depth + 1, max_depth, lines);
+        } else {
+            lines.push(format!("{}{}{}", prefix, connector, name_str));
+        }
+    }
+}
 
 /// Determines when an agent is available for use.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -617,24 +925,117 @@ fn read_readme(working_dir: &Path) -> String {
     std::fs::read_to_string(&readme_path).unwrap_or_default()
 }
 
+/// Discover and load all AGENTS.md-style instruction files from the project tree.
+///
+/// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
+/// `INSTRUCTIONS.md`, sorted by directory depth (root first). Returns a
+/// combined string listing the discovered file paths and their concatenated
+/// content.
+fn collect_agents_md_content(working_dir: &Path) -> String {
+    const AGENT_FILE_NAMES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".ragent.md", "INSTRUCTIONS.md"];
+
+    use ignore::WalkBuilder;
+
+    let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
+
+    let walk = WalkBuilder::new(working_dir)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .ignore(true)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build();
+
+    for entry in walk.flatten() {
+        let path = entry.path().to_path_buf();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if AGENT_FILE_NAMES.contains(&name) {
+                let depth = path
+                    .strip_prefix(working_dir)
+                    .map(|rel| rel.components().count())
+                    .unwrap_or(usize::MAX);
+                found.push((depth, path));
+            }
+        }
+    }
+
+    if found.is_empty() {
+        return String::new();
+    }
+
+    // Sort: root files first (depth=1), then deeper subdirectories
+    found.sort_by_key(|(depth, path)| (*depth, path.clone()));
+
+    let mut result = String::new();
+
+    result.push_str("### Discovered Instruction Files\n");
+    for (_, path) in &found {
+        let rel = path
+            .strip_prefix(working_dir)
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        result.push_str(&format!("- {rel}\n"));
+    }
+    result.push('\n');
+
+    for (_, path) in &found {
+        let rel = path
+            .strip_prefix(working_dir)
+            .unwrap_or(path)
+            .display()
+            .to_string();
+        if let Ok(content) = std::fs::read_to_string(path) {
+            let content = content.trim();
+            if !content.is_empty() {
+                result.push_str(&format!("### From: {rel}\n\n"));
+                result.push_str(content);
+                result.push_str("\n\n");
+            }
+        }
+    }
+
+    result
+}
+
+/// Build a system prompt for the given agent using cached context.
 pub fn build_system_prompt(
     agent: &AgentInfo,
     working_dir: &Path,
     file_tree: &str,
     skills: Option<&crate::skill::SkillRegistry>,
 ) -> String {
+    build_system_prompt_with_context(agent, working_dir, file_tree, skills, None, None, None)
+}
+
+/// Build a system prompt with explicitly supplied context snippets.
+///
+/// Passing `None` for any context field causes the function to read it
+/// on-demand from the filesystem.
+pub fn build_system_prompt_with_context(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+    git_status: Option<&str>,
+    readme: Option<&str>,
+    agents_md: Option<&str>,
+) -> String {
     let mut prompt = String::new();
 
-    // Read AGENTS.md once — used both for template substitution and appended
-    // as a section for built-in agents that don't embed the variable.
-    let agents_md_content = {
-        let agents_md_path = working_dir.join("AGENTS.md");
-        if agents_md_path.is_file() {
-            std::fs::read_to_string(&agents_md_path).unwrap_or_default()
-        } else {
-            String::new()
-        }
-    };
+    // Use provided agents_md content or collect it from the project tree.
+    let agents_md_content = agents_md
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| collect_agents_md_content(working_dir));
+    let git_status_text = git_status
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| read_git_status(working_dir));
+    let readme_text = readme
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| read_readme(working_dir));
 
     // Agent identity and role — substitute template variables used by custom agents.
     if let Some(ref agent_prompt) = agent.prompt {
@@ -655,16 +1056,12 @@ pub fn build_system_prompt(
             dt.format("%Y-%m-%d").to_string()
         };
 
-        // Prepare git status and README for injection
-        let git_status = read_git_status(working_dir);
-        let readme = read_readme(working_dir);
-
         let expanded = agent_prompt
             .replace("{{WORKING_DIR}}", &working_dir.display().to_string())
             .replace("{{FILE_TREE}}", file_tree)
             .replace("{{AGENTS_MD}}", &agents_md_content)
-            .replace("{{GIT_STATUS}}", &git_status)
-            .replace("{{README}}", &readme)
+            .replace("{{GIT_STATUS}}", &git_status_text)
+            .replace("{{README}}", &readme_text)
             .replace("{{DATE}}", &date_str);
         let _ = today; // suppress unused warning from the fallback path
 
@@ -680,7 +1077,11 @@ pub fn build_system_prompt(
     }
 
     // Working directory context (skip if already embedded via template variable)
-    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{WORKING_DIR}}")) {
+    if agent
+        .prompt
+        .as_deref()
+        .map_or(true, |p| !p.contains("{{WORKING_DIR}}"))
+    {
         prompt.push_str(&format!(
             "## Working Directory\n\
              You are operating in: {}\n\n",
@@ -689,7 +1090,12 @@ pub fn build_system_prompt(
     }
 
     // File tree context (skip if already embedded via template variable)
-    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{FILE_TREE}}")) && !file_tree.is_empty() {
+    if agent
+        .prompt
+        .as_deref()
+        .map_or(true, |p| !p.contains("{{FILE_TREE}}"))
+        && !file_tree.is_empty()
+    {
         prompt.push_str("## Project Structure\n");
         prompt.push_str("```\n");
         prompt.push_str(file_tree);
@@ -697,10 +1103,75 @@ pub fn build_system_prompt(
     }
 
     // AGENTS.md project guidelines (skip if already embedded via template variable)
-    if agent.prompt.as_deref().map_or(true, |p| !p.contains("{{AGENTS_MD}}")) && !agents_md_content.is_empty() {
+    if agent
+        .prompt
+        .as_deref()
+        .map_or(true, |p| !p.contains("{{AGENTS_MD}}"))
+        && !agents_md_content.is_empty()
+    {
         prompt.push_str("## Project Guidelines (AGENTS.md)\n");
         prompt.push_str(&agents_md_content);
         prompt.push_str("\n\n");
+    }
+
+    if agent
+        .prompt
+        .as_deref()
+        .map_or(true, |p| !p.contains("{{GIT_STATUS}}"))
+        && !git_status_text.trim().is_empty()
+    {
+        prompt.push_str("## Git Context\n");
+        prompt.push_str(&git_status_text);
+        prompt.push_str("\n\n");
+    }
+
+    if agent
+        .prompt
+        .as_deref()
+        .map_or(true, |p| !p.contains("{{README}}"))
+        && !readme_text.trim().is_empty()
+    {
+        prompt.push_str("## README\n");
+        prompt.push_str(&readme_text);
+        prompt.push_str("\n\n");
+    }
+
+    // Auto-load project and user memory files into context
+    {
+        let project_mem = working_dir
+            .join(".ragent")
+            .join("memory")
+            .join("MEMORY.md");
+        let project_analysis = working_dir
+            .join(".ragent")
+            .join("memory")
+            .join("PROJECT_ANALYSIS.md");
+        let user_mem = dirs::home_dir()
+            .map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+
+        if let Ok(content) = std::fs::read_to_string(&project_mem) {
+            if !content.trim().is_empty() {
+                prompt.push_str("## Project Memory\n");
+                prompt.push_str(&content);
+                prompt.push_str("\n\n");
+            }
+        }
+        if let Ok(content) = std::fs::read_to_string(&project_analysis) {
+            if !content.trim().is_empty() {
+                prompt.push_str("## Project Analysis\n");
+                prompt.push_str(&content);
+                prompt.push_str("\n\n");
+            }
+        }
+        if let Some(path) = user_mem {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if !content.trim().is_empty() {
+                    prompt.push_str("## User Memory\n");
+                    prompt.push_str(&content);
+                    prompt.push_str("\n\n");
+                }
+            }
+        }
     }
 
     // Available skills (per SPEC §3.19 prompt assembly order)
@@ -736,6 +1207,13 @@ pub fn build_system_prompt(
             prompt.push('\n');
         }
     }
+
+    prompt.push_str(
+        "## Reasoning Tool\n\n\
+         When useful, use the `think` tool to record short reasoning notes before \
+         making non-trivial decisions. Keep thoughts brief and focused on the next \
+         action.\n\n",
+    );
 
     // Sub-agent spawning guidance (new_task tool) — shown for primary agents only.
     // Agent list is generated dynamically from builtins + custom agents so it stays in sync.
@@ -815,14 +1293,12 @@ pub fn build_system_prompt(
         if !spawnable_custom.is_empty() {
             section.push_str("\n**Custom agents (project/user defined):**\n");
             for ca in &spawnable_custom {
-                let can_write = ca
-                    .permission
-                    .iter()
-                    .any(|r| r.permission == Permission::Edit && r.action == PermissionAction::Allow);
-                let can_bash = ca
-                    .permission
-                    .iter()
-                    .any(|r| r.permission == Permission::Bash && r.action == PermissionAction::Allow);
+                let can_write = ca.permission.iter().any(|r| {
+                    r.permission == Permission::Edit && r.action == PermissionAction::Allow
+                });
+                let can_bash = ca.permission.iter().any(|r| {
+                    r.permission == Permission::Bash && r.action == PermissionAction::Allow
+                });
                 let mut traits = vec!["custom"];
                 if !can_write {
                     traits.push("read-only");

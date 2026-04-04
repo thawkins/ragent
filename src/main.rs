@@ -108,6 +108,14 @@ struct Cli {
     /// Maximum number of agentic loop steps (default: 500)
     #[arg(long, global = true)]
     maxsteps: Option<u32>,
+
+    /// Disable automatic git context injection
+    #[arg(long, global = true)]
+    no_git_context: bool,
+
+    /// Disable automatic README context injection
+    #[arg(long, global = true)]
+    no_readme_context: bool,
 }
 
 /// Available top-level sub-commands.
@@ -189,6 +197,13 @@ fn data_dir() -> PathBuf {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if cli.no_git_context {
+        ragent_core::agent::disable_git_prompt_context();
+    }
+    if cli.no_readme_context {
+        ragent_core::agent::disable_readme_prompt_context();
+    }
 
     // Initialize tracing.
     //
@@ -332,7 +347,7 @@ async fn main() -> Result<()> {
             // Default: run TUI
             if cli.no_tui {
                 use tokio::io::AsyncBufReadExt;
-                
+
                 tracing::info!("Starting ragent interactive mode (plain)");
                 let dir = std::fs::canonicalize(".")?;
                 let session = session_manager.create_session(dir)?;
@@ -492,7 +507,46 @@ async fn main() -> Result<()> {
         }) => {
             let mut stdout = std::io::stdout().lock();
 
-            if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
+            if filter.as_deref() == Some("ollama_cloud") {
+                let api_key = storage
+                    .get_provider_auth("ollama_cloud")
+                    .ok()
+                    .flatten()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        std::env::var("OLLAMA_API_KEY")
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                    });
+                let Some(api_key) = api_key else {
+                    writeln!(
+                        stdout,
+                        "No Ollama Cloud API key found. Run `ragent auth ollama_cloud <key>` \
+                         or set OLLAMA_API_KEY."
+                    )?;
+                    return Ok(());
+                };
+
+                match ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
+                    &api_key,
+                    ollama_url.as_deref(),
+                )
+                .await
+                {
+                    Ok(models) if models.is_empty() => {
+                        writeln!(stdout, "No models found on Ollama Cloud.")?;
+                    }
+                    Ok(models) => {
+                        writeln!(stdout, "ollama_cloud models:")?;
+                        for m in &models {
+                            writeln!(stdout, "  ollama_cloud/{:<28} {}", m.id, m.name)?;
+                        }
+                    }
+                    Err(e) => {
+                        writeln!(stdout, "Could not connect to Ollama Cloud: {e}")?;
+                    }
+                }
+            } else if filter.as_deref() == Some("ollama") || ollama_url.is_some() {
                 match ragent_core::provider::ollama::list_ollama_models(ollama_url.as_deref()).await
                 {
                     Ok(models) if models.is_empty() => {
@@ -512,12 +566,10 @@ async fn main() -> Result<()> {
                         writeln!(stdout, "Is Ollama running? Start with: ollama serve")?;
                     }
                 }
-                if filter.as_deref() == Some("ollama") {
-                    // Only showing Ollama, skip other providers
-                } else {
+                if filter.as_deref() != Some("ollama") {
                     let providers = provider_registry.list();
                     for p in &providers {
-                        if p.id == "ollama" {
+                        if p.id == "ollama" || p.id == "ollama_cloud" {
                             continue;
                         }
                         for m in &p.models {

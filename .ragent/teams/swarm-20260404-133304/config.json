@@ -1,0 +1,92 @@
+{
+  "name": "swarm-20260404-133304",
+  "lead_session_id": "fb28f1b6-c582-4093-bb0d-73cf6511013c",
+  "created_at": "2026-04-04T13:33:04.292888823Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "1c54a309-777f-464a-95a4-acc5b252bbaa",
+      "agent_type": "general",
+      "status": "working",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.298592206Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze ClaudeCode Competitor\n\n**Task ID:** s1\n**Title:** Analyze ClaudeCode Competitor\n\nReview the source code in ../claude-code-sourcemap to identify key features and capabilities of the ClaudeCode product. Document your findings including unique features, functionality gaps compared to our product, and potential improvements we could implement. Save analysis to target/temp/swarmout/claudecode_analysis.md\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "4eb47aaf-dba7-42dd-b311-40d99d1dab1e",
+      "agent_type": "general",
+      "status": "failed",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.299103285Z",
+      "last_spawn_error": "LLM call failed: Ollama Cloud API error (400 Bad Request): {\"error\": \"Value looks like object, but can't find closing '}' symbol\"}",
+      "spawn_prompt": "## Swarm Task: Analyze Copilot-CLI Competitor\n\n**Task ID:** s2\n**Title:** Analyze Copilot-CLI Competitor\n\nResearch and analyze the copilot-cli product to identify its core features, strengths, and weaknesses. Compare it with our current product offering and document the competitive advantages and missing features we should consider implementing. Save analysis to target/temp/swarmout/copilotcli_analysis.md\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "7e7f58ea-5d8f-4629-a740-5c8d7e70e606",
+      "agent_type": "general",
+      "status": "failed",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.299688938Z",
+      "last_spawn_error": "LLM call failed: Ollama Cloud API error (400 Bad Request): {\"error\": \"Value looks like object, but can't find closing '}' symbol\"}",
+      "spawn_prompt": "## Swarm Task: Analyze OpenCode Competitor\n\n**Task ID:** s3\n**Title:** Analyze OpenCode Competitor\n\nReview the source code in ../opencode to understand OpenCode's architecture and feature set. Identify what makes it unique, where it falls short, and how we can leverage similar concepts or improve upon them. Save analysis to target/temp/swarmout/opencode_analysis.md\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "6b4aaf4e-4157-4d7f-b65d-8e553c5ede44",
+      "agent_type": "general",
+      "status": "failed",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.300544059Z",
+      "last_spawn_error": "LLM call failed: Ollama Cloud API error (400 Bad Request): {\"error\": \"Value looks like object, but can't find closing '}' symbol\"}",
+      "spawn_prompt": "## Swarm Task: Analyze RooCode Competitor\n\n**Task ID:** s4\n**Title:** Analyze RooCode Competitor\n\nInvestigate the roocode product to understand its positioning, target audience, and key differentiators. Document its feature set, user experience, and any gaps that represent opportunities for our product. Save analysis to target/temp/swarmout/roocode_analysis.md\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": null,
+      "agent_type": "general",
+      "status": "blocked",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.301575194Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Create SWARMOUT2 Feature Recommendations Document\n\n**Task ID:** s5\n**Title:** Create SWARMOUT2 Feature Recommendations Document\n\nSynthesize all competitor analyses from s1-s4 into a comprehensive document called SWARMOUT2.md. Include sections for: 1) Summary of each competitor's strengths/weaknesses, 2) Feature gaps in our product, 3) Prioritized list of recommended features to implement, and 4) Implementation roadmap with milestones.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": null,
+      "agent_type": "general",
+      "status": "blocked",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T13:33:04.302719911Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Generate Detailed Implementation Plan\n\n**Task ID:** s6\n**Title:** Generate Detailed Implementation Plan\n\nBased on the recommendations in SWARMOUT2.md, create a detailed implementation plan with specific milestones and tasks. Structure it as: Milestone 1 (MVP features), Milestone 2 (Enhanced functionality), Milestone 3 (Advanced features). For each milestone, list specific development tasks, estimated effort, and dependencies. Save as target/temp/swarmout/implementation_plan.md\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

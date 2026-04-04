@@ -557,7 +557,9 @@ mod tests {
     #[tokio::test]
     async fn test_optimize_returns_result() {
         let c = MockCompleter;
-        let out = optimize(OptMethod::CoStar, "Write a blog post", &c).await.unwrap();
+        let out = optimize(OptMethod::CoStar, "Write a blog post", &c)
+            .await
+            .unwrap();
         assert!(out.contains("[system:"));
         assert!(out.contains("Write a blog post"));
     }
@@ -576,7 +578,10 @@ mod tests {
         assert_eq!(OptMethod::from_str("co-star"), Some(OptMethod::CoStar));
         assert_eq!(OptMethod::from_str("CO_STAR"), Some(OptMethod::CoStar));
         assert_eq!(OptMethod::from_str("cot"), Some(OptMethod::ChainOfThought));
-        assert_eq!(OptMethod::from_str("chain-of-thought"), Some(OptMethod::ChainOfThought));
+        assert_eq!(
+            OptMethod::from_str("chain-of-thought"),
+            Some(OptMethod::ChainOfThought)
+        );
         assert_eq!(OptMethod::from_str("azure"), Some(OptMethod::Microsoft));
         assert_eq!(OptMethod::from_str("ms"), Some(OptMethod::Microsoft));
         assert_eq!(OptMethod::from_str("q*"), Some(OptMethod::QStar));
@@ -588,7 +593,11 @@ mod tests {
     fn test_help_table_contains_all_methods() {
         let table = OptMethod::help_table();
         for method in OptMethod::all() {
-            assert!(table.contains(method.name()), "help table missing {}", method.name());
+            assert!(
+                table.contains(method.name()),
+                "help table missing {}",
+                method.name()
+            );
         }
     }
 }

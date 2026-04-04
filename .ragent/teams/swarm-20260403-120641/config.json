@@ -1,0 +1,92 @@
+{
+  "name": "swarm-20260403-120641",
+  "lead_session_id": "a8e5636e-4e41-45d2-a789-bd24b9eb67e5",
+  "created_at": "2026-04-03T12:06:41.800578642Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "86b54a07-7537-441f-ae76-0affb7402279",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.815900766Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Review current product codebase\n\n**Task ID:** s1\n**Title:** Review current product codebase\n\nPerform a thorough review of the current product (the repository checked out in the agent's workspace). Create an analysis document at target/temp/swarmout/analysis-product.md. The review must include: 1) high-level architecture and major components (files, modules, services), 2) list of implemented features and commands (CLI, UI flows), 3) developer & user UX notes (ease of extension, onboarding, configuration), 4) public APIs and extension points, 5) test coverage and CI status, 6) known limitations and pain points discovered by reading the code, 7) recommended immediate improvements, and 8) any compatibility, licensing, or deployment constraints. Produce concise bullet lists and include file references (paths and line ranges) for important implementation points. Ensure the output document is written to target/temp/swarmout/analysis-product.md and create the directory if needed.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "f4837cc8-d6b7-4ee2-8d3e-597c9761c8c5",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.816345638Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: claudecode (local source)\n\n**Task ID:** s2\n**Title:** Analyze competitor: claudecode (local source)\n\nAnalyze the ClaudeCode source located at ../claude-code-sourcemap. Produce a competitor analysis document at target/temp/swarmout/analysis-claudecode.md. The document should include: 1) project overview and purpose, 2) list of user-facing features (detailed), 3) notable implementation approaches and architecture (key files/modules), 4) CLI/UX patterns and example commands or flows, 5) unique or standout features not present in our product, 6) strengths and weaknesses (security, performance, maintainability), 7) licensing and integration notes, and 8) explicit suggestions of features or design elements we could adopt or improve upon. Include exact file paths and short code excerpts where they illustrate the feature. Ensure the file is self-contained and saved to target/temp/swarmout/analysis-claudecode.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "48fdbfbb-0708-4897-bc82-315b0d7cc0a1",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.816797724Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: OpenCode (local source)\n\n**Task ID:** s3\n**Title:** Analyze competitor: OpenCode (local source)\n\nAnalyze the OpenCode source located at ../opencode. Produce a competitor analysis document at target/temp/swarmout/analysis-opencode.md. The document must include: 1) high-level description and goals, 2) detailed feature inventory and user workflows, 3) architecture and important modules (file references), 4) UX and CLI patterns with examples, 5) any unique capabilities that differentiate it from our product, 6) strengths and weak points, 7) integration and deployment considerations, and 8) concrete suggestions for features to copy or improve. Include file paths and short illustrative code snippets as evidence. Save the output to target/temp/swarmout/analysis-opencode.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "0a0afdf8-425a-4c52-a601-12119f05d514",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.817451987Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: copilot-cli (public)\n\n**Task ID:** s4\n**Title:** Analyze competitor: copilot-cli (public)\n\nPerform an analysis of copilot-cli (public product). If a local copy is not available, inspect official docs, README, and publicly available source or release notes (agent may use its environment or cached knowledge). Produce target/temp/swarmout/analysis-copilot-cli.md containing: 1) product summary, 2) detailed feature list and typical user flows, 3) interaction patterns (CLI, integrations, editors), 4) notable advantages and limitations compared to our product, 5) unique UX or automation features, 6) implementation or integration approaches (as much as can be determined), and 7) ideas for features to adopt, extend, or avoid. If remote access is unavailable, make a best-effort analysis based on documentation and label assumptions clearly. Save the file to target/temp/swarmout/analysis-copilot-cli.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "b54941c5-7498-41bc-a766-bec8f6e2d70a",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.818194246Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze competitor: roocode (public)\n\n**Task ID:** s5\n**Title:** Analyze competitor: roocode (public)\n\nAnalyze roocode (public competitor). If a local repo is not present, rely on docs, READMEs, or published descriptions accessible in your environment; otherwise inspect repository if available. Produce target/temp/swarmout/analysis-roocode.md containing: 1) product overview, 2) list of features and workflows, 3) distinguishing features versus our product, 4) strengths and weaknesses, 5) any notable architectural or UX patterns, and 6) recommendations of features or design choices to consider. Clearly separate facts from assumptions if some information is inferred. Save the output to target/temp/swarmout/analysis-roocode.md.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "a498a6fd-73f6-44ec-84db-0c3497d3c59c",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-03T12:06:41.819068801Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Synthesize SWARMOUT2.md with prioritized feature additions and roadmap\n\n**Task ID:** s6\n**Title:** Synthesize SWARMOUT2.md with prioritized feature additions and roadmap\n\nAfter all competitor and product analyses are complete, synthesize a consolidated output document at target/temp/swarmout/SWARMOUT2.md. This task depends on s1, s2, s3, s4, and s5. The synthesizer must: 1) read the five analysis files in target/temp/swarmout/, 2) produce an executive summary comparing our product to competitors, 3) enumerate recommended feature additions (grouped by theme), explicitly indicating which competitor inspired each feature and why, 4) prioritize suggested features (High/Medium/Low) with rationale, 5) generate a concrete implementation plan with Milestones (3–6 milestones) and for each milestone a set of tasks (developer tasks, acceptance criteria, rough time/effort estimates in person-days, and dependencies between tasks), 6) include quick wins vs. long-term investments, 7) suggest potential risks and mitigation, and 8) append a short mapping from competitor analysis files to each proposed feature (i.e., which analysis file supports the idea). Save the final markdown document to target/temp/swarmout/SWARMOUT2.md. Also create a machine-readable JSON plan at target/temp/swarmout/SWARMOUT2-plan.json containing the milestones and tasks with fields: id, title, description, effort_days, priority, depends_on (task ids). Ensure the directory target/temp/swarmout exists and that all output files referenced by dependencies are consumed.\n\nYou are part of a swarm team. Complete this specific task. When done, use `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

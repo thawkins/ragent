@@ -8,8 +8,8 @@
 
 use std::fs;
 
-use ragent_core::agent::custom::load_custom_agents;
 use ragent_core::agent::AgentMode;
+use ragent_core::agent::custom::load_custom_agents;
 use ragent_core::permission::PermissionAction;
 
 /// Helper: create a temp dir with a `.ragent/agents/` subdir containing the
@@ -117,7 +117,13 @@ For every review:
     assert_eq!(agent.permission[2].action, PermissionAction::Deny);
 
     // System prompt should be the markdown body
-    assert!(agent.prompt.as_deref().unwrap().starts_with("You are a security-focused"));
+    assert!(
+        agent
+            .prompt
+            .as_deref()
+            .unwrap()
+            .starts_with("You are a security-focused")
+    );
     assert!(agent.prompt.as_deref().unwrap().contains("OWASP Top 10"));
 }
 
@@ -213,10 +219,7 @@ MD system prompt.
 
 #[test]
 fn test_profile_missing_frontmatter() {
-    let dir = setup_agents_dir(&[(
-        "bad.md",
-        "# No frontmatter here\n\nJust markdown.\n",
-    )]);
+    let dir = setup_agents_dir(&[("bad.md", "# No frontmatter here\n\nJust markdown.\n")]);
 
     let (agents, diagnostics) = load_custom_agents(dir.path());
     assert_eq!(agents.len(), 0);
@@ -245,10 +248,7 @@ fn test_profile_empty_body() {
 
 #[test]
 fn test_profile_invalid_json_frontmatter() {
-    let dir = setup_agents_dir(&[(
-        "bad-json.md",
-        "---\n{ invalid json }\n---\n\nSome body.\n",
-    )]);
+    let dir = setup_agents_dir(&[("bad-json.md", "---\n{ invalid json }\n---\n\nSome body.\n")]);
 
     let (agents, diagnostics) = load_custom_agents(dir.path());
     assert_eq!(agents.len(), 0);

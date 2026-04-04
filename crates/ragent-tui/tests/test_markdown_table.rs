@@ -64,7 +64,10 @@ fn test_render_markdown_with_prefix_converts() {
     // For simple bold, output may be identical (html2text renders <strong> as **...**).
     // The key is that the pipeline runs without error and preserves content.
     assert!(output.contains("Bold"), "text content should be preserved");
-    assert!(output.contains("text"), "remaining text should be preserved");
+    assert!(
+        output.contains("text"),
+        "remaining text should be preserved"
+    );
     assert!(output.contains("From: /help"), "header should be preserved");
 }
 
@@ -78,9 +81,18 @@ fn test_render_markdown_table() {
     let input = "From: /test\n\n| Name | Value |\n|------|-------|\n| foo | 42 |\n| bar | 99 |";
     let output = app.render_markdown_to_ascii(input);
     // Should contain normalized table with pipes and dashes.
-    assert!(output.contains("foo"), "cell content should survive: {output}");
-    assert!(output.contains("42"), "cell content should survive: {output}");
-    assert!(output.contains("bar"), "cell content should survive: {output}");
+    assert!(
+        output.contains("foo"),
+        "cell content should survive: {output}"
+    );
+    assert!(
+        output.contains("42"),
+        "cell content should survive: {output}"
+    );
+    assert!(
+        output.contains("bar"),
+        "cell content should survive: {output}"
+    );
     // Should have some kind of table border structure
     assert!(
         output.contains('+') || output.contains('|') || output.contains('─'),
@@ -166,6 +178,12 @@ fn test_render_markdown_list() {
     let mut app = make_app();
     let input = "From: /test\n\n- Item one\n- Item two\n- Item three";
     let output = app.render_markdown_to_ascii(input);
-    assert!(output.contains("Item one"), "list items should survive: {output}");
-    assert!(output.contains("Item three"), "list items should survive: {output}");
+    assert!(
+        output.contains("Item one"),
+        "list items should survive: {output}"
+    );
+    assert!(
+        output.contains("Item three"),
+        "list items should survive: {output}"
+    );
 }

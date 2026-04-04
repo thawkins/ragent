@@ -90,9 +90,13 @@ fn test_model_response() {
         session_id: "s1".into(),
         text: "response text".into(),
         elapsed_ms: 500,
+        input_tokens: 42,
+        output_tokens: 24,
     });
     assert_eq!(name, "model_response");
     assert_eq!(v["elapsed_ms"], 500);
+    assert_eq!(v["input_tokens"], 42);
+    assert_eq!(v["output_tokens"], 24);
 }
 
 // ── Tool events ──────────────────────────────────────────────────────────
@@ -289,7 +293,10 @@ fn test_copilot_device_flow_complete_with_token() {
     assert_eq!(name, "copilot_device_flow_complete");
     // Token must be redacted to a boolean
     assert_eq!(v["token_present"], true);
-    assert!(v.get("token").is_none(), "raw token must not appear in SSE payload");
+    assert!(
+        v.get("token").is_none(),
+        "raw token must not appear in SSE payload"
+    );
     assert_eq!(v["api_base"], "https://api.github.com");
 }
 
@@ -324,7 +331,10 @@ fn test_lsp_status_failed() {
     });
     // Debug format includes variant + fields
     let status = v["status"].as_str().unwrap();
-    assert!(status.contains("Failed"), "expected Debug format, got: {status}");
+    assert!(
+        status.contains("Failed"),
+        "expected Debug format, got: {status}"
+    );
 }
 
 // ── Quota / usage events ─────────────────────────────────────────────────
@@ -496,7 +506,10 @@ fn test_tool_result_redacts_api_key() {
         success: true,
     });
     let content = v["content"].as_str().unwrap();
-    assert!(!content.contains(secret), "API key must be redacted: {content}");
+    assert!(
+        !content.contains(secret),
+        "API key must be redacted: {content}"
+    );
     assert!(content.contains("[REDACTED]"));
 }
 
@@ -513,7 +526,10 @@ fn test_tool_result_redacts_bearer_token() {
         success: true,
     });
     let content = v["content"].as_str().unwrap();
-    assert!(!content.contains("abcdefghijklmnopqrstuvwxyz"), "Bearer token must be redacted: {content}");
+    assert!(
+        !content.contains("abcdefghijklmnopqrstuvwxyz"),
+        "Bearer token must be redacted: {content}"
+    );
     assert!(content.contains("[REDACTED]"));
 }
 
@@ -530,7 +546,10 @@ fn test_tool_result_redacts_key_prefix() {
         success: true,
     });
     let content = v["content"].as_str().unwrap();
-    assert!(!content.contains(secret), "key- prefix must be redacted: {content}");
+    assert!(
+        !content.contains(secret),
+        "key- prefix must be redacted: {content}"
+    );
     assert!(content.contains("[REDACTED]"));
 }
 
@@ -555,9 +574,14 @@ fn test_model_response_redacts_api_key() {
         session_id: "s1".into(),
         text: format!("Your key is {secret}"),
         elapsed_ms: 100,
+        input_tokens: 12,
+        output_tokens: 34,
     });
     let text = v["text"].as_str().unwrap();
-    assert!(!text.contains(secret), "API key must be redacted in model response: {text}");
+    assert!(
+        !text.contains(secret),
+        "API key must be redacted in model response: {text}"
+    );
     assert!(text.contains("[REDACTED]"));
 }
 
@@ -567,6 +591,8 @@ fn test_model_response_no_secrets_passes_through() {
         session_id: "s1".into(),
         text: "Normal response text".into(),
         elapsed_ms: 50,
+        input_tokens: 4,
+        output_tokens: 6,
     });
     assert_eq!(v["text"], "Normal response text");
 }

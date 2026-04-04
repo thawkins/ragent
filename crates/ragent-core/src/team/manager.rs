@@ -29,10 +29,12 @@ use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
 use crate::config::Config;
 use crate::event::{Event, EventBus};
 use crate::session::processor::SessionProcessor;
-use crate::team::config::{MemberStatus, PlanStatus};
-use crate::team::mailbox::{Mailbox, MailboxMessage, MessageType, register_notifier, deregister_notifier};
-use crate::team::store::TeamStore;
 use crate::team::TeamMember;
+use crate::team::config::{MemberStatus, PlanStatus};
+use crate::team::mailbox::{
+    Mailbox, MailboxMessage, MessageType, deregister_notifier, register_notifier,
+};
+use crate::team::store::TeamStore;
 use crate::tool::TeamManagerInterface;
 
 /// Check if an error message indicates a context-window / token-count overflow.
@@ -63,7 +65,11 @@ fn is_permanent_api_error(error_msg: &str) -> bool {
     }
     // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
     if let Some(rest) = error_msg.strip_prefix("HTTP ") {
-        if let Some(code_str) = rest.split(':').next().or_else(|| rest.split_whitespace().next()) {
+        if let Some(code_str) = rest
+            .split(':')
+            .next()
+            .or_else(|| rest.split_whitespace().next())
+        {
             if let Ok(code) = code_str.trim().parse::<u16>() {
                 return (400..500).contains(&code) && code != 429 && code != 408;
             }
@@ -83,21 +89,23 @@ async fn compact_teammate_session(
     session_id: &str,
     agent: &AgentInfo,
 ) -> bool {
-    tracing::info!(session_id, "Compacting teammate session due to token overflow");
+    tracing::info!(
+        session_id,
+        "Compacting teammate session due to token overflow"
+    );
 
     // Use the compaction agent with the same provider/model as the teammate so
     // it works regardless of which provider is active (Copilot, OpenAI, Ollama …).
-    let mut compact_agent =
-        crate::agent::resolve_agent("compaction", &Default::default()).unwrap_or_else(|_| agent.clone());
+    let mut compact_agent = crate::agent::resolve_agent("compaction", &Default::default())
+        .unwrap_or_else(|_| agent.clone());
     if let Some(model_ref) = agent.model.clone() {
         compact_agent.model = Some(model_ref);
     }
 
-    let summary_prompt =
-        "Summarise the conversation so far into a concise representation that \
+    let summary_prompt = "Summarise the conversation so far into a concise representation that \
          preserves all important context, decisions, code changes, file paths, \
          and outstanding tasks. Output only the summary — no preamble."
-            .to_string();
+        .to_string();
 
     let cancel = Arc::new(AtomicBool::new(false));
     let compact_result = proc
@@ -110,7 +118,10 @@ async fn compact_teammate_session(
             return false;
         }
         Ok(_) => {
-            tracing::info!(session_id, "Compaction LLM call completed — replacing history");
+            tracing::info!(
+                session_id,
+                "Compaction LLM call completed — replacing history"
+            );
         }
     }
 
@@ -122,14 +133,12 @@ async fn compact_teammate_session(
         .ok()
         .and_then(|r| r.ok());
 
-    let summary_text = messages_result
-        .as_ref()
-        .and_then(|msgs| {
-            msgs.iter()
-                .rev()
-                .find(|m| m.role == crate::message::Role::Assistant)
-                .map(|m| m.text_content())
-        });
+    let summary_text = messages_result.as_ref().and_then(|msgs| {
+        msgs.iter()
+            .rev()
+            .find(|m| m.role == crate::message::Role::Assistant)
+            .map(|m| m.text_content())
+    });
 
     let Some(summary) = summary_text else {
         tracing::warn!(session_id, "Compaction produced no assistant message");
@@ -206,10 +215,11 @@ pub fn build_team_prompt_addition(
 You are a teammate in team "{team_name}". Your name is "{teammate_name}" (agent ID: {agent_id}).
 The team lead is "lead". Other teammates: {others}.
 
-### Team tool usage
+### Team tool usage — CRITICAL
 
-At the start of each turn, call `team_read_messages` (team_name: "{team_name}") to check
-for new instructions, plan approval results, or shutdown requests from the lead.
+**Your very first action in every response MUST be a tool call.** Do NOT write planning text.
+Call `team_read_messages` (team_name: "{team_name}") immediately at the start of each turn
+to check for new instructions, plan approval results, or shutdown requests from the lead.
 
 When you finish a task, call `team_task_complete` then `team_task_claim` to pick up the
 next available task. If no tasks remain, call `team_idle` to notify the lead.
@@ -369,7 +379,10 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
                         HookOutcome::Feedback(feedback)
                     }
                     Some(code) => {
-                        warn!(command, code, "Hook returned unexpected exit code; allowing");
+                        warn!(
+                            command,
+                            code, "Hook returned unexpected exit code; allowing"
+                        );
                         HookOutcome::Allow
                     }
                     None => {
@@ -400,7 +413,12 @@ pub async fn run_team_hook(
         }
     };
 
-    let hook = store.config.settings.hooks.iter().find(|h| h.event == event);
+    let hook = store
+        .config
+        .settings
+        .hooks
+        .iter()
+        .find(|h| h.event == event);
     let Some(hook) = hook else {
         return HookOutcome::Allow;
     };
@@ -413,12 +431,13 @@ pub async fn run_team_hook(
 /// Tracks the runtime state of one teammate.
 #[derive(Debug)]
 struct TeammateHandle {
-          /// Friendly name (e.g. `"security-reviewer"`).
-          _name: String,
-          /// Agent ID (e.g. `"tm-001"`).
-          _agent_id: String,
-          /// Child session ID used by the teammate's agent loop.
-          _child_session_id: String,    /// Cancel flag; set to `true` to terminate the teammate's agent loop.
+    /// Friendly name (e.g. `"security-reviewer"`).
+    _name: String,
+    /// Agent ID (e.g. `"tm-001"`).
+    _agent_id: String,
+    /// Child session ID used by the teammate's agent loop.
+    _child_session_id: String,
+    /// Cancel flag; set to `true` to terminate the teammate's agent loop.
     cancel: Arc<AtomicBool>,
     /// Cancel flag for the mailbox polling task.
     poll_cancel: Arc<AtomicBool>,
@@ -493,7 +512,12 @@ impl TeamManager {
                 match TeamStore::load(&manager.team_dir) {
                     Ok(store) => {
                         // Collect candidates to spawn, then drop the lock before spawning.
-                        let to_spawn: Vec<(String, String, String, Option<crate::agent::ModelRef>)> = {
+                        let to_spawn: Vec<(
+                            String,
+                            String,
+                            String,
+                            Option<crate::agent::ModelRef>,
+                        )> = {
                             let existing_handles = manager.handles.read().await;
                             store.config.members.iter()
                                 .filter(|m| m.status == crate::team::config::MemberStatus::Spawning)
@@ -528,13 +552,29 @@ impl TeamManager {
                                 .flatten()
                                 .map(|s| s.directory.clone())
                                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-                            match manager.spawn_teammate_internal(&name, &agent_type, &spawn_prompt, member_model.as_ref(), manager.active_model.as_ref(), &lead_wd).await {
-                                Ok(agent_id) => tracing::info!(team = %manager.team_name, teammate = %name, agent_id = %agent_id, "Successfully reconciled queued teammate"),
-                                Err(e) => tracing::warn!(team = %manager.team_name, teammate = %name, error = %e, "Failed to spawn queued teammate"),
+                            match manager
+                                .spawn_teammate_internal(
+                                    &name,
+                                    &agent_type,
+                                    &spawn_prompt,
+                                    member_model.as_ref(),
+                                    manager.active_model.as_ref(),
+                                    &lead_wd,
+                                )
+                                .await
+                            {
+                                Ok(agent_id) => {
+                                    tracing::info!(team = %manager.team_name, teammate = %name, agent_id = %agent_id, "Successfully reconciled queued teammate")
+                                }
+                                Err(e) => {
+                                    tracing::warn!(team = %manager.team_name, teammate = %name, error = %e, "Failed to spawn queued teammate")
+                                }
                             }
                         }
                     }
-                    Err(e) => tracing::warn!(team = %manager.team_name, error = %e, "Cannot load team store to reconcile spawning members"),
+                    Err(e) => {
+                        tracing::warn!(team = %manager.team_name, error = %e, "Cannot load team store to reconcile spawning members")
+                    }
                 }
                 // Short backoff between attempts (~1s total for 10 attempts)
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -634,12 +674,8 @@ impl TeamManager {
             }
         }
 
-        let team_addition = build_team_prompt_addition(
-            &self.team_name,
-            teammate_name,
-            &agent_id,
-            &teammate_roster,
-        );
+        let team_addition =
+            build_team_prompt_addition(&self.team_name, teammate_name, &agent_id, &teammate_roster);
         // Append the team context block to the agent's system prompt.
         let base = agent.prompt.as_deref().unwrap_or("");
         agent.prompt = Some(format!("{base}\n{team_addition}"));
@@ -652,11 +688,9 @@ impl TeamManager {
         } else {
             agent.memory
         };
-        if let Some(mem_dir) = super::config::resolve_memory_dir(
-            effective_scope,
-            teammate_name,
-            working_dir,
-        ) {
+        if let Some(mem_dir) =
+            super::config::resolve_memory_dir(effective_scope, teammate_name, working_dir)
+        {
             let memory_block = load_memory_block(&mem_dir);
             let current = agent.prompt.as_deref().unwrap_or("");
             agent.prompt = Some(format!("{current}\n{memory_block}"));
@@ -672,14 +706,15 @@ impl TeamManager {
         // Register handle.
         self.handles.write().await.insert(
             agent_id.clone(),
-                          TeammateHandle {
-                              _name: teammate_name.to_string(),
-                              _agent_id: agent_id.clone(),
-                              _child_session_id: child_sid.clone(),
-                              cancel: cancel.clone(),
-                              poll_cancel: poll_cancel.clone(),
-                              notify: Arc::clone(&notify),
-                          },        );
+            TeammateHandle {
+                _name: teammate_name.to_string(),
+                _agent_id: agent_id.clone(),
+                _child_session_id: child_sid.clone(),
+                cancel: cancel.clone(),
+                poll_cancel: poll_cancel.clone(),
+                notify: Arc::clone(&notify),
+            },
+        );
 
         // Start agent loop in background. Capture agent_id and team_dir for error persistence.
         let proc = Arc::clone(&self.processor);
@@ -713,7 +748,12 @@ impl TeamManager {
                 }
 
                 match proc
-                    .process_message(&child_sid_clone, &prompt_owned, &agent_clone, cancel_clone.clone())
+                    .process_message(
+                        &child_sid_clone,
+                        &prompt_owned,
+                        &agent_clone,
+                        cancel_clone.clone(),
+                    )
                     .await
                 {
                     Ok(_msg) => {
@@ -957,7 +997,11 @@ impl TeamManager {
     pub fn is_plan_pending(&self, agent_id: &str) -> bool {
         TeamStore::load(&self.team_dir)
             .ok()
-            .and_then(|s| s.config.member_by_id(agent_id).map(|m| m.plan_status == PlanStatus::Pending))
+            .and_then(|s| {
+                s.config
+                    .member_by_id(agent_id)
+                    .map(|m| m.plan_status == PlanStatus::Pending)
+            })
             .unwrap_or(false)
     }
 }
@@ -1047,7 +1091,7 @@ impl TeamManagerInterface for TeamManager {
             lead_model,
             working_dir,
         )
-            .await
+        .await
     }
 }
 

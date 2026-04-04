@@ -163,8 +163,7 @@ impl Mailbox {
         if raw.trim().is_empty() {
             return Ok(Vec::new());
         }
-        serde_json::from_str(&raw)
-            .with_context(|| format!("parse mailbox {}", self.path.display()))
+        serde_json::from_str(&raw).with_context(|| format!("parse mailbox {}", self.path.display()))
     }
 
     fn write_locked(file: &mut File, messages: &[MailboxMessage]) -> Result<()> {
@@ -232,11 +231,7 @@ impl Mailbox {
         }
 
         let mut messages: Vec<MailboxMessage> = serde_json::from_str(&raw)?;
-        let unread: Vec<MailboxMessage> = messages
-            .iter()
-            .filter(|m| !m.read)
-            .cloned()
-            .collect();
+        let unread: Vec<MailboxMessage> = messages.iter().filter(|m| !m.read).cloned().collect();
 
         if !unread.is_empty() {
             for m in &mut messages {
@@ -272,9 +267,7 @@ impl Mailbox {
         }
 
         let mut messages: Vec<MailboxMessage> = serde_json::from_str(&raw)?;
-        let found = messages
-            .iter_mut()
-            .find(|m| m.message_id == message_id);
+        let found = messages.iter_mut().find(|m| m.message_id == message_id);
 
         if let Some(m) = found {
             if !m.read {

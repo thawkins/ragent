@@ -5,7 +5,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, ConfiguredProvider, ContextAction, ProviderSource, PROVIDER_LIST, ProviderSetupStep};
+use crate::app::{
+    App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
+};
 
 fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
     if char_index == 0 {
@@ -78,6 +80,12 @@ pub enum InputAction {
     ConfirmForceCleanup,
     /// Cancel a pending forcecleanup modal (Esc -> cancel).
     CancelForceCleanup,
+    /// Confirm the plan approval dialog (Enter when cursor_approve = true).
+    ApprovePlan,
+    /// Reject the plan approval dialog (Enter when cursor_approve = false, or `r`/Esc).
+    RejectPlan,
+    /// Toggle the plan approval dialog cursor left/right (←/→ arrow keys).
+    TogglePlanCursor,
     /// Cycle focus to the next teammate (Alt+Down).
     FocusNextTeammate,
     /// Cycle focus to the previous teammate (Alt+Up).
@@ -205,6 +213,23 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
     }
 
+    // If a plan approval dialog is active, intercept keys
+    if let Some(ref state) = app.plan_approval_pending {
+        let cursor_approve = state.cursor_approve;
+        match key.code {
+            KeyCode::Enter => {
+                if cursor_approve {
+                    return Some(InputAction::ApprovePlan);
+                } else {
+                    return Some(InputAction::RejectPlan);
+                }
+            }
+            KeyCode::Left | KeyCode::Right => return Some(InputAction::TogglePlanCursor),
+            KeyCode::Char('r') | KeyCode::Esc => return Some(InputAction::RejectPlan),
+            _ => return None,
+        }
+    }
+
     // If slash menu is active, intercept navigation keys
     if app.slash_menu.is_some() {
         match key.code {
@@ -275,7 +300,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     if app.file_menu.is_some() {
         match key.code {
             KeyCode::Up => {
-                if let Some(ref mut menu) = app.file_menu && !menu.matches.is_empty() {
+                if let Some(ref mut menu) = app.file_menu
+                    && !menu.matches.is_empty()
+                {
                     menu.selected = if menu.selected == 0 {
                         menu.matches.len() - 1
                     } else {
@@ -291,7 +318,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return None;
             }
             KeyCode::Down => {
-                if let Some(ref mut menu) = app.file_menu && !menu.matches.is_empty() {
+                if let Some(ref mut menu) = app.file_menu
+                    && !menu.matches.is_empty()
+                {
                     menu.selected = (menu.selected + 1) % menu.matches.len();
                     const FILE_MENU_VISIBLE_ROWS: usize = 8;
                     if menu.selected >= menu.scroll_offset + FILE_MENU_VISIBLE_ROWS {
@@ -661,6 +690,22 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             mut editing_endpoint,
             ..
         } => match key.code {
+            KeyCode::Char('v')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_input,
+                    key_cursor,
+                    endpoint_input,
+                    endpoint_cursor,
+                    editing_endpoint,
+                    error: None,
+                });
+                app.paste_provider_setup_from_clipboard();
+            }
             KeyCode::Enter => {
                 let trimmed = key_input.trim().to_string();
                 if trimmed.is_empty() {
@@ -1187,7 +1232,9 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
 
         // Confirm selection on Enter
         KeyCode::Enter => {
-            let Some(state) = app.lsp_discover.as_mut() else { return };
+            let Some(state) = app.lsp_discover.as_mut() else {
+                return;
+            };
             let input = state.number_input.trim().to_string();
             if input.is_empty() {
                 // Empty input = close dialog
@@ -1220,7 +1267,8 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
                         None => {
                             if let Some(state) = app.lsp_discover.as_mut() {
                                 let count = state.servers.len();
-                                state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                                state.feedback =
+                                    Some(format!("✗ Invalid number — enter 1..{count}"));
                                 state.number_input.clear();
                                 state.number_cursor = 0;
                             }
@@ -1266,7 +1314,8 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
 
         KeyCode::Right => {
             if let Some(ref mut state) = app.lsp_discover {
-                state.number_cursor = (state.number_cursor + 1).min(state.number_input.chars().count());
+                state.number_cursor =
+                    (state.number_cursor + 1).min(state.number_input.chars().count());
             }
         }
 
@@ -1305,7 +1354,9 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
 
         // Confirm selection on Enter
         KeyCode::Enter => {
-            let Some(state) = app.mcp_discover.as_mut() else { return };
+            let Some(state) = app.mcp_discover.as_mut() else {
+                return;
+            };
             let input = state.number_input.trim().to_string();
             if input.is_empty() {
                 // Empty input = close dialog
@@ -1338,7 +1389,8 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
                         None => {
                             if let Some(state) = app.mcp_discover.as_mut() {
                                 let count = state.servers.len();
-                                state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
+                                state.feedback =
+                                    Some(format!("✗ Invalid number — enter 1..{count}"));
                                 state.number_input.clear();
                                 state.number_cursor = 0;
                             }
@@ -1384,7 +1436,8 @@ fn handle_mcp_discover_key(app: &mut App, key: KeyEvent) {
 
         KeyCode::Right => {
             if let Some(ref mut state) = app.mcp_discover {
-                state.number_cursor = (state.number_cursor + 1).min(state.number_input.chars().count());
+                state.number_cursor =
+                    (state.number_cursor + 1).min(state.number_input.chars().count());
             }
         }
 

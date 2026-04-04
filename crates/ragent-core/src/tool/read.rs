@@ -54,14 +54,17 @@ impl Tool for ReadTool {
                 },
                 "start_line": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "Starting line number (1-based, inclusive)"
                 },
                 "end_line": {
                     "type": "integer",
+                    "minimum": 1,
                     "description": "Ending line number (1-based, inclusive)"
                 }
             },
-            "required": ["path"]
+            "required": ["path"],
+            "additionalProperties": false
         })
     }
 

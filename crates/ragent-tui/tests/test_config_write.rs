@@ -96,7 +96,9 @@ fn test_atomic_update_no_tmp_file_left() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     assert!(
-        entries.iter().all(|n| n == "ragent.json" || n == "ragent.json.lock"),
+        entries
+            .iter()
+            .all(|n| n == "ragent.json" || n == "ragent.json.lock"),
         "unexpected files in dir: {entries:?}"
     );
 }
@@ -153,8 +155,8 @@ fn test_concurrent_writers_no_corruption() {
 
     // Verify the final file contains all entries and is valid JSON.
     let raw = std::fs::read_to_string(&config).unwrap();
-    let content: serde_json::Value = serde_json::from_str(&raw)
-        .expect("final file should be valid JSON");
+    let content: serde_json::Value =
+        serde_json::from_str(&raw).expect("final file should be valid JSON");
 
     for i in 0..num_threads {
         let key = format!("server_{i}");

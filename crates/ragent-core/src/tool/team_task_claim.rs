@@ -60,16 +60,24 @@ impl Tool for TeamTaskClaimTool {
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
 
         let store = TaskStore::open(&team_dir)?;
-        
+
         // Log current state for debugging
         if let Ok(list) = store.read() {
-            let task_summary: Vec<String> = list.tasks.iter()
-                .map(|t| format!("{} ({})", t.id, match t.status {
-                    crate::team::TaskStatus::Pending => "pending",
-                    crate::team::TaskStatus::InProgress => "in-progress",
-                    crate::team::TaskStatus::Completed => "completed",
-                    crate::team::TaskStatus::Cancelled => "cancelled",
-                }))
+            let task_summary: Vec<String> = list
+                .tasks
+                .iter()
+                .map(|t| {
+                    format!(
+                        "{} ({})",
+                        t.id,
+                        match t.status {
+                            crate::team::TaskStatus::Pending => "pending",
+                            crate::team::TaskStatus::InProgress => "in-progress",
+                            crate::team::TaskStatus::Completed => "completed",
+                            crate::team::TaskStatus::Cancelled => "cancelled",
+                        }
+                    )
+                })
                 .collect();
             tracing::debug!(
                 agent_id = %agent_id,
@@ -78,10 +86,10 @@ impl Tool for TeamTaskClaimTool {
                 "team_task_claim: available tasks"
             );
         }
-        
+
         // Check if a specific task_id was requested
         let specific_task_id = input.get("task_id").and_then(|v| v.as_str());
-        
+
         if let Some(task_id) = specific_task_id {
             // Claim a specific task by ID
             match store.claim_specific(task_id, &agent_id) {
@@ -108,7 +116,7 @@ impl Tool for TeamTaskClaimTool {
                 }),
                 Err(e) => {
                     let err_msg = e.to_string();
-                    
+
                     // Check if this is a dependency issue (common for pre-assigned tasks)
                     let is_dependency_issue = err_msg.contains("unsatisfied dependencies");
                     let guidance = if is_dependency_issue {
@@ -117,7 +125,7 @@ impl Tool for TeamTaskClaimTool {
                     } else {
                         ""
                     };
-                    
+
                     Ok(ToolOutput {
                         content: format!(
                             "Failed to claim task '{}': {}{}\n\
@@ -137,7 +145,7 @@ impl Tool for TeamTaskClaimTool {
         } else {
             // Claim the next available task
             let (claimed, already_had) = store.claim_next(&agent_id)?;
-            
+
             match claimed {
                 None => {
                     // No unclaimed, unblocked tasks available

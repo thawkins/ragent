@@ -39,11 +39,11 @@ impl Tool for EditTool {
         "edit"
     }
 
-        /// Returns a human-readable description of what the tool does.
-        fn description(&self) -> &str {
-            "Replace an exact occurrence of old_str with new_str in a file. \
+    /// Returns a human-readable description of what the tool does.
+    fn description(&self) -> &str {
+        "Replace an exact occurrence of old_str with new_str in a file. \
                The old_str must match exactly one location in the file."
-        }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -91,6 +91,8 @@ impl Tool for EditTool {
             .context("Missing required 'new_str' parameter")?;
 
         let path = resolve_path(&ctx.working_dir, path_str);
+
+        super::check_path_within_root(&path, &ctx.working_dir)?;
 
         // Acquire file lock to serialize concurrent edits to the same file
         let _lock = super::file_lock::lock_file(&path).await;

@@ -120,6 +120,8 @@ struct ModelResponseP<'a> {
     session_id: &'a str,
     text: std::borrow::Cow<'a, str>,
     elapsed_ms: u64,
+    input_tokens: u64,
+    output_tokens: u64,
 }
 
 #[derive(Serialize)]
@@ -276,6 +278,8 @@ fn event_type_name(event: &Event) -> &'static str {
         Event::TeamCleanedUp { .. } => "team_cleaned_up",
         Event::TeammateP2PMessage { .. } => "teammate_p2p_message",
         Event::LspStatusChanged { .. } => "lsp_status_changed",
+        Event::TaskCompleted { .. } => "task_completed",
+        Event::ShellCwdChanged { .. } => "shell_cwd_changed",
     }
 }
 
@@ -289,79 +293,133 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
     let name = event_type_name(event);
 
     let data = match event {
-        Event::SessionCreated { session_id }
-        | Event::SessionUpdated { session_id } => {
+        Event::SessionCreated { session_id } | Event::SessionUpdated { session_id } => {
             to_data(&SessionOnly { session_id })
         }
 
-        Event::MessageStart { session_id, message_id } => {
-            to_data(&SessionMsg { session_id, message_id })
-        }
+        Event::MessageStart {
+            session_id,
+            message_id,
+        } => to_data(&SessionMsg {
+            session_id,
+            message_id,
+        }),
 
-        Event::TextDelta { session_id, text }
-        | Event::ReasoningDelta { session_id, text } => {
+        Event::TextDelta { session_id, text } | Event::ReasoningDelta { session_id, text } => {
             to_data(&SessionText { session_id, text })
         }
 
-        Event::ToolCallStart { session_id, call_id, tool } => {
-            to_data(&ToolCallStartP { session_id, call_id, tool })
-        }
+        Event::ToolCallStart {
+            session_id,
+            call_id,
+            tool,
+        } => to_data(&ToolCallStartP {
+            session_id,
+            call_id,
+            tool,
+        }),
 
-        Event::ToolCallEnd { session_id, call_id, tool, error, duration_ms } => {
-            to_data(&ToolCallEndP {
-                session_id,
-                call_id,
-                tool,
-                error: error.as_deref(),
-                duration_ms: *duration_ms,
-            })
-        }
+        Event::ToolCallEnd {
+            session_id,
+            call_id,
+            tool,
+            error,
+            duration_ms,
+        } => to_data(&ToolCallEndP {
+            session_id,
+            call_id,
+            tool,
+            error: error.as_deref(),
+            duration_ms: *duration_ms,
+        }),
 
-        Event::MessageEnd { session_id, message_id, reason } => {
-            to_data(&MessageEndP { session_id, message_id, reason })
-        }
+        Event::MessageEnd {
+            session_id,
+            message_id,
+            reason,
+        } => to_data(&MessageEndP {
+            session_id,
+            message_id,
+            reason,
+        }),
 
-        Event::PermissionRequested { session_id, request_id, permission, description } => {
-            to_data(&PermReqP { session_id, request_id, permission, description })
-        }
+        Event::PermissionRequested {
+            session_id,
+            request_id,
+            permission,
+            description,
+        } => to_data(&PermReqP {
+            session_id,
+            request_id,
+            permission,
+            description,
+        }),
 
-        Event::PermissionReplied { session_id, request_id, allowed } => {
-            to_data(&PermRepP { session_id, request_id, allowed: *allowed })
-        }
+        Event::PermissionReplied {
+            session_id,
+            request_id,
+            allowed,
+        } => to_data(&PermRepP {
+            session_id,
+            request_id,
+            allowed: *allowed,
+        }),
 
-        Event::AgentSwitched { session_id, from, to } => {
-            to_data(&AgentSwitchedP { session_id, from, to })
-        }
+        Event::AgentSwitched {
+            session_id,
+            from,
+            to,
+        } => to_data(&AgentSwitchedP {
+            session_id,
+            from,
+            to,
+        }),
 
-        Event::AgentSwitchRequested { session_id, to, task, context } => {
-            to_data(&AgentSwitchReqP { session_id, to, task, context })
-        }
+        Event::AgentSwitchRequested {
+            session_id,
+            to,
+            task,
+            context,
+        } => to_data(&AgentSwitchReqP {
+            session_id,
+            to,
+            task,
+            context,
+        }),
 
-        Event::AgentRestoreRequested { session_id, summary } => {
-            to_data(&SessionSummary { session_id, summary })
-        }
+        Event::AgentRestoreRequested {
+            session_id,
+            summary,
+        } => to_data(&SessionSummary {
+            session_id,
+            summary,
+        }),
 
-        Event::AgentError { session_id, error } => {
-            to_data(&SessionError { session_id, error })
-        }
+        Event::AgentError { session_id, error } => to_data(&SessionError { session_id, error }),
 
         Event::McpStatusChanged { server_id, status } => {
             to_data(&ServerStatus { server_id, status })
         }
 
-        Event::TokenUsage { session_id, input_tokens, output_tokens } => {
-            to_data(&TokenUsageP {
-                session_id,
-                input_tokens: *input_tokens,
-                output_tokens: *output_tokens,
-            })
-        }
+        Event::TokenUsage {
+            session_id,
+            input_tokens,
+            output_tokens,
+        } => to_data(&TokenUsageP {
+            session_id,
+            input_tokens: *input_tokens,
+            output_tokens: *output_tokens,
+        }),
 
-        Event::ToolsSent { session_id, tools } => {
-            to_data(&ToolsSentP { session_id, tools })
-        }
+        Event::ToolsSent { session_id, tools } => to_data(&ToolsSentP { session_id, tools }),
 
-        Event::ModelResponse { session_id, text, elapsed_ms } => {
+        Event::ModelResponse {
+            session_id,
+            text,
+            elapsed_ms,
+            input_tokens,
+            output_tokens,
+        } => {
             let redacted = redact_secrets(text);
             to_data(&ModelResponseP {
                 session_id,
@@ -371,14 +429,32 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
                     std::borrow::Cow::Owned(redacted)
                 },
                 elapsed_ms: *elapsed_ms,
+                input_tokens: *input_tokens,
+                output_tokens: *output_tokens,
             })
         }
 
-        Event::ToolCallArgs { session_id, call_id, tool, args } => {
-            to_data(&ToolCallArgsP { session_id, call_id, tool, args })
-        }
+        Event::ToolCallArgs {
+            session_id,
+            call_id,
+            tool,
+            args,
+        } => to_data(&ToolCallArgsP {
+            session_id,
+            call_id,
+            tool,
+            args,
+        }),
 
-        Event::ToolResult { session_id, call_id, tool, content, content_line_count, metadata, success } => {
+        Event::ToolResult {
+            session_id,
+            call_id,
+            tool,
+            content,
+            content_line_count,
+            metadata,
+            success,
+        } => {
             let redacted = redact_secrets(content);
             to_data(&ToolResultP {
                 session_id,
@@ -395,77 +471,168 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             })
         }
 
-        Event::CopilotDeviceFlowComplete { token, api_base } => {
-            to_data(&CopilotFlowP { token_present: !token.is_empty(), api_base })
-        }
+        Event::CopilotDeviceFlowComplete { token, api_base } => to_data(&CopilotFlowP {
+            token_present: !token.is_empty(),
+            api_base,
+        }),
 
         Event::SessionAborted { session_id, reason } => {
             to_data(&SessionReasonP { session_id, reason })
         }
 
-        Event::QuotaUpdate { session_id, percent } => {
-            to_data(&QuotaP { session_id, percent: *percent })
-        }
+        Event::QuotaUpdate {
+            session_id,
+            percent,
+        } => to_data(&QuotaP {
+            session_id,
+            percent: *percent,
+        }),
 
-        Event::SubagentStart { session_id, task_id, child_session_id, agent, task, background } => {
-            to_data(&SubagentStartP {
-                session_id,
-                task_id,
-                child_session_id,
-                agent,
-                task,
-                background: *background,
-            })
-        }
+        Event::SubagentStart {
+            session_id,
+            task_id,
+            child_session_id,
+            agent,
+            task,
+            background,
+        } => to_data(&SubagentStartP {
+            session_id,
+            task_id,
+            child_session_id,
+            agent,
+            task,
+            background: *background,
+        }),
 
-        Event::SubagentComplete { session_id, task_id, child_session_id, summary, success, duration_ms } => {
-            to_data(&SubagentCompleteP {
-                session_id,
-                task_id,
-                child_session_id,
-                summary,
-                success: *success,
-                duration_ms: *duration_ms,
-            })
-        }
+        Event::SubagentComplete {
+            session_id,
+            task_id,
+            child_session_id,
+            summary,
+            success,
+            duration_ms,
+        } => to_data(&SubagentCompleteP {
+            session_id,
+            task_id,
+            child_session_id,
+            summary,
+            success: *success,
+            duration_ms: *duration_ms,
+        }),
 
-        Event::SubagentCancelled { session_id, task_id } => {
-            to_data(&SessionTaskP { session_id, task_id })
-        }
+        Event::SubagentCancelled {
+            session_id,
+            task_id,
+        } => to_data(&SessionTaskP {
+            session_id,
+            task_id,
+        }),
 
-        Event::TeammateSpawned { session_id, team_name, teammate_name, agent_id } => {
-            to_data(&TeammateSpawnedP { session_id, team_name, teammate_name, agent_id })
-        }
+        Event::TeammateSpawned {
+            session_id,
+            team_name,
+            teammate_name,
+            agent_id,
+        } => to_data(&TeammateSpawnedP {
+            session_id,
+            team_name,
+            teammate_name,
+            agent_id,
+        }),
 
-        Event::TeammateMessage { session_id, team_name, from, to, preview } => {
-            to_data(&TeammateMessageP { session_id, team_name, from, to, preview })
-        }
+        Event::TeammateMessage {
+            session_id,
+            team_name,
+            from,
+            to,
+            preview,
+        } => to_data(&TeammateMessageP {
+            session_id,
+            team_name,
+            from,
+            to,
+            preview,
+        }),
 
-        Event::TeammateIdle { session_id, team_name, agent_id } => {
-            to_data(&TeamAgentP { session_id, team_name, agent_id })
-        }
+        Event::TeammateIdle {
+            session_id,
+            team_name,
+            agent_id,
+        } => to_data(&TeamAgentP {
+            session_id,
+            team_name,
+            agent_id,
+        }),
 
-        Event::TeammateFailed { session_id, team_name, agent_id, error } => {
-            to_data(&TeamAgentErrorP { session_id, team_name, agent_id, error })
-        }
+        Event::TeammateFailed {
+            session_id,
+            team_name,
+            agent_id,
+            error,
+        } => to_data(&TeamAgentErrorP {
+            session_id,
+            team_name,
+            agent_id,
+            error,
+        }),
 
-        Event::TeamTaskClaimed { session_id, team_name, agent_id, task_id }
-        | Event::TeamTaskCompleted { session_id, team_name, agent_id, task_id } => {
-            to_data(&TeamTaskP { session_id, team_name, agent_id, task_id })
+        Event::TeamTaskClaimed {
+            session_id,
+            team_name,
+            agent_id,
+            task_id,
         }
+        | Event::TeamTaskCompleted {
+            session_id,
+            team_name,
+            agent_id,
+            task_id,
+        } => to_data(&TeamTaskP {
+            session_id,
+            team_name,
+            agent_id,
+            task_id,
+        }),
 
-        Event::TeamCleanedUp { session_id, team_name } => {
-            to_data(&TeamNameP { session_id, team_name })
-        }
+        Event::TeamCleanedUp {
+            session_id,
+            team_name,
+        } => to_data(&TeamNameP {
+            session_id,
+            team_name,
+        }),
 
-        Event::TeammateP2PMessage { session_id, team_name, from, to, preview } => {
-            to_data(&TeammateMessageP { session_id, team_name, from, to, preview })
-        }
+        Event::TeammateP2PMessage {
+            session_id,
+            team_name,
+            from,
+            to,
+            preview,
+        } => to_data(&TeammateMessageP {
+            session_id,
+            team_name,
+            from,
+            to,
+            preview,
+        }),
 
         Event::LspStatusChanged { server_id, status } => {
             let status_str = format!("{status:?}");
-            to_data(&ServerStatus { server_id, status: &status_str })
+            to_data(&ServerStatus {
+                server_id,
+                status: &status_str,
+            })
         }
+
+        Event::TaskCompleted { session_id, summary } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "summary": summary,
+        })),
+
+        Event::ShellCwdChanged { session_id, cwd } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "cwd": cwd,
+        })),
     };
 
     (name, data)

@@ -146,7 +146,10 @@ fn test_legacy_v1_still_readable() {
     // Should NOT start with "v2:" — it's legacy
     assert!(!v1_encoded.starts_with("v2:"));
     let decrypted = decrypt_key(&v1_encoded);
-    assert_eq!(decrypted, original, "Legacy v1 format should still be readable");
+    assert_eq!(
+        decrypted, original,
+        "Legacy v1 format should still be readable"
+    );
 }
 
 #[test]

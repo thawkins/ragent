@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-use crate::agent::{AgentInfo, build_system_prompt};
+use crate::agent::AgentInfo;
 use crate::event::{Event, EventBus, FinishReason};
 use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
@@ -25,6 +25,17 @@ use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
 use crate::tool::{TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
+
+/// Additional system-prompt guidance injected for Ollama sessions.
+pub const OLLAMA_TOOL_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
+IMPORTANT: When you need to take any action, call the appropriate tool IMMEDIATELY.\n\
+Do NOT write text describing what you are going to do — just call the tool.\n\
+Do NOT say \'Let me explore...\' or \'I will analyze...\' — instead, call the relevant tool now.\n\n\
+When you need file contents, use the `read` tool with arguments like \
+`{\"path\":\"src/main.rs\",\"start_line\":1,\"end_line\":100}`.\n\
+Prefer small line ranges (100 lines max) for large files; iterate with `start_line`/`end_line`.\n\
+Never invent or guess file contents — always read them with the tool.\n\n\
+Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
 
 /// Drives the agentic conversation loop for a single session.
 ///
@@ -192,22 +203,20 @@ impl SessionProcessor {
                 .flatten(),
             "generic_openai" => {
                 let cfg = crate::config::Config::load().ok();
-                self.storage_op(|s| {
-                    Ok(s.get_setting("generic_openai_api_base").ok().flatten())
-                })
-                .await
-                .ok()
-                .flatten()
-                .filter(|s: &String| !s.trim().is_empty())
-                .or_else(|| {
-                    cfg.and_then(|c| c.provider.get("generic_openai").cloned())
-                        .and_then(|p| p.api.and_then(|a| a.base_url))
-                })
-                .or_else(|| {
-                    std::env::var("GENERIC_OPENAI_API_BASE")
-                        .ok()
-                        .filter(|s| !s.trim().is_empty())
-                })
+                self.storage_op(|s| Ok(s.get_setting("generic_openai_api_base").ok().flatten()))
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|s: &String| !s.trim().is_empty())
+                    .or_else(|| {
+                        cfg.and_then(|c| c.provider.get("generic_openai").cloned())
+                            .and_then(|p| p.api.and_then(|a| a.base_url))
+                    })
+                    .or_else(|| {
+                        std::env::var("GENERIC_OPENAI_API_BASE")
+                            .ok()
+                            .filter(|s| !s.trim().is_empty())
+                    })
             }
             _ => None,
         };
@@ -239,21 +248,34 @@ impl SessionProcessor {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let team_context_for_session = resolve_team_context_for_session(session_id, &working_dir);
 
-        let file_tree = build_file_tree(&working_dir, 2);
-
         // Load skill registry for system prompt injection
         let skill_dirs = crate::config::Config::load()
             .map(|c| c.skill_dirs)
             .unwrap_or_default();
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-        let mut system_prompt =
-            build_system_prompt(agent, &working_dir, &file_tree, Some(&skill_registry));
+        let (git_status, readme, agents_md, file_tree) = crate::agent::collect_prompt_context(&working_dir).await;
+        let mut system_prompt = crate::agent::build_system_prompt_with_context(
+            agent,
+            &working_dir,
+            &file_tree,
+            Some(&skill_registry),
+            Some(&git_status),
+            Some(&readme),
+            Some(&agents_md),
+        );
+
+        if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
+            system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
+        }
 
         // Inject team-lead task distribution guidelines when this session is
         // running as a team lead.  These rules help the LLM spawn a consistent
         // number of teammates and avoid overloading a single teammate with an
         // unbounded list of items — which causes context-window overflows.
-        if team_context_for_session.as_deref().map_or(false, |tc| tc.is_lead) {
+        if team_context_for_session
+            .as_deref()
+            .map_or(false, |tc| tc.is_lead)
+        {
             system_prompt.push_str(
                 "\n## Team Lead — Task Distribution Rules\n\n\
                  When you receive a request that involves a list of N independent items \
@@ -405,6 +427,7 @@ impl SessionProcessor {
         };
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut agent_switch_requested = false;
+        let mut task_complete_requested = false;
 
         // Pre-create a placeholder assistant message so that partial progress
         // is visible in the output view (e.g. teammate inspection) even before
@@ -493,6 +516,8 @@ impl SessionProcessor {
             let mut reasoning_buffer = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut finish_reason = FinishReason::Stop;
+            let mut last_input_tokens: u64 = 0;
+            let mut last_output_tokens: u64 = 0;
 
             while let Some(event) = stream.next().await {
                 match event {
@@ -545,6 +570,8 @@ impl SessionProcessor {
                         input_tokens,
                         output_tokens,
                     } => {
+                        last_input_tokens = input_tokens;
+                        last_output_tokens = output_tokens;
                         self.event_bus.publish(Event::TokenUsage {
                             session_id: session_id.to_string(),
                             input_tokens,
@@ -598,14 +625,62 @@ impl SessionProcessor {
                     session_id: session_id.to_string(),
                     text: response_preview,
                     elapsed_ms: llm_request_start.elapsed().as_millis() as u64,
+                    input_tokens: last_input_tokens,
+                    output_tokens: last_output_tokens,
                 });
                 assistant_parts.push(MessagePart::Text {
                     text: text_buffer.clone(),
                 });
             }
 
-            // If no tool calls, we're done
-            if tool_calls.is_empty() || finish_reason != FinishReason::ToolUse {
+            // Execute tool calls if any were emitted, regardless of finish_reason.
+            // Some Ollama models send tool calls but set done_reason to "stop" rather
+            // than "tool_calls", so we cannot rely on finish_reason alone.
+            if tool_calls.is_empty() {
+                // No tool calls — check whether an Ollama model wrote planning text
+                // instead of calling a tool, and inject a nudge to make it act.
+                let is_ollama = matches!(
+                    model_ref.provider_id.as_str(),
+                    "ollama" | "ollama_cloud"
+                );
+                let looks_like_planning = !text_buffer.is_empty()
+                    && !tool_definitions.is_empty()
+                    && (text_buffer.contains("Let me")
+                        || text_buffer.contains("I'll")
+                        || text_buffer.contains("I will")
+                        || text_buffer.contains("I'm going to")
+                        || text_buffer.contains("let me")
+                        || text_buffer.contains("start by")
+                        || text_buffer.contains("begin by")
+                        || text_buffer.contains("First,")
+                        || text_buffer.contains("First I")
+                        || text_buffer.contains("exploring")
+                        || text_buffer.contains("examine")
+                        || text_buffer.contains("analyze"));
+                // Only nudge on early steps to avoid infinite loops
+                let should_nudge = is_ollama && looks_like_planning && step <= 3;
+                if should_nudge {
+                    tracing::info!(
+                        session_id = %session_id,
+                        step,
+                        "Ollama model produced planning text without tool calls — injecting nudge"
+                    );
+                    chat_messages.push(ChatMessage {
+                        role: "assistant".to_string(),
+                        content: ChatContent::Text(text_buffer.clone()),
+                    });
+                    chat_messages.push(ChatMessage {
+                        role: "user".to_string(),
+                        content: ChatContent::Text(
+                            "Please proceed now using tool calls. Do not write more planning \
+                             text — call the appropriate tool immediately.".to_string(),
+                        ),
+                    });
+                    text_buffer = String::new();
+                    reasoning_buffer = String::new();
+                    finish_reason = FinishReason::Stop;
+                    continue;
+                }
                 break;
             }
 
@@ -619,148 +694,166 @@ impl SessionProcessor {
 
             // Execute tool calls in parallel, bounded by tool semaphore
             let mut tool_result_parts: Vec<ContentPart> = Vec::new();
-            
+
             let mut futures = Vec::new();
-            
+
             for tc in &tool_calls {
                 let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
                     warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
                     json!({})
                 });
 
-                    assistant_content_parts.push(ContentPart::ToolUse {
-                        id: tc.id.clone(),
-                        name: tc.name.clone(),
-                        input: input.clone(),
-                    });
+                assistant_content_parts.push(ContentPart::ToolUse {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    input: input.clone(),
+                });
 
-                    let tool_ctx = ToolContext {
-                        session_id: session_id.to_string(),
-                        working_dir: working_dir.clone(),
-                        event_bus: self.event_bus.clone(),
-                        storage: Some(self.session_manager.storage().clone()),
-                        task_manager: self.task_manager.get().cloned(),
-                        lsp_manager: self.lsp_manager.get().cloned(),
-                        active_model: Some(model_ref.clone()),
-                        team_context: team_context_for_session.clone(),
-                        team_manager: self
-                            .team_manager
-                            .get()
-                            .cloned()
-                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                let tool_ctx = ToolContext {
+                    session_id: session_id.to_string(),
+                    working_dir: working_dir.clone(),
+                    event_bus: self.event_bus.clone(),
+                    storage: Some(self.session_manager.storage().clone()),
+                    task_manager: self.task_manager.get().cloned(),
+                    lsp_manager: self.lsp_manager.get().cloned(),
+                    active_model: Some(model_ref.clone()),
+                    team_context: team_context_for_session.clone(),
+                    team_manager: self
+                        .team_manager
+                        .get()
+                        .cloned()
+                        .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                };
+
+                let tc_clone = tc.clone();
+                let registry = self.tool_registry.clone();
+                let event_bus = self.event_bus.clone();
+                let session_id_str = session_id.to_string();
+
+                // Spawn each tool execution as a future — the tool semaphore
+                // inside the spawned task bounds concurrency.
+                let fut = tokio::spawn(async move {
+                    let _permit = crate::resource::acquire_tool_permit()
+                        .await
+                        .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
+                    let start = Instant::now();
+
+                    let result = registry
+                        .get(&tc_clone.name)
+                        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
+                    let result = match result {
+                        Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
+                        Err(e) => Err(e),
+                    };
+                    let duration_ms = start.elapsed().as_millis() as u64;
+
+                    let (output_value, error) = match &result {
+                        Ok(output) => {
+                            // Merge metadata into the output value so the
+                            // renderer can access line counts, summaries, etc.
+                            let val = match &output.metadata {
+                                Some(meta) if meta.is_object() => {
+                                    let mut obj = meta.clone();
+                                    obj.as_object_mut()
+                                        .unwrap()
+                                        .insert("content".to_string(), json!(output.content));
+                                    obj
+                                }
+                                _ => json!({ "content": output.content }),
+                            };
+                            (Some(val), None)
+                        }
+                        Err(e) => (None, Some(format!("{:#}", e))),
                     };
 
-                    let tc_clone = tc.clone();
-                    let registry = self.tool_registry.clone();
-                    let event_bus = self.event_bus.clone();
-                    let session_id_str = session_id.to_string();
-                    
-                    // Spawn each tool execution as a future — the tool semaphore
-                    // inside the spawned task bounds concurrency.
-                    let fut = tokio::spawn(async move {
-                        let _permit = crate::resource::acquire_tool_permit().await
-                            .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
-                        let start = Instant::now();
-                        
-                        let result = registry
-                            .get(&tc_clone.name)
-                            .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
-                        let result = match result {
-                            Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
-                            Err(e) => Err(e),
-                        };
-                        let duration_ms = start.elapsed().as_millis() as u64;
+                    let status = if result.is_ok() {
+                        ToolCallStatus::Completed
+                    } else {
+                        ToolCallStatus::Error
+                    };
+                    let success = status == ToolCallStatus::Completed;
 
-                        let (output_value, error) = match &result {
-                            Ok(output) => {
-                                // Merge metadata into the output value so the
-                                // renderer can access line counts, summaries, etc.
-                                let val = match &output.metadata {
-                                    Some(meta) if meta.is_object() => {
-                                        let mut obj = meta.clone();
-                                        obj.as_object_mut().unwrap().insert(
-                                            "content".to_string(),
-                                            json!(output.content),
-                                        );
-                                        obj
-                                    }
-                                    _ => json!({ "content": output.content }),
-                                };
-                                (Some(val), None)
-                            }
-                            Err(e) => (None, Some(format!("{:#}", e))),
-                        };
-
-                        let status = if result.is_ok() {
-                            ToolCallStatus::Completed
-                        } else {
-                            ToolCallStatus::Error
-                        };
-                        let success = status == ToolCallStatus::Completed;
-
-                        event_bus.publish(Event::ToolCallEnd {
-                            session_id: session_id_str.clone(),
-                            call_id: tc_clone.id.clone(),
-                            tool: tc_clone.name.clone(),
-                            error: error.clone(),
-                            duration_ms,
-                        });
-
-                        let result_content = match &result {
-                            Ok(output) => output.content.clone(),
-                            Err(e) => format!("Error: {}", e),
-                        };
-
-                        // Use metadata "lines" field when available (e.g. write/edit
-                        // tools report the actual file line count there), otherwise
-                        // fall back to counting lines in the result content.
-                        let content_line_count = result
-                            .as_ref()
-                            .ok()
-                            .and_then(|o| o.metadata.as_ref())
-                            .and_then(|m| m.get("lines"))
-                            .and_then(|v| v.as_u64())
-                            .map(|n| n as usize)
-                            .unwrap_or_else(|| result_content.lines().count());
-
-                        // Log the tool result (truncate at a char boundary)
-                        let result_preview = if result_content.len() > 200 {
-                            let end = result_content
-                                .char_indices()
-                                .map(|(i, _)| i)
-                                .take_while(|&i| i <= 200)
-                                .last()
-                                .unwrap_or(0);
-                            format!("{}…", &result_content[..end])
-                        } else {
-                            result_content.clone()
-                        };
-                        let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
-
-                        event_bus.publish(Event::ToolResult {
-                            session_id: session_id_str,
-                            call_id: tc_clone.id.clone(),
-                            tool: tc_clone.name.clone(),
-                            content: result_preview,
-                            content_line_count,
-                            metadata: tool_metadata.clone(),
-                            success,
-                        });
-
-                        // Return all the info we need to reconstruct state
-                        (tc_clone, input, status, output_value, error, duration_ms, result_content, tool_metadata)
+                    event_bus.publish(Event::ToolCallEnd {
+                        session_id: session_id_str.clone(),
+                        call_id: tc_clone.id.clone(),
+                        tool: tc_clone.name.clone(),
+                        error: error.clone(),
+                        duration_ms,
                     });
-                    
-                    futures.push(fut);
-                }
+
+                    let result_content = match &result {
+                        Ok(output) => output.content.clone(),
+                        Err(e) => format!("Error: {}", e),
+                    };
+
+                    // Use metadata "lines" field when available (e.g. write/edit
+                    // tools report the actual file line count there), otherwise
+                    // fall back to counting lines in the result content.
+                    let content_line_count = result
+                        .as_ref()
+                        .ok()
+                        .and_then(|o| o.metadata.as_ref())
+                        .and_then(|m| m.get("lines"))
+                        .and_then(|v| v.as_u64())
+                        .map(|n| n as usize)
+                        .unwrap_or_else(|| result_content.lines().count());
+
+                    // Log the tool result (truncate at a char boundary)
+                    let result_preview = if result_content.len() > 200 {
+                        let end = result_content
+                            .char_indices()
+                            .map(|(i, _)| i)
+                            .take_while(|&i| i <= 200)
+                            .last()
+                            .unwrap_or(0);
+                        format!("{}…", &result_content[..end])
+                    } else {
+                        result_content.clone()
+                    };
+                    let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
+
+                    event_bus.publish(Event::ToolResult {
+                        session_id: session_id_str,
+                        call_id: tc_clone.id.clone(),
+                        tool: tc_clone.name.clone(),
+                        content: result_preview,
+                        content_line_count,
+                        metadata: tool_metadata.clone(),
+                        success,
+                    });
+
+                    // Return all the info we need to reconstruct state
+                    (
+                        tc_clone,
+                        input,
+                        status,
+                        output_value,
+                        error,
+                        duration_ms,
+                        result_content,
+                        tool_metadata,
+                    )
+                });
+
+                futures.push(fut);
+            }
 
             // Wait for all tool calls to complete (concurrency bounded by semaphore)
             let results = futures::future::join_all(futures).await;
-            
+
             // Process results in order
             for result in results {
                 match result {
-                    Ok((tc, input, status, output_value, error, duration_ms, result_content, tool_metadata)) => {
+                    Ok((
+                        tc,
+                        input,
+                        status,
+                        output_value,
+                        error,
+                        duration_ms,
+                        result_content,
+                        tool_metadata,
+                    )) => {
                         assistant_parts.push(MessagePart::ToolCall {
                             tool: tc.name.clone(),
                             call_id: tc.id.clone(),
@@ -780,20 +873,26 @@ impl SessionProcessor {
 
                         // Check if a tool requested an agent switch or restore
                         if let Some(meta) = tool_metadata.as_ref() {
-                            if meta.get("agent_switch").is_some() || meta.get("agent_restore").is_some() {
+                            if meta.get("agent_switch").is_some()
+                                || meta.get("agent_restore").is_some()
+                            {
                                 agent_switch_requested = true;
                                 break;
                             }
+                            if meta.get("task_complete").is_some() {
+                                task_complete_requested = true;
+                                break;
+                            }
                         }
-                    },
+                    }
                     Err(e) => {
                         warn!(error = %e, "Tool execution task panicked");
                     }
                 }
             }
 
-            // If an agent switch was requested, exit the main loop too
-            if agent_switch_requested {
+            // If an agent switch or task completion was requested, exit the main loop too
+            if agent_switch_requested || task_complete_requested {
                 break;
             }
 
@@ -878,10 +977,7 @@ impl SessionProcessor {
         // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
             // DB first — device flow tokens stored here work for copilot_internal/v2/token
-            if let Ok(Some(key)) = self
-                .storage_op(|s| s.get_provider_auth("copilot"))
-                .await
-            {
+            if let Ok(Some(key)) = self.storage_op(|s| s.get_provider_auth("copilot")).await {
                 if !key.is_empty() {
                     return Ok(key);
                 }
@@ -904,6 +1000,7 @@ impl SessionProcessor {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],
             "openai" => vec!["OPENAI_API_KEY"],
             "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
+            "ollama_cloud" => vec!["OLLAMA_API_KEY"],
             _ => vec![],
         };
 
@@ -1073,56 +1170,4 @@ fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
     ChatContent::Parts(content_parts)
 }
 
-fn build_file_tree(dir: &std::path::Path, max_depth: usize) -> String {
-    let mut lines = Vec::new();
-    build_tree_recursive(dir, "", 0, max_depth, &mut lines);
-    lines.join("\n")
-}
 
-fn build_tree_recursive(
-    dir: &std::path::Path,
-    prefix: &str,
-    depth: usize,
-    max_depth: usize,
-    lines: &mut Vec<String>,
-) {
-    if depth >= max_depth {
-        return;
-    }
-
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.file_name());
-
-    // Filter hidden and common non-source dirs
-    entries.retain(|e| {
-        let name = e.file_name();
-        let name_str = name.to_string_lossy();
-        !name_str.starts_with('.')
-            && !matches!(
-                name_str.as_ref(),
-                "node_modules" | "target" | "__pycache__" | "dist" | "build" | ".git"
-            )
-    });
-
-    let count = entries.len();
-    for (i, entry) in entries.iter().enumerate() {
-        let is_last = i == count - 1;
-        let connector = if is_last { "└── " } else { "├── " };
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        let path = entry.path();
-
-        if path.is_dir() {
-            lines.push(format!("{}{}{}/", prefix, connector, name_str));
-            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
-            build_tree_recursive(&path, &new_prefix, depth + 1, max_depth, lines);
-        } else {
-            lines.push(format!("{}{}{}", prefix, connector, name_str));
-        }
-    }
-}

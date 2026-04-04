@@ -87,9 +87,7 @@ impl Tool for TeamCleanupTool {
             .map_err(|e| anyhow::anyhow!("Failed to remove team directory: {e}"))?;
 
         Ok(ToolOutput {
-            content: format!(
-                "Team '{team_name}' cleaned up successfully. All resources removed."
-            ),
+            content: format!("Team '{team_name}' cleaned up successfully. All resources removed."),
             metadata: Some(json!({
                 "team_name": team_name,
                 "status": "disbanded",

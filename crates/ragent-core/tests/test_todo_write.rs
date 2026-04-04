@@ -413,5 +413,9 @@ async fn test_no_storage() {
 fn test_todo_write_in_registry() {
     let registry = ragent_core::tool::create_default_registry();
     assert!(registry.get("todo_write").is_some());
-    assert!(registry.list().len() >= 31, "expected at least 31 tools, found {}", registry.list().len());
+    assert!(
+        registry.list().len() >= 31,
+        "expected at least 31 tools, found {}",
+        registry.list().len()
+    );
 }

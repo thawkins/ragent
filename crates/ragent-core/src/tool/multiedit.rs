@@ -110,31 +110,31 @@ impl Tool for MultiEditTool {
                 path: resolve_path(&ctx.working_dir, path_str),
                 old_str: old_str.to_string(),
                 new_str: new_str.to_string(),
-                          });
-                      }
-            
-                      // Collect unique paths and acquire locks in sorted order to prevent deadlocks
-                      let mut unique_paths: Vec<PathBuf> = ops.iter().map(|op| op.path.clone()).collect();
-                      unique_paths.sort();
-                      unique_paths.dedup();
-            
-                      // Acquire all file locks before reading/writing
-                      let mut _locks = Vec::new();
-                      for path in &unique_paths {
-                          _locks.push(super::file_lock::lock_file(path).await);
-                      }
-            
-                      // Phase 1: Read all target files and validate every edit
-                      // Group edits by file path so we apply them sequentially to the same content.
-                      let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
-                      for op in &ops {
-                          if !file_contents.contains_key(&op.path) {
-                              let content = tokio::fs::read_to_string(&op.path)
-                                  .await
-                                  .with_context(|| format!("Failed to read file: {}", op.path.display()))?;
-                              file_contents.insert(op.path.clone(), content);
-                          }
-                      }
+            });
+        }
+
+        // Collect unique paths and acquire locks in sorted order to prevent deadlocks
+        let mut unique_paths: Vec<PathBuf> = ops.iter().map(|op| op.path.clone()).collect();
+        unique_paths.sort();
+        unique_paths.dedup();
+
+        // Acquire all file locks before reading/writing
+        let mut _locks = Vec::new();
+        for path in &unique_paths {
+            _locks.push(super::file_lock::lock_file(path).await);
+        }
+
+        // Phase 1: Read all target files and validate every edit
+        // Group edits by file path so we apply them sequentially to the same content.
+        let mut file_contents: HashMap<PathBuf, String> = HashMap::new();
+        for op in &ops {
+            if !file_contents.contains_key(&op.path) {
+                let content = tokio::fs::read_to_string(&op.path)
+                    .await
+                    .with_context(|| format!("Failed to read file: {}", op.path.display()))?;
+                file_contents.insert(op.path.clone(), content);
+            }
+        }
         // Phase 2: Apply edits in order to in-memory content, validating each
         let mut files_modified: HashMap<PathBuf, usize> = HashMap::new();
         let mut total_edits = 0usize;

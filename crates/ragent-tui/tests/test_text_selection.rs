@@ -319,7 +319,10 @@ fn test_output_view_can_load_messages_for_non_current_session() {
         ))
         .expect("create message");
 
-    let msgs = app.storage.get_messages("child-s1").expect("read child messages");
+    let msgs = app
+        .storage
+        .get_messages("child-s1")
+        .expect("read child messages");
     assert_eq!(msgs.len(), 1);
     assert_eq!(msgs[0].text_content(), "hello from child");
 }
@@ -687,7 +690,6 @@ fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
     assert_eq!(app.input_cursor, 2);
 }
 
-
 #[test]
 fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
     let mut app = make_app();
@@ -738,5 +740,8 @@ fn test_left_click_outside_file_menu_closes_popup() {
 
     // Popup is above y=15, so y=20 is outside.
     app.handle_mouse_event(mouse_down(20, 20));
-    assert!(app.file_menu.is_none(), "outside click should dismiss popup");
+    assert!(
+        app.file_menu.is_none(),
+        "outside click should dismiss popup"
+    );
 }

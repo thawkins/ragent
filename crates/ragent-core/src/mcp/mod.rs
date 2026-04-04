@@ -253,9 +253,10 @@ impl McpClient {
         validate_mcp_config(id, &config)?;
 
         // Acquire a spawn permit to limit concurrent MCP connections.
-        let _permit = MCP_SPAWN_SEMAPHORE.acquire().await.map_err(|_| {
-            anyhow::anyhow!("MCP spawn semaphore closed")
-        })?;
+        let _permit = MCP_SPAWN_SEMAPHORE
+            .acquire()
+            .await
+            .map_err(|_| anyhow::anyhow!("MCP spawn semaphore closed"))?;
 
         match self.connect_inner(id, &config).await {
             Ok((service, tools)) => {
@@ -324,45 +325,46 @@ impl McpClient {
         id: &str,
         config: &McpServerConfig,
     ) -> anyhow::Result<(RunningService<RoleClient, ()>, Vec<RmcpTool>)> {
-        let service =
-            match config.type_ {
-                McpTransport::Stdio => {
-                    let command_str = config.command.as_deref().ok_or_else(|| {
-                        anyhow::anyhow!("stdio transport requires a 'command' field")
-                    })?;
+        let service = match config.type_ {
+            McpTransport::Stdio => {
+                let command_str = config
+                    .command
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("stdio transport requires a 'command' field"))?;
 
-                    let args = config.args.clone();
-                    let env = config.env.clone();
+                let args = config.args.clone();
+                let env = config.env.clone();
 
-                    let transport = rmcp::transport::TokioChildProcess::new(
-                        Command::new(command_str).configure(|cmd| {
-                            for arg in &args {
-                                cmd.arg(arg);
-                            }
-                            for (k, v) in &env {
-                                cmd.env(k, v);
-                            }
-                        }),
-                    )?;
+                let transport = rmcp::transport::TokioChildProcess::new(
+                    Command::new(command_str).configure(|cmd| {
+                        for arg in &args {
+                            cmd.arg(arg);
+                        }
+                        for (k, v) in &env {
+                            cmd.env(k, v);
+                        }
+                    }),
+                )?;
 
-                    tracing::info!(
-                        server_id = id,
-                        command = %crate::sanitize::redact_secrets(command_str),
-                        "Spawning stdio MCP server"
-                    );
-                    ().serve(transport).await?
-                }
-                McpTransport::Http | McpTransport::Sse => {
-                    let url = config.url.as_deref().ok_or_else(|| {
-                        anyhow::anyhow!("HTTP/SSE transport requires a 'url' field")
-                    })?;
+                tracing::info!(
+                    server_id = id,
+                    command = %crate::sanitize::redact_secrets(command_str),
+                    "Spawning stdio MCP server"
+                );
+                ().serve(transport).await?
+            }
+            McpTransport::Http | McpTransport::Sse => {
+                let url = config
+                    .url
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("HTTP/SSE transport requires a 'url' field"))?;
 
-                    let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url);
+                let transport = rmcp::transport::StreamableHttpClientTransport::from_uri(url);
 
-                    tracing::info!(server_id = id, url = %crate::sanitize::redact_secrets(url), "Connecting to HTTP MCP server");
-                    ().serve(transport).await?
-                }
-            };
+                tracing::info!(server_id = id, url = %crate::sanitize::redact_secrets(url), "Connecting to HTTP MCP server");
+                ().serve(transport).await?
+            }
+        };
 
         let tools = service.peer().list_all_tools().await?;
 

@@ -120,13 +120,9 @@ fn bench_normalize_ascii_tables(c: &mut Criterion) {
     let mut group = c.benchmark_group("normalize_ascii_tables");
     for &rows in &[10, 100, 1_000] {
         let table = generate_table(rows);
-        group.bench_with_input(
-            BenchmarkId::new("rows", rows),
-            &table,
-            |b, input| {
-                b.iter(|| app.normalize_ascii_tables(input));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("rows", rows), &table, |b, input| {
+            b.iter(|| app.normalize_ascii_tables(input));
+        });
     }
     group.finish();
 }

@@ -14,7 +14,9 @@ fn wd() -> &'static Path {
 
 #[tokio::test]
 async fn test_sandbox_rejects_rm_rf() {
-    let result = inject_dynamic_context("Out: !`rm -rf /`", wd()).await.unwrap();
+    let result = inject_dynamic_context("Out: !`rm -rf /`", wd())
+        .await
+        .unwrap();
     assert!(
         result.contains("[command rejected:"),
         "rm should be rejected (not on allowlist): {result}"
@@ -169,18 +171,22 @@ async fn test_sandbox_empty_command_handled() {
 
 #[tokio::test]
 async fn test_sandbox_multiple_commands_mixed() {
-    let result = inject_dynamic_context(
-        "A: !`echo allowed` B: !`rm -rf /` C: !`echo also_ok`",
-        wd(),
-    )
-    .await
-    .unwrap();
-    assert!(result.contains("allowed"), "First echo should succeed: {result}");
+    let result =
+        inject_dynamic_context("A: !`echo allowed` B: !`rm -rf /` C: !`echo also_ok`", wd())
+            .await
+            .unwrap();
+    assert!(
+        result.contains("allowed"),
+        "First echo should succeed: {result}"
+    );
     assert!(
         result.contains("[command rejected:"),
         "rm should be rejected: {result}"
     );
-    assert!(result.contains("also_ok"), "Second echo should succeed: {result}");
+    assert!(
+        result.contains("also_ok"),
+        "Second echo should succeed: {result}"
+    );
 }
 
 #[tokio::test]

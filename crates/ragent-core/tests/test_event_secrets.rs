@@ -40,7 +40,10 @@ fn test_event_tool_result_redacted() {
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
-    assert!(!redacted.contains(secret), "GitHub token should be redacted from tool result");
+    assert!(
+        !redacted.contains(secret),
+        "GitHub token should be redacted from tool result"
+    );
 }
 
 #[test]
@@ -52,7 +55,10 @@ fn test_event_agent_error_redacted() {
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
-    assert!(!redacted.contains("eyJhbGci"), "JWT should be redacted from agent error");
+    assert!(
+        !redacted.contains("eyJhbGci"),
+        "JWT should be redacted from agent error"
+    );
 }
 
 #[test]
@@ -65,7 +71,10 @@ fn test_event_tool_call_args_redacted() {
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
-    assert!(!redacted.contains("eyJhbGci"), "JWT in tool args should be redacted");
+    assert!(
+        !redacted.contains("eyJhbGci"),
+        "JWT in tool args should be redacted"
+    );
 }
 
 #[test]
@@ -76,7 +85,10 @@ fn test_event_copilot_device_flow_redacted() {
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
-    assert!(!redacted.contains("gho_"), "Copilot token should be redacted");
+    assert!(
+        !redacted.contains("gho_"),
+        "Copilot token should be redacted"
+    );
 }
 
 #[test]
@@ -88,6 +100,8 @@ fn test_event_model_response_with_registered_secret() {
         session_id: "s1".into(),
         text: format!("The key is {custom_secret} and more text"),
         elapsed_ms: 123,
+        input_tokens: 10,
+        output_tokens: 20,
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
@@ -125,7 +139,10 @@ fn test_event_safe_text_delta_unchanged() {
     };
     let json = serde_json::to_string(&event).unwrap();
     let redacted = redact_secrets(&json);
-    assert_eq!(json, redacted, "Safe text should not be modified by redaction");
+    assert_eq!(
+        json, redacted,
+        "Safe text should not be modified by redaction"
+    );
 }
 
 // ── EventBus publish/subscribe ───────────────────────────────────
@@ -147,5 +164,8 @@ async fn test_event_bus_redacted_publish() {
     // and that redact_secrets would clean it.
     let json = serde_json::to_string(&received).unwrap();
     let redacted = redact_secrets(&json);
-    assert!(!redacted.contains("AKIAIOSF"), "Redact on received event should work");
+    assert!(
+        !redacted.contains("AKIAIOSF"),
+        "Redact on received event should work"
+    );
 }

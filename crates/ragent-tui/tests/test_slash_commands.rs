@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_core::{
     agent,
     event::EventBus,
@@ -16,12 +17,10 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_tui::App;
 use ragent_tui::app::{
     ConfiguredProvider, FileMenuEntry, FileMenuState, HistoryPickerState, LogEntry, LogLevel,
-    OutputViewState, OutputViewTarget,
-    ProviderSetupStep, ProviderSource, ScreenMode,
+    OutputViewState, OutputViewTarget, ProviderSetupStep, ProviderSource, ScreenMode,
 };
 
 /// Build an [`App`] backed by an in-memory database.
@@ -73,10 +72,23 @@ fn test_slash_clear_empties_messages() {
     assert_eq!(app.scroll_offset, 0, "scroll should reset");
     assert_eq!(app.status, "messages cleared");
     // Should log the command start, the action, and the completion.
-    assert!(app.log_entries.len() >= 2, "expected at least start+action logs");
+    assert!(
+        app.log_entries.len() >= 2,
+        "expected at least start+action logs"
+    );
     assert!(app.log_entries[0].message.contains("Executing /clear"));
-    assert!(app.log_entries.iter().any(|e| e.message.contains("cleared")));
-    assert!(app.log_entries.last().unwrap().message.contains("Finished /clear"));
+    assert!(
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("cleared"))
+    );
+    assert!(
+        app.log_entries
+            .last()
+            .unwrap()
+            .message
+            .contains("Finished /clear")
+    );
 }
 
 // ── /help ───────────────────────────────────────────────────────────
@@ -99,7 +111,10 @@ fn test_slash_help_shows_commands() {
     assert!(text.contains("/compact"), "help should mention /compact");
     assert!(text.contains("/agent"), "help should mention /agent");
     assert!(text.contains("/model"), "help should mention /model");
-    assert!(text.contains("/inputdiag"), "help should mention /inputdiag");
+    assert!(
+        text.contains("/inputdiag"),
+        "help should mention /inputdiag"
+    );
     assert!(text.contains("/help"), "help should mention /help");
 }
 
@@ -148,8 +163,18 @@ fn test_slash_system_sets_prompt() {
     // Should have start/action/finish logs
     assert!(app.log_entries.len() >= 2);
     assert!(app.log_entries[0].message.contains("Executing /system"));
-    assert!(app.log_entries.iter().any(|e| e.message.contains("System prompt set")));
-    assert!(app.log_entries.last().unwrap().message.contains("Finished /system"));
+    assert!(
+        app.log_entries
+            .iter()
+            .any(|e| e.message.contains("System prompt set"))
+    );
+    assert!(
+        app.log_entries
+            .last()
+            .unwrap()
+            .message
+            .contains("Finished /system")
+    );
 }
 
 #[test]
@@ -233,6 +258,96 @@ fn test_slash_log_toggles_panel() {
     assert_eq!(app.status, "log panel hidden");
 }
 
+// ── /llmstats ───────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_llmstats_shows_average_metrics() {
+    let mut app = make_app();
+    app.selected_model = Some("openai/gpt-4o".to_string());
+    app.llm_request_stats = vec![
+        ragent_tui::app::LlmRequestStat {
+            model_ref: "openai/gpt-4o".to_string(),
+            elapsed_ms: 1000,
+            input_tokens: 100,
+            output_tokens: 50,
+        },
+        ragent_tui::app::LlmRequestStat {
+            model_ref: "openai/gpt-4o".to_string(),
+            elapsed_ms: 500,
+            input_tokens: 200,
+            output_tokens: 100,
+        },
+    ];
+
+    app.execute_slash_command("/llmstats");
+
+    assert_eq!(app.status, "llm stats");
+    assert!(!app.messages.is_empty(), "llmstats should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("From: /llmstats"));
+    assert!(text.contains("Model: openai/gpt-4o"));
+    assert!(text.contains("Samples: 2"));
+    assert!(text.contains("Average round-trip"));
+    assert!(text.contains("Average prompt parsing"));
+    assert!(text.contains("Average output"));
+}
+
+#[test]
+fn test_slash_llmstats_no_samples_shows_message() {
+    let mut app = make_app();
+    app.selected_model = Some("openai/gpt-4o".to_string());
+
+    app.execute_slash_command("/llmstats");
+
+    assert_eq!(app.status, "llm stats unavailable");
+    assert!(!app.messages.is_empty(), "llmstats should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("No completed LLM responses yet"));
+}
+
+// ── /cost ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_cost_shows_estimated_cost() {
+    let mut app = make_app();
+    app.llm_request_stats = vec![
+        ragent_tui::app::LlmRequestStat {
+            model_ref: "openai/gpt-4o".to_string(),
+            elapsed_ms: 1000,
+            input_tokens: 1000,
+            output_tokens: 500,
+        },
+        ragent_tui::app::LlmRequestStat {
+            model_ref: "ollama/llama3.2".to_string(),
+            elapsed_ms: 750,
+            input_tokens: 800,
+            output_tokens: 400,
+        },
+    ];
+
+    app.execute_slash_command("/cost");
+
+    assert_eq!(app.status, "cost summary");
+    assert!(!app.messages.is_empty(), "cost should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("From: /cost"));
+    assert!(text.contains("Samples: 2"));
+    assert!(text.contains("Total tokens"));
+    assert!(text.contains("Estimated cost"));
+}
+
+#[test]
+fn test_slash_cost_no_samples_shows_message() {
+    let mut app = make_app();
+
+    app.execute_slash_command("/cost");
+
+    assert_eq!(app.status, "cost unavailable");
+    assert!(!app.messages.is_empty(), "cost should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("No completed LLM responses yet"));
+}
+
 // ── /compact ────────────────────────────────────────────────────────
 
 #[test]
@@ -312,10 +427,7 @@ fn test_slash_provider_selection_updates_displayed_provider() {
     });
 
     // Press Enter to confirm the model selection.
-    ragent_tui::input::handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-    );
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(
         app.configured_provider.as_ref().map(|p| p.id.as_str()),
@@ -337,6 +449,12 @@ fn test_provider_list_includes_generic_openai() {
             .any(|(id, name)| *id == "generic_openai" && *name == "Generic OpenAI API"),
         "provider list should include Generic OpenAI API"
     );
+    assert!(
+        ragent_tui::app::PROVIDER_LIST
+            .iter()
+            .any(|(id, name)| *id == "ollama_cloud" && *name == "Ollama Cloud"),
+        "provider list should include Ollama Cloud"
+    );
 }
 
 #[test]
@@ -353,19 +471,13 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
         selected: 0,
     });
 
-    ragent_tui::input::handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-    );
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 2),
         _ => panic!("expected SelectModel state"),
     }
 
-    ragent_tui::input::handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-    );
+    ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::SelectModel { selected, .. } => assert_eq!(*selected, 0),
         _ => panic!("expected SelectModel state"),
@@ -440,9 +552,41 @@ fn test_generic_openai_enter_key_persists_endpoint_setting() {
     ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert_eq!(
-        app.storage.get_setting("generic_openai_api_base").ok().flatten(),
+        app.storage
+            .get_setting("generic_openai_api_base")
+            .ok()
+            .flatten(),
         Some("http://localhost:11434/v1".to_string())
     );
+}
+
+#[test]
+fn test_provider_setup_paste_text_into_key_field() {
+    let mut app = make_app();
+    app.provider_setup = Some(ProviderSetupStep::EnterKey {
+        provider_id: "ollama_cloud".to_string(),
+        provider_name: "Ollama Cloud".to_string(),
+        key_input: String::new(),
+        key_cursor: 0,
+        endpoint_input: String::new(),
+        endpoint_cursor: 0,
+        editing_endpoint: false,
+        error: None,
+    });
+
+    app.paste_text_into_provider_setup("cloud-key");
+
+    match app.provider_setup.as_ref().expect("provider setup present") {
+        ProviderSetupStep::EnterKey {
+            key_input,
+            key_cursor,
+            ..
+        } => {
+            assert_eq!(key_input, "cloud-key");
+            assert_eq!(*key_cursor, 9);
+        }
+        _ => panic!("expected EnterKey"),
+    }
 }
 
 // ── unknown command ─────────────────────────────────────────────────
@@ -462,7 +606,13 @@ fn test_slash_unknown_command_shows_error() {
     assert!(app.log_entries.len() >= 2);
     assert!(app.log_entries.iter().any(|e| e.level == LogLevel::Warn));
     assert!(app.log_entries[0].message.contains("Executing /foobar"));
-    assert!(app.log_entries.last().unwrap().message.contains("Finished /foobar"));
+    assert!(
+        app.log_entries
+            .last()
+            .unwrap()
+            .message
+            .contains("Finished /foobar")
+    );
 }
 
 // ── input clearing ──────────────────────────────────────────────────
@@ -667,11 +817,7 @@ fn test_ctrl_home_end_bindings() {
 fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
     let mut app = make_app();
     app.input = "compare @first with @second".to_string();
-    let first_cursor = app
-        .input
-        .find("@first")
-        .expect("first mention exists")
-        + "@fi".len();
+    let first_cursor = app.input.find("@first").expect("first mention exists") + "@fi".len();
     app.input_cursor = app.input[..first_cursor].chars().count();
 
     app.project_files_cache = Some(vec![
@@ -694,11 +840,7 @@ fn test_file_menu_targets_mention_under_cursor_not_last_mention() {
 fn test_accept_file_menu_replaces_active_mention_span_only() {
     let mut app = make_app();
     app.input = "compare @first with @second".to_string();
-    let first_cursor = app
-        .input
-        .find("@first")
-        .expect("first mention exists")
-        + "@first".len();
+    let first_cursor = app.input.find("@first").expect("first mention exists") + "@first".len();
     app.input_cursor = app.input[..first_cursor].chars().count();
 
     app.file_menu = Some(FileMenuState {
@@ -800,13 +942,14 @@ fn test_file_menu_enter_accepts_without_sending() {
         current_dir: None,
     });
 
-    let action = ragent_tui::input::handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-    );
+    let action =
+        ragent_tui::input::handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     assert!(action.is_none(), "enter should accept mention but not send");
     assert_eq!(app.input, "@src/first.rs");
-    assert!(app.file_menu.is_none(), "menu should close after file acceptance");
+    assert!(
+        app.file_menu.is_none(),
+        "menu should close after file acceptance"
+    );
 }
 
 #[test]
@@ -836,15 +979,24 @@ fn test_slash_browse_refresh_updates_cache_metadata() {
         app.status.starts_with("browse index refreshed"),
         "status should reflect browse refresh"
     );
-    assert!(app.project_files_cache.is_some(), "cache should be populated");
-    assert!(app.project_files_cache_cwd.is_some(), "cache cwd should be set");
+    assert!(
+        app.project_files_cache.is_some(),
+        "cache should be populated"
+    );
+    assert!(
+        app.project_files_cache_cwd.is_some(),
+        "cache cwd should be set"
+    );
     assert!(
         app.project_files_cache_refreshed_at.is_some(),
         "cache timestamp should be set"
     );
     assert_eq!(
         app.project_files_cache_count,
-        app.project_files_cache.as_ref().map(|v| v.len()).unwrap_or(0)
+        app.project_files_cache
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0)
     );
 }
 
@@ -863,7 +1015,10 @@ fn test_update_file_menu_refreshes_cache_on_cwd_mismatch() {
     assert!(app.project_files_cache.is_some());
     assert_eq!(
         app.project_files_cache_count,
-        app.project_files_cache.as_ref().map(|v| v.len()).unwrap_or(0)
+        app.project_files_cache
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0)
     );
 }
 
@@ -1181,7 +1336,10 @@ fn test_slash_opt_help_shows_markdown_table() {
     app.execute_slash_command("/opt help");
 
     assert_eq!(app.status, "opt help");
-    assert!(!app.messages.is_empty(), "/opt help should produce a message");
+    assert!(
+        !app.messages.is_empty(),
+        "/opt help should produce a message"
+    );
     let text = app.messages.last().unwrap().text_content();
     // The table must list at least a few well-known methods
     assert!(text.contains("co_star"), "table should include co_star");
@@ -1190,7 +1348,10 @@ fn test_slash_opt_help_shows_markdown_table() {
     assert!(text.contains("draw"), "table should include draw");
     assert!(text.contains("rise"), "table should include rise");
     assert!(text.contains("meta"), "table should include meta");
-    assert!(text.contains("variational"), "table should include variational");
+    assert!(
+        text.contains("variational"),
+        "table should include variational"
+    );
     assert!(text.contains("q_star"), "table should include q_star");
     assert!(text.contains("openai"), "table should include openai");
     assert!(text.contains("claude"), "table should include claude");
@@ -1448,9 +1609,7 @@ fn test_slash_opt_adds_to_input_history() {
     app.execute_slash_command("/opt help");
 
     assert!(
-        app.input_history
-            .iter()
-            .any(|h| h.starts_with("/opt")),
+        app.input_history.iter().any(|h| h.starts_with("/opt")),
         "input history should include the /opt command"
     );
 }

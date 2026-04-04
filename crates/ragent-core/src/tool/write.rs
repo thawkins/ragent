@@ -65,6 +65,8 @@ impl Tool for WriteTool {
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
+        super::check_path_within_root(&path, &ctx.working_dir)?;
+
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await

@@ -111,6 +111,8 @@ fn test_event_serialization_roundtrip_all_variants() {
             session_id: "s1".into(),
             text: "Here is the answer".into(),
             elapsed_ms: 1234,
+            input_tokens: 100,
+            output_tokens: 200,
         },
         Event::ToolCallArgs {
             session_id: "s1".into(),

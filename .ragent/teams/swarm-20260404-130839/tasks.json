@@ -1,0 +1,90 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze ClaudeCode Competitor",
+      "description": "Review the source code in ../claude-code-sourcemap to understand ClaudeCode's features and capabilities. Document your findings including key functionalities, strengths, and potential gaps compared to our product. Save analysis to target/temp/swarmout/claudecode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:08:39.731359652Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s2",
+      "title": "Analyze Copilot-CLI Competitor",
+      "description": "Research and analyze copilot-cli competitor product. Document its features, capabilities, strengths, and weaknesses compared to our product. Focus on unique features we might be missing. Save analysis to target/temp/swarmout/copilotcli_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:08:39.731519846Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s3",
+      "title": "Analyze OpenCode Competitor",
+      "description": "Review the source code in ../opencode to understand OpenCode's features and implementation approach. Document key functionalities, innovative aspects, and areas where it outperforms our solution. Save analysis to target/temp/swarmout/opencode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:08:39.731709440Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s4",
+      "title": "Analyze RooCode Competitor",
+      "description": "Research and analyze roocode competitor product. Identify its core features, user experience elements, and technical implementations that differentiate it from our product. Save analysis to target/temp/swarmout/roocode_analysis.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:08:39.731907399Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s5",
+      "title": "Product Feature Review",
+      "description": "Conduct comprehensive review of our current product features and capabilities. Document existing functionality, user workflows, and current limitations. This will serve as baseline for comparison with competitors. Save to target/temp/swarmout/product_review.md",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [],
+      "created_at": "2026-04-04T13:08:39.732164988Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s6",
+      "title": "Synthesize Competitor Analysis and Generate Feature Recommendations",
+      "description": "Consolidate all competitor analysis documents and product review to identify missing features in our product. Create a prioritized list of feature additions we should implement based on competitive gaps and market opportunities.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-04T13:08:39.732417257Z",
+      "claimed_at": null,
+      "completed_at": null
+    },
+    {
+      "id": "s7",
+      "title": "Create Implementation Plan with Milestones",
+      "description": "Using the recommended features from s6, create a detailed implementation plan document in target/temp/swarmout/SWARMOUT2.md. Include: 1) Executive summary of recommendations, 2) Detailed feature descriptions, 3) Implementation milestones with timelines, 4) Specific tasks for each milestone, 5) Resource requirements. Structure the document professionally with clear sections.",
+      "status": "pending",
+      "assigned_to": null,
+      "depends_on": [
+        "s6"
+      ],
+      "created_at": "2026-04-04T13:08:39.732700821Z",
+      "claimed_at": null,
+      "completed_at": null
+    }
+  ]
+}

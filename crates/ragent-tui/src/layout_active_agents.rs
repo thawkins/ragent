@@ -96,12 +96,18 @@ fn build_task_rows<'a>(
 
         let spans = vec![
             Span::styled("◦ ", Style::default().fg(dot_color)),
-            Span::styled(format!("{:<10} ", tid), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!("{:<10} ", tid),
+                Style::default().fg(Color::DarkGray),
+            ),
             Span::styled(
                 format!("{:<32}", agent_label),
                 Style::default().fg(name_color),
             ),
-            Span::styled(format!("{:<8} ", type_label), Style::default().fg(name_color)),
+            Span::styled(
+                format!("{:<8} ", type_label),
+                Style::default().fg(name_color),
+            ),
             Span::styled(
                 format!("{:>8} ", elapsed),
                 Style::default().fg(Color::DarkGray),
@@ -153,55 +159,63 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     let mut lines: Vec<Line> = Vec::new();
 
-          // ── header ─────────────────────────────────────────────────────────────
-          lines.push(Line::from(vec![
-              Span::styled(
-                  format!("  {:<10} {:<32}{:<8} {:>8} {:>7}", "id", "name", "type", "elapsed", "steps"),
-                  Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
-              ),
-          ]));
-    
-          // ── primary agent ───────────────────────────────────────────────────────
-           let mut primary_spans = vec![
-               Span::styled("● ", Style::default().fg(Color::Green)),
-               Span::styled(
-                   format!("{:<10} ", "lead"),
-                   Style::default().fg(Color::DarkGray),
-               ),
-               Span::styled(
-                   format!("{:<32}", primary_name),
-                   Style::default()
-                       .fg(Color::Green)
-                       .add_modifier(Modifier::BOLD),
-               ),
-               Span::styled(
-                   format!("{:<8} ", "primary"),
-                   Style::default().fg(Color::Green),
-               ),
-               Span::styled(
-                   format!("{:>8} ", "-"),
-                   Style::default().fg(Color::DarkGray),
-               ),
-               Span::styled(
-                   format!("{:>7}", primary_steps),
-                   Style::default().fg(Color::DarkGray),
-               ),
-           ];
-          if primary_is_custom {
-              primary_spans.push(Span::styled(
-                  " [C]",
-                  Style::default()
-                      .fg(Color::Magenta)
-                      .add_modifier(Modifier::BOLD),
-              ));
-          }
-          lines.push(Line::from(primary_spans));
+    // ── header ─────────────────────────────────────────────────────────────
+    lines.push(Line::from(vec![Span::styled(
+        format!(
+            "  {:<10} {:<32}{:<8} {:>8} {:>7}",
+            "id", "name", "type", "elapsed", "steps"
+        ),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+    )]));
 
-          // ── sub-agents (depth 0 = direct children of primary) ──────────────────
-          build_task_rows(&tasks, &primary_session, 0, &[], &app.event_bus, &custom_names, &teammate_ids, &mut lines);
+    // ── primary agent ───────────────────────────────────────────────────────
+    let mut primary_spans = vec![
+        Span::styled("● ", Style::default().fg(Color::Green)),
+        Span::styled(
+            format!("{:<10} ", "lead"),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            format!("{:<32}", primary_name),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{:<8} ", "primary"),
+            Style::default().fg(Color::Green),
+        ),
+        Span::styled(format!("{:>8} ", "-"), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{:>7}", primary_steps),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ];
+    if primary_is_custom {
+        primary_spans.push(Span::styled(
+            " [C]",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    lines.push(Line::from(primary_spans));
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    // ── sub-agents (depth 0 = direct children of primary) ──────────────────
+    build_task_rows(
+        &tasks,
+        &primary_session,
+        0,
+        &[],
+        &app.event_bus,
+        &custom_names,
+        &teammate_ids,
+        &mut lines,
+    );
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
 
     let total_lines = paragraph.line_count(area.width) as u16;
     let visible = area.height;

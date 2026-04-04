@@ -154,7 +154,10 @@ fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
     if let Some(text) = content.as_str() {
         return text
             .lines()
-            .map(|l| OdtPara { text: l.to_owned(), style: OdtStyle::Normal })
+            .map(|l| OdtPara {
+                text: l.to_owned(),
+                style: OdtStyle::Normal,
+            })
             .collect();
     }
 
@@ -167,7 +170,13 @@ fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
     } else {
         // Fallback: serialise to string
         let s = content.to_string();
-        return s.lines().map(|l| OdtPara { text: l.to_owned(), style: OdtStyle::Normal }).collect();
+        return s
+            .lines()
+            .map(|l| OdtPara {
+                text: l.to_owned(),
+                style: OdtStyle::Normal,
+            })
+            .collect();
     };
 
     let mut paras: Vec<OdtPara> = Vec::new();
@@ -175,23 +184,39 @@ fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
         let elem_type = elem["type"].as_str().unwrap_or("paragraph");
         match elem_type {
             "heading" => {
-                let text = elem["text"].as_str().or_else(|| elem["heading"].as_str()).unwrap_or("");
+                let text = elem["text"]
+                    .as_str()
+                    .or_else(|| elem["heading"].as_str())
+                    .unwrap_or("");
                 let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
-                paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::Heading(level) });
+                paras.push(OdtPara {
+                    text: text.to_owned(),
+                    style: OdtStyle::Heading(level),
+                });
             }
             "bullet_list" => {
                 if let Some(items) = elem["items"].as_array() {
                     for item in items {
-                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
-                        paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::ListBullet });
+                        let text = item
+                            .as_str()
+                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(OdtPara {
+                            text: text.to_owned(),
+                            style: OdtStyle::ListBullet,
+                        });
                     }
                 }
             }
             "ordered_list" | "numbered_list" => {
                 if let Some(items) = elem["items"].as_array() {
                     for item in items {
-                        let text = item.as_str().unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
-                        paras.push(OdtPara { text: text.to_owned(), style: OdtStyle::ListNumber });
+                        let text = item
+                            .as_str()
+                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""));
+                        paras.push(OdtPara {
+                            text: text.to_owned(),
+                            style: OdtStyle::ListNumber,
+                        });
                     }
                 }
             }
@@ -203,9 +228,15 @@ fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
             }
             _ => {
                 if elem["heading"].as_str().is_some() || elem["level"].as_u64().is_some() {
-                    let t = elem["heading"].as_str().or_else(|| elem["text"].as_str()).unwrap_or("");
+                    let t = elem["heading"]
+                        .as_str()
+                        .or_else(|| elem["text"].as_str())
+                        .unwrap_or("");
                     let level = elem["level"].as_u64().unwrap_or(1).clamp(1, 6);
-                    paras.push(OdtPara { text: t.to_owned(), style: OdtStyle::Heading(level) });
+                    paras.push(OdtPara {
+                        text: t.to_owned(),
+                        style: OdtStyle::Heading(level),
+                    });
                 } else {
                     let text = elem["text"].as_str().unwrap_or("");
                     let style = match elem["style"].as_str().unwrap_or("Normal") {
@@ -220,7 +251,10 @@ fn resolve_odt_paras(content: &Value) -> Vec<OdtPara> {
                         "Code" | "code" | "Preformatted" => OdtStyle::Code,
                         _ => OdtStyle::Normal,
                     };
-                    paras.push(OdtPara { text: text.to_owned(), style });
+                    paras.push(OdtPara {
+                        text: text.to_owned(),
+                        style,
+                    });
                 }
             }
         }
@@ -301,24 +335,42 @@ fn odt_content_structured(paras: &[OdtPara]) -> String {
     }).collect();
 
     let styles = concat!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>"#, "\n",
-        r#"<office:document-content"#, "\n",
-        r#"  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0""#, "\n",
-        r#"  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#, "\n",
-        r#"  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0""#, "\n",
-        r#"  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0">"#, "\n",
-        r#"  <office:automatic-styles>"#, "\n",
-        r#"    <style:style style:name="Text_20_Body" style:family="paragraph"><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_1" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.2in" fo:margin-bottom="0.1in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_2" style:family="paragraph"><style:text-properties fo:font-size="14pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.15in" fo:margin-bottom="0.08in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_3" style:family="paragraph"><style:text-properties fo:font-size="12pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_4" style:family="paragraph"><style:text-properties fo:font-size="11pt" fo:font-weight="bold" fo:font-style="italic"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_5" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-weight="bold"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Heading_20_6" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-style="italic"/></style:style>"#, "\n",
-        r#"    <style:style style:name="List_20_Bullet" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="List_20_Number" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#, "\n",
-        r#"    <style:style style:name="Preformatted_20_Text" style:family="paragraph"><style:text-properties style:font-name="Courier New" fo:font-size="10pt"/></style:style>"#, "\n",
-        r#"  </office:automatic-styles>"#, "\n",
+        r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+        "\n",
+        r#"<office:document-content"#,
+        "\n",
+        r#"  xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0""#,
+        "\n",
+        r#"  xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#,
+        "\n",
+        r#"  xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0""#,
+        "\n",
+        r#"  xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0">"#,
+        "\n",
+        r#"  <office:automatic-styles>"#,
+        "\n",
+        r#"    <style:style style:name="Text_20_Body" style:family="paragraph"><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_1" style:family="paragraph"><style:text-properties fo:font-size="18pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.2in" fo:margin-bottom="0.1in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_2" style:family="paragraph"><style:text-properties fo:font-size="14pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.15in" fo:margin-bottom="0.08in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_3" style:family="paragraph"><style:text-properties fo:font-size="12pt" fo:font-weight="bold"/><style:paragraph-properties fo:margin-top="0.1in" fo:margin-bottom="0.05in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_4" style:family="paragraph"><style:text-properties fo:font-size="11pt" fo:font-weight="bold" fo:font-style="italic"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_5" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-weight="bold"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Heading_20_6" style:family="paragraph"><style:text-properties fo:font-size="10pt" fo:font-style="italic"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="List_20_Bullet" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="List_20_Number" style:family="paragraph"><style:paragraph-properties fo:margin-left="0.3in" fo:text-indent="-0.2in"/></style:style>"#,
+        "\n",
+        r#"    <style:style style:name="Preformatted_20_Text" style:family="paragraph"><style:text-properties style:font-name="Courier New" fo:font-size="10pt"/></style:style>"#,
+        "\n",
+        r#"  </office:automatic-styles>"#,
+        "\n",
     );
 
     format!(
@@ -370,40 +422,50 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
     // Structured: array of slide objects [{title, content:[...]}]
     if let Some(arr) = content.as_array() {
         if arr.first().map(|v| v.is_object()).unwrap_or(false) {
-            return arr.iter().map(|s| {
+            return arr
+                .iter()
+                .map(|s| {
+                    let title = s["title"].as_str().unwrap_or("").to_owned();
+                    let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
+                        c.iter()
+                            .map(|item| {
+                                item.as_str()
+                                    .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                                    .to_owned()
+                            })
+                            .collect()
+                    } else if let Some(t) = s["text"].as_str() {
+                        t.lines().map(str::to_owned).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    OdpSlide { title, lines }
+                })
+                .collect();
+        }
+    }
+    // Object with slides key
+    if let Some(arr) = content["slides"].as_array() {
+        return arr
+            .iter()
+            .map(|s| {
                 let title = s["title"].as_str().unwrap_or("").to_owned();
                 let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
-                    c.iter().map(|item| {
-                        item.as_str()
-                            .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                            .to_owned()
-                    }).collect()
+                    c.iter()
+                        .map(|item| {
+                            item.as_str()
+                                .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                                .to_owned()
+                        })
+                        .collect()
                 } else if let Some(t) = s["text"].as_str() {
                     t.lines().map(str::to_owned).collect()
                 } else {
                     Vec::new()
                 };
                 OdpSlide { title, lines }
-            }).collect();
-        }
-    }
-    // Object with slides key
-    if let Some(arr) = content["slides"].as_array() {
-        return arr.iter().map(|s| {
-            let title = s["title"].as_str().unwrap_or("").to_owned();
-            let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
-                c.iter().map(|item| {
-                    item.as_str()
-                        .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                        .to_owned()
-                }).collect()
-            } else if let Some(t) = s["text"].as_str() {
-                t.lines().map(str::to_owned).collect()
-            } else {
-                Vec::new()
-            };
-            OdpSlide { title, lines }
-        }).collect();
+            })
+            .collect();
     }
     // Plain text: split on blank lines
     let text = content.as_str().unwrap_or("");
@@ -472,14 +534,18 @@ fn odp_content_structured(slides: &[OdpSlide]) -> String {
         } else {
             String::new()
         };
-        let body_xml: String = slide.lines.iter().map(|l| {
-            format!(
-                "      <draw:frame presentation:class=\"body\" \
+        let body_xml: String = slide
+            .lines
+            .iter()
+            .map(|l| {
+                format!(
+                    "      <draw:frame presentation:class=\"body\" \
                  svg:x=\"0.5in\" svg:y=\"2in\" svg:width=\"9in\" svg:height=\"5in\">\
                  <draw:text-box><text:p>{}</text:p></draw:text-box></draw:frame>\n",
-                xml_escape(l)
-            )
-        }).collect();
+                    xml_escape(l)
+                )
+            })
+            .collect();
         slide_xml.push_str(&format!(
             "    <draw:page draw:name=\"Slide {n}\" draw:master-page-name=\"Default\">\n{title_xml}{body_xml}    </draw:page>\n",
             n = i + 1,

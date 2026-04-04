@@ -91,6 +91,8 @@ impl Tool for PatchTool {
                 resolve_path(&ctx.working_dir, &fp.path)
             };
 
+            super::check_path_within_root(&target, &ctx.working_dir)?;
+
             let content = tokio::fs::read_to_string(&target)
                 .await
                 .with_context(|| format!("Failed to read file: {}", target.display()))?;
@@ -203,7 +205,10 @@ fn parse_unified_diff(diff_text: &str) -> Result<Vec<FilePatch>> {
             }
 
             if !hunks.is_empty() {
-                result.push(FilePatch { path: file_path, hunks });
+                result.push(FilePatch {
+                    path: file_path,
+                    hunks,
+                });
             }
         } else {
             i += 1;

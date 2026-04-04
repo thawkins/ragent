@@ -227,7 +227,11 @@ impl Tool for GrepTool {
                 if match_count == 1 { "" } else { "es" },
                 files_searched,
                 if files_searched == 1 { "" } else { "s" },
-                if truncated { " (results truncated at limit)" } else { "" },
+                if truncated {
+                    " (results truncated at limit)"
+                } else {
+                    ""
+                },
             );
             Ok(ToolOutput {
                 content: format!("{summary}\n\n{content}"),
@@ -291,5 +295,3 @@ fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
         working_dir.join(p)
     }
 }
-
-

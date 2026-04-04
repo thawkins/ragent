@@ -4,7 +4,9 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::team::{Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TeamStore, find_team_dir};
+use crate::team::{
+    Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TeamStore, find_team_dir,
+};
 
 /// Teammate submits a plan; sets member plan_status to Pending.
 pub struct TeamSubmitPlanTool;

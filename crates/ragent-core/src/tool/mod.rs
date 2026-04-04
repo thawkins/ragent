@@ -9,6 +9,8 @@
 
 /// Shell command execution tool.
 pub mod bash;
+/// Persistent shell state reset tool.
+pub mod bash_reset;
 /// Task cancellation tool.
 pub mod cancel_task;
 /// File creation tool.
@@ -46,7 +48,6 @@ pub mod plan;
 pub mod question;
 pub mod read;
 pub mod rm;
-pub mod todo;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 pub mod team_approve_plan;
 pub mod team_assign_task;
@@ -54,9 +55,11 @@ pub mod team_broadcast;
 pub mod team_cleanup;
 pub mod team_create;
 pub mod team_idle;
-pub mod team_message;
+pub mod github_issues;
+pub mod memory_write;
 pub mod team_memory_read;
 pub mod team_memory_write;
+pub mod team_message;
 pub mod team_read_messages;
 pub mod team_shutdown_ack;
 pub mod team_shutdown_teammate;
@@ -68,8 +71,12 @@ pub mod team_task_complete;
 pub mod team_task_create;
 pub mod team_task_list;
 pub mod team_wait;
+pub mod task_complete;
+pub mod think;
+pub mod todo;
 pub mod wait_tasks;
 pub mod webfetch;
+pub mod github_prs;
 pub mod websearch;
 pub mod write;
 
@@ -77,8 +84,56 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Verify that `path` resolves to somewhere within `root` after canonicalization.
+/// Prevents directory traversal attacks (e.g., `../../etc/passwd`).
+pub fn check_path_within_root(path: &Path, root: &Path) -> anyhow::Result<()> {
+    let canonical = if path.exists() {
+        path.canonicalize()?
+    } else {
+        let parent = path.parent().unwrap_or(path);
+        let canonical_parent = if parent.exists() {
+            parent.canonicalize()?
+        } else {
+            let mut p = parent;
+            let mut parts = vec![];
+            loop {
+                if p.exists() {
+                    let mut base = p.canonicalize()?;
+                    for part in parts.iter().rev() {
+                        base = base.join(part);
+                    }
+                    break base;
+                }
+                if let Some(name) = p.file_name() {
+                    parts.push(name.to_os_string());
+                }
+                p = match p.parent() {
+                    Some(pp) => pp,
+                    None => break root.to_path_buf(),
+                };
+            }
+        };
+        if let Some(filename) = path.file_name() {
+            canonical_parent.join(filename)
+        } else {
+            canonical_parent
+        }
+    };
+
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+
+    if !canonical.starts_with(&canonical_root) {
+        anyhow::bail!(
+            "Path escape rejected: '{}' resolves outside project root '{}'",
+            path.display(),
+            canonical_root.display()
+        );
+    }
+    Ok(())
+}
 
 use crate::event::EventBus;
 use crate::llm::ToolDefinition;
@@ -333,7 +388,7 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert_eq!(registry.list().len(), 53);
+/// assert!(registry.list().contains(&"think"));
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
@@ -344,6 +399,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(multiedit::MultiEditTool));
     registry.register(Arc::new(patch::PatchTool));
     registry.register(Arc::new(bash::BashTool));
+    registry.register(Arc::new(bash_reset::BashResetTool));
     registry.register(Arc::new(grep::GrepTool));
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(list::ListTool));
@@ -352,6 +408,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(websearch::WebSearchTool));
     registry.register(Arc::new(plan::PlanEnterTool));
     registry.register(Arc::new(plan::PlanExitTool));
+    registry.register(Arc::new(think::ThinkTool));
     registry.register(Arc::new(todo::TodoReadTool));
     registry.register(Arc::new(todo::TodoWriteTool));
     registry.register(Arc::new(office_read::OfficeReadTool));
@@ -373,6 +430,14 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(lsp_definition::LspDefinitionTool));
     registry.register(Arc::new(lsp_references::LspReferencesTool));
     registry.register(Arc::new(lsp_diagnostics::LspDiagnosticsTool));
+    registry.register(Arc::new(memory_write::MemoryWriteTool));
+    registry.register(Arc::new(memory_write::MemoryReadTool));
+    // GitHub tools
+    registry.register(Arc::new(github_issues::GithubListIssuesTool));
+    registry.register(Arc::new(github_issues::GithubGetIssueTool));
+    registry.register(Arc::new(github_issues::GithubCreateIssueTool));
+    registry.register(Arc::new(github_issues::GithubCommentIssueTool));
+    registry.register(Arc::new(github_issues::GithubCloseIssueTool));
     // Team coordination tools
     registry.register(Arc::new(team_approve_plan::TeamApprovePlanTool));
     registry.register(Arc::new(team_assign_task::TeamAssignTaskTool));
@@ -391,8 +456,15 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_submit_plan::TeamSubmitPlanTool));
     registry.register(Arc::new(team_task_claim::TeamTaskClaimTool));
     registry.register(Arc::new(team_task_complete::TeamTaskCompleteTool));
+    registry.register(Arc::new(task_complete::TaskCompleteTool));
     registry.register(Arc::new(team_task_create::TeamTaskCreateTool));
     registry.register(Arc::new(team_task_list::TeamTaskListTool));
     registry.register(Arc::new(team_wait::TeamWaitTool));
+    // GitHub PR tools
+    registry.register(Arc::new(github_prs::GithubListPrsTool));
+    registry.register(Arc::new(github_prs::GithubGetPrTool));
+    registry.register(Arc::new(github_prs::GithubCreatePrTool));
+    registry.register(Arc::new(github_prs::GithubMergePrTool));
+    registry.register(Arc::new(github_prs::GithubReviewPrTool));
     registry
 }

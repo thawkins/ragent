@@ -34,15 +34,18 @@ fn test_yolo_toggle_idempotent_double() {
     yolo::set_enabled(false);
     yolo::toggle();
     yolo::toggle();
-    assert!(!yolo::is_enabled(), "double toggle returns to original state");
+    assert!(
+        !yolo::is_enabled(),
+        "double toggle returns to original state"
+    );
 }
 
 // --- Integration: bash denied patterns ---
 
-use std::sync::Arc;
-use std::path::PathBuf;
-use ragent_core::tool::{Tool, ToolContext};
 use ragent_core::event::EventBus;
+use ragent_core::tool::{Tool, ToolContext};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 fn make_ctx() -> ToolContext {
     ToolContext {
@@ -94,15 +97,18 @@ async fn test_yolo_off_rejects_denied_bash_pattern() {
         )
         .await;
 
-    assert!(result.is_err(), "should reject denied pattern when YOLO is off");
+    assert!(
+        result.is_err(),
+        "should reject denied pattern when YOLO is off"
+    );
 }
 
 // --- Integration: MCP config validation ---
 
 #[test]
 fn test_yolo_allows_mcp_metacharacters() {
-    use ragent_core::mcp::validate_mcp_config;
     use ragent_core::config::{McpServerConfig, McpTransport};
+    use ragent_core::mcp::validate_mcp_config;
 
     yolo::set_enabled(true);
 
@@ -115,15 +121,19 @@ fn test_yolo_allows_mcp_metacharacters() {
         disabled: false,
     };
     let result = validate_mcp_config("test-server", &config);
-    assert!(result.is_ok(), "YOLO should skip MCP validation, got: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "YOLO should skip MCP validation, got: {:?}",
+        result
+    );
 
     yolo::set_enabled(false);
 }
 
 #[test]
 fn test_yolo_off_rejects_mcp_metacharacters() {
-    use ragent_core::mcp::validate_mcp_config;
     use ragent_core::config::{McpServerConfig, McpTransport};
+    use ragent_core::mcp::validate_mcp_config;
 
     yolo::set_enabled(false);
 
@@ -136,5 +146,8 @@ fn test_yolo_off_rejects_mcp_metacharacters() {
         disabled: false,
     };
     let result = validate_mcp_config("test-server", &config);
-    assert!(result.is_err(), "should reject metacharacters when YOLO is off");
+    assert!(
+        result.is_err(),
+        "should reject metacharacters when YOLO is off"
+    );
 }

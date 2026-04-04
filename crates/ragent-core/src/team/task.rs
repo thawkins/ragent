@@ -158,8 +158,7 @@ impl TaskStore {
         if raw.trim().is_empty() {
             return Ok(TaskList::default());
         }
-        serde_json::from_str(&raw)
-            .with_context(|| format!("parse {}", self.path.display()))
+        serde_json::from_str(&raw).with_context(|| format!("parse {}", self.path.display()))
     }
 
     /// Write the task list (caller must hold the lock).
@@ -209,7 +208,9 @@ impl TaskStore {
         let already_in_progress = list
             .tasks
             .iter()
-            .find(|t| t.status == TaskStatus::InProgress && t.assigned_to.as_deref() == Some(agent_id))
+            .find(|t| {
+                t.status == TaskStatus::InProgress && t.assigned_to.as_deref() == Some(agent_id)
+            })
             .cloned();
         if let Some(active) = already_in_progress {
             file.unlock()?;
@@ -217,10 +218,7 @@ impl TaskStore {
             return Ok((Some(active), true));
         }
 
-        let idx = list
-            .tasks
-            .iter()
-            .position(|t| t.is_claimable(&done));
+        let idx = list.tasks.iter().position(|t| t.is_claimable(&done));
 
         if let Some(i) = idx {
             list.tasks[i].status = TaskStatus::InProgress;
@@ -280,7 +278,9 @@ impl TaskStore {
             file.unlock()?;
             return Err(anyhow!(
                 "agent {} already has task '{}' in progress; must complete it before claiming '{}'",
-                agent_id, other.id, task_id
+                agent_id,
+                other.id,
+                task_id
             ));
         }
 
@@ -301,7 +301,8 @@ impl TaskStore {
                 file.unlock()?;
                 return Err(anyhow!(
                     "task '{task_id}' is already assigned to {}, not {}",
-                    assigned_to, agent_id
+                    assigned_to,
+                    agent_id
                 ));
             }
         }
@@ -352,19 +353,20 @@ impl TaskStore {
         let mut list: TaskList = if raw.trim().is_empty() {
             TaskList::default()
         } else {
-            serde_json::from_str(&raw)
-                .with_context(|| "parse tasks.json")?
+            serde_json::from_str(&raw).with_context(|| "parse tasks.json")?
         };
 
-        let available_ids: Vec<String> = list.tasks.iter()
+        let available_ids: Vec<String> = list
+            .tasks
+            .iter()
             .map(|t| format!("{} ({})", t.id, t.title))
             .collect();
-        let task = list
-            .get_mut(task_id)
-            .ok_or_else(|| anyhow!(
+        let task = list.get_mut(task_id).ok_or_else(|| {
+            anyhow!(
                 "task '{task_id}' not found. Available tasks: [{}]",
                 available_ids.join(", ")
-            ))?;
+            )
+        })?;
 
         // Auto-claim if the task is pending/unclaimed, rather than rejecting
         if task.assigned_to.as_deref() != Some(agent_id) {
@@ -497,19 +499,20 @@ impl TaskStore {
         let mut list: TaskList = if raw.trim().is_empty() {
             TaskList::default()
         } else {
-            serde_json::from_str(&raw)
-                .with_context(|| "parse tasks.json")?
+            serde_json::from_str(&raw).with_context(|| "parse tasks.json")?
         };
 
-        let available_ids: Vec<String> = list.tasks.iter()
+        let available_ids: Vec<String> = list
+            .tasks
+            .iter()
             .map(|t| format!("{} ({})", t.id, t.title))
             .collect();
-        let task = list
-            .get_mut(task_id)
-            .ok_or_else(|| anyhow!(
+        let task = list.get_mut(task_id).ok_or_else(|| {
+            anyhow!(
                 "task '{task_id}' not found. Available tasks: [{}]",
                 available_ids.join(", ")
-            ))?;
+            )
+        })?;
         f(task);
         let updated = task.clone();
 
@@ -538,8 +541,7 @@ impl TaskStore {
         let mut list: TaskList = if raw.trim().is_empty() {
             TaskList::default()
         } else {
-            serde_json::from_str(&raw)
-                .with_context(|| "parse tasks.json")?
+            serde_json::from_str(&raw).with_context(|| "parse tasks.json")?
         };
 
         let pos = list
