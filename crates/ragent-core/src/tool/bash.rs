@@ -212,10 +212,30 @@ pub fn is_safe_command(cmd: &str) -> bool {
 
 /// Check if command uses a banned tool (e.g., curl, wget).
 fn contains_banned_command(cmd: &str) -> bool {
-    let trimmed = cmd.trim().to_lowercase();
-    BANNED_COMMANDS
-        .iter()
-        .any(|banned| trimmed.contains(banned))
+    let cmd_lower = cmd.trim().to_lowercase();
+    let bytes = cmd_lower.as_bytes();
+    let clen = bytes.len();
+
+    BANNED_COMMANDS.iter().any(|banned| {
+        let banned_bytes = banned.as_bytes();
+        let blen = banned_bytes.len();
+        if clen < blen {
+            return false;
+        }
+        // Require word boundaries: banned name must not be part of a longer identifier.
+        // Characters that delimit command tokens: whitespace, |, ;, &, (, ), `, ', "
+        let is_boundary = |b: u8| !b.is_ascii_alphanumeric() && b != b'_' && b != b'-';
+        for i in 0..=(clen - blen) {
+            if &bytes[i..i + blen] == banned_bytes {
+                let before_ok = i == 0 || is_boundary(bytes[i - 1]);
+                let after_ok = i + blen == clen || is_boundary(bytes[i + blen]);
+                if before_ok && after_ok {
+                    return true;
+                }
+            }
+        }
+        false
+    })
 }
 
 /// Check if command tries to escape the working directory.

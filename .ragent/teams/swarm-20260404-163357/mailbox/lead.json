@@ -1,0 +1,11 @@
+[
+  {
+    "message_id": "7347240b-99b2-4512-81df-f8365f8036d0",
+    "from": "tm-001",
+    "to": "lead",
+    "type": "message",
+    "content": "I attempted to claim task s1 but it's assigned to tm-003. Should I work on a different task or wait for reassignment?",
+    "sent_at": "2026-04-04T16:34:35.201400605Z",
+    "read": false
+  }
+]

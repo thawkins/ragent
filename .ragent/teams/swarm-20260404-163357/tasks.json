@@ -1,0 +1,77 @@
+{
+  "team_name": "",
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Analyze Current Product",
+      "description": "Examine the current project's source code and documentation. Identify existing features, architecture, and any limitations or missing capabilities that could be enhanced. Summarize findings in a markdown file named product_analysis.md and place it in target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-04T16:33:57.810662265Z",
+      "claimed_at": "2026-04-04T16:34:20.255642038Z",
+      "completed_at": "2026-04-04T16:34:55.585290648Z"
+    },
+    {
+      "id": "s2",
+      "title": "Analyze Competitor: claudecode",
+      "description": "Review the source code located at ../claude-code-sourcemap. Identify its core features, unique capabilities, UX patterns, and any advanced functionality not present in the current product. Document strengths, weaknesses, and noteworthy implementation details in competitor_ClaudeCode.md inside target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "tm-002",
+      "depends_on": [],
+      "created_at": "2026-04-04T16:33:57.810775035Z",
+      "claimed_at": "2026-04-04T16:34:02.144693326Z",
+      "completed_at": "2026-04-04T16:36:10.933198177Z"
+    },
+    {
+      "id": "s3",
+      "title": "Analyze Competitor: copilot-cli",
+      "description": "Inspect the copilot-cli repository (path provided by the user). Catalog its main features, command‑line interface design, integration points, and any innovative approaches. Write a concise analysis in competitor_CopilotCLI.md and store it in target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "tm-003",
+      "depends_on": [],
+      "created_at": "2026-04-04T16:33:57.810897999Z",
+      "claimed_at": "2026-04-04T16:34:16.048815721Z",
+      "completed_at": "2026-04-04T16:34:16.048817039Z"
+    },
+    {
+      "id": "s4",
+      "title": "Analyze Competitor: OpenCode",
+      "description": "Explore the source code at ../opencode. Determine key functionalities, tooling support, and any differentiating features compared to the current product. Summarize the analysis in competitor_OpenCode.md within target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "tm-004",
+      "depends_on": [],
+      "created_at": "2026-04-04T16:33:57.811027614Z",
+      "claimed_at": "2026-04-04T16:34:02.944992503Z",
+      "completed_at": "2026-04-04T16:35:57.464654032Z"
+    },
+    {
+      "id": "s5",
+      "title": "Analyze Competitor: roocode",
+      "description": "Examine the roocode project (source location provided by the user). Identify its major capabilities, workflow, and any advanced features that could inspire enhancements. Produce an analysis file named competitor_RooCode.md and place it in target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "tm-005",
+      "depends_on": [],
+      "created_at": "2026-04-04T16:33:57.811172469Z",
+      "claimed_at": "2026-04-04T16:34:03.855963782Z",
+      "completed_at": "2026-04-04T16:34:23.941870783Z"
+    },
+    {
+      "id": "s6",
+      "title": "Generate Feature Recommendation Document (SWARMOUT2.md)",
+      "description": "Combine the insights from product_analysis.md and all competitor_*.md files. Propose concrete feature additions for the current product, referencing competitive gaps. Create a detailed implementation plan that includes Milestones and granular Tasks for each suggested feature. Write all of this into SWARMOUT2.md and save the file in target/temp/swarmout.",
+      "status": "completed",
+      "assigned_to": "swarm",
+      "depends_on": [
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5"
+      ],
+      "created_at": "2026-04-04T16:33:57.811343Z",
+      "claimed_at": "2026-04-04T16:36:10.933692249Z",
+      "completed_at": "2026-04-04T16:36:10.933693004Z"
+    }
+  ]
+}
