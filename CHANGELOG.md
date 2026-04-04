@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.0-alpha.24] - 2026-04-04
+
+### Fixed
+- **Security Audit CI** — resolved all failures in both `cargo audit` and `cargo deny check` jobs:
+  - Upgraded `criterion` 0.4→0.5 in `ragent-core` and `ragent-server` (eliminates `atty` RUSTSEC-2021-0145/2024-0375)
+  - Updated `rustls-webpki` 0.103.9→0.103.10 (fixes RUSTSEC-2026-0049 CRL matching bug)
+  - Updated `quinn-proto` 0.11.13→0.11.14 (fixes RUSTSEC-2026-0037 Quinn DoS)
+  - Added `.cargo/audit.toml` to ignore RUSTSEC-2026-0002 (`lru` via ratatui; unexploitable)
+  - Rewrote `deny.toml` for cargo-deny ≥0.19 schema (removed obsolete keys: `vulnerability`, `unmaintained`, `unlicensed`, `copyleft`)
+  - Added `CDLA-Permissive-2.0` to allowed license list (webpki-roots 1.0.6)
+  - Added advisory ignore entries for `paste` and `proc-macro-error` (transitive unmaintained, unfixable)
+  - Added `license.workspace = true` to `prompt_opt/Cargo.toml`
+  - Changed `wildcards = "deny"` → `"warn"` to avoid false-positives on workspace-internal path deps
+- **Tool hallucination prevention** — inject `## Available Tools` section into every session's system prompt listing all registered tool names exactly, preventing models (especially Ollama-hosted) from calling non-existent tools like `search` instead of `grep`
+
 ## [0.1.0-alpha.23] - 2026-04-04
 
 ### Added

@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.23
+## Current Version: 0.1.0-alpha.24
+
+### Fixed
+- **Security Audit CI** — all `cargo audit` and `cargo deny check` failures resolved:
+  - Upgraded criterion 0.4→0.5 (removes `atty` vulnerability)
+  - Updated `rustls-webpki` and `quinn-proto` to patched versions
+  - Rewrote `deny.toml` for cargo-deny ≥0.19 schema
+  - Added `.cargo/audit.toml` for transitive advisory ignores
+- **Tool hallucination** — system prompt now includes exact list of available tool names to prevent models hallucinating tool names like `search` instead of `grep`
 
 ### Added
 - **`/bash` slash command** — manage dynamic bash allowlist/denylist persisted in `ragent.json`:
