@@ -1,0 +1,10 @@
+# cargo-audit configuration for ragent.
+# See https://docs.rs/cargo-audit for full documentation.
+
+[advisories]
+# Ignore advisories for vulnerabilities in transitive deps we cannot directly control.
+ignore = [
+    # RUSTSEC-2026-0002: lru IterMut violates Stacked Borrows.
+    # lru is a transitive dependency of ratatui 0.29; we do not call iter_mut() directly.
+    "RUSTSEC-2026-0002",
+]

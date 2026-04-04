@@ -57,4 +57,4 @@ ignore = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tempfile = "3.5"
-criterion = "0.4"
+criterion = "0.5"

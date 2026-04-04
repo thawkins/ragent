@@ -1,19 +1,23 @@
 # cargo-deny configuration for ragent.
 # See https://embarkstudios.github.io/cargo-deny/ for full documentation.
+# Schema updated for cargo-deny >=0.19 (older keys like vulnerability/unmaintained removed).
 
 [advisories]
-# Fail CI on any known vulnerability.
-vulnerability = "deny"
-# Warn on unmaintained crates but don't block.
-unmaintained = "warn"
-# Warn on crates yanked from crates.io.
-yanked = "warn"
-# Allow advisories to be ignored temporarily with an expiry note.
-ignore = []
+# Ignore advisories for vulnerabilities in transitive deps we cannot directly control.
+ignore = [
+    # RUSTSEC-2026-0002: lru IterMut violates Stacked Borrows.
+    # lru is a transitive dependency of ratatui 0.29; we do not call iter_mut() directly.
+    { id = "RUSTSEC-2026-0002", reason = "transitive via ratatui; ragent does not call lru::LruCache::iter_mut()" },
+    # RUSTSEC-2024-0436: paste crate no longer maintained.
+    # paste is a transitive dep (via ratatui); it continues to work correctly.
+    { id = "RUSTSEC-2024-0436", reason = "transitive via ratatui; functionality unaffected" },
+    # RUSTSEC-2024-0370: proc-macro-error is unmaintained.
+    # proc-macro-error is a transitive dep (via ouroboros -> allsorts -> printpdf).
+    { id = "RUSTSEC-2024-0370", reason = "transitive via printpdf; functionality unaffected" },
+]
 
 [licenses]
 # Only allow these license families.
-unlicensed = "deny"
 allow = [
     "MIT",
     "Apache-2.0",
@@ -27,9 +31,9 @@ allow = [
     "CC0-1.0",
     "OpenSSL",
     "MPL-2.0",
+    # webpki-roots uses CDLA-Permissive-2.0 (Community Data License Agreement — permissive).
+    "CDLA-Permissive-2.0",
 ]
-# Some crates use dual MIT/Apache-2.0 licensing.
-copyleft = "warn"
 
 # ring uses a custom ISC-style license.
 [[licenses.clarify]]
@@ -40,8 +44,9 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 [bans]
 # Warn on multiple versions of the same crate (common in large trees).
 multiple-versions = "warn"
-# Deny wildcard dependencies in workspace crates.
-wildcards = "deny"
+# Warn on wildcard deps (workspace-internal path deps are flagged here; deny for external wildcards
+# is enforced by convention rather than this setting to avoid false-positives on workspace members).
+wildcards = "warn"
 
 [sources]
 # Only allow crates from crates.io and local paths.
