@@ -3440,6 +3440,7 @@ dependencies = [
  "prompt_opt",
  "pulldown-cmark",
  "ragent-core",
+ "ragent-server",
  "rand 0.8.5",
  "ratatui",
  "serde",

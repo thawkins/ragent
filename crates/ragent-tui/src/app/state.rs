@@ -529,6 +529,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Run system diagnostics (providers, git, ripgrep, MCP, memory)",
     },
     SlashCommandDef {
+        trigger: "webapi",
+        description: "Manage the HTTP REST API: /webapi enable | disable | help",
+    },
+    SlashCommandDef {
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
@@ -1019,6 +1023,12 @@ pub struct App {
     // ── Agent role mode (M2 Task 2.3) ───────────────────────────────────────
     /// Currently active role mode. None = normal (general-purpose) mode.
     pub role_mode: Option<RoleMode>,
+    /// Running HTTP API server handle. `None` when the server is disabled (default).
+    pub webapi_server: Option<tokio::task::JoinHandle<()>>,
+    /// Address the HTTP API server is bound to.
+    pub webapi_addr: String,
+    /// Bearer token for the HTTP API. Randomly generated on `/webapi enable`.
+    pub webapi_token: Option<String>,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

@@ -1649,3 +1649,49 @@ fn test_slash_opt_no_model_shows_warning() {
         "no message should be added when no model configured"
     );
 }
+
+#[test]
+fn test_slash_webapi_help_shows_endpoints() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/webapi help");
+
+    assert!(
+        !app.messages.is_empty(),
+        "help should produce a message"
+    );
+    let last = app.messages.last().unwrap();
+    let text = format!("{:?}", last);
+    assert!(text.contains("health") || text.contains("sessions"), "help output should list API endpoints");
+}
+
+#[test]
+fn test_slash_webapi_disable_when_not_running() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/webapi disable");
+
+    let last = app.messages.last().unwrap();
+    let text = format!("{:?}", last);
+    assert!(text.contains("not running") || text.contains("Disabled"), "should report server not running");
+}
+
+#[tokio::test]
+async fn test_slash_webapi_enable_sets_token() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    assert!(app.webapi_token.is_none(), "token should be None before enabling");
+
+    app.execute_slash_command("/webapi enable");
+
+    assert!(app.webapi_token.is_some(), "token should be set after /webapi enable");
+    assert!(app.webapi_server.is_some(), "server handle should be set");
+
+    // Clean up
+    if let Some(h) = app.webapi_server.take() {
+        h.abort();
+    }
+}

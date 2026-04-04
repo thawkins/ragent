@@ -467,6 +467,9 @@ impl App {
             autopilot_pending_continue: None,
             plan_approval_pending: None,
             role_mode: None,
+            webapi_server: None,
+            webapi_addr: "127.0.0.1:3000".to_string(),
+            webapi_token: None,
         };
 
         // Log any warnings from custom agent loading into the log panel
@@ -5904,6 +5907,140 @@ Type `/swarm help` for more info.\n";
                 });
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
+                }
+            }
+
+            "webapi" => {
+                match args.trim() {
+                    "enable" | "start" => {
+                        if self.webapi_server.is_some() {
+                            let addr = self.webapi_addr.clone();
+                            self.append_assistant_text(&format!(
+                                "⚠️ Web API is already running at http://{addr}\n\nRun `/webapi disable` to stop it."
+                            ));
+                        } else {
+                            use rand::Rng;
+                            let token: String = rand::thread_rng()
+                                .sample_iter(&rand::distributions::Alphanumeric)
+                                .take(40)
+                                .map(char::from)
+                                .collect();
+                            self.webapi_token = Some(token.clone());
+                            let addr = self.webapi_addr.clone();
+
+                            let config = ragent_core::config::Config::load().unwrap_or_default();
+                            let app_state = ragent_server::routes::AppState {
+                                event_bus: self.event_bus.clone(),
+                                config: std::sync::Arc::new(tokio::sync::RwLock::new(config)),
+                                storage: self.storage.clone(),
+                                session_processor: self.session_processor.clone(),
+                                auth_token: token.clone(),
+                                rate_limiter: std::sync::Arc::new(
+                                    tokio::sync::Mutex::new(std::collections::HashMap::new()),
+                                ),
+                                coordinator: None,
+                            };
+
+                            let addr_clone = addr.clone();
+                            let handle = tokio::spawn(async move {
+                                if let Err(e) =
+                                    ragent_server::routes::start_server(&addr_clone, app_state)
+                                        .await
+                                {
+                                    tracing::error!("Web API server error: {e}");
+                                }
+                            });
+                            self.webapi_server = Some(handle);
+
+                            self.append_assistant_text(&format!(
+                                "✅ **Web API enabled** at `http://{addr}`\n\n\
+                                **Bearer Token:**\n```\n{token}\n```\n\
+                                Include this token in all API requests (except `/health`):\n\
+                                ```\nAuthorization: Bearer {token}\n```\n\n\
+                                Run `/webapi help` to see all endpoints."
+                            ));
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "disable" | "stop" => {
+                        if let Some(handle) = self.webapi_server.take() {
+                            handle.abort();
+                            self.webapi_token = None;
+                            self.append_assistant_text("🛑 **Web API disabled.**");
+                        } else {
+                            self.append_assistant_text(
+                                "ℹ️ Web API is not running. Use `/webapi enable` to start it.",
+                            );
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "help" | "status" | "" => {
+                        let base = format!("http://{}", self.webapi_addr);
+                        let status = if self.webapi_server.is_some() {
+                            format!("🟢 **Running** — {base}")
+                        } else {
+                            "🔴 **Disabled** — run `/webapi enable` to start".to_string()
+                        };
+                        let auth_note = if let Some(ref tok) = self.webapi_token {
+                            format!(
+                                "\n**Bearer Token:** `{tok}`\n\
+                                Add `Authorization: Bearer {tok}` to all requests (except `/health`)."
+                            )
+                        } else {
+                            "\n*No token set — start the server with `/webapi enable`.*".to_string()
+                        };
+                        self.append_assistant_text(&format!(
+                            "## 🌐 Web API\n\n\
+                            **Status:** {status}{auth_note}\n\n\
+                            ### Endpoints\n\n\
+                            | Method | Path | Description |\n\
+                            |--------|------|-------------|\n\
+                            | `GET` | [{base}/health]({base}/health) | Health check — no auth required |\n\
+                            | `GET` | [{base}/config]({base}/config) | Get application configuration |\n\
+                            | `GET` | [{base}/providers]({base}/providers) | List available LLM providers |\n\
+                            | `GET` | [{base}/sessions]({base}/sessions) | List all sessions |\n\
+                            | `POST` | [{base}/sessions]({base}/sessions) | Create session · body: `{{\"directory\": \"/path\"}}` |\n\
+                            | `GET` | [{base}/sessions/{{id}}]({base}/sessions) | Get session details |\n\
+                            | `DELETE` | [{base}/sessions/{{id}}]({base}/sessions) | Archive a session |\n\
+                            | `GET` | [{base}/sessions/{{id}}/messages]({base}/sessions) | List session messages |\n\
+                            | `POST` | [{base}/sessions/{{id}}/messages]({base}/sessions) | Send message · body: `{{\"content\": \"...\", \"attachments\": []}}` |\n\
+                            | `POST` | [{base}/sessions/{{id}}/abort]({base}/sessions) | Abort current operation |\n\
+                            | `POST` | [{base}/sessions/{{id}}/permission/{{req_id}}]({base}/sessions) | Reply to permission · body: `{{\"allow\": true}}` |\n\
+                            | `GET` | [{base}/sessions/{{id}}/tasks]({base}/sessions) | List background tasks |\n\
+                            | `POST` | [{base}/sessions/{{id}}/tasks]({base}/sessions) | Spawn a background task |\n\
+                            | `GET` | [{base}/sessions/{{id}}/tasks/{{tid}}]({base}/sessions) | Get task status |\n\
+                            | `DELETE` | [{base}/sessions/{{id}}/tasks/{{tid}}]({base}/sessions) | Cancel a task |\n\
+                            | `GET` | [{base}/events]({base}/events) | SSE stream for real-time events |\n\
+                            | `POST` | [{base}/opt]({base}/opt) | Optimise a prompt |\n\
+                            | `GET` | [{base}/orchestrator/metrics]({base}/orchestrator/metrics) | Orchestration metrics |\n\
+                            | `POST` | [{base}/orchestrator/start]({base}/orchestrator/start) | Start orchestration job |\n\
+                            | `GET` | [{base}/orchestrator/jobs/{{id}}]({base}/orchestrator/jobs) | Get job status |\n\n\
+                            ### Quick start\n\
+                            ```bash\n\
+                            # Health check\n\
+                            curl {base}/health\n\n\
+                            # List sessions (replace TOKEN)\n\
+                            curl -H 'Authorization: Bearer TOKEN' {base}/sessions\n\n\
+                            # Send a message\n\
+                            curl -X POST -H 'Authorization: Bearer TOKEN' \\\n\
+                              -H 'Content-Type: application/json' \\\n\
+                              -d '{{\"content\": \"Hello!\"}}' \\\n\
+                              {base}/sessions/SESSION_ID/messages\n\
+                            ```"
+                        ));
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "Usage: `/webapi enable` · `/webapi disable` · `/webapi help`",
+                        );
+                    }
                 }
             }
 
