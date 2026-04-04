@@ -25,6 +25,8 @@ pub mod edit;
 mod file_lock;
 /// Concurrent file operations tool (batch read/write).
 pub mod file_ops_tool;
+pub mod github_issues;
+pub mod github_prs;
 /// File globbing tool.
 pub mod glob;
 pub mod grep;
@@ -39,6 +41,7 @@ pub mod lsp_diagnostics;
 pub mod lsp_hover;
 pub mod lsp_references;
 pub mod lsp_symbols;
+pub mod memory_write;
 pub mod multiedit;
 pub mod new_task;
 pub mod office_common;
@@ -52,6 +55,7 @@ pub mod plan;
 pub mod question;
 pub mod read;
 pub mod rm;
+pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 pub mod team_approve_plan;
 pub mod team_assign_task;
@@ -59,8 +63,6 @@ pub mod team_broadcast;
 pub mod team_cleanup;
 pub mod team_create;
 pub mod team_idle;
-pub mod github_issues;
-pub mod memory_write;
 pub mod team_memory_read;
 pub mod team_memory_write;
 pub mod team_message;
@@ -75,12 +77,10 @@ pub mod team_task_complete;
 pub mod team_task_create;
 pub mod team_task_list;
 pub mod team_wait;
-pub mod task_complete;
 pub mod think;
 pub mod todo;
 pub mod wait_tasks;
 pub mod webfetch;
-pub mod github_prs;
 pub mod websearch;
 pub mod write;
 

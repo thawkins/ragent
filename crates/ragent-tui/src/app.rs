@@ -2782,23 +2782,21 @@ impl App {
                 }
                 self.status = "agents".to_string();
             }
-            "context" => {
-                match args.trim() {
-                    "refresh" => {
-                        ragent_core::agent::clear_prompt_context_cache();
-                        self.append_assistant_text(
+            "context" => match args.trim() {
+                "refresh" => {
+                    ragent_core::agent::clear_prompt_context_cache();
+                    self.append_assistant_text(
                             "From: /context\n🔄 Context cache cleared — next message will recompute file tree, git status, and README."
                         );
-                        self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
-                        self.status = "context refreshed".to_string();
-                    }
-                    _ => {
-                        self.append_assistant_text(
+                    self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
+                    self.status = "context refreshed".to_string();
+                }
+                _ => {
+                    self.append_assistant_text(
                             "From: /context\nUsage: `/context refresh` — clears cached file tree, git status, and README context"
                         );
-                    }
                 }
-            }
+            },
 
             // ── /init ────────────────────────────────────────────────────────
             "init" => {
@@ -2809,7 +2807,10 @@ impl App {
                      and test layout, then write a summary to `.ragent/memory/PROJECT_ANALYSIS.md`. \
                      Future sessions will automatically load this context."
                 );
-                self.push_log_no_agent(LogLevel::Info, "init: starting project analysis".to_string());
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    "init: starting project analysis".to_string(),
+                );
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
                 }
@@ -2854,7 +2855,8 @@ After your analysis, call the `memory_write` tool with:\n\
 - path: \"PROJECT_ANALYSIS.md\"\n\
 - content: a well-structured markdown summary of your findings\n\n\
 Be concise but comprehensive. This will be injected into future agent sessions automatically.\
-".to_string();
+"
+                .to_string();
 
                 let msg = Message::user_text(&sid, &task);
                 self.messages.push(msg);
@@ -2867,10 +2869,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                 let event_bus = self.event_bus.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = processor
-                        .process_message(&sid, &task, &agent, flag)
-                        .await
-                    {
+                    if let Err(e) = processor.process_message(&sid, &task, &agent, flag).await {
                         tracing::warn!(error = %e, "init: analysis failed");
                         event_bus.publish(ragent_core::event::Event::AgentError {
                             session_id: sid,
@@ -5331,9 +5330,7 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
 
                         let is_global = entry_with_flag.ends_with("--global");
                         let entry = if is_global {
-                            entry_with_flag
-                                .trim_end_matches("--global")
-                                .trim()
+                            entry_with_flag.trim_end_matches("--global").trim()
                         } else {
                             entry_with_flag
                         };
@@ -5648,16 +5645,23 @@ Type `/swarm help` for more info.\n";
                                     time_secs = parts[i + 1].parse().ok();
                                     i += 2;
                                 }
-                                _ => { i += 1; }
+                                _ => {
+                                    i += 1;
+                                }
                             }
                         }
                         self.autopilot_enabled = true;
                         self.autopilot_token_budget = token_budget;
                         self.autopilot_time_limit_secs = time_secs;
                         self.autopilot_started_at = Some(std::time::Instant::now());
-                        let mut msg = "⚡ **Autopilot ON** — agent will run autonomously.".to_string();
-                        if let Some(t) = token_budget { msg.push_str(&format!(" Token budget: {t}.")); }
-                        if let Some(s) = time_secs { msg.push_str(&format!(" Time limit: {s}s.")); }
+                        let mut msg =
+                            "⚡ **Autopilot ON** — agent will run autonomously.".to_string();
+                        if let Some(t) = token_budget {
+                            msg.push_str(&format!(" Token budget: {t}."));
+                        }
+                        if let Some(s) = time_secs {
+                            msg.push_str(&format!(" Time limit: {s}s."));
+                        }
                         msg.push_str("\nCall `task_complete` to signal completion, or `/autopilot off` to stop.");
                         self.append_assistant_text(&format!("From: /autopilot\n{msg}"));
                         self.status = "⚡ autopilot".to_string();
@@ -5681,7 +5685,8 @@ Type `/swarm help` for more info.\n";
                     }
                     "status" => {
                         let state = if self.autopilot_enabled {
-                            let elapsed = self.autopilot_started_at
+                            let elapsed = self
+                                .autopilot_started_at
                                 .map(|s| s.elapsed().as_secs())
                                 .unwrap_or(0);
                             format!("⚡ Autopilot: **ON** (running for {}s)", elapsed)
@@ -5716,11 +5721,7 @@ Type `/swarm help` for more info.\n";
                     );
                 } else {
                     let sid = self.session_id.clone().unwrap_or_default();
-                    self.execute_plan_delegation(
-                        &sid,
-                        args.to_string(),
-                        String::new(),
-                    );
+                    self.execute_plan_delegation(&sid, args.to_string(), String::new());
                 }
                 if self.current_screen == ScreenMode::Home {
                     self.current_screen = ScreenMode::Chat;
@@ -5731,7 +5732,9 @@ Type `/swarm help` for more info.\n";
             "mode" => {
                 let sub = args.trim().to_lowercase();
                 if sub.is_empty() || sub == "status" {
-                    let current = self.role_mode.as_ref()
+                    let current = self
+                        .role_mode
+                        .as_ref()
                         .map(|m| format!("{} {}", m.icon(), m.label()))
                         .unwrap_or_else(|| "normal (no role mode active)".to_string());
                     self.append_assistant_text(&format!(
@@ -5742,7 +5745,9 @@ Type `/swarm help` for more info.\n";
                 } else if sub == "off" || sub == "normal" {
                     self.role_mode = None;
                     self.status = "mode: normal".to_string();
-                    self.append_assistant_text("From: /mode\n✅ Role mode cleared — back to normal mode.");
+                    self.append_assistant_text(
+                        "From: /mode\n✅ Role mode cleared — back to normal mode.",
+                    );
                     self.push_log_no_agent(LogLevel::Info, "role mode cleared".to_string());
                 } else if let Some(mode) = RoleMode::from_str(&sub) {
                     let label = mode.label().to_string();
@@ -5778,8 +5783,8 @@ Type `/swarm help` for more info.\n";
                     .join(".ragent")
                     .join("memory")
                     .join("PROJECT_ANALYSIS.md");
-                let user_mem = dirs::home_dir()
-                    .map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+                let user_mem =
+                    dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
 
                 match args.trim() {
                     "show" | "" => {
@@ -5873,24 +5878,22 @@ Type `/swarm help` for more info.\n";
                             .await;
 
                             match result {
-                                Ok(token) => {
-                                    match ragent_core::github::auth::save_token(&token) {
-                                        Ok(_) => {
-                                            event_bus.publish(
+                                Ok(token) => match ragent_core::github::auth::save_token(&token) {
+                                    Ok(_) => {
+                                        event_bus.publish(
                                                 ragent_core::event::Event::AgentError {
                                                     session_id: sid,
                                                     error: "✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.".to_string(),
                                                 },
                                             );
-                                        }
-                                        Err(e) => {
-                                            event_bus.publish(ragent_core::event::Event::AgentError {
-                                                session_id: sid,
-                                                error: format!("Failed to save GitHub token: {e}"),
-                                            });
-                                        }
                                     }
-                                }
+                                    Err(e) => {
+                                        event_bus.publish(ragent_core::event::Event::AgentError {
+                                            session_id: sid,
+                                            error: format!("Failed to save GitHub token: {e}"),
+                                        });
+                                    }
+                                },
                                 Err(e) => {
                                     event_bus.publish(ragent_core::event::Event::AgentError {
                                         session_id: sid,
@@ -5900,30 +5903,26 @@ Type `/swarm help` for more info.\n";
                             }
                         });
                     }
-                    "logout" => {
-                        match ragent_core::github::auth::delete_token() {
-                            Ok(_) => self.append_assistant_text(
-                                "From: /github\n✅ GitHub token removed.",
-                            ),
-                            Err(e) => self.append_assistant_text(&format!(
-                                "From: /github\n❌ Failed to remove token: {e}"
-                            )),
+                    "logout" => match ragent_core::github::auth::delete_token() {
+                        Ok(_) => {
+                            self.append_assistant_text("From: /github\n✅ GitHub token removed.")
                         }
-                    }
-                    "status" | "" => {
-                        match ragent_core::github::auth::load_token() {
-                            Some(_) => {
-                                self.append_assistant_text(
+                        Err(e) => self.append_assistant_text(&format!(
+                            "From: /github\n❌ Failed to remove token: {e}"
+                        )),
+                    },
+                    "status" | "" => match ragent_core::github::auth::load_token() {
+                        Some(_) => {
+                            self.append_assistant_text(
                                     "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
                                 );
-                            }
-                            None => {
-                                self.append_assistant_text(
+                        }
+                        None => {
+                            self.append_assistant_text(
                                     "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
                                 );
-                            }
                         }
-                    }
+                    },
                     _ => {
                         self.append_assistant_text(
                             "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
@@ -5964,9 +5963,7 @@ Type `/swarm help` for more info.\n";
                                                 event_bus.publish(
                                                     ragent_core::event::Event::AgentError {
                                                         session_id: sid,
-                                                        error: format!(
-                                                            "❌ Install failed: {e}"
-                                                        ),
+                                                        error: format!("❌ Install failed: {e}"),
                                                     },
                                                 );
                                             }
@@ -6111,10 +6108,9 @@ Type `/swarm help` for more info.\n";
                     lines.push("\n**Checking for updates…**".to_string());
                     let update_msg = match ragent_core::updater::check_for_update().await {
                         Some(info) => format!("⚠️  Update available: v{}", info.version),
-                        None => format!(
-                            "✅ Up to date (v{})",
-                            ragent_core::updater::CURRENT_VERSION
-                        ),
+                        None => {
+                            format!("✅ Up to date (v{})", ragent_core::updater::CURRENT_VERSION)
+                        }
                     };
                     lines.push(update_msg);
 
@@ -6130,90 +6126,88 @@ Type `/swarm help` for more info.\n";
                 }
             }
 
-            "webapi" => {
-                match args.trim() {
-                    "enable" | "start" => {
-                        if self.webapi_server.is_some() {
-                            let addr = self.webapi_addr.clone();
-                            self.append_assistant_text(&format!(
+            "webapi" => match args.trim() {
+                "enable" | "start" => {
+                    if self.webapi_server.is_some() {
+                        let addr = self.webapi_addr.clone();
+                        self.append_assistant_text(&format!(
                                 "⚠️ Web API is already running at http://{addr}\n\nRun `/webapi disable` to stop it."
                             ));
-                        } else {
-                            use rand::Rng;
-                            let token: String = rand::thread_rng()
-                                .sample_iter(&rand::distributions::Alphanumeric)
-                                .take(40)
-                                .map(char::from)
-                                .collect();
-                            self.webapi_token = Some(token.clone());
-                            let addr = self.webapi_addr.clone();
+                    } else {
+                        use rand::Rng;
+                        let token: String = rand::thread_rng()
+                            .sample_iter(&rand::distributions::Alphanumeric)
+                            .take(40)
+                            .map(char::from)
+                            .collect();
+                        self.webapi_token = Some(token.clone());
+                        let addr = self.webapi_addr.clone();
 
-                            let config = ragent_core::config::Config::load().unwrap_or_default();
-                            let app_state = ragent_server::routes::AppState {
-                                event_bus: self.event_bus.clone(),
-                                config: std::sync::Arc::new(tokio::sync::RwLock::new(config)),
-                                storage: self.storage.clone(),
-                                session_processor: self.session_processor.clone(),
-                                auth_token: token.clone(),
-                                rate_limiter: std::sync::Arc::new(
-                                    tokio::sync::Mutex::new(std::collections::HashMap::new()),
-                                ),
-                                coordinator: None,
-                            };
+                        let config = ragent_core::config::Config::load().unwrap_or_default();
+                        let app_state = ragent_server::routes::AppState {
+                            event_bus: self.event_bus.clone(),
+                            config: std::sync::Arc::new(tokio::sync::RwLock::new(config)),
+                            storage: self.storage.clone(),
+                            session_processor: self.session_processor.clone(),
+                            auth_token: token.clone(),
+                            rate_limiter: std::sync::Arc::new(tokio::sync::Mutex::new(
+                                std::collections::HashMap::new(),
+                            )),
+                            coordinator: None,
+                        };
 
-                            let addr_clone = addr.clone();
-                            let handle = tokio::spawn(async move {
-                                if let Err(e) =
-                                    ragent_server::routes::start_server(&addr_clone, app_state)
-                                        .await
-                                {
-                                    tracing::error!("Web API server error: {e}");
-                                }
-                            });
-                            self.webapi_server = Some(handle);
+                        let addr_clone = addr.clone();
+                        let handle = tokio::spawn(async move {
+                            if let Err(e) =
+                                ragent_server::routes::start_server(&addr_clone, app_state).await
+                            {
+                                tracing::error!("Web API server error: {e}");
+                            }
+                        });
+                        self.webapi_server = Some(handle);
 
-                            self.append_assistant_text(&format!(
-                                "✅ **Web API enabled** at `http://{addr}`\n\n\
+                        self.append_assistant_text(&format!(
+                            "✅ **Web API enabled** at `http://{addr}`\n\n\
                                 **Bearer Token:**\n```\n{token}\n```\n\
                                 Include this token in all API requests (except `/health`):\n\
                                 ```\nAuthorization: Bearer {token}\n```\n\n\
                                 Run `/webapi help` to see all endpoints."
-                            ));
-                        }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+                        ));
                     }
-                    "disable" | "stop" => {
-                        if let Some(handle) = self.webapi_server.take() {
-                            handle.abort();
-                            self.webapi_token = None;
-                            self.append_assistant_text("🛑 **Web API disabled.**");
-                        } else {
-                            self.append_assistant_text(
-                                "ℹ️ Web API is not running. Use `/webapi enable` to start it.",
-                            );
-                        }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
                     }
-                    "help" | "status" | "" => {
-                        let base = format!("http://{}", self.webapi_addr);
-                        let status = if self.webapi_server.is_some() {
-                            format!("🟢 **Running** — {base}")
-                        } else {
-                            "🔴 **Disabled** — run `/webapi enable` to start".to_string()
-                        };
-                        let auth_note = if let Some(ref tok) = self.webapi_token {
-                            format!(
-                                "\n**Bearer Token:** `{tok}`\n\
+                }
+                "disable" | "stop" => {
+                    if let Some(handle) = self.webapi_server.take() {
+                        handle.abort();
+                        self.webapi_token = None;
+                        self.append_assistant_text("🛑 **Web API disabled.**");
+                    } else {
+                        self.append_assistant_text(
+                            "ℹ️ Web API is not running. Use `/webapi enable` to start it.",
+                        );
+                    }
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
+                    }
+                }
+                "help" | "status" | "" => {
+                    let base = format!("http://{}", self.webapi_addr);
+                    let status = if self.webapi_server.is_some() {
+                        format!("🟢 **Running** — {base}")
+                    } else {
+                        "🔴 **Disabled** — run `/webapi enable` to start".to_string()
+                    };
+                    let auth_note = if let Some(ref tok) = self.webapi_token {
+                        format!(
+                            "\n**Bearer Token:** `{tok}`\n\
                                 Add `Authorization: Bearer {tok}` to all requests (except `/health`)."
-                            )
-                        } else {
-                            "\n*No token set — start the server with `/webapi enable`.*".to_string()
-                        };
-                        self.append_assistant_text(&format!(
+                        )
+                    } else {
+                        "\n*No token set — start the server with `/webapi enable`.*".to_string()
+                    };
+                    self.append_assistant_text(&format!(
                             "## 🌐 Web API\n\n\
                             **Status:** {status}{auth_note}\n\n\
                             ### Endpoints\n\n\
@@ -6252,17 +6246,16 @@ Type `/swarm help` for more info.\n";
                               {base}/sessions/SESSION_ID/messages\n\
                             ```"
                         ));
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
-                    }
-                    _ => {
-                        self.append_assistant_text(
-                            "Usage: `/webapi enable` · `/webapi disable` · `/webapi help`",
-                        );
+                    if self.current_screen == ScreenMode::Home {
+                        self.current_screen = ScreenMode::Chat;
                     }
                 }
-            }
+                _ => {
+                    self.append_assistant_text(
+                        "Usage: `/webapi enable` · `/webapi disable` · `/webapi help`",
+                    );
+                }
+            },
 
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
@@ -7466,7 +7459,10 @@ Type `/swarm help` for more info.\n";
                 InputAction::RejectPlan => {
                     if let Some(state) = self.plan_approval_pending.take() {
                         if let Some(ref session_id) = self.session_id.clone() {
-                            self.push_log_no_agent(LogLevel::Info, "plan rejected — re-delegating".to_string());
+                            self.push_log_no_agent(
+                                LogLevel::Info,
+                                "plan rejected — re-delegating".to_string(),
+                            );
                             self.append_assistant_text(
                                 "From: /plan\n🔄 **Plan rejected** — re-delegating to plan agent for revision.\n",
                             );
@@ -7801,16 +7797,25 @@ Type `/swarm help` for more info.\n";
                     // keeps working towards its goal.
                     if self.autopilot_enabled && *reason != FinishReason::Cancelled {
                         // Check time limit
-                        let time_exceeded = self.autopilot_time_limit_secs
-                            .and_then(|limit| self.autopilot_started_at.map(|s| s.elapsed().as_secs() >= limit))
+                        let time_exceeded = self
+                            .autopilot_time_limit_secs
+                            .and_then(|limit| {
+                                self.autopilot_started_at
+                                    .map(|s| s.elapsed().as_secs() >= limit)
+                            })
                             .unwrap_or(false);
                         if time_exceeded {
                             self.autopilot_enabled = false;
                             self.autopilot_started_at = None;
                             self.autopilot_pending_continue = None;
                             self.status = "autopilot: time limit reached".to_string();
-                            self.append_assistant_text("⚡ **Autopilot stopped** — time limit reached.");
-                            self.push_log_no_agent(LogLevel::Warn, "autopilot stopped: time limit".to_string());
+                            self.append_assistant_text(
+                                "⚡ **Autopilot stopped** — time limit reached.",
+                            );
+                            self.push_log_no_agent(
+                                LogLevel::Warn,
+                                "autopilot stopped: time limit".to_string(),
+                            );
                         } else {
                             // Schedule a continuation on the next render tick
                             self.autopilot_pending_continue = Some(
@@ -7926,7 +7931,10 @@ Type `/swarm help` for more info.\n";
                         self.autopilot_started_at = None;
                         self.autopilot_pending_continue = None;
                         self.status = "task complete".to_string();
-                        self.push_log_no_agent(LogLevel::Info, "autopilot stopped: task complete".to_string());
+                        self.push_log_no_agent(
+                            LogLevel::Info,
+                            "autopilot stopped: task complete".to_string(),
+                        );
                     }
                     self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
                 }

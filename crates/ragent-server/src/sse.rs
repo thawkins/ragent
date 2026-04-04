@@ -624,7 +624,10 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             })
         }
 
-        Event::TaskCompleted { session_id, summary } => to_data(&serde_json::json!({
+        Event::TaskCompleted {
+            session_id,
+            summary,
+        } => to_data(&serde_json::json!({
             "session_id": session_id,
             "summary": summary,
         })),

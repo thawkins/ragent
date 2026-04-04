@@ -74,7 +74,9 @@ impl Tool for McpToolWrapper {
 
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let client = self.client.read().await;
-        let result = client.call_tool(&self.server_id, &self.tool_name, input).await?;
+        let result = client
+            .call_tool(&self.server_id, &self.tool_name, input)
+            .await?;
         let content = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
         Ok(ToolOutput {
             content,

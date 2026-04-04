@@ -58,9 +58,8 @@ impl Tool for MemoryWriteTool {
         let filename = input["path"].as_str().unwrap_or("MEMORY.md");
 
         let mem_dir = resolve_memory_dir(scope, &ctx.working_dir)?;
-        std::fs::create_dir_all(&mem_dir).with_context(|| {
-            format!("Failed to create memory directory: {}", mem_dir.display())
-        })?;
+        std::fs::create_dir_all(&mem_dir)
+            .with_context(|| format!("Failed to create memory directory: {}", mem_dir.display()))?;
 
         let file_path = mem_dir.join(filename);
 
@@ -77,10 +76,7 @@ impl Tool for MemoryWriteTool {
             .with_context(|| format!("Failed to write to memory file: {}", file_path.display()))?;
 
         Ok(ToolOutput {
-            content: format!(
-                "Memory written to {} (scope: {scope})",
-                file_path.display()
-            ),
+            content: format!("Memory written to {} (scope: {scope})", file_path.display()),
             metadata: Some(json!({
                 "file": file_path.display().to_string(),
                 "scope": scope,

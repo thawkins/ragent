@@ -75,7 +75,6 @@ impl std::str::FromStr for OptMethod {
 }
 
 impl OptMethod {
-
     /// Canonical short name for this method (used in status messages, logs).
     pub fn name(self) -> &'static str {
         match self {
@@ -583,12 +582,18 @@ mod tests {
         assert_eq!(OptMethod::from_str("costar").ok(), Some(OptMethod::CoStar));
         assert_eq!(OptMethod::from_str("co-star").ok(), Some(OptMethod::CoStar));
         assert_eq!(OptMethod::from_str("CO_STAR").ok(), Some(OptMethod::CoStar));
-        assert_eq!(OptMethod::from_str("cot").ok(), Some(OptMethod::ChainOfThought));
+        assert_eq!(
+            OptMethod::from_str("cot").ok(),
+            Some(OptMethod::ChainOfThought)
+        );
         assert_eq!(
             OptMethod::from_str("chain-of-thought").ok(),
             Some(OptMethod::ChainOfThought)
         );
-        assert_eq!(OptMethod::from_str("azure").ok(), Some(OptMethod::Microsoft));
+        assert_eq!(
+            OptMethod::from_str("azure").ok(),
+            Some(OptMethod::Microsoft)
+        );
         assert_eq!(OptMethod::from_str("ms").ok(), Some(OptMethod::Microsoft));
         assert_eq!(OptMethod::from_str("q*").ok(), Some(OptMethod::QStar));
         assert_eq!(OptMethod::from_str("o1").ok(), Some(OptMethod::O1Style));

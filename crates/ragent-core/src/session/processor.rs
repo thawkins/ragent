@@ -72,10 +72,7 @@ impl SessionProcessor {
     ///
     /// This should be called once after the MCP client has connected to all configured servers.
     /// Tools are registered with names in the format `mcp_{server_id}_{tool_name}`.
-    pub async fn set_mcp_client(
-        &self,
-        client: Arc<tokio::sync::RwLock<crate::mcp::McpClient>>,
-    ) {
+    pub async fn set_mcp_client(&self, client: Arc<tokio::sync::RwLock<crate::mcp::McpClient>>) {
         // Register all currently connected MCP tools into the shared registry.
         let tool_defs = {
             let c = client.read().await;
@@ -110,7 +107,10 @@ impl SessionProcessor {
         }
 
         if registered > 0 {
-            tracing::info!(count = registered, "Registered MCP tools into tool registry");
+            tracing::info!(
+                count = registered,
+                "Registered MCP tools into tool registry"
+            );
         } else {
             tracing::debug!("No connected MCP tools to register");
         }
@@ -308,7 +308,10 @@ impl SessionProcessor {
         let has_prior_messages = self
             .session_manager
             .get_messages(session_id)
-            .map(|msgs| msgs.iter().any(|m| m.role == crate::message::Role::Assistant))
+            .map(|msgs| {
+                msgs.iter()
+                    .any(|m| m.role == crate::message::Role::Assistant)
+            })
             .unwrap_or(false);
         if !has_prior_messages {
             crate::hooks::fire_hooks(
@@ -322,7 +325,8 @@ impl SessionProcessor {
         // Load skill registry for system prompt injection
         let skill_dirs = session_config.skill_dirs.clone();
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-        let (git_status, readme, agents_md, file_tree) = crate::agent::collect_prompt_context(&working_dir).await;
+        let (git_status, readme, agents_md, file_tree) =
+            crate::agent::collect_prompt_context(&working_dir).await;
         let mut system_prompt = crate::agent::build_system_prompt_with_context(
             agent,
             &working_dir,
@@ -715,10 +719,7 @@ impl SessionProcessor {
             if tool_calls.is_empty() {
                 // No tool calls — check whether an Ollama model wrote planning text
                 // instead of calling a tool, and inject a nudge to make it act.
-                let is_ollama = matches!(
-                    model_ref.provider_id.as_str(),
-                    "ollama" | "ollama_cloud"
-                );
+                let is_ollama = matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
                 let looks_like_planning = !text_buffer.is_empty()
                     && !tool_definitions.is_empty()
                     && (text_buffer.contains("Let me")
@@ -749,7 +750,8 @@ impl SessionProcessor {
                         role: "user".to_string(),
                         content: ChatContent::Text(
                             "Please proceed now using tool calls. Do not write more planning \
-                             text — call the appropriate tool immediately.".to_string(),
+                             text — call the appropriate tool immediately."
+                                .to_string(),
                         ),
                     });
                     text_buffer = String::new();
@@ -1266,5 +1268,3 @@ fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
         .collect();
     ChatContent::Parts(content_parts)
 }
-
-

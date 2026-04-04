@@ -9,8 +9,7 @@ use super::{Tool, ToolContext, ToolOutput};
 
 /// Returns the authenticated `GitHubClient` or a human-readable error.
 fn make_client() -> Result<GitHubClient> {
-    GitHubClient::new()
-        .context("GitHub not authenticated. Run /github login to authenticate.")
+    GitHubClient::new().context("GitHub not authenticated. Run /github login to authenticate.")
 }
 
 /// Resolve owner/repo from the working directory or return an error.
@@ -73,9 +72,7 @@ impl Tool for GithubListIssuesTool {
         let state = input["state"].as_str().unwrap_or("open");
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
-        let mut path = format!(
-            "/repos/{owner}/{repo}/issues?state={state}&per_page={limit}"
-        );
+        let mut path = format!("/repos/{owner}/{repo}/issues?state={state}&per_page={limit}");
         if let Some(labels) = input["labels"].as_str() {
             if !labels.is_empty() {
                 path.push_str(&format!("&labels={}", urlencoded(labels)));
@@ -83,7 +80,9 @@ impl Tool for GithubListIssuesTool {
         }
 
         let issues = client.get(&path).await?;
-        let arr = issues.as_array().context("Expected array from GitHub issues endpoint")?;
+        let arr = issues
+            .as_array()
+            .context("Expected array from GitHub issues endpoint")?;
 
         if arr.is_empty() {
             return Ok(ToolOutput {
@@ -169,20 +168,12 @@ impl Tool for GithubGetIssueTool {
 
         let labels: Vec<&str> = issue["labels"]
             .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|l| l["name"].as_str())
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|l| l["name"].as_str()).collect())
             .unwrap_or_default();
 
         let assignees: Vec<&str> = issue["assignees"]
             .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|a| a["login"].as_str())
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|a| a["login"].as_str()).collect())
             .unwrap_or_default();
 
         let mut md = format!(
@@ -213,9 +204,7 @@ impl Tool for GithubGetIssueTool {
                     let commenter = comment["user"]["login"].as_str().unwrap_or("?");
                     let created = comment["created_at"].as_str().unwrap_or("");
                     let cbody = comment["body"].as_str().unwrap_or("");
-                    md.push_str(&format!(
-                        "\n**{commenter}** ({created}):\n{cbody}\n"
-                    ));
+                    md.push_str(&format!("\n**{commenter}** ({created}):\n{cbody}\n"));
                 }
             }
         }
@@ -304,7 +293,9 @@ impl Tool for GithubCreateIssueTool {
 
         Ok(ToolOutput {
             content: format!("Created issue #{number} in {owner}/{repo}\nURL: {html_url}"),
-            metadata: Some(json!({ "number": number, "url": html_url, "owner": owner, "repo": repo })),
+            metadata: Some(
+                json!({ "number": number, "url": html_url, "owner": owner, "repo": repo }),
+            ),
         })
     }
 }

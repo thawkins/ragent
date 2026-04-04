@@ -1,7 +1,7 @@
 //! Tests for the hooks lifecycle system.
 
-use ragent_core::hooks::{HookConfig, HookTrigger, fire_hooks};
 use ragent_core::config::Config;
+use ragent_core::hooks::{HookConfig, HookTrigger, fire_hooks};
 use std::path::Path;
 
 #[test]
@@ -9,7 +9,10 @@ fn test_hook_trigger_display() {
     assert_eq!(HookTrigger::OnSessionStart.to_string(), "on_session_start");
     assert_eq!(HookTrigger::OnSessionEnd.to_string(), "on_session_end");
     assert_eq!(HookTrigger::OnError.to_string(), "on_error");
-    assert_eq!(HookTrigger::OnPermissionDenied.to_string(), "on_permission_denied");
+    assert_eq!(
+        HookTrigger::OnPermissionDenied.to_string(),
+        "on_permission_denied"
+    );
 }
 
 #[test]
@@ -98,12 +101,7 @@ fn test_config_merge_hooks_append() {
 #[test]
 fn test_fire_hooks_empty_noop() {
     // Should not panic with an empty hooks list
-    fire_hooks(
-        &[],
-        HookTrigger::OnSessionStart,
-        Path::new("/tmp"),
-        &[],
-    );
+    fire_hooks(&[], HookTrigger::OnSessionStart, Path::new("/tmp"), &[]);
 }
 
 #[test]
@@ -114,17 +112,12 @@ fn test_fire_hooks_no_matching_trigger_noop() {
         timeout_secs: 30,
     }];
     // Should return without spawning since trigger doesn't match
-    fire_hooks(
-        &hooks,
-        HookTrigger::OnSessionStart,
-        Path::new("/tmp"),
-        &[],
-    );
+    fire_hooks(&hooks, HookTrigger::OnSessionStart, Path::new("/tmp"), &[]);
 }
 
 #[tokio::test]
 async fn test_fire_hooks_runs_matching_command() {
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
 
     // Write to a temp file to verify command executed
     let output_path = std::env::temp_dir().join("ragent_hook_test_output.txt");
@@ -137,12 +130,7 @@ async fn test_fire_hooks_runs_matching_command() {
         timeout_secs: 10,
     }];
 
-    fire_hooks(
-        &hooks,
-        HookTrigger::OnSessionStart,
-        Path::new("."),
-        &[],
-    );
+    fire_hooks(&hooks, HookTrigger::OnSessionStart, Path::new("."), &[]);
 
     // Give the spawned task time to complete
     sleep(Duration::from_millis(500)).await;

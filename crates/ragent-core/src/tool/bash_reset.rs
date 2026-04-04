@@ -6,8 +6,8 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use super::{Tool, ToolContext, ToolOutput};
 use super::bash::state_file_path;
+use super::{Tool, ToolContext, ToolOutput};
 
 /// Resets the persistent shell state for the current session.
 pub struct BashResetTool;

@@ -1,6 +1,6 @@
 //! GitHub OAuth device flow and token storage.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
 
 /// Resolve GitHub token from environment or stored file.
@@ -143,8 +143,7 @@ where
     let state = start_device_flow(client_id).await?;
     progress_cb(&state.user_code, &state.verification_uri);
 
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_secs(state.expires_in);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(state.expires_in);
     let mut interval = std::time::Duration::from_secs(state.interval);
 
     loop {

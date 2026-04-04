@@ -62,9 +62,7 @@ impl Tool for GithubListPrsTool {
         let state = input["state"].as_str().unwrap_or("open");
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
-        let mut path = format!(
-            "/repos/{owner}/{repo}/pulls?state={state}&per_page={limit}"
-        );
+        let mut path = format!("/repos/{owner}/{repo}/pulls?state={state}&per_page={limit}");
         if let Some(base) = input["base"].as_str() {
             path.push_str(&format!("&base={base}"));
         }
@@ -142,8 +140,7 @@ impl Tool for GithubGetPrTool {
         let pr_path = format!("/repos/{owner}/{repo}/pulls/{number}");
         let reviews_path = format!("/repos/{owner}/{repo}/pulls/{number}/reviews");
 
-        let (pr, reviews) =
-            tokio::try_join!(client.get(&pr_path), client.get(&reviews_path))?;
+        let (pr, reviews) = tokio::try_join!(client.get(&pr_path), client.get(&reviews_path))?;
 
         let title = pr["title"].as_str().unwrap_or("(no title)");
         let state = pr["state"].as_str().unwrap_or("?");

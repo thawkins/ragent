@@ -9,9 +9,7 @@ use ragent_core::sanitize::{
 /// so secret scanners cannot flag them in source.
 fn fake_token(prefix: &str, len: usize) -> String {
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let suffix: String = (0..len)
-        .map(|i| CHARS[i % CHARS.len()] as char)
-        .collect();
+    let suffix: String = (0..len).map(|i| CHARS[i % CHARS.len()] as char).collect();
     format!("{prefix}{suffix}")
 }
 
@@ -25,18 +23,19 @@ fn base64_url_encode(data: &[u8]) -> String {
         let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
         out.push(TABLE[(b0 >> 2)] as char);
         out.push(TABLE[((b0 & 3) << 4) | (b1 >> 4)] as char);
-        if chunk.len() > 1 { out.push(TABLE[((b1 & 0xf) << 2) | (b2 >> 6)] as char); }
-        if chunk.len() > 2 { out.push(TABLE[b2 & 0x3f] as char); }
+        if chunk.len() > 1 {
+            out.push(TABLE[((b1 & 0xf) << 2) | (b2 >> 6)] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[b2 & 0x3f] as char);
+        }
     }
     out
 }
 
-
 /// Build a fake numeric-suffixed token.
 fn fake_numeric_token(prefix: &str, len: usize) -> String {
-    let suffix: String = (0..len)
-        .map(|i| (b'0' + (i % 10) as u8) as char)
-        .collect();
+    let suffix: String = (0..len).map(|i| (b'0' + (i % 10) as u8) as char).collect();
     format!("{prefix}{suffix}")
 }
 

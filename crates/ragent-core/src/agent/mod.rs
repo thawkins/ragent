@@ -1138,16 +1138,12 @@ pub fn build_system_prompt_with_context(
 
     // Auto-load project and user memory files into context
     {
-        let project_mem = working_dir
-            .join(".ragent")
-            .join("memory")
-            .join("MEMORY.md");
+        let project_mem = working_dir.join(".ragent").join("memory").join("MEMORY.md");
         let project_analysis = working_dir
             .join(".ragent")
             .join("memory")
             .join("PROJECT_ANALYSIS.md");
-        let user_mem = dirs::home_dir()
-            .map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+        let user_mem = dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
 
         if let Ok(content) = std::fs::read_to_string(&project_mem) {
             if !content.trim().is_empty() {

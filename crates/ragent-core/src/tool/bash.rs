@@ -12,8 +12,8 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use tokio::process::Command;
 
-use crate::event::Event;
 use super::{Tool, ToolContext, ToolOutput};
+use crate::event::Event;
 
 /// Derive a filesystem-safe identifier from a session ID.
 ///
@@ -22,7 +22,13 @@ use super::{Tool, ToolContext, ToolOutput};
 fn safe_session_id(session_id: &str) -> String {
     session_id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -81,11 +87,11 @@ const SAFE_COMMANDS: &[&str] = &[
     "egrep",
     "fgrep",
     "find",
-    "rg",   // ripgrep
+    "rg", // ripgrep
     "wc",
     // --- Version control ---
-    "git",  // covers all git subcommands (clone, add, commit, push, pull, status, diff, log …)
-    "gh",   // GitHub CLI
+    "git", // covers all git subcommands (clone, add, commit, push, pull, status, diff, log …)
+    "gh",  // GitHub CLI
     // --- Build / package management ---
     "cargo",
     "rustc",
@@ -125,13 +131,33 @@ const SAFE_COMMANDS: &[&str] = &[
 // Banned commands: these are never allowed (unless YOLO mode enabled).
 // High-risk tools that could exfiltrate data or connect to external systems.
 const BANNED_COMMANDS: &[&str] = &[
-    "curl", "wget", "nc", "netcat", "telnet", "axel", "aria2c", "lynx", "w3m",
+    "curl",
+    "wget",
+    "nc",
+    "netcat",
+    "telnet",
+    "axel",
+    "aria2c",
+    "lynx",
+    "w3m",
     // Attack and exploitation tools
-    "nmap", "masscan", "nikto", "sqlmap", "hydra", "john", "hashcat",
-    "aircrack", "metasploit", "msfconsole", "msfvenom", "burpsuite",
-    "ettercap", "arpspoof",
+    "nmap",
+    "masscan",
+    "nikto",
+    "sqlmap",
+    "hydra",
+    "john",
+    "hashcat",
+    "aircrack",
+    "metasploit",
+    "msfconsole",
+    "msfvenom",
+    "burpsuite",
+    "ettercap",
+    "arpspoof",
     // tcpdump and wireshark are blocked by default but can be enabled via YOLO mode
-    "tcpdump", "wireshark",
+    "tcpdump",
+    "wireshark",
 ];
 
 const DENIED_PATTERNS: &[&str] = &[

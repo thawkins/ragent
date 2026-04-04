@@ -3,7 +3,7 @@
 //! Checks GitHub releases API for a newer version and optionally downloads
 //! and replaces the running binary.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 /// The GitHub repo to check for releases.
