@@ -802,9 +802,9 @@ async fn prompt_opt_handler(
         return error_response(StatusCode::BAD_REQUEST, "prompt must not be empty");
     }
 
-    let method = match OptMethod::from_str(&body.method) {
-        Some(m) => m,
-        None => {
+    let method = match body.method.parse::<OptMethod>() {
+        Ok(m) => m,
+        Err(_) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown optimization method: {}", body.method),

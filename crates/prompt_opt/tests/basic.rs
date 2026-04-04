@@ -46,8 +46,9 @@ fn test_help_table() {
 
 #[test]
 fn test_from_str_round_trip() {
+    use std::str::FromStr;
     for method in OptMethod::all() {
-        let parsed = OptMethod::from_str(method.name());
+        let parsed = OptMethod::from_str(method.name()).ok();
         assert_eq!(
             parsed,
             Some(*method),

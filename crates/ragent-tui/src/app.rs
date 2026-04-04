@@ -3012,9 +3012,9 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     return;
                 }
 
-                let method = match OptMethod::from_str(method_str) {
-                    Some(m) => m,
-                    None => {
+                let method = match method_str.parse::<OptMethod>() {
+                    Ok(m) => m,
+                    Err(_) => {
                         self.status = format!("⚠ Unknown optimization method: {}", method_str);
                         self.push_log_no_agent(
                             LogLevel::Warn,

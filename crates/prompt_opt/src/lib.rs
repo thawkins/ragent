@@ -49,27 +49,32 @@ pub enum OptMethod {
     Microsoft,
 }
 
-impl OptMethod {
+impl std::str::FromStr for OptMethod {
+    type Err = ();
+
     /// Parse a method name/alias (case-insensitive) into an [`OptMethod`].
-    pub fn from_str(s: &str) -> Option<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "co_star" | "costar" | "co-star" => Some(Self::CoStar),
-            "crispe" | "crisper" => Some(Self::Crispe),
+            "co_star" | "costar" | "co-star" => Ok(Self::CoStar),
+            "crispe" | "crisper" => Ok(Self::Crispe),
             "cot" | "chain_of_thought" | "chain-of-thought" | "chainofthought" => {
-                Some(Self::ChainOfThought)
+                Ok(Self::ChainOfThought)
             }
-            "draw" => Some(Self::Draw),
-            "rise" => Some(Self::Rise),
-            "o1_style" | "o1-style" | "o1" => Some(Self::O1Style),
-            "meta" | "meta_prompting" | "meta-prompting" => Some(Self::MetaPrompting),
-            "variational" | "vari" => Some(Self::Variational),
-            "q_star" | "qstar" | "q-star" | "q*" => Some(Self::QStar),
-            "openai" => Some(Self::OpenAI),
-            "claude" => Some(Self::Claude),
-            "microsoft" | "ms" | "azure" => Some(Self::Microsoft),
-            _ => None,
+            "draw" => Ok(Self::Draw),
+            "rise" => Ok(Self::Rise),
+            "o1_style" | "o1-style" | "o1" => Ok(Self::O1Style),
+            "meta" | "meta_prompting" | "meta-prompting" => Ok(Self::MetaPrompting),
+            "variational" | "vari" => Ok(Self::Variational),
+            "q_star" | "qstar" | "q-star" | "q*" => Ok(Self::QStar),
+            "openai" => Ok(Self::OpenAI),
+            "claude" => Ok(Self::Claude),
+            "microsoft" | "ms" | "azure" => Ok(Self::Microsoft),
+            _ => Err(()),
         }
     }
+}
+
+impl OptMethod {
 
     /// Canonical short name for this method (used in status messages, logs).
     pub fn name(self) -> &'static str {
@@ -574,19 +579,20 @@ mod tests {
 
     #[test]
     fn test_from_str_aliases() {
-        assert_eq!(OptMethod::from_str("costar"), Some(OptMethod::CoStar));
-        assert_eq!(OptMethod::from_str("co-star"), Some(OptMethod::CoStar));
-        assert_eq!(OptMethod::from_str("CO_STAR"), Some(OptMethod::CoStar));
-        assert_eq!(OptMethod::from_str("cot"), Some(OptMethod::ChainOfThought));
+        use std::str::FromStr;
+        assert_eq!(OptMethod::from_str("costar").ok(), Some(OptMethod::CoStar));
+        assert_eq!(OptMethod::from_str("co-star").ok(), Some(OptMethod::CoStar));
+        assert_eq!(OptMethod::from_str("CO_STAR").ok(), Some(OptMethod::CoStar));
+        assert_eq!(OptMethod::from_str("cot").ok(), Some(OptMethod::ChainOfThought));
         assert_eq!(
-            OptMethod::from_str("chain-of-thought"),
+            OptMethod::from_str("chain-of-thought").ok(),
             Some(OptMethod::ChainOfThought)
         );
-        assert_eq!(OptMethod::from_str("azure"), Some(OptMethod::Microsoft));
-        assert_eq!(OptMethod::from_str("ms"), Some(OptMethod::Microsoft));
-        assert_eq!(OptMethod::from_str("q*"), Some(OptMethod::QStar));
-        assert_eq!(OptMethod::from_str("o1"), Some(OptMethod::O1Style));
-        assert_eq!(OptMethod::from_str("badname"), None);
+        assert_eq!(OptMethod::from_str("azure").ok(), Some(OptMethod::Microsoft));
+        assert_eq!(OptMethod::from_str("ms").ok(), Some(OptMethod::Microsoft));
+        assert_eq!(OptMethod::from_str("q*").ok(), Some(OptMethod::QStar));
+        assert_eq!(OptMethod::from_str("o1").ok(), Some(OptMethod::O1Style));
+        assert_eq!(OptMethod::from_str("badname").ok(), None::<OptMethod>);
     }
 
     #[test]
