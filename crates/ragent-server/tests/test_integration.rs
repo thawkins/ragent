@@ -33,6 +33,7 @@ fn test_state(token: &str) -> AppState {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     });
 
     AppState {

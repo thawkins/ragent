@@ -332,6 +332,7 @@ async fn main() -> Result<()> {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
@@ -341,6 +342,26 @@ async fn main() -> Result<()> {
         max_background_agents,
     ));
     let _ = session_processor.task_manager.set(task_manager);
+
+    // Connect MCP servers from config and register their tools into the tool registry.
+    if !config.read().await.mcp.is_empty() {
+        let mcp_configs: Vec<(String, ragent_core::config::McpServerConfig)> = config
+            .read()
+            .await
+            .mcp
+            .iter()
+            .map(|(id, cfg)| (id.clone(), cfg.clone()))
+            .collect();
+
+        let mut mcp_client = ragent_core::mcp::McpClient::new();
+        for (id, cfg) in mcp_configs {
+            if let Err(e) = mcp_client.connect(&id, cfg).await {
+                tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
+            }
+        }
+        let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
+        session_processor.set_mcp_client(shared_client).await;
+    }
 
     match cli.command {
         None => {

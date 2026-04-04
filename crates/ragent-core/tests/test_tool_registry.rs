@@ -14,11 +14,22 @@ fn test_default_registry_has_all_tools() {
 
     let expected = [
         "bash",
+        "bash_reset",
         "cancel_task",
         "create",
         "edit",
         "glob",
         "grep",
+        "github_close_issue",
+        "github_comment_issue",
+        "github_create_issue",
+        "github_create_pr",
+        "github_get_issue",
+        "github_get_pr",
+        "github_list_issues",
+        "github_list_prs",
+        "github_merge_pr",
+        "github_review_pr",
         "libre_info",
         "libre_read",
         "libre_write",
@@ -75,7 +86,7 @@ fn test_default_registry_has_all_tools() {
     ];
     assert_eq!(tools.len(), expected.len());
     for name in &expected {
-        assert!(tools.contains(name), "Missing tool: {}", name);
+        assert!(tools.contains(&name.to_string()), "Missing tool: {}", name);
     }
 }
 
@@ -132,7 +143,7 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 59);
+    assert_eq!(defs.len(), 70);
 
     for def in &defs {
         assert!(
@@ -206,7 +217,7 @@ impl Tool for TestTool {
 
 #[test]
 fn test_register_custom_tool() {
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     assert!(registry.list().is_empty());
 
     registry.register(Arc::new(TestTool));

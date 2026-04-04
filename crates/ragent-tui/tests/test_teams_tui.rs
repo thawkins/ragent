@@ -48,6 +48,7 @@ fn make_app() -> App {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

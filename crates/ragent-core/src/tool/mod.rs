@@ -7,6 +7,10 @@
 //! Built-in tools (file I/O, shell execution, search, and user interaction) are
 //! provided via [`create_default_registry`].
 
+/// MCP server tool wrapper.
+pub mod mcp_tool;
+pub use mcp_tool::McpToolWrapper;
+
 /// Shell command execution tool.
 pub mod bash;
 /// Persistent shell state reset tool.
@@ -85,7 +89,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Verify that `path` resolves to somewhere within `root` after canonicalization.
 /// Prevents directory traversal attacks (e.g., `../../etc/passwd`).
@@ -273,8 +277,11 @@ pub trait Tool: Send + Sync {
 ///
 /// Tools are registered by name and can be looked up, listed, or exported
 /// as [`ToolDefinition`] descriptors for LLM function-calling.
+///
+/// The internal map uses a [`RwLock`] so tools can be registered dynamically
+/// (e.g., MCP tools) after the registry is wrapped in an `Arc`.
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn Tool>>,
+    tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
 }
 
 impl ToolRegistry {
@@ -290,7 +297,7 @@ impl ToolRegistry {
     /// ```
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: RwLock::new(HashMap::new()),
         }
     }
 
@@ -302,12 +309,13 @@ impl ToolRegistry {
     /// use ragent_core::tool::{ToolRegistry, read::ReadTool};
     /// use std::sync::Arc;
     ///
-    /// let mut registry = ToolRegistry::new();
+    /// let registry = ToolRegistry::new();
     /// registry.register(Arc::new(ReadTool));
     /// assert_eq!(registry.list().len(), 1);
     /// ```
-    pub fn register(&mut self, tool: Arc<dyn Tool>) {
-        self.tools.insert(tool.name().to_string(), tool);
+    pub fn register(&self, tool: Arc<dyn Tool>) {
+        let mut tools = self.tools.write().expect("tool registry lock poisoned");
+        tools.insert(tool.name().to_string(), tool);
     }
 
     /// Looks up a tool by name, returning a shared reference if found.
@@ -322,7 +330,8 @@ impl ToolRegistry {
     /// assert!(registry.get("nonexistent").is_none());
     /// ```
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.get(name).cloned()
+        let tools = self.tools.read().expect("tool registry lock poisoned");
+        tools.get(name).cloned()
     }
 
     /// Returns an alphabetically sorted list of all registered tool names.
@@ -334,11 +343,12 @@ impl ToolRegistry {
     ///
     /// let registry = create_default_registry();
     /// let names = registry.list();
-    /// assert!(names.contains(&"read"));
-    /// assert!(names.contains(&"bash"));
+    /// assert!(names.contains(&"read".to_string()));
+    /// assert!(names.contains(&"bash".to_string()));
     /// ```
-    pub fn list(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self.tools.keys().map(|s| s.as_str()).collect();
+    pub fn list(&self) -> Vec<String> {
+        let tools = self.tools.read().expect("tool registry lock poisoned");
+        let mut names: Vec<String> = tools.keys().cloned().collect();
         names.sort();
         names
     }
@@ -356,8 +366,8 @@ impl ToolRegistry {
     /// assert!(defs.windows(2).all(|w| w[0].name <= w[1].name));
     /// ```
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs: Vec<ToolDefinition> = self
-            .tools
+        let tools = self.tools.read().expect("tool registry lock poisoned");
+        let mut defs: Vec<ToolDefinition> = tools
             .values()
             .map(|t| ToolDefinition {
                 name: t.name().to_string(),
@@ -388,10 +398,10 @@ impl Default for ToolRegistry {
 /// use ragent_core::tool::create_default_registry;
 ///
 /// let registry = create_default_registry();
-/// assert!(registry.list().contains(&"think"));
+/// assert!(registry.list().contains(&"think".to_string()));
 /// ```
 pub fn create_default_registry() -> ToolRegistry {
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(Arc::new(read::ReadTool));
     registry.register(Arc::new(write::WriteTool));
     registry.register(Arc::new(create::CreateTool));

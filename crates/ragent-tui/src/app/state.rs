@@ -521,6 +521,14 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "GitHub integration: /github login | logout | status",
     },
     SlashCommandDef {
+        trigger: "update",
+        description: "Check for or install updates: /update | /update install",
+    },
+    SlashCommandDef {
+        trigger: "doctor",
+        description: "Run system diagnostics (providers, git, ripgrep, MCP, memory)",
+    },
+    SlashCommandDef {
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },

@@ -1,6 +1,15 @@
 # Changelog
 
-## [0.1.0-alpha.21] - 2026-04-04
+## [0.1.0-alpha.22] - 2026-06-09
+
+### Added
+- **M5 Ecosystem Integration:**
+  - **MCP Tool Wiring (5.1):** `McpToolWrapper` implementing the `Tool` trait; MCP server tools are discovered at startup and registered in the tool registry as `mcp_{server_id}_{tool_name}`; `ToolRegistry` now uses `RwLock` for interior mutability enabling runtime registration; `SessionProcessor` holds `OnceLock<Arc<RwLock<McpClient>>>` with `set_mcp_client()` wired into `main.rs`
+  - **Hooks System (5.4):** `HookConfig` with `HookTrigger` enum (`on_session_start`, `on_session_end`, `on_error`, `on_permission_denied`); `fire_hooks()` async fire-and-forget via `tokio::spawn`; hooks configured in `ragent.json` under `"hooks"` array; 4 lifecycle trigger points wired into `session/processor.rs`; hooks merge (append) across config files
+  - **Auto-Update (5.5):** `ragent_core::updater` module with `check_for_update()` (GitHub releases API, 10s timeout), `download_and_replace()` (300s timeout, replaces running binary), `is_newer()` semver comparison; `/update` slash command with interactive confirmation
+  - **`/doctor` Diagnostic Command (5.6):** System diagnostics report including binary path, version, config validity, MCP server connectivity, provider/model selection, tool count, session store status
+
+
 
 ### Added
 - **M4 Advanced Features & Differentiation:**

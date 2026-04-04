@@ -100,7 +100,7 @@ async fn test_max_5_parallel_tools() {
     let test_tool = Arc::new(ConcurrencyTestTool::new(100));
 
     // Create tool registry with our test tool
-    let mut registry = ToolRegistry::new();
+    let registry = ToolRegistry::new();
     registry.register(test_tool.clone());
 
     // Set up session processor components
@@ -124,6 +124,7 @@ async fn test_max_5_parallel_tools() {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     };
 
     // Note: This test is simplified and won't actually call process_message

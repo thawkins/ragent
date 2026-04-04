@@ -15,6 +15,8 @@ pub mod github;
 pub mod error;
 pub mod event;
 pub mod file_ops;
+/// Lifecycle hooks — run shell commands at session lifecycle points.
+pub mod hooks;
 pub mod id;
 pub mod llm;
 /// Language Server Protocol client for code-intelligence queries.
@@ -40,5 +42,7 @@ pub mod task;
 /// Agent team coordination — shared task list, mailboxes, and team config.
 pub mod team;
 pub mod tool;
+/// Auto-update support — check GitHub releases and replace the binary.
+pub mod updater;
 /// YOLO mode — bypass all command validation and tool restrictions.
 pub mod yolo;

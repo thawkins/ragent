@@ -40,6 +40,7 @@ async fn test_session_processor_errors_when_model_missing() {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -100,6 +101,7 @@ async fn test_session_processor_errors_when_provider_missing() {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -227,6 +229,7 @@ async fn test_session_processor_injects_ollama_read_guidance() {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -276,6 +279,7 @@ async fn test_session_processor_injects_git_and_readme_context() {
         task_manager: std::sync::OnceLock::new(),
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
+        mcp_client: std::sync::OnceLock::new(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();

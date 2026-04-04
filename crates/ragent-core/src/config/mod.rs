@@ -46,6 +46,9 @@ pub struct Config {
     /// Feature flags for experimental functionality.
     #[serde(default)]
     pub experimental: ExperimentalFlags,
+    /// Lifecycle hooks. See [`crate::hooks::HookConfig`].
+    #[serde(default)]
+    pub hooks: Vec<crate::hooks::HookConfig>,
 }
 
 fn default_agent_name() -> String {
@@ -419,6 +422,9 @@ impl Config {
         if overlay.experimental.open_telemetry {
             base.experimental.open_telemetry = true;
         }
+
+        // Hooks append (overlay hooks are added on top of base hooks)
+        base.hooks.extend(overlay.hooks);
 
         base
     }

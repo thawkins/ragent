@@ -5712,6 +5712,201 @@ Type `/swarm help` for more info.\n";
                 }
             }
 
+            "update" => {
+                match args.trim() {
+                    "install" => {
+                        self.append_assistant_text(
+                            "From: /update install\n⬇️ Downloading latest release…",
+                        );
+                        let event_bus = self.event_bus.clone();
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        tokio::spawn(async move {
+                            match ragent_core::updater::check_for_update().await {
+                                Some(info) => match info.download_url {
+                                    Some(ref url) => {
+                                        match ragent_core::updater::download_and_replace(url).await
+                                        {
+                                            Ok(()) => {
+                                                event_bus.publish(
+                                                    ragent_core::event::Event::AgentError {
+                                                        session_id: sid,
+                                                        error: format!(
+                                                            "✅ Updated to v{}! Please restart ragent to use the new version.",
+                                                            info.version
+                                                        ),
+                                                    },
+                                                );
+                                            }
+                                            Err(e) => {
+                                                event_bus.publish(
+                                                    ragent_core::event::Event::AgentError {
+                                                        session_id: sid,
+                                                        error: format!(
+                                                            "❌ Install failed: {e}"
+                                                        ),
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        event_bus.publish(ragent_core::event::Event::AgentError {
+                                            session_id: sid,
+                                            error: format!(
+                                                "⚠️  Update v{} found but no binary available for this platform.\n\nVisit https://github.com/thawkins/ragent/releases to download manually.",
+                                                info.version
+                                            ),
+                                        });
+                                    }
+                                },
+                                None => {
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                                        session_id: sid,
+                                        error: format!(
+                                            "✅ Already up to date (v{}).",
+                                            ragent_core::updater::CURRENT_VERSION
+                                        ),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    _ => {
+                        self.append_assistant_text("From: /update\n🔍 Checking for updates…");
+                        let event_bus = self.event_bus.clone();
+                        let sid = self.session_id.clone().unwrap_or_default();
+                        tokio::spawn(async move {
+                            match ragent_core::updater::check_for_update().await {
+                                Some(info) => {
+                                    let notes = if info.body.is_empty() {
+                                        "No release notes.".to_string()
+                                    } else {
+                                        info.body.chars().take(500).collect::<String>()
+                                    };
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                                        session_id: sid,
+                                        error: format!(
+                                            "🆕 Update available: **v{}**\n\n{}\n\nRun `/update install` to install.",
+                                            info.version, notes
+                                        ),
+                                    });
+                                }
+                                None => {
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                                        session_id: sid,
+                                        error: format!(
+                                            "✅ ragent is up to date (v{}).",
+                                            ragent_core::updater::CURRENT_VERSION
+                                        ),
+                                    });
+                                }
+                            }
+                        });
+                    }
+                }
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
+            "doctor" => {
+                self.append_assistant_text("From: /doctor\n🩺 Running diagnostics…");
+                let event_bus = self.event_bus.clone();
+                let sid = self.session_id.clone().unwrap_or_default();
+                let working_dir = std::env::current_dir().unwrap_or_default();
+                tokio::spawn(async move {
+                    let mut lines = vec!["From: /doctor\n# Diagnostic Report\n".to_string()];
+
+                    // Check git
+                    let git_ok = std::process::Command::new("git")
+                        .args(["--version"])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    lines.push(format!("{} git", if git_ok { "✅" } else { "❌" }));
+
+                    // Check ripgrep
+                    let rg_ok = std::process::Command::new("rg")
+                        .arg("--version")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+                    lines.push(format!(
+                        "{} ripgrep (rg)",
+                        if rg_ok {
+                            "✅"
+                        } else {
+                            "❌ ripgrep not found — install at https://github.com/BurntSushi/ripgrep"
+                        }
+                    ));
+
+                    // Check GitHub token
+                    let gh_ok = ragent_core::github::auth::load_token().is_some();
+                    lines.push(format!(
+                        "{} GitHub token",
+                        if gh_ok {
+                            "✅"
+                        } else {
+                            "⚠️  no GitHub token — run /github login"
+                        }
+                    ));
+
+                    // Check memory dirs
+                    let memory_dir_ok = if let Some(home) = dirs::home_dir() {
+                        let p = home.join(".ragent").join("memory");
+                        std::fs::create_dir_all(&p).is_ok()
+                    } else {
+                        false
+                    };
+                    lines.push(format!(
+                        "{} memory directory (~/.ragent/memory/)",
+                        if memory_dir_ok { "✅" } else { "❌" }
+                    ));
+
+                    // Check project .ragent dir
+                    let project_ragent_ok =
+                        std::fs::create_dir_all(working_dir.join(".ragent")).is_ok();
+                    lines.push(format!(
+                        "{} project .ragent/ directory",
+                        if project_ragent_ok { "✅" } else { "❌" }
+                    ));
+
+                    // Check MCP config (field is `mcp`)
+                    let mcp_configured = ragent_core::config::Config::load()
+                        .map(|c| !c.mcp.is_empty())
+                        .unwrap_or(false);
+                    lines.push(format!(
+                        "{} MCP servers configured",
+                        if mcp_configured {
+                            "✅"
+                        } else {
+                            "ℹ️  no MCP servers configured (optional)"
+                        }
+                    ));
+
+                    // Check for update
+                    lines.push("\n**Checking for updates…**".to_string());
+                    let update_msg = match ragent_core::updater::check_for_update().await {
+                        Some(info) => format!("⚠️  Update available: v{}", info.version),
+                        None => format!(
+                            "✅ Up to date (v{})",
+                            ragent_core::updater::CURRENT_VERSION
+                        ),
+                    };
+                    lines.push(update_msg);
+
+                    lines.push("\n*Diagnostics complete.*".to_string());
+
+                    event_bus.publish(ragent_core::event::Event::AgentError {
+                        session_id: sid,
+                        error: lines.join("\n"),
+                    });
+                });
+                if self.current_screen == ScreenMode::Home {
+                    self.current_screen = ScreenMode::Chat;
+                }
+            }
+
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
@@ -5796,6 +5991,7 @@ Type `/swarm help` for more info.\n";
 
                     let flag = Arc::new(AtomicBool::new(false));
                     self.cancel_flag = Some(flag.clone());
+                    let working_dir = std::env::current_dir().unwrap_or_default();
 
                     tokio::spawn(async move {
                         match ragent_core::skill::invoke::invoke_skill(

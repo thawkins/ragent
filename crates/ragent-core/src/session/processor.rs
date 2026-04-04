@@ -23,7 +23,7 @@ use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
 use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
-use crate::tool::{TeamContext, ToolContext, ToolRegistry};
+use crate::tool::{McpToolWrapper, TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
 
 /// Additional system-prompt guidance injected for Ollama sessions.
@@ -62,9 +62,62 @@ pub struct SessionProcessor {
     /// Optional team manager for spawning and coordinating teammate sessions.
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
     pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
+    /// Optional MCP client for dynamic MCP tool registration.
+    /// Set once after startup via [`SessionProcessor::set_mcp_client`].
+    pub mcp_client: std::sync::OnceLock<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>>,
 }
 
 impl SessionProcessor {
+    /// Set the MCP client and register all tools from connected servers into the tool registry.
+    ///
+    /// This should be called once after the MCP client has connected to all configured servers.
+    /// Tools are registered with names in the format `mcp_{server_id}_{tool_name}`.
+    pub async fn set_mcp_client(
+        &self,
+        client: Arc<tokio::sync::RwLock<crate::mcp::McpClient>>,
+    ) {
+        // Register all currently connected MCP tools into the shared registry.
+        let tool_defs = {
+            let c = client.read().await;
+            // Collect (server_id, tool_def) pairs for all connected servers.
+            let mut pairs = Vec::new();
+            for server in c.servers() {
+                if server.status == crate::mcp::McpStatus::Connected {
+                    for tool in &server.tools {
+                        pairs.push((server.id.clone(), tool.clone()));
+                    }
+                }
+            }
+            pairs
+        };
+
+        let registered = tool_defs.len();
+        for (server_id, tool_def) in tool_defs {
+            let wrapper = McpToolWrapper::new(
+                &server_id,
+                &tool_def.name,
+                &tool_def.description,
+                tool_def.parameters,
+                client.clone(),
+            );
+            tracing::debug!(
+                server_id = %server_id,
+                tool = %tool_def.name,
+                ragent_name = %wrapper.ragent_name,
+                "Registering MCP tool"
+            );
+            self.tool_registry.register(Arc::new(wrapper));
+        }
+
+        if registered > 0 {
+            tracing::info!(count = registered, "Registered MCP tools into tool registry");
+        } else {
+            tracing::debug!("No connected MCP tools to register");
+        }
+
+        let _ = self.mcp_client.set(client);
+    }
+
     /// Run a blocking storage operation on a dedicated thread to avoid
     /// stalling the Tokio runtime.
     async fn storage_op<F, T>(&self, f: F) -> Result<T>
@@ -248,10 +301,26 @@ impl SessionProcessor {
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         let team_context_for_session = resolve_team_context_for_session(session_id, &working_dir);
 
+        // Load config once for hooks and other config-dependent features
+        let session_config = crate::config::Config::load().unwrap_or_default();
+
+        // Fire on_session_start hook when this is the first message in the session
+        let has_prior_messages = self
+            .session_manager
+            .get_messages(session_id)
+            .map(|msgs| msgs.iter().any(|m| m.role == crate::message::Role::Assistant))
+            .unwrap_or(false);
+        if !has_prior_messages {
+            crate::hooks::fire_hooks(
+                &session_config.hooks,
+                crate::hooks::HookTrigger::OnSessionStart,
+                &working_dir,
+                &[],
+            );
+        }
+
         // Load skill registry for system prompt injection
-        let skill_dirs = crate::config::Config::load()
-            .map(|c| c.skill_dirs)
-            .unwrap_or_default();
+        let skill_dirs = session_config.skill_dirs.clone();
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
         let (git_status, readme, agents_md, file_tree) = crate::agent::collect_prompt_context(&working_dir).await;
         let mut system_prompt = crate::agent::build_system_prompt_with_context(
@@ -507,6 +576,13 @@ impl SessionProcessor {
                         session_id: session_id.to_string(),
                         error: e.to_string(),
                     });
+                    let error_msg = e.to_string();
+                    crate::hooks::fire_hooks(
+                        &session_config.hooks,
+                        crate::hooks::HookTrigger::OnError,
+                        &working_dir,
+                        &[("RAGENT_ERROR", &error_msg)],
+                    );
                     bail!("LLM call failed: {}", e);
                 }
             };
@@ -729,6 +805,8 @@ impl SessionProcessor {
                 let registry = self.tool_registry.clone();
                 let event_bus = self.event_bus.clone();
                 let session_id_str = session_id.to_string();
+                let hook_working_dir = working_dir.clone();
+                let hook_configs = session_config.hooks.clone();
 
                 // Spawn each tool execution as a future — the tool semaphore
                 // inside the spawned task bounds concurrency.
@@ -765,6 +843,18 @@ impl SessionProcessor {
                         }
                         Err(e) => (None, Some(format!("{:#}", e))),
                     };
+
+                    // Fire on_permission_denied hook when a tool returns a permission error
+                    if let Some(err_msg) = &error {
+                        if err_msg.contains("permission denied") {
+                            crate::hooks::fire_hooks(
+                                &hook_configs,
+                                crate::hooks::HookTrigger::OnPermissionDenied,
+                                &hook_working_dir,
+                                &[("RAGENT_ERROR", err_msg.as_str())],
+                            );
+                        }
+                    }
 
                     let status = if result.is_ok() {
                         ToolCallStatus::Completed
@@ -963,6 +1053,13 @@ impl SessionProcessor {
             message_id: assistant_msg.id.clone(),
             reason: FinishReason::Stop,
         });
+
+        crate::hooks::fire_hooks(
+            &session_config.hooks,
+            crate::hooks::HookTrigger::OnSessionEnd,
+            &working_dir,
+            &[],
+        );
 
         Ok(assistant_msg)
     }
