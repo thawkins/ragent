@@ -37,6 +37,32 @@ Prefer small line ranges (100 lines max) for large files; iterate with `start_li
 Never invent or guess file contents — always read them with the tool.\n\n\
 Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
 
+/// Build a concise system-prompt section listing every registered tool by name and description.
+///
+/// Injected into every session's system prompt so the model always knows the exact tool names
+/// available. This prevents hallucinated tool names (e.g. calling "search" instead of "grep").
+fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String {
+    let defs = registry.definitions();
+    if defs.is_empty() {
+        return String::new();
+    }
+    let mut section = String::from(
+        "## Available Tools\n\nYou have access to the following tools. \
+        Use ONLY these exact tool names — do not invent or guess tool names.\n\n",
+    );
+    for def in &defs {
+        // Truncate long descriptions to keep the prompt compact.
+        let desc = if def.description.len() > 120 {
+            format!("{}…", &def.description[..120])
+        } else {
+            def.description.clone()
+        };
+        section.push_str(&format!("- `{}` — {}\n", def.name, desc));
+    }
+    section.push('\n');
+    section
+}
+
 /// Drives the agentic conversation loop for a single session.
 ///
 /// Holds shared references to the session manager, LLM provider registry,
@@ -336,6 +362,12 @@ impl SessionProcessor {
             Some(&readme),
             Some(&agents_md),
         );
+
+        // Inject a tool reference listing so the model knows the exact tool names.
+        // This is critical for models (especially via Ollama) that may hallucinate
+        // tool names like "search" instead of the actual "grep" tool.
+        let tool_reference = build_tool_reference_section(&self.tool_registry);
+        system_prompt.push_str(&tool_reference);
 
         if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
             system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
