@@ -1,0 +1,105 @@
+{
+  "name": "swarm-20260404-164152",
+  "lead_session_id": "0eb2aa27-b1f1-4646-88f9-f91e9448e407",
+  "created_at": "2026-04-04T16:41:52.693073107Z",
+  "status": "active",
+  "members": [
+    {
+      "name": "swarm-s1",
+      "agent_id": "tm-001",
+      "session_id": "560dace9-8096-41aa-af0a-5ae8f756ca15",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.734896938Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Create output directory\n\n**Task ID:** s1\n**Title:** Create output directory\n\nCreate the directory target/temp/swarmout if it does not exist. Ensure the directory is writable and clean any existing files that may conflict with the new output.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s1\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s2",
+      "agent_id": "tm-002",
+      "session_id": "8eeca804-c209-408c-95af-96bb9a134960",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.739682691Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Review current product\n\n**Task ID:** s2\n**Title:** Review current product\n\nExamine the source code and documentation of the current product (the repository where the request originates). Produce a concise markdown file current_product.md that lists existing major features, architecture components, and any known limitations or open issues. Place the file in target/temp/swarmout.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s2\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s3",
+      "agent_id": "tm-003",
+      "session_id": "b1e2496f-b1c1-4218-9b3c-1d6d0171d17f",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.742577650Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze ClaudeCode competitor\n\n**Task ID:** s3\n**Title:** Analyze ClaudeCode competitor\n\nRead the source code located at ../claude-code-sourcemap. Identify key features, user workflows, and any unique capabilities that differentiate it from the current product. Summarize findings in a markdown file claude_code_analysis.md placed in target/temp/swarmout.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s3\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s4",
+      "agent_id": "tm-004",
+      "session_id": "787ffd42-5563-49bb-9a7f-b440c2bd4408",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.745743039Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze OpenCode competitor\n\n**Task ID:** s4\n**Title:** Analyze OpenCode competitor\n\nRead the source code located at ../opencode. Document the main functionalities, integration points, and any advanced features (e.g., AI prompting, code generation pipelines). Output the results to opencode_analysis.md in target/temp/swarmout.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s4\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s5",
+      "agent_id": "tm-005",
+      "session_id": "cf83f93c-acdd-4cb8-923e-c44d4dba1805",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.753311789Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Copilot‑CLI competitor\n\n**Task ID:** s5\n**Title:** Analyze Copilot‑CLI competitor\n\nResearch and, if source is available, examine the copilot-cli tool. Capture its primary command‑line features, configuration mechanisms, and extension capabilities. Produce copilot_cli_analysis.md in target/temp/swarmout.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s5\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s6",
+      "agent_id": "tm-006",
+      "session_id": "c16e37af-f8b3-4284-835a-cad0d7818be6",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.765683377Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Analyze Roocode competitor\n\n**Task ID:** s6\n**Title:** Analyze Roocode competitor\n\nGather information on roocode (public repositories, documentation, or release notes). Identify the features it offers that are not present in the current product. Summarize the analysis in roocode_analysis.md placed in target/temp/swarmout.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s6\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    },
+    {
+      "name": "swarm-s7",
+      "agent_id": "tm-007",
+      "session_id": "29dac968-553d-4762-84ef-301fad6776e7",
+      "agent_type": "general",
+      "status": "idle",
+      "current_task_id": null,
+      "plan_status": "none",
+      "created_at": "2026-04-04T16:41:52.770796255Z",
+      "last_spawn_error": null,
+      "spawn_prompt": "## Swarm Task: Generate SWARMOUT2.md with feature suggestions and implementation plan\n\n**Task ID:** s7\n**Title:** Generate SWARMOUT2.md with feature suggestions and implementation plan\n\nCombine the outputs from s2‑s6 to create a comprehensive document SWARMOUT2.md. The document should:\n1. List suggested feature additions for the current product, referencing gaps identified in each competitor analysis.\n2. Provide a prioritized roadmap with detailed Milestones and associated Tasks for implementing each new feature. Each task should include a concise description, estimated effort (e.g., story points), and any required dependencies.\n3. Follow a clear markdown structure (e.g., ## Suggested Features, ## Milestones, ### Milestone 1, #### Tasks, etc.).\nPlace SWARMOUT2.md in target/temp/swarmout.\nEnsure the plan is realistic and actionable for a development team.\n\nYou are part of a swarm team. Complete this specific task.\n\nIMPORTANT: Your VERY FIRST action must be a tool call. Call `team_read_messages` with team_name set to the team name from your context. Do NOT respond with text first — call the tool immediately.\n\nAfter reading messages, do the work described above using tool calls (glob, read, bash, etc.). When done, call `team_task_complete` to mark task \"s7\" as completed.\nFocus only on your assigned task — other teammates are handling other parts.",
+      "memory_scope": "none"
+    }
+  ],
+  "settings": {
+    "max_teammates": 8,
+    "require_plan_approval": false,
+    "auto_claim_tasks": true,
+    "hooks": []
+  }
+}

@@ -27,6 +27,7 @@ fn detect_repo(ctx: &ToolContext) -> Result<(String, String)> {
 // 1. GithubListIssuesTool
 // ---------------------------------------------------------------------------
 
+/// Tool that lists GitHub issues in a repository.
 pub struct GithubListIssuesTool;
 
 #[async_trait::async_trait]
@@ -115,6 +116,7 @@ impl Tool for GithubListIssuesTool {
 // 2. GithubGetIssueTool
 // ---------------------------------------------------------------------------
 
+/// Tool that retrieves a single GitHub issue by number.
 pub struct GithubGetIssueTool;
 
 #[async_trait::async_trait]
@@ -229,6 +231,7 @@ impl Tool for GithubGetIssueTool {
 // 3. GithubCreateIssueTool
 // ---------------------------------------------------------------------------
 
+/// Tool that creates a new GitHub issue in a repository.
 pub struct GithubCreateIssueTool;
 
 #[async_trait::async_trait]
@@ -310,6 +313,7 @@ impl Tool for GithubCreateIssueTool {
 // 4. GithubCommentIssueTool
 // ---------------------------------------------------------------------------
 
+/// Tool that posts a comment on an existing GitHub issue.
 pub struct GithubCommentIssueTool;
 
 #[async_trait::async_trait]
@@ -377,6 +381,7 @@ impl Tool for GithubCommentIssueTool {
 // 5. GithubCloseIssueTool
 // ---------------------------------------------------------------------------
 
+/// Tool that closes a GitHub issue.
 pub struct GithubCloseIssueTool;
 
 #[async_trait::async_trait]

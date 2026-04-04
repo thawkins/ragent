@@ -477,6 +477,9 @@ impl App {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
 
+        // Initialise the bash allowlist/denylist from config
+        ragent_core::bash_lists::load_from_config();
+
         app
     }
 
@@ -3382,6 +3385,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.current_screen = ScreenMode::Chat;
                 }
                 self.status = "reload".to_string();
+                // Reload bash lists alongside other config
+                ragent_core::bash_lists::load_from_config();
             }
             "resume" => {
                 if !self.agent_halted {
@@ -5241,6 +5246,221 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                     Err(e) => {
                         self.status = format!("Failed to read todos: {}", e);
                         self.push_log_no_agent(LogLevel::Error, format!("todo_list error: {}", e));
+                    }
+                }
+            }
+            // ── /bash ────────────────────────────────────────────────────────
+            "bash" => {
+                let (sub, rest) = args
+                    .split_once(char::is_whitespace)
+                    .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
+
+                match sub {
+                    "help" | "" => {
+                        let help = "\
+From: /bash help
+
+## /bash — Bash command list management
+
+Manage the user-defined **allowlist** and **denylist** that complement the
+built-in safety rules.
+
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `/bash add allow <cmd>` | Allow a banned command prefix (e.g. `curl`) |
+| `/bash add deny <pattern>` | Block any command containing `<pattern>` |
+| `/bash remove allow <cmd>` | Remove a command from the allowlist |
+| `/bash remove deny <pattern>` | Remove a pattern from the denylist |
+| `/bash show` | Show the current allowlist and denylist |
+| `/bash help` | Show this help text |
+
+Append `--global` to write the change to the global config
+(`~/.config/ragent/ragent.json`) instead of the project `ragent.json`.
+
+### How it works
+
+- **allowlist**: command prefixes that bypass the built-in banned-command \
+check.  Use this to re-enable tools like `curl` without entering YOLO mode.
+- **denylist**: substring patterns that always reject a command, \
+supplementing the built-in denied-patterns list.
+
+Changes are persisted immediately to `ragent.json` and take effect at once.
+";
+                        self.append_assistant_text(help);
+                    }
+                    "show" => {
+                        let allowlist = ragent_core::bash_lists::get_allowlist();
+                        let denylist = ragent_core::bash_lists::get_denylist();
+
+                        let mut out = String::from("From: /bash show\n\n## Bash command lists\n\n");
+
+                        out.push_str("### Allowlist (user-defined)\n");
+                        if allowlist.is_empty() {
+                            out.push_str("  *(empty)*\n");
+                        } else {
+                            for entry in &allowlist {
+                                out.push_str(&format!("  - `{entry}`\n"));
+                            }
+                        }
+
+                        out.push_str("\n### Denylist (user-defined)\n");
+                        if denylist.is_empty() {
+                            out.push_str("  *(empty)*\n");
+                        } else {
+                            for entry in &denylist {
+                                out.push_str(&format!("  - `{entry}`\n"));
+                            }
+                        }
+
+                        out.push_str(
+                            "\n*Built-in lists are not shown here. \
+                            Use `/bash help` for more information.*\n",
+                        );
+                        self.append_assistant_text(&out);
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    "add" | "remove" => {
+                        // Parse: [allow|deny] <entry> [--global]
+                        let (list_type, entry_with_flag) = rest
+                            .split_once(char::is_whitespace)
+                            .map_or((rest, ""), |(l, e)| (l.trim(), e.trim()));
+
+                        let is_global = entry_with_flag.ends_with("--global");
+                        let entry = if is_global {
+                            entry_with_flag
+                                .trim_end_matches("--global")
+                                .trim()
+                        } else {
+                            entry_with_flag
+                        };
+
+                        if entry.is_empty() {
+                            self.append_assistant_text(&format!(
+                                "From: /bash {sub}\n\nUsage: `/bash {sub} allow|deny <entry> [--global]`"
+                            ));
+                            if self.current_screen == ScreenMode::Home {
+                                self.current_screen = ScreenMode::Chat;
+                            }
+                            return;
+                        }
+
+                        let scope = if is_global {
+                            ragent_core::bash_lists::Scope::Global
+                        } else {
+                            ragent_core::bash_lists::Scope::Project
+                        };
+                        let scope_label = if is_global { "global" } else { "project" };
+                        let config_file = if is_global {
+                            "~/.config/ragent/ragent.json"
+                        } else {
+                            "ragent.json"
+                        };
+
+                        match (sub, list_type) {
+                            ("add", "allow") => {
+                                match ragent_core::bash_lists::add_allowlist(entry, scope) {
+                                    Ok(()) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash add allow\n\n\
+                                            ✅ Added `{entry}` to the **allowlist** \
+                                            ({scope_label}: `{config_file}`).\n\n\
+                                            Commands starting with `{entry}` will no longer \
+                                            be blocked by the banned-command check."
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash add allow\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("add", "deny") => {
+                                match ragent_core::bash_lists::add_denylist(entry, scope) {
+                                    Ok(()) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash add deny\n\n\
+                                            ✅ Added `{entry}` to the **denylist** \
+                                            ({scope_label}: `{config_file}`).\n\n\
+                                            Any command containing `{entry}` will be rejected."
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash add deny\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("remove", "allow") => {
+                                match ragent_core::bash_lists::remove_allowlist(entry, scope) {
+                                    Ok(true) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove allow\n\n\
+                                            ✅ Removed `{entry}` from the **allowlist** \
+                                            ({scope_label}: `{config_file}`)."
+                                        ));
+                                    }
+                                    Ok(false) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove allow\n\n\
+                                            ⚠️ `{entry}` was not in the {scope_label} allowlist."
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove allow\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("remove", "deny") => {
+                                match ragent_core::bash_lists::remove_denylist(entry, scope) {
+                                    Ok(true) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove deny\n\n\
+                                            ✅ Removed `{entry}` from the **denylist** \
+                                            ({scope_label}: `{config_file}`)."
+                                        ));
+                                    }
+                                    Ok(false) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove deny\n\n\
+                                            ⚠️ `{entry}` was not in the {scope_label} denylist."
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /bash remove deny\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.append_assistant_text(&format!(
+                                    "From: /bash {sub}\n\n\
+                                    Unknown list type `{list_type}`. Use `allow` or `deny`.\n\n\
+                                    Usage: `/bash {sub} allow|deny <entry> [--global]`"
+                                ));
+                            }
+                        }
+
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(&format!(
+                            "From: /bash\n\nUnknown subcommand `{sub}`. \
+                            Run `/bash help` for usage."
+                        ));
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
                     }
                 }
             }

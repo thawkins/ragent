@@ -3324,7 +3324,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.23"
 dependencies = [
  "anyhow",
  "clap 4.5.60",
@@ -3346,7 +3346,7 @@ version = "0.1.0"
 
 [[package]]
 name = "ragent-core"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.23"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.23"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "0.1.0-alpha.22"
+version = "0.1.0-alpha.23"
 dependencies = [
  "anyhow",
  "arboard",

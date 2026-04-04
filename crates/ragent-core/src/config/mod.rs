@@ -49,6 +49,9 @@ pub struct Config {
     /// Lifecycle hooks. See [`crate::hooks::HookConfig`].
     #[serde(default)]
     pub hooks: Vec<crate::hooks::HookConfig>,
+    /// User-defined bash command allowlist and denylist additions.
+    #[serde(default)]
+    pub bash: BashConfig,
 }
 
 fn default_agent_name() -> String {
@@ -166,6 +169,23 @@ pub struct AgentConfig {
     // TODO: Replace `Value` with typed agent option structs.
     #[serde(default)]
     pub options: HashMap<String, Value>,
+}
+
+/// User-defined additions to the bash command allowlist and denylist.
+///
+/// Entries in `allowlist` are command prefixes that bypass the built-in
+/// banned-command check (e.g. `"curl"` to allow curl).  Entries in
+/// `denylist` are substring patterns that always reject a command (e.g.
+/// `"git push --force"`).  Both global and project configs are merged —
+/// the union of all entries is used.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BashConfig {
+    /// Command prefixes exempted from the banned-command check.
+    #[serde(default)]
+    pub allowlist: Vec<String>,
+    /// Patterns that unconditionally reject a command.
+    #[serde(default)]
+    pub denylist: Vec<String>,
 }
 
 /// A user-defined slash-command shortcut.
@@ -425,6 +445,18 @@ impl Config {
 
         // Hooks append (overlay hooks are added on top of base hooks)
         base.hooks.extend(overlay.hooks);
+
+        // Bash lists are unioned across global + project configs
+        for entry in overlay.bash.allowlist {
+            if !base.bash.allowlist.contains(&entry) {
+                base.bash.allowlist.push(entry);
+            }
+        }
+        for entry in overlay.bash.denylist {
+            if !base.bash.denylist.contains(&entry) {
+                base.bash.denylist.push(entry);
+            }
+        }
 
         base
     }

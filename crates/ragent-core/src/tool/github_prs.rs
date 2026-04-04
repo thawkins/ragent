@@ -18,6 +18,7 @@ fn detect(ctx: &ToolContext) -> Result<(GitHubClient, String, String)> {
 
 // ── GithubListPrsTool ─────────────────────────────────────────────────────────
 
+/// Tool that lists pull requests in a GitHub repository.
 pub struct GithubListPrsTool;
 
 #[async_trait::async_trait]
@@ -102,6 +103,7 @@ impl Tool for GithubListPrsTool {
 
 // ── GithubGetPrTool ───────────────────────────────────────────────────────────
 
+/// Tool that retrieves a single GitHub pull request by number.
 pub struct GithubGetPrTool;
 
 #[async_trait::async_trait]
@@ -185,6 +187,7 @@ impl Tool for GithubGetPrTool {
 
 // ── GithubCreatePrTool ────────────────────────────────────────────────────────
 
+/// Tool that creates a new GitHub pull request.
 pub struct GithubCreatePrTool;
 
 #[async_trait::async_trait]
@@ -280,6 +283,7 @@ impl Tool for GithubCreatePrTool {
 
 // ── GithubMergePrTool ─────────────────────────────────────────────────────────
 
+/// Tool that merges a GitHub pull request.
 pub struct GithubMergePrTool;
 
 #[async_trait::async_trait]
@@ -347,6 +351,7 @@ impl Tool for GithubMergePrTool {
 
 // ── GithubReviewPrTool ────────────────────────────────────────────────────────
 
+/// Tool that submits a review on a GitHub pull request.
 pub struct GithubReviewPrTool;
 
 #[async_trait::async_trait]

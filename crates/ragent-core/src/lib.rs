@@ -46,3 +46,5 @@ pub mod tool;
 pub mod updater;
 /// YOLO mode — bypass all command validation and tool restrictions.
 pub mod yolo;
+/// Runtime bash command allowlist / denylist, persisted in ragent.json.
+pub mod bash_lists;

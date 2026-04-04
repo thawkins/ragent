@@ -497,6 +497,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Auto-decompose a goal into parallel subtasks (/swarm <prompt> | /swarm status | /swarm help)",
     },
     SlashCommandDef {
+        trigger: "bash",
+        description: "Manage bash command lists: /bash add|remove allow|deny <entry> [--global] | show | help",
+    },
+    SlashCommandDef {
         trigger: "yolo",
         description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
     },

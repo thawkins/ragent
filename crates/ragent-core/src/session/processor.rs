@@ -591,7 +591,7 @@ impl SessionProcessor {
             let mut text_buffer = String::new();
             let mut reasoning_buffer = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
-            let mut finish_reason = FinishReason::Stop;
+            let mut _finish_reason = FinishReason::Stop;
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
 
@@ -675,7 +675,7 @@ impl SessionProcessor {
                         }
                     }
                     StreamEvent::Finish { reason } => {
-                        finish_reason = reason;
+                        _finish_reason = reason;
                     }
                 }
             }
@@ -754,7 +754,7 @@ impl SessionProcessor {
                     });
                     text_buffer = String::new();
                     reasoning_buffer = String::new();
-                    finish_reason = FinishReason::Stop;
+                    _finish_reason = FinishReason::Stop;
                     continue;
                 }
                 break;

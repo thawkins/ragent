@@ -1,6 +1,17 @@
 # Release
 
-## Current Version: 0.1.0-alpha.20
+## Current Version: 0.1.0-alpha.23
+
+### Added
+- **`/bash` slash command** — manage dynamic bash allowlist/denylist persisted in `ragent.json`:
+  - `add allow <cmd>` / `add deny <pattern>` / `remove allow|deny <entry>` / `show` / `help`
+  - `--global` flag writes to `~/.config/ragent/ragent.json`
+  - Allowlist exempts banned commands without YOLO mode; denylist adds extra rejection patterns
+  - Lists loaded at startup and on `/reload`
+
+### Fixed
+- CI `cargo check -D warnings` failures: unused `finish_reason` variable, missing doc comments on GitHub tool structs and team config field
+
 
 ### Added
 - Input changes improvements

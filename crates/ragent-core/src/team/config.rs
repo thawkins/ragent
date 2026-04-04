@@ -146,6 +146,7 @@ pub struct TeamMember {
     /// When this member was added to the team.
     pub created_at: DateTime<Utc>,
     #[serde(default)]
+    /// Last error message from a failed spawn attempt, if any.
     pub last_spawn_error: Option<String>,
     /// Initial prompt sent to this teammate when spawned.  Stored so that the
     /// reconcile loop can replay it if the manager was unavailable at blueprint

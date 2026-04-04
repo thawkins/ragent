@@ -344,9 +344,12 @@ impl Tool for BashTool {
         }
 
         // CC1-T4: Check for banned commands (curl, wget, nc, etc.)
+        // A user-defined allowlist entry (via /bash add allow <cmd>) exempts the command.
         if contains_banned_command(command) {
             if crate::yolo::is_enabled() {
                 tracing::warn!("YOLO mode: allowing banned command tool");
+            } else if crate::bash_lists::is_allowlisted(command) {
+                tracing::info!("Banned command allowed by user allowlist");
             } else {
                 bail!(
                     "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m). \
@@ -376,6 +379,16 @@ impl Tool for BashTool {
                         "Command rejected: contains dangerous pattern '{pattern}'. This pattern could cause irreversible damage to the system."
                     );
                 }
+            }
+        }
+
+        // Check user-defined denylist (from ragent.json `bash.denylist`)
+        if !crate::yolo::is_enabled() {
+            if let Some(pattern) = crate::bash_lists::matches_denylist(command) {
+                bail!(
+                    "Command rejected: matches user-defined deny pattern '{pattern}'. \
+                    Use `/bash remove deny \"{pattern}\"` to remove this restriction."
+                );
             }
         }
 

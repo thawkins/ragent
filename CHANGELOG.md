@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.1.0-alpha.23] - 2026-04-04
+
+### Added
+- **`/bash` slash command** — dynamic bash allowlist/denylist management:
+  - `/bash add allow <cmd>` — exempt a banned command prefix (e.g. `curl`) from the built-in banned-command check
+  - `/bash add deny <pattern>` — add a substring pattern that unconditionally rejects any matching command
+  - `/bash remove allow|deny <entry>` — remove an entry from either list
+  - `/bash show` — display current user-defined allowlist and denylist
+  - `/bash help` — usage reference
+  - Append `--global` to any add/remove to write to `~/.config/ragent/ragent.json` instead of the project `ragent.json`
+  - Lists are persisted in `ragent.json` under a new `bash` top-level key (`allowlist`, `denylist` arrays)
+  - Global and project configs are merged at startup; also reloaded on `/reload`
+  - Allowlisted commands bypass the built-in banned-command check without entering YOLO mode
+  - Denylisted patterns are checked after built-in DENIED_PATTERNS
+
+### Fixed
+- **CI warnings-as-errors** — resolved all 14 errors flagged by `cargo check -D warnings`:
+  - `session/processor.rs` — renamed unused `finish_reason` variable to `_finish_reason`
+  - `team/config.rs` — added missing doc comment on `last_spawn_error` field
+  - `tool/github_issues.rs` — added doc comments to all 5 tool structs
+  - `tool/github_prs.rs` — added doc comments to all 5 tool structs
+
 ## [0.1.0-alpha.22] - 2026-06-09
 
 ### Added
