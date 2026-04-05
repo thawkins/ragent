@@ -371,8 +371,8 @@ pub(crate) fn read_line_range(metadata: &Option<serde_json::Value>) -> Option<St
 
 /// Return inline diff stats `(+added, -removed)` for tools that support it.
 ///
-/// Currently only the `edit`, `multiedit`, and `patch` tools provide the
-/// necessary `old_lines` / `new_lines` metadata.
+/// Currently only the `edit`, `multiedit`, `patch`, and `str_replace_editor` tools
+/// provide the necessary `old_lines` / `new_lines` metadata.
 pub(crate) fn tool_inline_diff(
     tool: &str,
     output: &Option<serde_json::Value>,
@@ -380,10 +380,17 @@ pub(crate) fn tool_inline_diff(
     let out = output.as_ref()?;
     let tool = canonical_tool_name(tool);
     match tool {
-        "edit" => {
-            let old_lines = out.get("old_lines").and_then(|v| v.as_u64())? as usize;
-            let new_lines = out.get("new_lines").and_then(|v| v.as_u64())? as usize;
-            Some((new_lines, old_lines))
+        "edit" | "str_replace_editor" => {
+            let old_lines = out.get("old_lines").and_then(|v| v.as_u64());
+            let new_lines = out.get("new_lines").and_then(|v| v.as_u64());
+            match (old_lines, new_lines) {
+                (Some(old), Some(new)) => Some((new as usize, old as usize)),
+                // create/write command: lines_added = lines written, none removed
+                _ => {
+                    let added = out.get("lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    if added > 0 { Some((added, 0)) } else { None }
+                }
+            }
         }
         "multiedit" | "patch" => {
             let added = out.get("lines_added").and_then(|v| v.as_u64()).unwrap_or(0) as usize;

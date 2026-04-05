@@ -176,16 +176,20 @@ async fn handle_insert(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         .await
         .with_context(|| format!("Failed to write file: {}", path.display()))?;
 
+    let inserted_count = new_text.lines().count();
     Ok(ToolOutput {
         content: format!(
             "Inserted {} line(s) after line {} in {}",
-            new_text.lines().count(),
+            inserted_count,
             insert_line,
             path.display()
         ),
-        metadata: Some(
-            json!({ "path": path.display().to_string(), "insert_after_line": insert_line }),
-        ),
+        metadata: Some(json!({
+            "path": path.display().to_string(),
+            "insert_after_line": insert_line,
+            "old_lines": 0,
+            "new_lines": inserted_count,
+        })),
     })
 }
 
@@ -245,6 +249,8 @@ async fn handle_delete(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
             "path": path.display().to_string(),
             "start_line": start,
             "end_line": end_clamped,
+            "old_lines": removed,
+            "new_lines": 0,
             "lines_removed": removed,
         })),
     })
