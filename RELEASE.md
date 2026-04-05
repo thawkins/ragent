@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-alpha.24
+## Current Version: 0.1.0-alpha.25
+
+### Fixed
+- **CI lint fixes** — resolved 1339 Clippy warnings/errors across 127 files workspace-wide
+- Rewrote workspace lint config with priority-aware lint groups and 50+ `allow` entries
+- Fixed `prompt_opt::from_str` Clippy `should_implement_trait` by implementing `std::str::FromStr`
+
+## Previous: 0.1.0-alpha.24
 
 ### Fixed
 - **Security Audit CI** — all `cargo audit` and `cargo deny check` failures resolved:
