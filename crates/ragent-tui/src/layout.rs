@@ -267,6 +267,11 @@ fn render_home(frame: &mut Frame, app: &mut App) {
         render_lsp_discover_dialog(frame, app);
     }
 
+    // LSP edit dialog overlay
+    if app.lsp_edit.is_some() {
+        render_lsp_edit_dialog(frame, app);
+    }
+
     // MCP discover dialog overlay
     if app.mcp_discover.is_some() {
         render_mcp_discover_dialog(frame, app);
@@ -1428,6 +1433,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // LSP discover dialog overlay
     if app.lsp_discover.is_some() {
         render_lsp_discover_dialog(frame, app);
+    }
+
+    // LSP edit dialog overlay
+    if app.lsp_edit.is_some() {
+        render_lsp_edit_dialog(frame, app);
     }
 
     // MCP discover dialog overlay
@@ -2750,6 +2760,126 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         .block(block)
         .alignment(Alignment::Left)
         .scroll((state.scroll_offset, 0));
+    frame.render_widget(paragraph, area);
+}
+
+/// Render the interactive LSP edit dialog overlay.
+///
+/// Shows all configured LSP servers. ↑/↓ moves the cursor; Space/Enter toggles
+/// enabled/disabled; Esc closes the dialog.
+fn render_lsp_edit_dialog(frame: &mut Frame, app: &App) {
+    let Some(state) = app.lsp_edit.as_ref() else {
+        return;
+    };
+
+    let dialog_height = 24u16;
+    let area = {
+        let full = frame.area();
+        let h = dialog_height.min(full.height.saturating_sub(4));
+        let w = full.width.min(72);
+        ratatui::layout::Rect {
+            x: (full.width.saturating_sub(w)) / 2,
+            y: (full.height.saturating_sub(h)) / 2,
+            width: w,
+            height: h,
+        }
+    };
+    frame.render_widget(Clear, area);
+
+    let mut lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            "LSP Server Configuration",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    // Column header
+    lines.push(Line::from(vec![Span::styled(
+        format!("  {:<20}  {}", "Server ID", "Status"),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(Span::styled(
+        format!("  {}", "─".repeat(46)),
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    // Compute visible window for scrolling (account for header/footer rows)
+    let fixed_rows = 8u16; // title + blank + header + sep + blank + feedback + hint + border
+    let visible_rows = area.height.saturating_sub(fixed_rows) as usize;
+    // Clamp scroll so selected row is always visible
+    let scroll = state.scroll_offset as usize;
+
+    for (i, (id, disabled)) in state.servers.iter().enumerate() {
+        let is_selected = i == state.selected;
+        let (status_str, status_color) = if *disabled {
+            ("⚪ disabled", Color::DarkGray)
+        } else {
+            ("🟢 enabled ", Color::Green)
+        };
+
+        let row_style = if is_selected {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+
+        let cursor = if is_selected { "▶ " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{}{:<20}", cursor, id),
+                row_style.fg(if is_selected {
+                    Color::White
+                } else {
+                    Color::White
+                }),
+            ),
+            Span::styled(format!("  {}", status_str), row_style.fg(status_color)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // Feedback line
+    if let Some(ref msg) = state.feedback {
+        let color = if msg.starts_with('✗') {
+            Color::Red
+        } else {
+            Color::Green
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {msg}"),
+            Style::default().fg(color),
+        )));
+        lines.push(Line::from(""));
+    }
+
+    // Hint row
+    let scroll_hint = if state.servers.len() > visible_rows {
+        "  ↑/↓ scroll  Space/Enter toggle  Esc close"
+    } else {
+        "  ↑/↓ move  Space/Enter toggle  Esc close"
+    };
+    lines.push(Line::from(Span::styled(
+        scroll_hint,
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" /lsp edit ")
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Left)
+        .scroll((scroll as u16, 0));
     frame.render_widget(paragraph, area);
 }
 

@@ -158,6 +158,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
+    // If LSP edit dialog is active, route all keys there
+    if app.lsp_edit.is_some() {
+        handle_lsp_edit_key(app, key);
+        return None;
+    }
+
     // If MCP discover dialog is active, route all keys there
     if app.mcp_discover.is_some() {
         handle_mcp_discover_key(app, key);
@@ -1361,6 +1367,83 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
                 let insert_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
                 state.number_input.insert(insert_pos, c);
                 state.number_cursor += 1;
+            }
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key events when the LSP edit dialog is active.
+fn handle_lsp_edit_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.lsp_edit = None;
+        }
+
+        KeyCode::Up => {
+            if let Some(ref mut state) = app.lsp_edit {
+                if state.selected > 0 {
+                    state.selected -= 1;
+                    if (state.selected as u16) < state.scroll_offset {
+                        state.scroll_offset = state.selected as u16;
+                    }
+                }
+            }
+        }
+
+        KeyCode::Down => {
+            if let Some(ref mut state) = app.lsp_edit {
+                let max = state.servers.len().saturating_sub(1);
+                if state.selected < max {
+                    state.selected += 1;
+                    // Keep selected row visible (assume ~14 visible rows in dialog)
+                    let visible: u16 = 14;
+                    if state.selected as u16 >= state.scroll_offset + visible {
+                        state.scroll_offset = (state.selected as u16).saturating_sub(visible - 1);
+                    }
+                }
+            }
+        }
+
+        KeyCode::PageUp => {
+            if let Some(ref mut state) = app.lsp_edit {
+                state.selected = state.selected.saturating_sub(10);
+                state.scroll_offset = state.scroll_offset.saturating_sub(10);
+            }
+        }
+
+        KeyCode::PageDown => {
+            if let Some(ref mut state) = app.lsp_edit {
+                let max = state.servers.len().saturating_sub(1);
+                state.selected = (state.selected + 10).min(max);
+            }
+        }
+
+        // Space or Enter = toggle selected server
+        KeyCode::Char(' ') | KeyCode::Enter => {
+            let selected = app.lsp_edit.as_ref().map(|s| s.selected);
+            let id = selected.and_then(|i| {
+                app.lsp_edit
+                    .as_ref()
+                    .and_then(|s| s.servers.get(i).map(|(id, _)| id.clone()))
+            });
+            if let Some(id) = id {
+                let result = app.toggle_lsp_server_enabled(&id);
+                if let Some(ref mut state) = app.lsp_edit {
+                    match result {
+                        Ok(msg) => {
+                            // Flip the local disabled flag so the UI updates immediately
+                            if let Some(entry) = state.servers.get_mut(state.selected) {
+                                entry.1 = !entry.1;
+                            }
+                            state.feedback = Some(msg);
+                        }
+                        Err(e) => {
+                            state.feedback = Some(format!("✗ {e}"));
+                        }
+                    }
+                }
             }
         }
 

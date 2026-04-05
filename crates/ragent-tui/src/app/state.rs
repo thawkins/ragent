@@ -474,7 +474,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "lsp",
-        description: "Show LSP server status (/lsp discover | /lsp connect <id> | /lsp disconnect <id>)",
+        description: "Show LSP server status (/lsp discover | /lsp edit | /lsp connect <id> | /lsp disconnect <id>)",
     },
     SlashCommandDef {
         trigger: "mcp",
@@ -750,6 +750,22 @@ pub struct LspDiscoverState {
     pub scroll_offset: u16,
 }
 
+/// State for the interactive `/lsp edit` dialog.
+///
+/// Shows all configured LSP servers (from ragent.json) with their enabled/disabled
+/// status. Arrow keys move the cursor; Space or Enter toggles enabled/disabled.
+#[derive(Debug, Clone)]
+pub struct LspEditState {
+    /// Configured servers: (id, disabled flag).
+    pub servers: Vec<(String, bool)>,
+    /// Index of the currently highlighted row.
+    pub selected: usize,
+    /// Vertical scroll offset.
+    pub scroll_offset: u16,
+    /// Feedback message shown after a toggle action.
+    pub feedback: Option<String>,
+}
+
 /// State for the interactive `/mcp discover` dialog.
 ///
 /// Shown as an overlay that lists discovered MCP servers with numbered
@@ -914,6 +930,8 @@ pub struct App {
     pub lsp_manager: Option<SharedLspManager>,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
+    /// Active LSP edit dialog (enable/disable configured servers), if any.
+    pub lsp_edit: Option<LspEditState>,
     /// Active MCP discovery dialog, if any.
     pub mcp_discover: Option<McpDiscoverState>,
     /// When true, the next assistant text delta starts a new message instead

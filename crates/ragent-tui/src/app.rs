@@ -427,6 +427,7 @@ impl App {
             lsp_servers: Vec::new(),
             lsp_manager: None,
             lsp_discover: None,
+            lsp_edit: None,
             mcp_discover: None,
             force_new_message: false,
             agent_stack: Vec::new(),
@@ -1479,6 +1480,29 @@ impl App {
     /// and uses it for `/lsp` command operations.
     pub fn set_lsp_manager(&mut self, manager: SharedLspManager) {
         self.lsp_manager = Some(manager);
+    }
+
+    /// Toggle the `disabled` flag for a configured LSP server in ragent.json.
+    pub fn toggle_lsp_server_enabled(&self, id: &str) -> Result<String, String> {
+        let config_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join("ragent.json");
+
+        let config = ragent_core::config::Config::load().unwrap_or_default();
+        let currently_disabled = config.lsp.get(id).map(|c| c.disabled).unwrap_or(false);
+        let new_disabled = !currently_disabled;
+        let id_owned = id.to_string();
+
+        atomic_config_update(&config_path, |json| {
+            json["lsp"][&id_owned]["disabled"] = serde_json::json!(new_disabled);
+            Ok(())
+        })?;
+
+        if new_disabled {
+            Ok(format!("⚪ '{}' disabled. Restart ragent to apply.", id))
+        } else {
+            Ok(format!("🟢 '{}' enabled. Restart ragent to apply.", id))
+        }
     }
 
     /// Add a discovered server to the `lsp` section in `ragent.json` and
@@ -3914,6 +3938,32 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 let lsp_args: Vec<&str> = args.split_whitespace().collect();
                 let sub = lsp_args.first().copied().unwrap_or("");
                 match sub {
+                    "edit" => {
+                        // Build list of configured servers from config.
+                        let mut servers: Vec<(String, bool)> = ragent_core::config::Config::load()
+                            .unwrap_or_default()
+                            .lsp
+                            .into_iter()
+                            .map(|(id, cfg)| (id, cfg.disabled))
+                            .collect();
+                        servers.sort_by(|a, b| a.0.cmp(&b.0));
+
+                        if servers.is_empty() {
+                            let msg = "No LSP servers configured in ragent.json.\nRun /lsp discover to find and enable servers first.";
+                            self.append_assistant_text(&format!("From: /lsp edit\n{}", msg));
+                        } else {
+                            self.lsp_edit = Some(LspEditState {
+                                servers,
+                                selected: 0,
+                                scroll_offset: 0,
+                                feedback: None,
+                            });
+                        }
+                        if self.current_screen == ScreenMode::Home {
+                            self.current_screen = ScreenMode::Chat;
+                        }
+                        return;
+                    }
                     "discover" => {
                         // Run discovery synchronously using block_in_place.
                         let found = tokio::task::block_in_place(|| {
@@ -4018,7 +4068,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                                 self.lsp_servers.len()
                             ));
                         }
-                        out.push_str("\nSubcommands: /lsp discover  /lsp connect <id>  /lsp disconnect <id>\n");
+                        out.push_str("\nSubcommands: /lsp discover  /lsp edit  /lsp connect <id>  /lsp disconnect <id>\n");
                         self.append_assistant_text(&out);
                     }
                 }
