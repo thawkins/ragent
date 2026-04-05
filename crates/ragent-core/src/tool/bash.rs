@@ -268,26 +268,42 @@ fn contains_banned_command(cmd: &str) -> bool {
 
 /// Check if command tries to escape the working directory.
 /// Rejects cd/pushd with .., /, ~, $HOME, or ${HOME}.
-fn is_directory_escape_attempt(cmd: &str, _working_dir: &std::path::Path) -> bool {
-    let cmd_lower = cmd.to_lowercase();
+fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool {
+    let canonical_wd = working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf());
 
-    for cd_cmd in &["cd ", "pushd "] {
-        if cmd_lower.contains(cd_cmd) {
-            if cmd.contains("cd ..") || cmd.contains("pushd ..") {
-                return true;
+    for token in &["cd ", "pushd "] {
+        // Find each occurrence of the token in the command
+        let mut search_start = 0;
+        while let Some(pos) = cmd[search_start..].find(token) {
+            let abs_pos = search_start + pos;
+            // Only treat it as a cd if it's at the start or after a shell separator
+            let before = if abs_pos == 0 { b';' } else { cmd.as_bytes()[abs_pos - 1] };
+            let is_after_separator = matches!(before, b';' | b'&' | b'|' | b'(' | b'\n' | b' ');
+            if abs_pos == 0 || is_after_separator {
+                let arg_start = abs_pos + token.len();
+                // Extract the argument (up to next whitespace or ; & | )
+                let arg = cmd[arg_start..]
+                    .split(|c: char| c == ';' || c == '&' || c == '|' || c == ')' || c == '\n')
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+
+                if arg.starts_with("..") {
+                    return true;
+                }
+                if arg.starts_with('~') || arg.starts_with("$HOME") || arg.starts_with("${HOME}") {
+                    return true;
+                }
+                if arg.starts_with('/') {
+                    // Allow if the absolute path resolves to the working directory or a subdirectory of it
+                    let target = std::path::Path::new(arg);
+                    let canonical_target = target.canonicalize().unwrap_or_else(|_| target.to_path_buf());
+                    if !canonical_target.starts_with(&canonical_wd) {
+                        return true;
+                    }
+                }
             }
-            if cmd.contains("cd /") || cmd.contains("pushd /") {
-                return true;
-            }
-            if cmd.contains("cd ~") || cmd.contains("pushd ~") {
-                return true;
-            }
-            if cmd.contains("cd $HOME") || cmd.contains("pushd $HOME") {
-                return true;
-            }
-            if cmd.contains("cd ${HOME}") || cmd.contains("pushd ${HOME}") {
-                return true;
-            }
+            search_start = abs_pos + 1;
         }
     }
     false
