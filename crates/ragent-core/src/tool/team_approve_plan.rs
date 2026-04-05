@@ -13,11 +13,11 @@ pub struct TeamApprovePlanTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamApprovePlanTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_approve_plan"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Approve or reject a teammate's submitted plan. Lead-only. \
          On approval, the teammate exits plan-pending mode and begins implementation. \
          On rejection, provide feedback and the teammate will revise."
@@ -48,7 +48,7 @@ impl Tool for TeamApprovePlanTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 
@@ -65,7 +65,7 @@ impl Tool for TeamApprovePlanTool {
 
         let approved = input
             .get("approved")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: approved"))?;
 
         let feedback = input

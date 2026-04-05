@@ -241,7 +241,7 @@ fn to_data<T: Serialize>(payload: &T) -> String {
 }
 
 /// Return the SSE event type name for an [`Event`] variant.
-fn event_type_name(event: &Event) -> &'static str {
+const fn event_type_name(event: &Event) -> &'static str {
     match event {
         Event::SessionCreated { .. } => "session_created",
         Event::SessionUpdated { .. } => "session_updated",
@@ -289,6 +289,7 @@ fn event_type_name(event: &Event) -> &'static str {
 ///
 /// This is the testable core of [`event_to_sse`]. The returned tuple is
 /// `(event_name, json_data_string)`.
+#[must_use]
 pub fn event_to_parts(event: &Event) -> (&'static str, String) {
     let name = event_type_name(event);
 

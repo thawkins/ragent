@@ -1,7 +1,7 @@
 //! Office document reading tool.
 //!
 //! Provides [`OfficeReadTool`], which reads content from Microsoft Word (`.docx`),
-//! Excel (`.xlsx`), and PowerPoint (`.pptx`) files and returns structured text
+//! Excel (`.xlsx`), and `PowerPoint` (`.pptx`) files and returns structured text
 //! that an LLM can reason about.
 //!
 //! Depends on: `docx-rust`, `calamine`, `ooxmlsdk`.
@@ -13,20 +13,20 @@ use std::path::Path;
 use super::office_common::{OfficeFormat, detect_format, resolve_path, truncate_output};
 use super::{Tool, ToolContext, ToolOutput};
 
-/// Reads content from Word, Excel, or PowerPoint files.
+/// Reads content from Word, Excel, or `PowerPoint` files.
 ///
 /// Supports output in `text`, `markdown` (default), or `json` format.
-/// Excel supports optional sheet and range selection. PowerPoint supports
+/// Excel supports optional sheet and range selection. `PowerPoint` supports
 /// optional slide number selection.
 pub struct OfficeReadTool;
 
 #[async_trait::async_trait]
 impl Tool for OfficeReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "office_read"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read content from Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files."
     }
 
@@ -60,7 +60,7 @@ impl Tool for OfficeReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -130,8 +130,7 @@ pub(crate) fn read_docx(path: &Path, format: &str) -> Result<String> {
                     .property
                     .as_ref()
                     .and_then(|p| p.style_id.as_ref())
-                    .map(|s| s.value.to_string())
-                    .unwrap_or_else(|| "Normal".to_string());
+                    .map_or_else(|| "Normal".to_string(), |s| s.value.to_string());
                 paragraphs.push((style, text));
             }
             docx_rust::document::BodyContent::Table(table) => {
@@ -173,7 +172,7 @@ pub(crate) fn read_docx(path: &Path, format: &str) -> Result<String> {
 ///
 /// # Arguments
 ///
-/// * `style` - The Word paragraph style name (e.g., "Heading1", "ListBullet").
+/// * `style` - The Word paragraph style name (e.g., "Heading1", "`ListBullet`").
 /// * `text` - The paragraph text content.
 ///
 /// # Returns
@@ -234,7 +233,7 @@ fn extract_table_markdown(table: &docx_rust::document::Table<'_>) -> String {
         return String::new();
     }
 
-    let col_count = rows_text.iter().map(|r| r.len()).max().unwrap_or(0);
+    let col_count = rows_text.iter().map(std::vec::Vec::len).max().unwrap_or(0);
     for row in &mut rows_text {
         while row.len() < col_count {
             row.push(String::new());
@@ -283,7 +282,7 @@ pub(crate) fn read_xlsx(
     let mut workbook: Xlsx<_> =
         calamine::open_workbook(path).map_err(|e| anyhow::anyhow!("Failed to open xlsx: {e}"))?;
 
-    let sheet_names = workbook.sheet_names().to_owned();
+    let sheet_names = workbook.sheet_names();
     if sheet_names.is_empty() {
         bail!("Workbook contains no sheets");
     }
@@ -324,7 +323,7 @@ pub(crate) fn read_xlsx(
         for col_idx in start_col..end_col {
             let cell_value = range
                 .get((row_idx, col_idx))
-                .map(|d| format_cell_value(d))
+                .map(format_cell_value)
                 .unwrap_or_default();
             row_cells.push(cell_value);
         }
@@ -481,7 +480,7 @@ fn parse_cell_ref(cell_ref: &str) -> Result<(usize, usize)> {
     Ok((col, row))
 }
 
-/// Reads a PowerPoint presentation and returns its content.
+/// Reads a `PowerPoint` presentation and returns its content.
 ///
 /// # Arguments
 ///
@@ -584,7 +583,7 @@ pub(crate) fn read_pptx(path: &Path, slide_num: Option<usize>, format: &str) -> 
     }
 }
 
-/// Extracts title and body text from a PowerPoint slide.
+/// Extracts title and body text from a `PowerPoint` slide.
 ///
 /// # Arguments
 ///
@@ -596,7 +595,9 @@ pub(crate) fn read_pptx(path: &Path, slide_num: Option<usize>, format: &str) -> 
 fn extract_slide_text(
     slide: &ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::Slide,
 ) -> (String, String) {
-    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::*;
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::{
+        ShapeTreeChildChoice, SlideChildChoice,
+    };
 
     let mut title = String::new();
     let mut body_parts: Vec<String> = Vec::new();
@@ -604,15 +605,15 @@ fn extract_slide_text(
     for child in &slide.children {
         if let SlideChildChoice::PCSld(csd) = child {
             for shape_child in &csd.shape_tree.children {
-                if let ShapeTreeChildChoice::PSp(shape) = shape_child {
-                    if let Some(text_body) = &shape.text_body {
-                        let text = extract_text_body_text(text_body);
-                        if !text.is_empty() {
-                            if title.is_empty() && is_title_shape(shape) {
-                                title = text;
-                            } else {
-                                body_parts.push(text);
-                            }
+                if let ShapeTreeChildChoice::PSp(shape) = shape_child
+                    && let Some(text_body) = &shape.text_body
+                {
+                    let text = extract_text_body_text(text_body);
+                    if !text.is_empty() {
+                        if title.is_empty() && is_title_shape(shape) {
+                            title = text;
+                        } else {
+                            body_parts.push(text);
                         }
                     }
                 }
@@ -635,7 +636,9 @@ fn extract_slide_text(
 fn is_title_shape(
     shape: &ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::Shape,
 ) -> bool {
-    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::*;
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::{
+        ApplicationNonVisualDrawingPropertiesChildChoice, PlaceholderValues,
+    };
 
     let nvsp = &shape.non_visual_shape_properties;
     let app_props = &nvsp.application_non_visual_drawing_properties;
@@ -653,11 +656,11 @@ fn is_title_shape(
     false
 }
 
-/// Extracts plain text from a PowerPoint text body.
+/// Extracts plain text from a `PowerPoint` text body.
 ///
 /// # Arguments
 ///
-/// * `text_body` - The TextBody reference.
+/// * `text_body` - The `TextBody` reference.
 ///
 /// # Returns
 ///
@@ -672,10 +675,10 @@ fn extract_text_body_text(
     for para in &text_body.a_p {
         let mut para_text = String::new();
         for child in &para.children {
-            if let ParagraphChildChoice::AR(run) = child {
-                if let Some(ref content) = run.text.xml_content {
-                    para_text.push_str(content);
-                }
+            if let ParagraphChildChoice::AR(run) = child
+                && let Some(ref content) = run.text.xml_content
+            {
+                para_text.push_str(content);
             }
         }
         if !para_text.is_empty() {
@@ -690,7 +693,7 @@ fn extract_text_body_text(
 ///
 /// # Arguments
 ///
-/// * `notes_slide` - The NotesSlide reference.
+/// * `notes_slide` - The `NotesSlide` reference.
 ///
 /// # Returns
 ///
@@ -699,27 +702,29 @@ fn extract_notes_text(
     notes_slide: &ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::NotesSlide,
 ) -> String {
     use ooxmlsdk::schemas::schemas_openxmlformats_org_drawingml_2006_main::ParagraphChildChoice;
-    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::*;
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::{
+        NotesSlideChildChoice, ShapeTreeChildChoice,
+    };
 
     let mut notes_parts: Vec<String> = Vec::new();
 
     for child in &notes_slide.children {
         if let NotesSlideChildChoice::PCSld(csd) = child {
             for shape_child in &csd.shape_tree.children {
-                if let ShapeTreeChildChoice::PSp(shape) = shape_child {
-                    if let Some(text_body) = &shape.text_body {
-                        for para in &text_body.a_p {
-                            let mut para_text = String::new();
-                            for p_child in &para.children {
-                                if let ParagraphChildChoice::AR(run) = p_child {
-                                    if let Some(ref content) = run.text.xml_content {
-                                        para_text.push_str(content);
-                                    }
-                                }
+                if let ShapeTreeChildChoice::PSp(shape) = shape_child
+                    && let Some(text_body) = &shape.text_body
+                {
+                    for para in &text_body.a_p {
+                        let mut para_text = String::new();
+                        for p_child in &para.children {
+                            if let ParagraphChildChoice::AR(run) = p_child
+                                && let Some(ref content) = run.text.xml_content
+                            {
+                                para_text.push_str(content);
                             }
-                            if !para_text.is_empty() {
-                                notes_parts.push(para_text);
-                            }
+                        }
+                        if !para_text.is_empty() {
+                            notes_parts.push(para_text);
                         }
                     }
                 }

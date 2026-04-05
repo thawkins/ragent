@@ -109,10 +109,10 @@ impl LspClient {
 
         let workspace_folder = lsp_types::WorkspaceFolder {
             uri: root_uri.clone(),
-            name: root_path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "workspace".to_string()),
+            name: root_path.file_name().map_or_else(
+                || "workspace".to_string(),
+                |s| s.to_string_lossy().to_string(),
+            ),
         };
 
         #[allow(deprecated)]
@@ -361,7 +361,7 @@ async fn reader_loop(
         };
 
         // Responses have an "id"; server-originated notifications do not.
-        if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
+        if let Some(id) = value.get("id").and_then(serde_json::Value::as_u64) {
             let mut map = pending.lock().await;
             if let Some(tx) = map.remove(&id) {
                 let _ = tx.send(value);
@@ -380,13 +380,13 @@ async fn handle_notification(
 ) {
     match method {
         "textDocument/publishDiagnostics" => {
-            if let Some(params) = message.get("params") {
-                if let Ok(p) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone()) {
-                    diagnostics
-                        .write()
-                        .await
-                        .insert(p.uri.to_string(), p.diagnostics);
-                }
+            if let Some(params) = message.get("params")
+                && let Ok(p) = serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
+            {
+                diagnostics
+                    .write()
+                    .await
+                    .insert(p.uri.to_string(), p.diagnostics);
             }
         }
         // window/logMessage, $/progress, etc. are silently ignored.

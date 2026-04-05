@@ -48,6 +48,7 @@ pub struct CustomAgentDef {
 ///
 /// Returns `(agents, diagnostics)`.  Diagnostics are non-fatal human-readable
 /// strings describing why individual files were skipped or renamed.
+#[must_use]
 pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<String>) {
     let mut agents: HashMap<String, CustomAgentDef> = HashMap::new();
     let mut diagnostics: Vec<String> = Vec::new();
@@ -71,6 +72,7 @@ pub fn load_custom_agents(working_dir: &Path) -> (Vec<CustomAgentDef>, Vec<Strin
 /// Return the user-global agents directory: `~/.ragent/agents/`.
 ///
 /// Returns `None` if the home directory cannot be determined.
+#[must_use]
 pub fn global_agents_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".ragent").join("agents"))
 }
@@ -78,6 +80,7 @@ pub fn global_agents_dir() -> Option<PathBuf> {
 /// Walk up from `working_dir` to find the nearest `.ragent/agents/` directory.
 ///
 /// Returns `None` if no `.ragent/` directory is found before the filesystem root.
+#[must_use]
 pub fn find_project_agents_dir(working_dir: &Path) -> Option<PathBuf> {
     let mut current = working_dir;
     loop {
@@ -155,11 +158,10 @@ fn scan_dir(
 /// Returns a human-readable error string when the file cannot be read, parsed,
 /// or fails validation.
 fn load_agent_file(path: &Path, is_project_local: bool) -> Result<CustomAgentDef, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("could not read file: {e}"))?;
 
     let record: OasfAgentRecord =
-        serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {e}"))?;
 
     record_to_agent_info(&record, path).map(|agent_info| CustomAgentDef {
         record: record.clone(),
@@ -224,14 +226,13 @@ struct ProfileFrontmatter {
 ///
 /// Returns a human-readable string when parsing or validation fails.
 fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgentDef, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("could not read file: {e}"))?;
 
     let (frontmatter, body) = parse_json_frontmatter(&content)
         .ok_or_else(|| "missing JSON frontmatter (expected --- delimiters)".to_string())?;
 
     let fm: ProfileFrontmatter = serde_json::from_str(frontmatter)
-        .map_err(|e| format!("frontmatter JSON parse error: {}", e))?;
+        .map_err(|e| format!("frontmatter JSON parse error: {e}"))?;
 
     let system_prompt = body.trim().to_string();
     if system_prompt.is_empty() {
@@ -256,7 +257,7 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
     // Synthesise a minimal OASF record so the rest of the pipeline is happy.
     let record = OasfAgentRecord {
         name: fm.name.clone(),
-        description: fm.description.clone(),
+        description: fm.description,
         version: "1.0.0".to_string(),
         schema_version: "0.7.0".to_string(),
         authors: Vec::new(),
@@ -287,9 +288,7 @@ fn parse_json_frontmatter(text: &str) -> Option<(&str, &str)> {
         return None;
     }
     // Skip past the opening "---" line.
-    let after_open = trimmed
-        .strip_prefix("---")?
-        .trim_start_matches(|c: char| c == '-');
+    let after_open = trimmed.strip_prefix("---")?.trim_start_matches('-');
     let after_open = after_open
         .strip_prefix('\n')
         .or_else(|| after_open.strip_prefix("\r\n"))?;
@@ -329,10 +328,10 @@ pub fn record_to_agent_info(
         .modules
         .iter()
         .find(|m| m.module_type == RAGENT_MODULE_TYPE)
-        .ok_or_else(|| format!("missing required module type '{}'", RAGENT_MODULE_TYPE))?;
+        .ok_or_else(|| format!("missing required module type '{RAGENT_MODULE_TYPE}'"))?;
 
     let payload: RagentAgentPayload = serde_json::from_value(ragent_module.payload.clone())
-        .map_err(|e| format!("invalid '{}' payload: {}", RAGENT_MODULE_TYPE, e))?;
+        .map_err(|e| format!("invalid '{RAGENT_MODULE_TYPE}' payload: {e}"))?;
 
     // ── Validate payload fields ────────────────────────────────────────────
     if payload.system_prompt.trim().is_empty() {
@@ -352,22 +351,21 @@ pub fn record_to_agent_info(
         "all" => AgentMode::All,
         other => {
             return Err(format!(
-                "unknown mode '{}'; expected primary, subagent, or all",
-                other
+                "unknown mode '{other}'; expected primary, subagent, or all"
             ));
         }
     };
 
-    if let Some(temp) = payload.temperature {
-        if !(0.0..=2.0).contains(&temp) {
-            return Err(format!("temperature {} out of range [0.0, 2.0]", temp));
-        }
+    if let Some(temp) = payload.temperature
+        && !(0.0..=2.0).contains(&temp)
+    {
+        return Err(format!("temperature {temp} out of range [0.0, 2.0]"));
     }
 
-    if let Some(top_p) = payload.top_p {
-        if !(0.0..=1.0).contains(&top_p) {
-            return Err(format!("top_p {} out of range [0.0, 1.0]", top_p));
-        }
+    if let Some(top_p) = payload.top_p
+        && !(0.0..=1.0).contains(&top_p)
+    {
+        return Err(format!("top_p {top_p} out of range [0.0, 1.0]"));
     }
 
     let model = if let Some(ref model_str) = payload.model {
@@ -380,8 +378,7 @@ pub fn record_to_agent_info(
             }
             _ => {
                 return Err(format!(
-                    "model '{}' must be in 'provider:model' format",
-                    model_str
+                    "model '{model_str}' must be in 'provider:model' format"
                 ));
             }
         }
@@ -389,10 +386,10 @@ pub fn record_to_agent_info(
         None
     };
 
-    if let Some(steps) = payload.max_steps {
-        if steps == 0 {
-            return Err("max_steps must be greater than 0".to_string());
-        }
+    if let Some(steps) = payload.max_steps
+        && steps == 0
+    {
+        return Err("max_steps must be greater than 0".to_string());
     }
 
     // ── Parse permissions ──────────────────────────────────────────────────
@@ -406,8 +403,7 @@ pub fn record_to_agent_info(
                     "ask" => PermissionAction::Ask,
                     other => {
                         return Err(format!(
-                            "unknown action '{}'; expected allow, deny, or ask",
-                            other
+                            "unknown action '{other}'; expected allow, deny, or ask"
                         ));
                     }
                 };
@@ -437,8 +433,7 @@ pub fn record_to_agent_info(
         Some("none") | None => crate::team::config::MemoryScope::None,
         Some(other) => {
             return Err(format!(
-                "unknown memory scope '{}'; expected user, project, or none",
-                other
+                "unknown memory scope '{other}'; expected user, project, or none"
             ));
         }
     };
@@ -459,7 +454,7 @@ pub fn record_to_agent_info(
         prompt: Some(payload.system_prompt.clone()),
         permission,
         max_steps: Some(payload.max_steps.unwrap_or(100)),
-        skills: payload.skills.clone(),
+        skills: payload.skills,
         memory,
         options,
         model_pinned,

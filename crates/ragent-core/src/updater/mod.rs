@@ -71,15 +71,12 @@ async fn fetch_latest_release() -> Result<ReleaseInfo> {
     let download_url = json["assets"]
         .as_array()
         .and_then(|assets| {
-            assets.iter().find(|a| {
-                a["name"]
-                    .as_str()
-                    .map(|n| n.contains(&target))
-                    .unwrap_or(false)
-            })
+            assets
+                .iter()
+                .find(|a| a["name"].as_str().is_some_and(|n| n.contains(&target)))
         })
         .and_then(|a| a["browser_download_url"].as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     Ok(ReleaseInfo {
         tag_name,
@@ -91,6 +88,7 @@ async fn fetch_latest_release() -> Result<ReleaseInfo> {
 
 /// Simple semver-ish comparison: is `latest` newer than `current`?
 /// Handles alpha/beta suffixes conservatively.
+#[must_use]
 pub fn is_newer(latest: &str, current: &str) -> bool {
     // Strip leading 'v'
     let latest = latest.trim_start_matches('v');

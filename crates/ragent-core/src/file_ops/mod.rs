@@ -44,6 +44,7 @@ impl ConcurrentFileReader {
     }
 
     /// Set concurrency limit.
+    #[must_use]
     pub fn with_concurrency(mut self, n: usize) -> Self {
         self.concurrency = n.max(1);
         self
@@ -137,7 +138,8 @@ pub struct EditStaging {
 
 impl EditStaging {
     /// Create a new staging area.
-    pub fn new(dry_run: bool) -> Self {
+    #[must_use]
+    pub const fn new(dry_run: bool) -> Self {
         Self {
             edits: Vec::new(),
             dry_run,
@@ -240,12 +242,12 @@ impl EditStaging {
                 if let Err(e) = tokio::fs::write(&tmp, content.clone()).await {
                     let p1 = path.clone();
                     let p2 = p1.clone();
-                    return Ok((p1.clone(), None, Some((p2.clone(), anyhow::Error::new(e)))));
+                    return Ok((p1, None, Some((p2, anyhow::Error::new(e)))));
                 }
                 if let Err(e) = tokio::fs::rename(&tmp, &path).await {
                     let p1 = path.clone();
                     let p2 = p1.clone();
-                    return Ok((p1.clone(), None, Some((p2.clone(), anyhow::Error::new(e)))));
+                    return Ok((p1, None, Some((p2, anyhow::Error::new(e)))));
                 }
 
                 // successful write
@@ -292,7 +294,7 @@ impl EditStaging {
             }
 
             // Append rollback errors to errors list
-            for r in rollback_errors.into_iter() {
+            for r in rollback_errors {
                 errors.push(r);
             }
 

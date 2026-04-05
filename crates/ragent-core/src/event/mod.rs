@@ -411,7 +411,7 @@ pub struct EventBus {
 impl Event {
     /// Returns the variant name for use in log messages.
     #[must_use]
-    pub fn type_name(&self) -> &'static str {
+    pub const fn type_name(&self) -> &'static str {
         match self {
             Self::SessionCreated { .. } => "SessionCreated",
             Self::SessionUpdated { .. } => "SessionUpdated",
@@ -459,7 +459,7 @@ impl Event {
     /// `CopilotDeviceFlowComplete`) are not scoped to a session and return
     /// `None`.
     #[must_use]
-    pub fn session_id(&self) -> Option<&str> {
+    pub const fn session_id(&self) -> Option<&str> {
         match self {
             Self::SessionCreated { session_id, .. }
             | Self::SessionUpdated { session_id, .. }
@@ -512,6 +512,7 @@ impl EventBus {
     ///
     /// let bus = EventBus::new(128);
     /// ```
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
         Self {
@@ -536,6 +537,7 @@ impl EventBus {
     /// Returns the current step number for a specific agent session.
     ///
     /// Returns `0` if no step has been set for this session.
+    #[must_use]
     pub fn current_step(&self, session_id: &str) -> u64 {
         self.steps
             .read()
@@ -556,6 +558,7 @@ impl EventBus {
     /// let mut rx = bus.subscribe();
     /// // rx.recv().await will yield future events published to the bus.
     /// ```
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
         self.sender.subscribe()
     }
@@ -621,11 +624,11 @@ impl Default for EventBus {
 impl fmt::Display for FinishReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FinishReason::Stop => write!(f, "stop"),
-            FinishReason::ToolUse => write!(f, "tool_use"),
-            FinishReason::Length => write!(f, "length"),
-            FinishReason::ContentFilter => write!(f, "content_filter"),
-            FinishReason::Cancelled => write!(f, "cancelled"),
+            Self::Stop => write!(f, "stop"),
+            Self::ToolUse => write!(f, "tool_use"),
+            Self::Length => write!(f, "length"),
+            Self::ContentFilter => write!(f, "content_filter"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }

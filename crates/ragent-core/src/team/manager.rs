@@ -39,7 +39,7 @@ use crate::tool::TeamManagerInterface;
 
 /// Check if an error message indicates a context-window / token-count overflow.
 ///
-/// These errors come from Anthropic, OpenAI, and GitHub Copilot when the prompt
+/// These errors come from Anthropic, `OpenAI`, and GitHub Copilot when the prompt
 /// is too long for the model's context window.  They are *not* permanent failures —
 /// the session can be compacted and then retried successfully.
 fn is_token_overflow_error(error_msg: &str) -> bool {
@@ -64,16 +64,14 @@ fn is_permanent_api_error(error_msg: &str) -> bool {
         return false;
     }
     // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
-    if let Some(rest) = error_msg.strip_prefix("HTTP ") {
-        if let Some(code_str) = rest
+    if let Some(rest) = error_msg.strip_prefix("HTTP ")
+        && let Some(code_str) = rest
             .split(':')
             .next()
             .or_else(|| rest.split_whitespace().next())
-        {
-            if let Ok(code) = code_str.trim().parse::<u16>() {
-                return (400..500).contains(&code) && code != 429 && code != 408;
-            }
-        }
+        && let Ok(code) = code_str.trim().parse::<u16>()
+    {
+        return (400..500).contains(&code) && code != 429 && code != 408;
     }
     false
 }
@@ -131,13 +129,13 @@ async fn compact_teammate_session(
     let messages_result = tokio::task::spawn_blocking(move || storage.get_messages(&sid_owned))
         .await
         .ok()
-        .and_then(|r| r.ok());
+        .and_then(std::result::Result::ok);
 
     let summary_text = messages_result.as_ref().and_then(|msgs| {
         msgs.iter()
             .rev()
             .find(|m| m.role == crate::message::Role::Assistant)
-            .map(|m| m.text_content())
+            .map(super::super::message::Message::text_content)
     });
 
     let Some(summary) = summary_text else {
@@ -156,7 +154,7 @@ async fn compact_teammate_session(
         &sid_owned,
         crate::message::Role::Assistant,
         vec![crate::message::MessagePart::Text {
-            text: format!("[Conversation compacted]\n\n{}", summary),
+            text: format!("[Conversation compacted]\n\n{summary}"),
         }],
     );
 
@@ -192,6 +190,7 @@ async fn compact_teammate_session(
 /// - `{{TEAMMATE_NAME}}` — this teammate's friendly name
 /// - `{{AGENT_ID}}` — this teammate's agent ID (e.g. `"tm-001"`)
 /// - `{{TEAMMATE_ROSTER}}` — list of other teammates with names and agent IDs
+#[must_use]
 pub fn build_team_prompt_addition(
     team_name: &str,
     teammate_name: &str,
@@ -359,12 +358,12 @@ pub async fn run_hook(command: &str, args: &[String], stdin_data: Option<&str>) 
         }
         Ok(mut child_proc) => {
             // Write stdin data if provided.
-            if let Some(data) = stdin_data {
-                if let Some(mut stdin) = child_proc.stdin.take() {
-                    use tokio::io::AsyncWriteExt;
-                    let _ = stdin.write_all(data.as_bytes()).await;
-                    drop(stdin);
-                }
+            if let Some(data) = stdin_data
+                && let Some(mut stdin) = child_proc.stdin.take()
+            {
+                use tokio::io::AsyncWriteExt;
+                let _ = stdin.write_all(data.as_bytes()).await;
+                drop(stdin);
             }
 
             match child_proc.wait_with_output().await {
@@ -467,7 +466,7 @@ pub struct TeamManager {
     /// Serialises spawn operations to avoid concurrent config read/write races.
     spawn_lock: Arc<Mutex<()>>,
     /// The lead's active model — teammates inherit this when spawned via
-    /// the reconcile loop (where no ToolContext model is available).
+    /// the reconcile loop (where no `ToolContext` model is available).
     pub active_model: Option<crate::agent::ModelRef>,
 }
 
@@ -494,7 +493,7 @@ impl TeamManager {
     }
 
     /// Reconcile any members recorded on-disk with `Spawning` status by
-    /// attempting to spawn them now that the TeamManager exists.
+    /// attempting to spawn them now that the `TeamManager` exists.
     ///
     /// This runs in a background tokio task and will call `spawn_teammate_internal`
     /// for each queued member. Prompts are not persisted by blueprints, so an
@@ -550,8 +549,10 @@ impl TeamManager {
                                 .get_session(&manager.lead_session_id)
                                 .ok()
                                 .flatten()
-                                .map(|s| s.directory.clone())
-                                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+                                .map_or_else(
+                                    || std::env::current_dir().unwrap_or_default(),
+                                    |s| s.directory,
+                                );
                             match manager
                                 .spawn_teammate_internal(
                                     &name,
@@ -564,16 +565,16 @@ impl TeamManager {
                                 .await
                             {
                                 Ok(agent_id) => {
-                                    tracing::info!(team = %manager.team_name, teammate = %name, agent_id = %agent_id, "Successfully reconciled queued teammate")
+                                    tracing::info!(team = %manager.team_name, teammate = %name, agent_id = %agent_id, "Successfully reconciled queued teammate");
                                 }
                                 Err(e) => {
-                                    tracing::warn!(team = %manager.team_name, teammate = %name, error = %e, "Failed to spawn queued teammate")
+                                    tracing::warn!(team = %manager.team_name, teammate = %name, error = %e, "Failed to spawn queued teammate");
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(team = %manager.team_name, error = %e, "Cannot load team store to reconcile spawning members")
+                        tracing::warn!(team = %manager.team_name, error = %e, "Cannot load team store to reconcile spawning members");
                     }
                 }
                 // Short backoff between attempts (~1s total for 10 attempts)
@@ -650,8 +651,7 @@ impl TeamManager {
             let mem_scope = store
                 .config
                 .member_by_id(&agent_id)
-                .map(|m| m.memory_scope)
-                .unwrap_or(super::config::MemoryScope::None);
+                .map_or(super::config::MemoryScope::None, |m| m.memory_scope);
             store.save()?;
             tracing::debug!(team = %self.team_name, agent_id = %agent_id, "Team config saved after session assignment");
             (roster, mem_scope)
@@ -667,11 +667,11 @@ impl TeamManager {
         // Ensure the agent has a model configured. Some custom agent names may
         // not resolve to a configured model; fall back to the built-in "general"
         // agent's model to avoid immediate startup failures in the agent loop.
-        if agent.model.is_none() {
-            if let Ok(default_agent) = crate::agent::resolve_agent("general", &config) {
-                agent.model = default_agent.model;
-                tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_type = %agent_type, "No model on agent; falling back to 'general' model");
-            }
+        if agent.model.is_none()
+            && let Ok(default_agent) = crate::agent::resolve_agent("general", &config)
+        {
+            agent.model = default_agent.model;
+            tracing::info!(team = %self.team_name, teammate = %teammate_name, agent_type = %agent_type, "No model on agent; falling back to 'general' model");
         }
 
         let team_addition =
@@ -683,10 +683,10 @@ impl TeamManager {
         // ── Persistent memory injection ────────────────────────────────────
         // Resolve memory scope: member-level config (from blueprint) takes
         // priority, then the agent profile's setting, then None.
-        let effective_scope = if memory_scope != super::config::MemoryScope::None {
-            memory_scope
-        } else {
+        let effective_scope = if memory_scope == super::config::MemoryScope::None {
             agent.memory
+        } else {
+            memory_scope
         };
         if let Some(mem_dir) =
             super::config::resolve_memory_dir(effective_scope, teammate_name, working_dir)
@@ -736,7 +736,7 @@ impl TeamManager {
             let mut compacted = false; // only compact once per spawn
             for attempt in 0..=MAX_RETRIES {
                 if attempt > 0 {
-                    let backoff = std::time::Duration::from_millis(500 * attempt as u64);
+                    let backoff = std::time::Duration::from_millis(500 * u64::from(attempt));
                     tracing::info!(
                         team = %team_name_clone,
                         agent_id = %agent_id_clone,
@@ -778,7 +778,7 @@ impl TeamManager {
                         return; // success — exit the retry loop
                     }
                     Err(e) => {
-                        last_error = format!("{}", e);
+                        last_error = format!("{e}");
                         warn!(
                             child_session = %child_sid_clone,
                             error = %last_error,
@@ -884,8 +884,8 @@ impl TeamManager {
 
                 // Wait for a push notification or the fallback interval.
                 tokio::select! {
-                    _ = notify.notified() => {}
-                    _ = tokio::time::sleep(interval) => {}
+                    () = notify.notified() => {}
+                    () = tokio::time::sleep(interval) => {}
                 }
 
                 if cancel.load(Ordering::Relaxed) {
@@ -994,6 +994,7 @@ impl TeamManager {
 
     /// Returns `true` if the teammate has a pending plan (used by the processor
     /// to block write/bash tools while `PlanPending`).
+    #[must_use]
     pub fn is_plan_pending(&self, agent_id: &str) -> bool {
         TeamStore::load(&self.team_dir)
             .ok()

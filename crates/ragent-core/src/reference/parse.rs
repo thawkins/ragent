@@ -61,6 +61,7 @@ pub struct ParsedRef {
 /// assert_eq!(refs.len(), 1);
 /// assert!(matches!(refs[0].kind, FileRef::File(_)));
 /// ```
+#[must_use]
 pub fn parse_refs(input: &str) -> Vec<ParsedRef> {
     let mut refs = Vec::new();
     let bytes = input.as_bytes();

@@ -1,7 +1,7 @@
-//! LibreOffice document info/metadata tool.
+//! `LibreOffice` document info/metadata tool.
 //!
 //! Provides [`LibreInfoTool`], which returns metadata and structural statistics
-//! about OpenDocument files without reading all content.
+//! about `OpenDocument` files without reading all content.
 //!
 //! - **ODS**: uses `calamine` to enumerate sheets and row/column counts.
 //! - **ODT**: parses `meta.xml` for title/author/date; counts paragraphs in `content.xml`.
@@ -22,12 +22,12 @@ pub struct LibreInfoTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreInfoTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "libre_info"
     }
 
     /// Returns the tool description.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get metadata and structural info about an OpenDocument file: sheet list and dimensions \
          for ODS, word/paragraph counts for ODT, slide count for ODP. Returns JSON."
     }
@@ -45,11 +45,11 @@ impl Tool for LibreInfoTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
-    /// Executes the LibreOffice info query.
+    /// Executes the `LibreOffice` info query.
     ///
     /// # Errors
     ///
@@ -97,7 +97,7 @@ fn info_ods(path: &Path) -> Result<Value> {
     let mut wb: Sheets<_> = open_workbook_auto(path)
         .with_context(|| format!("calamine failed to open {}", path.display()))?;
 
-    let sheet_names = wb.sheet_names().to_vec();
+    let sheet_names = wb.sheet_names();
     let mut sheets_info = Vec::new();
     for name in &sheet_names {
         if let Ok(range) = wb.worksheet_range(name) {
@@ -207,8 +207,10 @@ fn info_odp(path: &Path) -> Result<Value> {
                         .find(|a| {
                             std::str::from_utf8(a.key.local_name().as_ref()).unwrap_or("") == "name"
                         })
-                        .map(|a| std::str::from_utf8(&a.value).unwrap_or("").to_string())
-                        .unwrap_or_else(|| format!("Slide {slide_count}"));
+                        .map_or_else(
+                            || format!("Slide {slide_count}"),
+                            |a| std::str::from_utf8(&a.value).unwrap_or("").to_string(),
+                        );
                     slide_names.push(name);
                 }
             }

@@ -5,20 +5,21 @@ use std::path::PathBuf;
 
 /// Resolve GitHub token from environment or stored file.
 /// Returns `None` if no token is configured.
+#[must_use]
 pub fn load_token() -> Option<String> {
     // 1. Environment variable
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        if !token.is_empty() {
-            return Some(token);
-        }
+    if let Ok(token) = std::env::var("GITHUB_TOKEN")
+        && !token.is_empty()
+    {
+        return Some(token);
     }
     // 2. Stored file
-    if let Some(path) = token_file_path() {
-        if let Ok(token) = std::fs::read_to_string(&path) {
-            let token = token.trim().to_string();
-            if !token.is_empty() {
-                return Some(token);
-            }
+    if let Some(path) = token_file_path()
+        && let Ok(token) = std::fs::read_to_string(&path)
+    {
+        let token = token.trim().to_string();
+        if !token.is_empty() {
+            return Some(token);
         }
     }
     None
@@ -39,10 +40,10 @@ pub fn save_token(token: &str) -> Result<()> {
 
 /// Delete the stored GitHub token.
 pub fn delete_token() -> Result<()> {
-    if let Some(path) = token_file_path() {
-        if path.exists() {
-            std::fs::remove_file(&path)?;
-        }
+    if let Some(path) = token_file_path()
+        && path.exists()
+    {
+        std::fs::remove_file(&path)?;
     }
     Ok(())
 }

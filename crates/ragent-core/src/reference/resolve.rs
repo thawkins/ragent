@@ -215,12 +215,12 @@ async fn try_read_binary(abs_path: &Path, raw: &str) -> Result<Option<String>> {
     let ext = abs_path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
+        .map(str::to_lowercase);
 
     match ext.as_deref() {
         Some("docx" | "xlsx" | "pptx") => {
             let path = abs_path.to_path_buf();
-            let ext_owned = ext.unwrap().to_string();
+            let ext_owned = ext.unwrap();
             let raw_owned = raw.to_string();
             let content = tokio::task::spawn_blocking(move || -> Result<String> {
                 match ext_owned.as_str() {
@@ -348,7 +348,7 @@ fn list_recursive(
 
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("Cannot read directory: {}", dir.display()))?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
 
     entries.sort_by(|a, b| {

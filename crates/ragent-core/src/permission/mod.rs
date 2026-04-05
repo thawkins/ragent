@@ -29,9 +29,9 @@ impl fmt::Display for PermissionAction {
     /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PermissionAction::Allow => write!(f, "allow"),
-            PermissionAction::Deny => write!(f, "deny"),
-            PermissionAction::Ask => write!(f, "ask"),
+            Self::Allow => write!(f, "allow"),
+            Self::Deny => write!(f, "deny"),
+            Self::Ask => write!(f, "ask"),
         }
     }
 }
@@ -87,17 +87,17 @@ impl From<&str> for Permission {
     /// This function is infallible; unknown strings become [`Permission::Custom`].
     fn from(s: &str) -> Self {
         match s {
-            "read" => Permission::Read,
-            "edit" => Permission::Edit,
-            "bash" => Permission::Bash,
-            "web" => Permission::Web,
-            "question" => Permission::Question,
-            "plan_enter" => Permission::PlanEnter,
-            "plan_exit" => Permission::PlanExit,
-            "todo" => Permission::Todo,
-            "external_directory" => Permission::ExternalDirectory,
-            "doom_loop" => Permission::DoomLoop,
-            other => Permission::Custom(other.to_string()),
+            "read" => Self::Read,
+            "edit" => Self::Edit,
+            "bash" => Self::Bash,
+            "web" => Self::Web,
+            "question" => Self::Question,
+            "plan_enter" => Self::PlanEnter,
+            "plan_exit" => Self::PlanExit,
+            "todo" => Self::Todo,
+            "external_directory" => Self::ExternalDirectory,
+            "doom_loop" => Self::DoomLoop,
+            other => Self::Custom(other.to_string()),
         }
     }
 }
@@ -110,17 +110,17 @@ impl fmt::Display for Permission {
     /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Permission::Read => write!(f, "read"),
-            Permission::Edit => write!(f, "edit"),
-            Permission::Bash => write!(f, "bash"),
-            Permission::Web => write!(f, "web"),
-            Permission::Question => write!(f, "question"),
-            Permission::PlanEnter => write!(f, "plan_enter"),
-            Permission::PlanExit => write!(f, "plan_exit"),
-            Permission::Todo => write!(f, "todo"),
-            Permission::ExternalDirectory => write!(f, "external_directory"),
-            Permission::DoomLoop => write!(f, "doom_loop"),
-            Permission::Custom(s) => write!(f, "{}", s),
+            Self::Read => write!(f, "read"),
+            Self::Edit => write!(f, "edit"),
+            Self::Bash => write!(f, "bash"),
+            Self::Web => write!(f, "web"),
+            Self::Question => write!(f, "question"),
+            Self::PlanEnter => write!(f, "plan_enter"),
+            Self::PlanExit => write!(f, "plan_exit"),
+            Self::Todo => write!(f, "todo"),
+            Self::ExternalDirectory => write!(f, "external_directory"),
+            Self::DoomLoop => write!(f, "doom_loop"),
+            Self::Custom(s) => write!(f, "{s}"),
         }
     }
 }
@@ -144,7 +144,7 @@ impl<'de> Deserialize<'de> for Permission {
     /// Returns an error if the deserializer fails or the string type is invalid.
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Ok(Permission::from(s.as_str()))
+        Ok(Self::from(s.as_str()))
     }
 }
 
@@ -217,6 +217,7 @@ impl PermissionChecker {
     /// }];
     /// let checker = PermissionChecker::new(rules);
     /// ```
+    #[must_use]
     pub fn new(ruleset: PermissionRuleset) -> Self {
         Self {
             ruleset,
@@ -244,6 +245,7 @@ impl PermissionChecker {
     /// assert_eq!(checker.check("read", "src/main.rs"), PermissionAction::Allow);
     /// assert_eq!(checker.check("read", "secrets.env"), PermissionAction::Ask);
     /// ```
+    #[must_use]
     pub fn check(&self, permission: &str, path: &str) -> PermissionAction {
         let target = Permission::from(permission);
         let wildcard = Permission::Custom("*".to_string());

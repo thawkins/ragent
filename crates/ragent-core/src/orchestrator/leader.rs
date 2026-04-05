@@ -1,4 +1,4 @@
-//! In-process leader election and CoordinatorCluster (Task 5.2).
+//! In-process leader election and `CoordinatorCluster` (Task 5.2).
 //!
 //! Provides:
 //! - [`LeaderEvent`] — broadcast events when leadership changes.
@@ -53,6 +53,7 @@ pub struct LeaderElector {
 impl LeaderElector {
     /// Create a new elector with an internal broadcast channel of the given
     /// capacity.
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
         Self {
@@ -99,6 +100,7 @@ impl LeaderElector {
     }
 
     /// Subscribe to leadership-change events.
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<LeaderEvent> {
         self.tx.subscribe()
     }
@@ -152,6 +154,7 @@ pub struct CoordinatorCluster {
 
 impl CoordinatorCluster {
     /// Create a new cluster backed by the given [`LeaderElector`].
+    #[must_use]
     pub fn new(elector: LeaderElector) -> Self {
         Self {
             nodes: Arc::new(RwLock::new(HashMap::new())),
@@ -189,10 +192,10 @@ impl CoordinatorCluster {
             return None;
         }
         // Try elected leader first.
-        if let Some(id) = self.elector.current_leader().await {
-            if let Some(c) = nodes.get(&id) {
-                return Some(c.clone());
-            }
+        if let Some(id) = self.elector.current_leader().await
+            && let Some(c) = nodes.get(&id)
+        {
+            return Some(c.clone());
         }
         // Fallback: any registered coordinator.
         nodes.values().next().cloned()
@@ -221,6 +224,7 @@ impl CoordinatorCluster {
     }
 
     /// Subscribe to leader-change events.
+    #[must_use]
     pub fn subscribe_leader_events(&self) -> broadcast::Receiver<LeaderEvent> {
         self.elector.subscribe()
     }

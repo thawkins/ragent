@@ -16,14 +16,14 @@ pub struct WriteTool;
 
 #[async_trait::async_trait]
 impl Tool for WriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "write"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Write content to a file. Creates parent directories if needed."
     }
 
@@ -47,7 +47,7 @@ impl Tool for WriteTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 

@@ -218,15 +218,15 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
     let safe_cmd = redact_secrets(command);
 
     // Validate against allowlist before execution (skipped in YOLO mode).
-    if !crate::yolo::is_enabled() {
-        if let Err(reason) = validate_command(command) {
-            tracing::warn!(
-                command = %safe_cmd,
-                reason = %reason,
-                "Dynamic context command rejected by allowlist"
-            );
-            return format!("[command rejected: {reason}]");
-        }
+    if !crate::yolo::is_enabled()
+        && let Err(reason) = validate_command(command)
+    {
+        tracing::warn!(
+            command = %safe_cmd,
+            reason = %reason,
+            "Dynamic context command rejected by allowlist"
+        );
+        return format!("[command rejected: {reason}]");
     }
 
     tracing::debug!(command = %safe_cmd, "Executing dynamic context command");

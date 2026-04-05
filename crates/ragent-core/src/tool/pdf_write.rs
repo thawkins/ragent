@@ -39,14 +39,14 @@ const CONTENT_WIDTH: f32 = PAGE_W - MARGIN_LEFT - MARGIN_RIGHT;
 
 #[async_trait::async_trait]
 impl Tool for PdfWriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "pdf_write"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Create a PDF file from structured content. Supports text paragraphs with headings, tables, and embedded images."
     }
 
@@ -122,7 +122,7 @@ impl Tool for PdfWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -238,7 +238,10 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
         match el_type {
             "heading" => {
                 let text = element.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                let level = element.get("level").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+                let level = element
+                    .get("level")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1) as usize;
 
                 let font_size = match level {
                     1 => H1_FONT_SIZE,
@@ -314,10 +317,10 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
 
                 let num_cols = headers
                     .len()
-                    .max(rows.iter().map(|r| r.len()).max().unwrap_or(0))
+                    .max(rows.iter().map(std::vec::Vec::len).max().unwrap_or(0))
                     .max(1);
                 let col_width = CONTENT_WIDTH / num_cols as f32;
-                let row_height_mm = BODY_FONT_SIZE * LINE_SPACING * 0.3528 + 2.0;
+                let row_height_mm = (BODY_FONT_SIZE * LINE_SPACING).mul_add(0.3528, 2.0);
 
                 // Header row
                 if !headers.is_empty() {
@@ -333,7 +336,7 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                     );
 
                     for (i, header) in headers.iter().enumerate() {
-                        let x = MARGIN_LEFT + (i as f32 * col_width) + 1.0;
+                        let x = (i as f32).mul_add(col_width, MARGIN_LEFT) + 1.0;
                         let truncated = truncate_cell(header, col_width);
                         emit_text(
                             &mut ops,
@@ -360,7 +363,7 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                     }
 
                     for (i, cell) in row.iter().enumerate() {
-                        let x = MARGIN_LEFT + (i as f32 * col_width) + 1.0;
+                        let x = (i as f32).mul_add(col_width, MARGIN_LEFT) + 1.0;
                         let truncated = truncate_cell(cell, col_width);
                         emit_text(
                             &mut ops,
@@ -404,15 +407,15 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
 
                 let mut warnings: Vec<PdfWarnMsg> = Vec::new();
                 let raw_image = RawImage::decode_from_bytes(&image_bytes, &mut warnings)
-                    .map_err(|e| anyhow::anyhow!("Failed to decode image: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to decode image: {e}"))?;
 
                 let img_width_px = raw_image.width as f32;
                 let img_height_px = raw_image.height as f32;
 
                 let max_width = element
                     .get("width_mm")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(CONTENT_WIDTH as f64) as f32;
+                    .and_then(serde_json::Value::as_f64)
+                    .unwrap_or(f64::from(CONTENT_WIDTH)) as f32;
                 let display_width = max_width.min(CONTENT_WIDTH);
                 let aspect = img_height_px / img_width_px;
                 let display_height = display_width * aspect;
@@ -464,7 +467,7 @@ fn write_pdf(path: &Path, content: &Value, working_dir: &Path) -> Result<usize> 
                 }
             }
             other => {
-                bail!("Unknown element type: '{}'", other);
+                bail!("Unknown element type: '{other}'");
             }
         }
     }

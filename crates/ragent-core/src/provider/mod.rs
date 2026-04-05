@@ -1,6 +1,6 @@
 //! LLM provider abstraction layer.
 //!
-//! Defines the [`Provider`] trait for integrating LLM backends (e.g. Anthropic, OpenAI)
+//! Defines the [`Provider`] trait for integrating LLM backends (e.g. Anthropic, `OpenAI`)
 //! and [`ProviderRegistry`] for managing and querying available providers and models.
 
 pub mod anthropic;
@@ -123,6 +123,7 @@ impl ProviderRegistry {
     /// let registry = ProviderRegistry::new();
     /// assert!(registry.list().is_empty());
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             providers: HashMap::new(),
@@ -155,8 +156,9 @@ impl ProviderRegistry {
     /// assert!(registry.get("anthropic").is_some());
     /// assert!(registry.get("nonexistent").is_none());
     /// ```
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&dyn Provider> {
-        self.providers.get(id).map(|p| p.as_ref())
+        self.providers.get(id).map(std::convert::AsRef::as_ref)
     }
 
     /// Returns [`ProviderInfo`] for every registered provider.
@@ -170,6 +172,7 @@ impl ProviderRegistry {
     /// let providers = registry.list();
     /// assert!(!providers.is_empty());
     /// ```
+    #[must_use]
     pub fn list(&self) -> Vec<ProviderInfo> {
         self.providers
             .values()
@@ -194,6 +197,7 @@ impl ProviderRegistry {
     /// // No providers registered, so resolution returns `None`.
     /// assert!(registry.resolve_model("openai", "gpt-4o").is_none());
     /// ```
+    #[must_use]
     pub fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo> {
         self.providers
             .get(provider_id)
@@ -219,6 +223,7 @@ impl Default for ProviderRegistry {
 /// assert!(registry.get("openai").is_some());
 /// assert!(registry.get("generic_openai").is_some());
 /// ```
+#[must_use]
 pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));

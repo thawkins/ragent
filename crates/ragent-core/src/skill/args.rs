@@ -33,6 +33,7 @@ use std::path::Path;
 /// let result = substitute_args(body, "staging", "sess-123", Path::new("/skills/deploy"));
 /// assert_eq!(result, "Deploy staging to staging environment");
 /// ```
+#[must_use]
 pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Path) -> String {
     let parsed_args = parse_args(args);
     let mut result = body.to_string();
@@ -77,6 +78,7 @@ pub fn substitute_args(body: &str, args: &str, session_id: &str, skill_dir: &Pat
 /// assert_eq!(parse_args(r#""hello world" foo"#), vec!["hello world", "foo"]);
 /// assert_eq!(parse_args(""), Vec::<String>::new());
 /// ```
+#[must_use]
 pub fn parse_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut chars = input.chars().peekable();
@@ -125,18 +127,18 @@ fn substitute_indexed_args(body: &str, args: &[String]) -> String {
         if ch == '$' {
             // Check for $ARGUMENTS[N]
             let rest: String = chars.clone().collect();
-            if let Some(stripped) = rest.strip_prefix("ARGUMENTS[") {
-                if let Some(bracket_pos) = stripped.find(']') {
-                    let index_str = &stripped[..bracket_pos];
-                    if let Ok(idx) = index_str.parse::<usize>() {
-                        let replacement = args.get(idx).map_or("", String::as_str);
-                        result.push_str(replacement);
-                        // Consume "ARGUMENTS[N]"
-                        for _ in 0..("ARGUMENTS[".len() + bracket_pos + 1) {
-                            chars.next();
-                        }
-                        continue;
+            if let Some(stripped) = rest.strip_prefix("ARGUMENTS[")
+                && let Some(bracket_pos) = stripped.find(']')
+            {
+                let index_str = &stripped[..bracket_pos];
+                if let Ok(idx) = index_str.parse::<usize>() {
+                    let replacement = args.get(idx).map_or("", String::as_str);
+                    result.push_str(replacement);
+                    // Consume "ARGUMENTS[N]"
+                    for _ in 0..=("ARGUMENTS[".len() + bracket_pos) {
+                        chars.next();
                     }
+                    continue;
                 }
             }
             result.push(ch);

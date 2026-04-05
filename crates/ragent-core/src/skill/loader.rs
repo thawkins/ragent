@@ -30,7 +30,7 @@ use super::{SkillContext, SkillInfo, SkillScope};
 ///
 /// Field names use kebab-case to match the SPEC-defined frontmatter format.
 /// Includes fields from the Anthropic Agent Skills specification for
-/// OpenSkills compatibility (license, compatibility, metadata).
+/// `OpenSkills` compatibility (license, compatibility, metadata).
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 struct SkillFrontmatter {
@@ -71,7 +71,7 @@ struct SkillFrontmatter {
     allow_dynamic_context: bool,
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -91,9 +91,9 @@ enum AllowedTools {
 impl AllowedTools {
     fn into_vec(self) -> Vec<String> {
         match self {
-            AllowedTools::Single(s) => vec![s],
-            AllowedTools::Multiple(v) => v,
-            AllowedTools::None => Vec::new(),
+            Self::Single(s) => vec![s],
+            Self::Multiple(v) => v,
+            Self::None => Vec::new(),
         }
     }
 }
@@ -238,18 +238,14 @@ fn validate_skill_name(name: &str) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("Skill name cannot be empty"));
     }
     if name.len() > 64 {
-        return Err(anyhow::anyhow!(
-            "Skill name '{}' exceeds 64 characters",
-            name
-        ));
+        return Err(anyhow::anyhow!("Skill name '{name}' exceeds 64 characters"));
     }
     if !name
         .chars()
         .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     {
         return Err(anyhow::anyhow!(
-            "Skill name '{}' must contain only lowercase letters, digits, and hyphens",
-            name
+            "Skill name '{name}' must contain only lowercase letters, digits, and hyphens"
         ));
     }
     Ok(())
@@ -267,15 +263,15 @@ fn yaml_to_json(yaml: &serde_yaml::Value) -> anyhow::Result<serde_json::Value> {
 ///
 /// Scans in order (lowest → highest priority):
 ///
-/// 1. OpenSkills global: `~/.agent/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
+/// 1. `OpenSkills` global: `~/.agent/skills/*/SKILL.md`, `~/.claude/skills/*/SKILL.md`
 /// 2. Personal: `~/.ragent/skills/*/SKILL.md`
 /// 3. Extra directories from config `skill_dirs` (treated as Personal scope)
-/// 4. OpenSkills project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
+/// 4. `OpenSkills` project: `{working_dir}/.agent/skills/*/SKILL.md`, `{working_dir}/.claude/skills/*/SKILL.md`
 /// 5. Project: `{working_dir}/.ragent/skills/*/SKILL.md`
 /// 6. Monorepo: nested `.ragent/skills/` in subdirectories of `working_dir`
 ///
 /// Higher-scope skills override lower-scope skills when names conflict.
-/// Ragent-native paths always take precedence over OpenSkills paths at the
+/// Ragent-native paths always take precedence over `OpenSkills` paths at the
 /// same level (global or project).
 ///
 /// Individual parse failures are logged as warnings and skipped.

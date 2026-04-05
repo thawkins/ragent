@@ -11,11 +11,11 @@ pub struct TeamTaskListTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamTaskListTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_task_list"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List all tasks in the team's shared task list, including their status, \
          assignment, and dependencies."
     }
@@ -33,7 +33,7 @@ impl Tool for TeamTaskListTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:read"
     }
 

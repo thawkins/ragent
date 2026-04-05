@@ -31,11 +31,11 @@ pub struct GithubListIssuesTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubListIssuesTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_list_issues"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List GitHub issues for the current repository. \
          Optional: state (open/closed/all), labels (comma-separated), limit (default 20)."
     }
@@ -61,7 +61,7 @@ impl Tool for GithubListIssuesTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:read"
     }
 
@@ -73,10 +73,10 @@ impl Tool for GithubListIssuesTool {
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
         let mut path = format!("/repos/{owner}/{repo}/issues?state={state}&per_page={limit}");
-        if let Some(labels) = input["labels"].as_str() {
-            if !labels.is_empty() {
-                path.push_str(&format!("&labels={}", urlencoded(labels)));
-            }
+        if let Some(labels) = input["labels"].as_str()
+            && !labels.is_empty()
+        {
+            path.push_str(&format!("&labels={}", urlencoded(labels)));
         }
 
         let issues = client.get(&path).await?;
@@ -120,11 +120,11 @@ pub struct GithubGetIssueTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubGetIssueTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_get_issue"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get details of a specific GitHub issue including body, comments, and labels."
     }
 
@@ -141,7 +141,7 @@ impl Tool for GithubGetIssueTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:read"
     }
 
@@ -225,11 +225,11 @@ pub struct GithubCreateIssueTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubCreateIssueTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_create_issue"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Create a new GitHub issue in the current repository."
     }
 
@@ -258,7 +258,7 @@ impl Tool for GithubCreateIssueTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 
@@ -309,11 +309,11 @@ pub struct GithubCommentIssueTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubCommentIssueTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_comment_issue"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Add a comment to a GitHub issue."
     }
 
@@ -334,7 +334,7 @@ impl Tool for GithubCommentIssueTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 
@@ -377,11 +377,11 @@ pub struct GithubCloseIssueTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubCloseIssueTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_close_issue"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Close a GitHub issue (optionally with a comment)."
     }
 
@@ -402,7 +402,7 @@ impl Tool for GithubCloseIssueTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 
@@ -415,15 +415,15 @@ impl Tool for GithubCloseIssueTool {
             .context("Missing required parameter 'number'")?;
 
         // Optionally post a closing comment first.
-        if let Some(comment) = input["comment"].as_str() {
-            if !comment.is_empty() {
-                client
-                    .post(
-                        &format!("/repos/{owner}/{repo}/issues/{number}/comments"),
-                        &json!({ "body": comment }),
-                    )
-                    .await?;
-            }
+        if let Some(comment) = input["comment"].as_str()
+            && !comment.is_empty()
+        {
+            client
+                .post(
+                    &format!("/repos/{owner}/{repo}/issues/{number}/comments"),
+                    &json!({ "body": comment }),
+                )
+                .await?;
         }
 
         client

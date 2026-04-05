@@ -29,6 +29,7 @@ impl GitHubClient {
     }
 
     /// Create from an explicit token.
+    #[must_use]
     pub fn with_token(token: String) -> Self {
         Self {
             token,
@@ -38,6 +39,7 @@ impl GitHubClient {
 
     /// The OAuth App client ID used for device flow login.
     /// Resolved from `RAGENT_GITHUB_CLIENT_ID` env var, falling back to the compiled default.
+    #[must_use]
     pub fn client_id() -> String {
         std::env::var("RAGENT_GITHUB_CLIENT_ID")
             .unwrap_or_else(|_| GITHUB_CLIENT_ID_DEFAULT.to_string())
@@ -118,11 +120,11 @@ impl GitHubClient {
     async fn handle_response(&self, resp: reqwest::Response, path: &str) -> Result<Value> {
         let status = resp.status();
 
-        if status.as_u16() == 403 || status.as_u16() == 429 {
-            if let Some(reset) = resp.headers().get("x-ratelimit-reset") {
-                let reset_str = reset.to_str().unwrap_or("unknown");
-                bail!("GitHub rate limit exceeded. Resets at epoch {reset_str}. Path: {path}");
-            }
+        if (status.as_u16() == 403 || status.as_u16() == 429)
+            && let Some(reset) = resp.headers().get("x-ratelimit-reset")
+        {
+            let reset_str = reset.to_str().unwrap_or("unknown");
+            bail!("GitHub rate limit exceeded. Resets at epoch {reset_str}. Path: {path}");
         }
 
         if status.as_u16() == 401 {
@@ -147,6 +149,7 @@ impl GitHubClient {
     }
 
     /// Detect the GitHub owner/repo from the current git repository remote.
+    #[must_use]
     pub fn detect_repo(working_dir: &std::path::Path) -> Option<(String, String)> {
         let output = std::process::Command::new("git")
             .args(["remote", "get-url", "origin"])

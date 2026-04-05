@@ -6,16 +6,16 @@ use serde_json::{Value, json};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::team::{Mailbox, MailboxMessage, MemberStatus, MessageType, TeamStore, find_team_dir};
 
-/// Lead sends a shutdown_request to a teammate's mailbox.
+/// Lead sends a `shutdown_request` to a teammate's mailbox.
 pub struct TeamShutdownTeammateTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamShutdownTeammateTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_shutdown_teammate"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Request graceful shutdown of a named teammate. Lead-only. \
          Sends a shutdown_request to the teammate's mailbox. \
          The teammate will call team_shutdown_ack to confirm before terminating."
@@ -42,7 +42,7 @@ impl Tool for TeamShutdownTeammateTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 

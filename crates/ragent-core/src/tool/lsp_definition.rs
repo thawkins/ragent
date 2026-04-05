@@ -23,11 +23,11 @@ pub struct LspDefinitionTool;
 #[async_trait::async_trait]
 impl Tool for LspDefinitionTool {
     /// Returns the tool name.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "lsp_definition"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Find where a symbol is defined using the Language Server Protocol. \
          Provide the file and cursor position; returns the definition's file path and line. \
          Requires an LSP server configured for the file's language."
@@ -55,7 +55,7 @@ impl Tool for LspDefinitionTool {
     }
 
     /// Returns the permission category.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "lsp:read"
     }
 
@@ -141,15 +141,12 @@ impl Tool for LspDefinitionTool {
 
         if locations.is_empty() {
             return Ok(ToolOutput {
-                content: format!("No definition found at {}:{}:{}", path_str, line, column),
+                content: format!("No definition found at {path_str}:{line}:{column}"),
                 metadata: Some(json!({ "count": 0 })),
             });
         }
 
-        let mut out = format!(
-            "Definition(s) for symbol at {}:{}:{}:\n\n",
-            path_str, line, column
-        );
+        let mut out = format!("Definition(s) for symbol at {path_str}:{line}:{column}:\n\n");
         let mut locs_json = Vec::new();
 
         for loc in &locations {
@@ -173,6 +170,8 @@ fn uri_to_display(uri: &lsp_types::Uri) -> String {
         .parse::<Url>()
         .ok()
         .and_then(|u| u.to_file_path().ok())
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| uri.as_str().to_string())
+        .map_or_else(
+            || uri.as_str().to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        )
 }

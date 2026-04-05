@@ -11,11 +11,11 @@ pub struct TeamReadMessagesTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamReadMessagesTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_read_messages"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read all unread messages from your mailbox in the team. \
          Messages are marked as read after this call. \
          Call this at the start of each turn to check for new instructions."
@@ -34,7 +34,7 @@ impl Tool for TeamReadMessagesTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -47,8 +47,7 @@ impl Tool for TeamReadMessagesTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| "lead".to_string());
+            .map_or_else(|| "lead".to_string(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;

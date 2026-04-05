@@ -91,6 +91,7 @@ pub struct Metrics {
 
 impl Metrics {
     /// Create a new metrics instance.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             active_jobs: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -127,6 +128,7 @@ pub struct Coordinator {
 
 impl Coordinator {
     /// Return a snapshot of the internal metrics counters.
+    #[must_use]
     pub fn metrics_snapshot(&self) -> MetricsSnapshot {
         MetricsSnapshot {
             active_jobs: self
@@ -158,7 +160,8 @@ impl std::fmt::Debug for Coordinator {
 }
 
 impl Coordinator {
-    /// Default constructor using InProcessRouter.
+    /// Default constructor using `InProcessRouter`.
+    #[must_use]
     pub fn new(registry: AgentRegistry) -> Self {
         let router = Arc::new(super::router::InProcessRouter::new(registry.clone()));
         Self {
@@ -181,7 +184,8 @@ impl Coordinator {
         }
     }
 
-    /// Constructor that sets a custom per-request timeout on the default InProcessRouter.
+    /// Constructor that sets a custom per-request timeout on the default `InProcessRouter`.
+    #[must_use]
     pub fn with_request_timeout(registry: AgentRegistry, timeout: Duration) -> Self {
         let mut r = super::router::InProcessRouter::new(registry.clone());
         r.request_timeout = timeout;
@@ -198,6 +202,7 @@ impl Coordinator {
     /// Attach a [`policy::ConflictResolver`] to this coordinator.  When set,
     /// `start_job_sync` applies the policy to agent responses instead of
     /// concatenating them directly.
+    #[must_use]
     pub fn with_policy(mut self, resolver: policy::ConflictResolver) -> Self {
         self.policy = Some(Arc::new(resolver));
         self
@@ -222,7 +227,7 @@ impl Coordinator {
         }
 
         let mut handles = Vec::new();
-        for agent in matches.iter() {
+        for agent in &matches {
             let router = self.router.clone();
             let agent_id = agent.id.clone();
             let msg = OrchestrationMessage {
@@ -277,16 +282,15 @@ impl Coordinator {
 
         // Apply conflict-resolution policy if configured; otherwise concatenate.
         if let Some(resolver) = &self.policy {
-            resolver.resolve(&desc.id, &responses).map_err(|e| {
+            resolver.resolve(&desc.id, &responses).inspect_err(|_e| {
                 self.metrics
                     .errors
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                e
             })
         } else {
             let parts: Vec<String> = responses
                 .into_iter()
-                .map(|(id, resp)| format!("--- agent: {} ---\n{}", id, resp))
+                .map(|(id, resp)| format!("--- agent: {id} ---\n{resp}"))
                 .collect();
             Ok(parts.join("\n"))
         }
@@ -316,7 +320,7 @@ impl Coordinator {
             anyhow::bail!("no agents match the required capabilities")
         }
 
-        for agent in matches.iter() {
+        for agent in &matches {
             let agent_id = agent.id.clone();
             let msg = OrchestrationMessage {
                 job_id: desc.id.clone(),
@@ -331,7 +335,7 @@ impl Coordinator {
                         self.metrics
                             .completed_jobs
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        return Ok(format!("--- agent: {} ---\n{}", agent_id, resp));
+                        return Ok(format!("--- agent: {agent_id} ---\n{resp}"));
                     }
                     continue;
                 }
@@ -410,7 +414,7 @@ impl Coordinator {
 
             // assign subtasks in order; collect aggregated parts
             let mut parts = Vec::new();
-            for agent in matches.iter() {
+            for agent in &matches {
                 let agent_id = agent.id.clone();
                 let _ = tx.send(JobEvent::SubtaskAssigned {
                     job_id: job_id_for_spawn.clone(),
@@ -427,7 +431,7 @@ impl Coordinator {
                             agent_id: agent_id.clone(),
                             success: true,
                         });
-                        parts.push(format!("--- agent: {} ---\n{}", agent_id, resp));
+                        parts.push(format!("--- agent: {agent_id} ---\n{resp}"));
                     }
                     Err(e) => {
                         let _ = tx.send(JobEvent::SubtaskCompleted {

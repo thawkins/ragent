@@ -12,11 +12,11 @@ pub struct TeamTaskCompleteTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamTaskCompleteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_task_complete"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Mark a task as completed. The task must be currently assigned to the caller. \
          Completing a task automatically unblocks any tasks that depend on it."
     }
@@ -38,7 +38,7 @@ impl Tool for TeamTaskCompleteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:tasks"
     }
 
@@ -56,8 +56,7 @@ impl Tool for TeamTaskCompleteTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| ctx.session_id.clone());
+            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
@@ -106,10 +105,9 @@ impl Tool for TeamTaskCompleteTool {
                 );
                 return Ok(ToolOutput {
                     content: format!(
-                        "Failed to mark task '{}' as completed: {}\n\
+                        "Failed to mark task '{task_id}' as completed: {err_msg}\n\
                          This usually means the task doesn't exist, is already completed, \
-                         or is assigned to a different agent.",
-                        task_id, err_msg
+                         or is assigned to a different agent."
                     ),
                     metadata: Some(json!({
                         "team_name": team_name,

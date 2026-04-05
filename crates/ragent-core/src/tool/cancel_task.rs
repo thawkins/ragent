@@ -13,12 +13,12 @@ pub struct CancelTaskTool;
 
 #[async_trait::async_trait]
 impl Tool for CancelTaskTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "cancel_task"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Cancel a running background sub-agent task. Requires the task_id \
                returned by new_task when background: true was used."
     }
@@ -35,7 +35,7 @@ impl Tool for CancelTaskTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }
 
@@ -45,7 +45,7 @@ impl Tool for CancelTaskTool {
     ///
     /// Returns an error if:
     /// - The `task_id` parameter is missing or invalid
-    /// - TaskManager is not available in the context
+    /// - `TaskManager` is not available in the context
     /// - The task does not belong to the current session
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task_id = input

@@ -11,11 +11,11 @@ pub struct TeamCleanupTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamCleanupTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_cleanup"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Tear down a team and remove its on-disk resources. Lead-only. \
          Fails if any teammates are still active (not Stopped). \
          Use team_shutdown_teammate on each active member first."
@@ -38,7 +38,7 @@ impl Tool for TeamCleanupTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 
@@ -50,7 +50,7 @@ impl Tool for TeamCleanupTool {
 
         let force = input
             .get("force")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)

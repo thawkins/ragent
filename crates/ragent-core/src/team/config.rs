@@ -28,6 +28,7 @@ pub enum MemoryScope {
 ///
 /// Returns `None` when `scope` is [`MemoryScope::None`].
 /// The directory is **not** created — callers should create it on first write.
+#[must_use]
 pub fn resolve_memory_dir(
     scope: MemoryScope,
     agent_name: &str,
@@ -243,6 +244,7 @@ impl TeamConfig {
     }
 
     /// Return the member with the given `agent_id`, if found.
+    #[must_use]
     pub fn member_by_id(&self, agent_id: &str) -> Option<&TeamMember> {
         self.members.iter().find(|m| m.agent_id == agent_id)
     }
@@ -253,6 +255,7 @@ impl TeamConfig {
     }
 
     /// Return the member with the given `name`, if found.
+    #[must_use]
     pub fn member_by_name(&self, name: &str) -> Option<&TeamMember> {
         self.members.iter().find(|m| m.name == name)
     }

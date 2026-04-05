@@ -21,12 +21,12 @@ pub struct LspReferencesTool;
 
 #[async_trait::async_trait]
 impl Tool for LspReferencesTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "lsp_references"
     }
 
     /// Returns the tool description.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Find all usages (references) of a symbol in the workspace using the Language \
          Server Protocol. Returns file paths and line numbers. \
          Requires an LSP server configured for the file's language."
@@ -57,7 +57,7 @@ impl Tool for LspReferencesTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "lsp:read"
     }
 
@@ -136,10 +136,7 @@ impl Tool for LspReferencesTool {
 
         if locations.is_empty() {
             return Ok(ToolOutput {
-                content: format!(
-                    "No references found for symbol at {}:{}:{}",
-                    path_str, line, column
-                ),
+                content: format!("No references found for symbol at {path_str}:{line}:{column}"),
                 metadata: Some(json!({ "count": 0 })),
             });
         }
@@ -181,6 +178,8 @@ fn uri_to_display(uri: &lsp_types::Uri) -> String {
         .parse::<Url>()
         .ok()
         .and_then(|u| u.to_file_path().ok())
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| uri.as_str().to_string())
+        .map_or_else(
+            || uri.as_str().to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        )
 }

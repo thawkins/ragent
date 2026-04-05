@@ -804,7 +804,7 @@ async fn prompt_opt_handler(
 
     let method = match body.method.parse::<OptMethod>() {
         Ok(m) => m,
-        Err(_) => {
+        Err(()) => {
             return error_response(
                 StatusCode::BAD_REQUEST,
                 format!("unknown optimization method: {}", body.method),

@@ -11,11 +11,11 @@ pub struct TeamAssignTaskTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamAssignTaskTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_assign_task"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Assign a specific pending task directly to a named teammate. Lead-only. \
          The task is marked InProgress and assigned to the specified agent."
     }
@@ -41,7 +41,7 @@ impl Tool for TeamAssignTaskTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 

@@ -17,12 +17,12 @@ pub struct ListTool;
 
 #[async_trait::async_trait]
 impl Tool for ListTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "list"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List directory contents with tree-like output. Supports depth control."
     }
 
@@ -42,7 +42,7 @@ impl Tool for ListTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -54,10 +54,10 @@ impl Tool for ListTool {
     /// - The specified path is not a directory or does not exist
     /// - The directory cannot be read due to permission issues
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let dir = input["path"]
-            .as_str()
-            .map(|p| resolve_path(&ctx.working_dir, p))
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let dir = input["path"].as_str().map_or_else(
+            || ctx.working_dir.clone(),
+            |p| resolve_path(&ctx.working_dir, p),
+        );
 
         let max_depth = input["depth"].as_u64().unwrap_or(2) as usize;
 
@@ -101,7 +101,7 @@ fn list_recursive(
 
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .with_context(|| format!("Cannot read directory: {}", dir.display()))?
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
 
     // Sort entries: directories first, then by name
@@ -132,10 +132,10 @@ fn list_recursive(
                 name_str.as_ref(),
                 "node_modules" | "target" | ".git" | "__pycache__" | "dist" | "build"
             ) {
-                lines.push(format!("{}{}{}/  (skipped)", prefix, connector, name_str));
+                lines.push(format!("{prefix}{connector}{name_str}/  (skipped)"));
                 continue;
             }
-            lines.push(format!("{}{}{}/", prefix, connector, name_str));
+            lines.push(format!("{prefix}{connector}{name_str}/"));
             let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
             list_recursive(&path, &new_prefix, depth + 1, max_depth, lines)?;
         } else {
@@ -155,7 +155,7 @@ fn list_recursive(
 
 fn format_size(bytes: u64) -> String {
     if bytes < 1024 {
-        format!("{} B", bytes)
+        format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {

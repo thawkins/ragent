@@ -25,14 +25,14 @@ pub struct WaitTasksTool;
 
 #[async_trait::async_trait]
 impl Tool for WaitTasksTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "wait_tasks"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Wait for one or more background sub-agent tasks to complete. \
          Returns full results for all awaited tasks. \
          Use this instead of polling with list_tasks. \
@@ -59,13 +59,13 @@ impl Tool for WaitTasksTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }
 
     /// # Errors
     ///
-    /// Returns an error if the TaskManager is not initialized, if any requested task ID
+    /// Returns an error if the `TaskManager` is not initialized, if any requested task ID
     /// does not exist or is not a background task, or if the wait operation times out.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task_manager = ctx
@@ -75,7 +75,7 @@ impl Tool for WaitTasksTool {
 
         let timeout_secs = input
             .get("timeout_secs")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(300);
 
         // Subscribe to the event bus BEFORE reading current state to eliminate
@@ -88,7 +88,7 @@ impl Tool for WaitTasksTool {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
                     .collect()
             })
             .unwrap_or_default();
@@ -188,8 +188,7 @@ impl Tool for WaitTasksTool {
             let agent_name = all_tasks
                 .iter()
                 .find(|t| &t.id == task_id)
-                .map(|t| t.agent_name.as_str())
-                .unwrap_or("unknown");
+                .map_or("unknown", |t| t.agent_name.as_str());
 
             let icon = if *success { "✅" } else { "❌" };
             let short_id = &task_id[..8.min(task_id.len())];
@@ -210,7 +209,7 @@ impl Tool for WaitTasksTool {
                     0
                 };
 
-                let output_lines = task.result.as_ref().map(|r| r.lines().count()).unwrap_or(0);
+                let output_lines = task.result.as_ref().map_or(0, |r| r.lines().count());
 
                 task_details.push(json!({
                     "id": &task.id,

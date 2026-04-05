@@ -73,6 +73,7 @@ impl Task {
     }
 
     /// Return `true` if the task is pending and all dependencies are satisfied.
+    #[must_use]
     pub fn is_claimable(&self, completed_ids: &[String]) -> bool {
         self.status == TaskStatus::Pending
             && self
@@ -112,12 +113,14 @@ impl TaskList {
     }
 
     /// Find the first pending task whose dependencies are all satisfied.
+    #[must_use]
     pub fn next_claimable(&self) -> Option<&Task> {
         let done = self.completed_ids();
         self.tasks.iter().find(|t| t.is_claimable(&done))
     }
 
     /// Find the in-progress task currently owned by `agent_id`, if any.
+    #[must_use]
     pub fn in_progress_for<'a>(&'a self, agent_id: &str) -> Option<&'a Task> {
         self.tasks.iter().find(|t| {
             t.status == TaskStatus::InProgress && t.assigned_to.as_deref() == Some(agent_id)
@@ -296,15 +299,13 @@ impl TaskStore {
         }
 
         // Task must not be assigned to a different agent
-        if let Some(assigned_to) = &task.assigned_to {
-            if assigned_to != agent_id {
-                file.unlock()?;
-                return Err(anyhow!(
-                    "task '{task_id}' is already assigned to {}, not {}",
-                    assigned_to,
-                    agent_id
-                ));
-            }
+        if let Some(assigned_to) = &task.assigned_to
+            && assigned_to != agent_id
+        {
+            file.unlock()?;
+            return Err(anyhow!(
+                "task '{task_id}' is already assigned to {assigned_to}, not {agent_id}"
+            ));
         }
 
         // Task must be Pending (the only claimable status)
@@ -423,7 +424,7 @@ impl TaskStore {
         Ok(())
     }
 
-    /// Atomically pre-assign a pending task to an agent in InProgress state.
+    /// Atomically pre-assign a pending task to an agent in `InProgress` state.
     ///
     /// Used when the lead spawns a teammate for a specific task — the lead
     /// pre-assigns the task so that when the teammate calls `claim_next()`,

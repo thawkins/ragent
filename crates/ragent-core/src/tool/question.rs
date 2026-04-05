@@ -15,14 +15,14 @@ pub struct QuestionTool;
 
 #[async_trait::async_trait]
 impl Tool for QuestionTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "question"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Ask the user a question and wait for their response. \
          Use this when you need clarification or confirmation."
     }
@@ -43,7 +43,7 @@ impl Tool for QuestionTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "question"
     }
 
@@ -65,7 +65,7 @@ impl Tool for QuestionTool {
         });
 
         Ok(ToolOutput {
-            content: format!("[Question asked: {}] Awaiting user response.", question),
+            content: format!("[Question asked: {question}] Awaiting user response."),
             metadata: Some(json!({
                 "request_id": request_id,
                 "question": question,

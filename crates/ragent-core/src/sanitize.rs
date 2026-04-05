@@ -5,7 +5,7 @@ use regex::Regex;
 
 /// Matches common secret patterns:
 ///
-/// - `sk-` / `sk_live_` / `sk_test_` prefixed keys (OpenAI, Stripe, etc.)
+/// - `sk-` / `sk_live_` / `sk_test_` prefixed keys (`OpenAI`, Stripe, etc.)
 /// - `key-` prefixed keys
 /// - `Bearer` tokens (including JWTs with dots)
 /// - `ghp_` / `gho_` / `ghs_` / `ghu_` / `ghr_` GitHub tokens
@@ -137,14 +137,14 @@ pub fn redact_secrets(msg: &str) -> String {
 
     // Layer 1: exact-match registered secrets (longest first to avoid
     // partial replacements when one secret is a substring of another).
-    if let Ok(registry) = SECRET_REGISTRY.read() {
-        if !registry.is_empty() {
-            let mut secrets: Vec<&str> = registry.iter().map(String::as_str).collect();
-            secrets.sort_by(|a, b| b.len().cmp(&a.len()));
-            for secret in secrets {
-                if result.contains(secret) {
-                    result = result.replace(secret, "[REDACTED]");
-                }
+    if let Ok(registry) = SECRET_REGISTRY.read()
+        && !registry.is_empty()
+    {
+        let mut secrets: Vec<&str> = registry.iter().map(String::as_str).collect();
+        secrets.sort_by(|a, b| b.len().cmp(&a.len()));
+        for secret in secrets {
+            if result.contains(secret) {
+                result = result.replace(secret, "[REDACTED]");
             }
         }
     }

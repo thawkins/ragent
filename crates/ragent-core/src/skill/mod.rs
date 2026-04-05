@@ -52,7 +52,7 @@ pub enum SkillContext {
 impl std::fmt::Display for SkillContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SkillContext::Fork => write!(f, "fork"),
+            Self::Fork => write!(f, "fork"),
         }
     }
 }
@@ -67,11 +67,11 @@ pub enum SkillScope {
     Bundled = 0,
     /// Enterprise-managed settings.
     Enterprise = 1,
-    /// OpenSkills global directories (`~/.agent/skills/`, `~/.claude/skills/`).
+    /// `OpenSkills` global directories (`~/.agent/skills/`, `~/.claude/skills/`).
     OpenSkillsGlobal = 2,
     /// User-level skill from `~/.ragent/skills/`.
     Personal = 3,
-    /// OpenSkills project directories (`.agent/skills/`, `.claude/skills/`).
+    /// `OpenSkills` project directories (`.agent/skills/`, `.claude/skills/`).
     OpenSkillsProject = 4,
     /// Project-level skill from `.ragent/skills/`.
     Project = 5,
@@ -80,12 +80,12 @@ pub enum SkillScope {
 impl std::fmt::Display for SkillScope {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SkillScope::Bundled => write!(f, "bundled"),
-            SkillScope::Enterprise => write!(f, "enterprise"),
-            SkillScope::OpenSkillsGlobal => write!(f, "openskills-global"),
-            SkillScope::Personal => write!(f, "personal"),
-            SkillScope::OpenSkillsProject => write!(f, "openskills-project"),
-            SkillScope::Project => write!(f, "project"),
+            Self::Bundled => write!(f, "bundled"),
+            Self::Enterprise => write!(f, "enterprise"),
+            Self::OpenSkillsGlobal => write!(f, "openskills-global"),
+            Self::Personal => write!(f, "personal"),
+            Self::OpenSkillsProject => write!(f, "openskills-project"),
+            Self::Project => write!(f, "project"),
         }
     }
 }
@@ -143,7 +143,7 @@ pub struct SkillInfo {
     pub body: String,
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -194,7 +194,8 @@ impl SkillInfo {
     ///
     /// This function does not return errors. It returns a boolean based on the
     /// `user_invocable` field value.
-    pub fn is_user_invocable(&self) -> bool {
+    #[must_use]
+    pub const fn is_user_invocable(&self) -> bool {
         self.user_invocable
     }
 
@@ -204,7 +205,8 @@ impl SkillInfo {
     ///
     /// This function does not return errors. It returns a boolean based on the
     /// inverse of the `disable_model_invocation` field.
-    pub fn is_agent_invocable(&self) -> bool {
+    #[must_use]
+    pub const fn is_agent_invocable(&self) -> bool {
         !self.disable_model_invocation
     }
 
@@ -214,6 +216,7 @@ impl SkillInfo {
     ///
     /// This function does not return errors. It returns `true` if the context
     /// is set to `SkillContext::Fork`, `false` otherwise.
+    #[must_use]
     pub fn is_forked(&self) -> bool {
         self.context.as_ref() == Some(&SkillContext::Fork)
     }
@@ -252,6 +255,7 @@ pub struct SkillRegistry {
 
 impl SkillRegistry {
     /// Creates an empty skill registry.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             skills: HashMap::new(),
@@ -314,11 +318,13 @@ impl SkillRegistry {
     }
 
     /// Looks up a skill by name.
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&SkillInfo> {
         self.skills.get(name)
     }
 
     /// Returns all skills that the user can invoke via `/name`.
+    #[must_use]
     pub fn list_user_invocable(&self) -> Vec<&SkillInfo> {
         self.skills
             .values()
@@ -327,6 +333,7 @@ impl SkillRegistry {
     }
 
     /// Returns all skills that the agent can auto-invoke.
+    #[must_use]
     pub fn list_agent_invocable(&self) -> Vec<&SkillInfo> {
         self.skills
             .values()
@@ -335,6 +342,7 @@ impl SkillRegistry {
     }
 
     /// Returns all registered skills, sorted by name for deterministic output.
+    #[must_use]
     pub fn list_all(&self) -> Vec<&SkillInfo> {
         let mut skills: Vec<_> = self.skills.values().collect();
         skills.sort_by(|a, b| a.name.cmp(&b.name));
@@ -342,11 +350,13 @@ impl SkillRegistry {
     }
 
     /// Returns the number of registered skills.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.skills.len()
     }
 
     /// Returns `true` if no skills are registered.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
     }

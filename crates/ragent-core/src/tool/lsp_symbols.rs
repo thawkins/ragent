@@ -22,11 +22,11 @@ pub struct LspSymbolsTool;
 #[async_trait::async_trait]
 impl Tool for LspSymbolsTool {
     /// Returns the tool name.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "lsp_symbols"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List all symbols (functions, types, constants, etc.) defined in a source file \
          using the Language Server Protocol. Returns names, kinds, and line numbers. \
          Requires an LSP server configured for the file's language."
@@ -46,7 +46,7 @@ impl Tool for LspSymbolsTool {
     }
 
     /// Returns the permission category.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "lsp:read"
     }
 
@@ -160,7 +160,7 @@ fn flatten_symbol(
     }
 }
 
-fn symbol_kind_name(kind: lsp_types::SymbolKind) -> &'static str {
+const fn symbol_kind_name(kind: lsp_types::SymbolKind) -> &'static str {
     use lsp_types::SymbolKind;
     match kind {
         SymbolKind::FILE => "file",

@@ -81,7 +81,7 @@ impl SessionManager {
     /// let event_bus = Arc::new(EventBus::new(128));
     /// let manager = SessionManager::new(storage, event_bus);
     /// ```
-    pub fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
+    pub const fn new(storage: Arc<Storage>, event_bus: Arc<EventBus>) -> Self {
         Self { storage, event_bus }
     }
 
@@ -105,7 +105,8 @@ impl SessionManager {
     /// let manager = SessionManager::new(storage, event_bus);
     /// let _storage_ref = manager.storage();
     /// ```
-    pub fn storage(&self) -> &Arc<Storage> {
+    #[must_use]
+    pub const fn storage(&self) -> &Arc<Storage> {
         &self.storage
     }
 
@@ -273,9 +274,8 @@ impl SessionManager {
 
 impl From<crate::storage::SessionRow> for Session {
     fn from(row: crate::storage::SessionRow) -> Self {
-        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|e| {
+        let created_at = DateTime::parse_from_rfc3339(&row.created_at).map_or_else(
+            |e| {
                 tracing::warn!(
                     session_id = %row.id,
                     raw = %row.created_at,
@@ -283,10 +283,11 @@ impl From<crate::storage::SessionRow> for Session {
                     "failed to parse created_at timestamp, falling back to Utc::now()"
                 );
                 Utc::now()
-            });
-        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|e| {
+            },
+            |dt| dt.with_timezone(&Utc),
+        );
+        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at).map_or_else(
+            |e| {
                 tracing::warn!(
                     session_id = %row.id,
                     raw = %row.updated_at,
@@ -294,7 +295,9 @@ impl From<crate::storage::SessionRow> for Session {
                     "failed to parse updated_at timestamp, falling back to Utc::now()"
                 );
                 Utc::now()
-            });
+            },
+            |dt| dt.with_timezone(&Utc),
+        );
         let archived_at = row.archived_at.and_then(|s| {
             DateTime::parse_from_rfc3339(&s)
                 .ok()
@@ -302,7 +305,7 @@ impl From<crate::storage::SessionRow> for Session {
         });
         let summary = row.summary.and_then(|s| serde_json::from_str(&s).ok());
 
-        Session {
+        Self {
             id: row.id,
             title: row.title,
             project_id: row.project_id,

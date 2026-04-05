@@ -1,7 +1,7 @@
 //! Office document writing tool.
 //!
 //! Provides [`OfficeWriteTool`], which creates new Microsoft Word (`.docx`),
-//! Excel (`.xlsx`), and PowerPoint (`.pptx`) files from structured JSON input.
+//! Excel (`.xlsx`), and `PowerPoint` (`.pptx`) files from structured JSON input.
 //!
 //! Depends on: `docx-rust`, `rust_xlsxwriter`, `ooxmlsdk`.
 
@@ -12,7 +12,7 @@ use std::path::Path;
 use super::office_common::{OfficeFormat, detect_format, resolve_path};
 use super::{Tool, ToolContext, ToolOutput};
 
-/// Writes content to Word, Excel, or PowerPoint files.
+/// Writes content to Word, Excel, or `PowerPoint` files.
 ///
 /// Accepts structured JSON content and creates the specified document type.
 /// Creates parent directories if needed.
@@ -20,11 +20,11 @@ pub struct OfficeWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for OfficeWriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "office_write"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Write content to Word (.docx), Excel (.xlsx), or PowerPoint (.pptx) files."
     }
 
@@ -53,7 +53,7 @@ impl Tool for OfficeWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -250,7 +250,7 @@ fn write_docx(path: &Path, content: &Value) -> Result<()> {
                     let style = elem["style"].as_str().unwrap_or("Normal");
                     paras.push(ParaEntry {
                         text: text.to_owned(),
-                        style_id: style_canonical(style).to_owned(),
+                        style_id: style_canonical(style).clone(),
                     });
                 }
             }
@@ -458,7 +458,7 @@ fn write_xlsx(path: &Path, content: &Value) -> Result<()> {
     Ok(())
 }
 
-/// Writes a PowerPoint presentation from structured JSON content.
+/// Writes a `PowerPoint` presentation from structured JSON content.
 ///
 /// Expected content format:
 /// ```json
@@ -523,16 +523,16 @@ fn write_pptx(path: &Path, content: &Value) -> Result<()> {
         .context("Failed to write slide rels")?;
         write!(zip, "{}", generate_slide_rels_xml()).context("Failed to write slide rels XML")?;
 
-        if let Some(notes) = slide_def["notes"].as_str() {
-            if !notes.is_empty() {
-                zip.start_file(
-                    format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
-                    options,
-                )
-                .context("Failed to write notes slide")?;
-                write!(zip, "{}", generate_notes_slide_xml(notes))
-                    .context("Failed to write notes slide XML")?;
-            }
+        if let Some(notes) = slide_def["notes"].as_str()
+            && !notes.is_empty()
+        {
+            zip.start_file(
+                format!("ppt/notesSlides/notesSlide{slide_num}.xml"),
+                options,
+            )
+            .context("Failed to write notes slide")?;
+            write!(zip, "{}", generate_notes_slide_xml(notes))
+                .context("Failed to write notes slide XML")?;
         }
     }
 
@@ -563,7 +563,7 @@ fn write_pptx(path: &Path, content: &Value) -> Result<()> {
     Ok(())
 }
 
-/// XML escape helper for PowerPoint content.
+/// XML escape helper for `PowerPoint` content.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -593,7 +593,7 @@ fn generate_content_types_xml(slide_count: usize) -> String {
     )
 }
 
-fn generate_root_rels_xml() -> &'static str {
+const fn generate_root_rels_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
@@ -663,7 +663,7 @@ fn generate_slide_xml(title: &str, body: &str) -> String {
     )
 }
 
-fn generate_slide_rels_xml() -> &'static str {
+const fn generate_slide_rels_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
@@ -690,7 +690,7 @@ fn generate_notes_slide_xml(notes: &str) -> String {
     )
 }
 
-fn generate_slide_master_xml() -> &'static str {
+const fn generate_slide_master_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
 <p:cSld>
@@ -710,7 +710,7 @@ fn generate_slide_master_xml() -> &'static str {
 </p:sldMaster>"#
 }
 
-fn generate_slide_layout_xml() -> &'static str {
+const fn generate_slide_layout_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="titleOnly">
 <p:cSld name="Title Only">
@@ -722,7 +722,7 @@ fn generate_slide_layout_xml() -> &'static str {
 </p:sldLayout>"#
 }
 
-fn generate_slide_master_rels_xml() -> &'static str {
+const fn generate_slide_master_rels_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
@@ -730,14 +730,14 @@ fn generate_slide_master_rels_xml() -> &'static str {
 </Relationships>"#
 }
 
-fn generate_slide_layout_rels_xml() -> &'static str {
+const fn generate_slide_layout_rels_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
 </Relationships>"#
 }
 
-fn generate_theme_xml() -> &'static str {
+const fn generate_theme_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
 <a:themeElements>

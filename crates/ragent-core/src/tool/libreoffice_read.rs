@@ -1,6 +1,6 @@
-//! LibreOffice document reading tool.
+//! `LibreOffice` document reading tool.
 //!
-//! Provides [`LibreReadTool`], which reads content from OpenDocument Text (`.odt`),
+//! Provides [`LibreReadTool`], which reads content from `OpenDocument` Text (`.odt`),
 //! Spreadsheet (`.ods`), and Presentation (`.odp`) files.
 //!
 //! - **ODS**: parsed with `calamine`, which has full native ODS support.
@@ -22,12 +22,12 @@ pub struct LibreReadTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "libre_read"
     }
 
     /// Returns the tool description.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read content from OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
          ODS uses calamine for full spreadsheet fidelity; ODT/ODP use XML extraction."
     }
@@ -62,11 +62,11 @@ impl Tool for LibreReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
-    /// Executes the LibreOffice read operation.
+    /// Executes the `LibreOffice` read operation.
     ///
     /// # Errors
     ///
@@ -124,7 +124,7 @@ fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) ->
     let mut wb: Sheets<_> = open_workbook_auto(path)
         .with_context(|| format!("calamine failed to open ODS: {}", path.display()))?;
 
-    let sheet_names = wb.sheet_names().to_vec();
+    let sheet_names = wb.sheet_names();
     let target = match sheet {
         Some(name) => {
             if sheet_names.iter().any(|n| n == name) {
@@ -132,10 +132,10 @@ fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) ->
             } else if let Ok(idx) = name.parse::<usize>() {
                 sheet_names
                     .get(idx)
-                    .ok_or_else(|| anyhow::anyhow!("Sheet index {} out of range", idx))?
+                    .ok_or_else(|| anyhow::anyhow!("Sheet index {idx} out of range"))?
                     .clone()
             } else {
-                anyhow::bail!("Sheet '{}' not found", name);
+                anyhow::bail!("Sheet '{name}' not found");
             }
         }
         None => sheet_names
@@ -157,13 +157,13 @@ fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) ->
                 row.iter()
                     .skip(r1c1.1)
                     .take(r2c2.1.saturating_sub(r1c1.1) + 1)
-                    .map(|c| c.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect()
             })
             .collect()
     } else {
         data.rows()
-            .map(|row| row.iter().map(|c| c.to_string()).collect())
+            .map(|row| row.iter().map(std::string::ToString::to_string).collect())
             .collect()
     };
 
@@ -179,9 +179,9 @@ fn read_ods(path: &Path, sheet: Option<&str>, range: Option<&str>, fmt: &str) ->
             .join("\n")),
         _ => {
             if rows.is_empty() {
-                return Ok(format!("Sheet **{}** is empty.", target));
+                return Ok(format!("Sheet **{target}** is empty."));
             }
-            let mut md = format!("### Sheet: {}\n\n", target);
+            let mut md = format!("### Sheet: {target}\n\n");
             if let Some(header) = rows.first() {
                 md.push_str("| ");
                 md.push_str(&header.join(" | "));
@@ -240,32 +240,32 @@ fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> 
                 let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
                 if name == "page" {
                     current = Some(String::new());
-                } else if matches!(name, "p" | "span") {
-                    if let Some(ref mut s) = current {
-                        if !s.is_empty() && !s.ends_with('\n') {
-                            s.push('\n');
-                        }
-                    }
+                } else if matches!(name, "p" | "span")
+                    && let Some(ref mut s) = current
+                    && !s.is_empty()
+                    && !s.ends_with('\n')
+                {
+                    s.push('\n');
                 }
             }
             Ok(Event::Text(e)) => {
                 let text = std::str::from_utf8(e.as_ref()).unwrap_or("").trim();
-                if !text.is_empty() {
-                    if let Some(ref mut slide) = current {
-                        if !slide.is_empty() && !slide.ends_with('\n') && !slide.ends_with(' ') {
-                            slide.push(' ');
-                        }
-                        slide.push_str(text);
+                if !text.is_empty()
+                    && let Some(ref mut slide) = current
+                {
+                    if !slide.is_empty() && !slide.ends_with('\n') && !slide.ends_with(' ') {
+                        slide.push(' ');
                     }
+                    slide.push_str(text);
                 }
             }
             Ok(Event::End(e)) => {
                 let local = e.local_name();
                 let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                if name == "page" {
-                    if let Some(s) = current.take() {
-                        slides.push(s.trim().to_string());
-                    }
+                if name == "page"
+                    && let Some(s) = current.take()
+                {
+                    slides.push(s.trim().to_string());
                 }
             }
             Ok(Event::Eof) | Err(_) => break,
@@ -300,7 +300,7 @@ fn read_odp(path: &Path, slide_num: Option<usize>, fmt: &str) -> Result<String> 
             .join("\n\n")),
         _ => Ok(selection
             .iter()
-            .map(|(i, s)| format!("### Slide {}\n\n{}", i, s))
+            .map(|(i, s)| format!("### Slide {i}\n\n{s}"))
             .collect::<Vec<_>>()
             .join("\n\n")),
     }

@@ -45,7 +45,7 @@ pub async fn lock_file(path: &Path) -> OwnedMutexGuard<()> {
 /// Periodically clean up locks for files that are no longer being edited.
 ///
 /// This is optional; locks are lightweight and don't leak resources, but this
-/// prevents the HashMap from growing unbounded over a long-running session.
+/// prevents the `HashMap` from growing unbounded over a long-running session.
 #[allow(dead_code)]
 pub async fn cleanup_unused_locks() {
     let mut locks: tokio::sync::RwLockWriteGuard<'_, HashMap<PathBuf, Arc<Mutex<()>>>> =

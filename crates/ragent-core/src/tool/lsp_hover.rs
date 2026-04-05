@@ -20,11 +20,11 @@ pub struct LspHoverTool;
 #[async_trait::async_trait]
 impl Tool for LspHoverTool {
     /// Returns the tool name.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "lsp_hover"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get type information and documentation for a symbol at a specific line and column \
          in a source file using the Language Server Protocol. \
          Requires an LSP server configured for the file's language."
@@ -52,7 +52,7 @@ impl Tool for LspHoverTool {
     }
 
     /// Returns the permission category.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "lsp:read"
     }
 
@@ -124,10 +124,7 @@ impl Tool for LspHoverTool {
             .context("LSP hover request failed")?;
 
         let content = match result {
-            None => format!(
-                "No hover information available at {}:{}:{}",
-                path_str, line, column
-            ),
+            None => format!("No hover information available at {path_str}:{line}:{column}"),
             Some(hover) => {
                 let text = match &hover.contents {
                     lsp_types::HoverContents::Scalar(markup) => markup_to_text(markup),
@@ -138,7 +135,7 @@ impl Tool for LspHoverTool {
                         .join("\n"),
                     lsp_types::HoverContents::Markup(markup) => markup.value.clone(),
                 };
-                format!("Hover at {}:{}:{}\n\n{}", path_str, line, column, text)
+                format!("Hover at {path_str}:{line}:{column}\n\n{text}")
             }
         };
 

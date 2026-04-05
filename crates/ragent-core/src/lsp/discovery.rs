@@ -157,8 +157,16 @@ pub async fn discover() -> Vec<DiscoveredServer> {
                     language: server.language.to_string(),
                     id: server.language.to_string(),
                     executable: path,
-                    args: server.args.iter().map(|s| s.to_string()).collect(),
-                    extensions: server.extensions.iter().map(|s| s.to_string()).collect(),
+                    args: server
+                        .args
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect(),
+                    extensions: server
+                        .extensions
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect(),
                     source: DiscoverySource::SystemPath,
                 });
                 break; // stop at first matching executable for this language
@@ -256,7 +264,10 @@ async fn scan_vscode_extensions(ext_dir: &std::path::Path) -> Vec<DiscoveredServ
                         id: format!("{language}-vscode"),
                         executable: candidate,
                         args: vec!["--stdio".to_string()],
-                        extensions: extensions.iter().map(|s| s.to_string()).collect(),
+                        extensions: extensions
+                            .iter()
+                            .map(std::string::ToString::to_string)
+                            .collect(),
                         source: DiscoverySource::VsCodeExtension {
                             ext_dir: ext_dir.to_path_buf(),
                         },

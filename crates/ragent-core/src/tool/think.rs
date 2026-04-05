@@ -10,11 +10,11 @@ pub struct ThinkTool;
 
 #[async_trait::async_trait]
 impl Tool for ThinkTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "think"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Record a short reasoning note without changing project state."
     }
 
@@ -32,7 +32,7 @@ impl Tool for ThinkTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "think:record"
     }
 

@@ -122,7 +122,7 @@ pub struct Capabilities {
     pub tool_use: bool,
 }
 
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
 
@@ -327,11 +327,11 @@ impl Default for ExperimentalFlags {
     }
 }
 
-fn default_max_background_agents() -> usize {
+const fn default_max_background_agents() -> usize {
     4
 }
 
-fn default_background_agent_timeout() -> u64 {
+const fn default_background_agent_timeout() -> u64 {
     3600
 }
 
@@ -352,7 +352,7 @@ impl Config {
     /// println!("default agent: {}", config.default_agent);
     /// ```
     pub fn load() -> anyhow::Result<Self> {
-        let mut config = Config::default();
+        let mut config = Self::default();
 
         // Global config: ~/.config/ragent/ragent.json
         if let Some(config_dir) = dirs::config_dir() {
@@ -381,16 +381,16 @@ impl Config {
 
         // Inline config from environment variable
         if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
-            let overlay: Config = serde_json::from_str(&content)?;
+            let overlay: Self = serde_json::from_str(&content)?;
             config = Self::merge(config, overlay);
         }
 
         Ok(config)
     }
 
-    fn load_file(path: &Path) -> anyhow::Result<Config> {
+    fn load_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = serde_json::from_str(&content)?;
+        let config: Self = serde_json::from_str(&content)?;
         Ok(config)
     }
 
@@ -408,7 +408,8 @@ impl Config {
     /// let merged = Config::merge(base, overlay);
     /// assert_eq!(merged.username.as_deref(), Some("alice"));
     /// ```
-    pub fn merge(mut base: Config, overlay: Config) -> Config {
+    #[must_use]
+    pub fn merge(mut base: Self, overlay: Self) -> Self {
         if overlay.username.is_some() {
             base.username = overlay.username;
         }

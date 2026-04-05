@@ -21,14 +21,14 @@ const USER_AGENT: &str = "ragent/0.1 (https://github.com/thawkins/ragent)";
 
 #[async_trait::async_trait]
 impl Tool for WebSearchTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "websearch"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Search the web and return results with titles, URLs, and snippets. \
          Requires a TAVILY_API_KEY environment variable to be set."
     }
@@ -53,14 +53,14 @@ impl Tool for WebSearchTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "web"
     }
 
     /// # Errors
     ///
     /// Returns an error if the `query` parameter is missing or empty,
-    /// if the TAVILY_API_KEY environment variable is not set, or if the
+    /// if the `TAVILY_API_KEY` environment variable is not set, or if the
     /// search request fails.
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"]
@@ -161,22 +161,19 @@ async fn tavily_search(api_key: &str, query: &str, max_results: u64) -> Result<V
     let response = client
         .post(TAVILY_API_URL)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Authorization", format!("Bearer {api_key}"))
         .json(&request_body)
         .send()
         .await
-        .with_context(|| format!("Failed to call Tavily search API for: {}", query))?;
+        .with_context(|| format!("Failed to call Tavily search API for: {query}"))?;
 
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         if status.as_u16() == 401 || status.as_u16() == 403 {
-            bail!(
-                "Tavily API authentication failed (HTTP {}). Check your TAVILY_API_KEY.",
-                status
-            );
+            bail!("Tavily API authentication failed (HTTP {status}). Check your TAVILY_API_KEY.");
         }
-        bail!("Tavily API error (HTTP {}): {}", status, body);
+        bail!("Tavily API error (HTTP {status}): {body}");
     }
 
     let tavily_response: TavilyResponse = response

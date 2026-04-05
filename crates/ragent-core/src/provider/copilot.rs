@@ -102,6 +102,7 @@ impl CopilotProvider {
     ///
     /// let provider = CopilotProvider::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             _base_url: DEFAULT_COPILOT_API_BASE.to_string(),
@@ -117,6 +118,7 @@ impl CopilotProvider {
     ///
     /// let provider = CopilotProvider::with_url("https://my-proxy.example.com/copilot");
     /// ```
+    #[must_use]
     pub fn with_url(base_url: &str) -> Self {
         Self {
             _base_url: base_url.trim_end_matches('/').to_string(),
@@ -133,12 +135,12 @@ impl Default for CopilotProvider {
 #[async_trait::async_trait]
 impl Provider for CopilotProvider {
     /// Returns `"copilot"`.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "copilot"
     }
 
     /// Returns `"GitHub Copilot"`.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "GitHub Copilot"
     }
 
@@ -291,7 +293,7 @@ impl CopilotClient {
         }
     }
 
-    /// Builds the JSON request body in OpenAI chat completions format.
+    /// Builds the JSON request body in `OpenAI` chat completions format.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
 
@@ -430,10 +432,11 @@ impl CopilotClient {
         }
 
         // Backward-compatible toggle.
-        if let Some(thinking_val) = request.options.get("thinking") {
-            if thinking_val.as_str() == Some("disabled") && body["reasoning_effort"].is_null() {
-                body["reasoning_effort"] = json!("none");
-            }
+        if let Some(thinking_val) = request.options.get("thinking")
+            && thinking_val.as_str() == Some("disabled")
+            && body["reasoning_effort"].is_null()
+        {
+            body["reasoning_effort"] = json!("none");
         }
 
         body
@@ -639,6 +642,7 @@ impl LlmClient for CopilotClient {
 ///     println!("Found Copilot token: {}", &token[..8]);
 /// }
 /// ```
+#[must_use]
 pub fn find_copilot_token() -> Option<String> {
     let config_dirs = if cfg!(windows) {
         vec![dirs::data_local_dir().map(|d| d.join("github-copilot"))]
@@ -648,16 +652,16 @@ pub fn find_copilot_token() -> Option<String> {
 
     for dir_opt in config_dirs.into_iter().flatten() {
         let apps_file = dir_opt.join("apps.json");
-        if let Ok(content) = std::fs::read_to_string(&apps_file) {
-            if let Ok(parsed) = serde_json::from_str::<Value>(&content) {
-                // apps.json is an object keyed by app ID, each with an "oauth_token" field
-                if let Some(obj) = parsed.as_object() {
-                    for (_key, entry) in obj {
-                        if let Some(token) = entry.get("oauth_token").and_then(|t| t.as_str()) {
-                            if !token.is_empty() {
-                                return Some(token.to_string());
-                            }
-                        }
+        if let Ok(content) = std::fs::read_to_string(&apps_file)
+            && let Ok(parsed) = serde_json::from_str::<Value>(&content)
+        {
+            // apps.json is an object keyed by app ID, each with an "oauth_token" field
+            if let Some(obj) = parsed.as_object() {
+                for (_key, entry) in obj {
+                    if let Some(token) = entry.get("oauth_token").and_then(|t| t.as_str())
+                        && !token.is_empty()
+                    {
+                        return Some(token.to_string());
                     }
                 }
             }
@@ -682,6 +686,7 @@ pub fn find_copilot_token() -> Option<String> {
 ///     println!("Got token from gh CLI: {}", &token[..8]);
 /// }
 /// ```
+#[must_use]
 pub fn find_gh_cli_token() -> Option<String> {
     let output = std::process::Command::new("gh")
         .args(["auth", "token"])
@@ -714,6 +719,7 @@ pub fn find_gh_cli_token() -> Option<String> {
 /// assert!(is_pat_token("ghp_xxxx"));
 /// assert!(!is_pat_token("ghu_xxxx"));
 /// ```
+#[must_use]
 pub fn is_pat_token(token: &str) -> bool {
     token.starts_with("github_pat_") || token.starts_with("ghp_")
 }
@@ -735,14 +741,15 @@ pub fn is_pat_token(token: &str) -> bool {
 /// let db_lookup = || Some("ghu_my_stored_token".to_string());
 /// let token = resolve_copilot_github_token(Some(&db_lookup));
 /// ```
+#[must_use]
 pub fn resolve_copilot_github_token(
     db_lookup: Option<&dyn Fn() -> Option<String>>,
 ) -> Option<String> {
     // 1. GITHUB_COPILOT_TOKEN env var
-    if let Ok(token) = std::env::var("GITHUB_COPILOT_TOKEN") {
-        if !token.is_empty() {
-            return Some(token);
-        }
+    if let Ok(token) = std::env::var("GITHUB_COPILOT_TOKEN")
+        && !token.is_empty()
+    {
+        return Some(token);
     }
     // 2. IDE auto-discover (apps.json)
     if let Some(token) = find_copilot_token() {
@@ -753,12 +760,11 @@ pub fn resolve_copilot_github_token(
         return Some(token);
     }
     // 4. Database (if provided)
-    if let Some(lookup) = db_lookup {
-        if let Some(token) = lookup() {
-            if !token.is_empty() {
-                return Some(token);
-            }
-        }
+    if let Some(lookup) = db_lookup
+        && let Some(token) = lookup()
+        && !token.is_empty()
+    {
+        return Some(token);
     }
     None
 }
@@ -939,7 +945,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
     {
         let cache = SESSION_TOKEN_CACHE
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(cached) = cache.as_ref() {
             let now = chrono::Utc::now().timestamp();
             if cached.source_hash == source_hash
@@ -990,7 +996,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
     {
         let mut cache = SESSION_TOKEN_CACHE
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *cache = Some(CachedSessionToken {
             token: body.token.clone(),
             expires_at: body.expires_at,
@@ -1078,12 +1084,11 @@ async fn discover_api_base_multi_source(primary_token: &str) -> Option<String> {
         return Some(base);
     }
     // The primary token (e.g. device flow) may lack scope; try gh CLI
-    if let Some(gh_token) = find_gh_cli_token() {
-        if gh_token != primary_token {
-            if let Some(base) = discover_copilot_api_base(&gh_token).await {
-                return Some(base);
-            }
-        }
+    if let Some(gh_token) = find_gh_cli_token()
+        && gh_token != primary_token
+        && let Some(base) = discover_copilot_api_base(&gh_token).await
+    {
+        return Some(base);
     }
     None
 }
@@ -1137,10 +1142,9 @@ pub async fn check_copilot_health(github_token: &str) -> bool {
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
+            && resp.status().is_success()
         {
-            if resp.status().is_success() {
-                return true;
-            }
+            return true;
         }
     }
 
@@ -1390,7 +1394,7 @@ fn plan_label_from_api_base(api_base: &str) -> String {
 pub fn cached_copilot_plan() -> Option<String> {
     let cache = SESSION_TOKEN_CACHE
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let cached = cache.as_ref()?;
     let api_base = cached.api_base.as_deref()?;
     Some(plan_label_from_api_base(api_base))
@@ -1452,7 +1456,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 .capabilities
                 .as_ref()
                 .and_then(|c| c.model_type.as_deref())
-                .map_or(false, |t| t == "chat");
+                == Some("chat");
             is_chat && entry.model_picker_enabled && entry.supports_chat_completions()
         })
         .map(|entry| {
@@ -1471,7 +1475,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
 
             let has_reasoning = supports
                 .and_then(|s| s.reasoning_effort.as_ref())
-                .map_or(false, |efforts| !efforts.is_empty());
+                .is_some_and(|efforts| !efforts.is_empty());
 
             let display_name = entry.name.clone().unwrap_or_else(|| entry.id.clone());
             let multiplier_suffix = entry
@@ -1495,9 +1499,9 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 },
                 capabilities: Capabilities {
                     reasoning: has_reasoning,
-                    streaming: supports.map_or(true, |s| s.streaming),
-                    vision: supports.map_or(false, |s| s.vision),
-                    tool_use: supports.map_or(true, |s| s.tool_calls),
+                    streaming: supports.is_none_or(|s| s.streaming),
+                    vision: supports.is_some_and(|s| s.vision),
+                    tool_use: supports.is_none_or(|s| s.tool_calls),
                 },
                 context_window,
                 max_output,

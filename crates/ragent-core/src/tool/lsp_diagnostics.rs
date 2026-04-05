@@ -18,12 +18,12 @@ pub struct LspDiagnosticsTool;
 
 #[async_trait::async_trait]
 impl Tool for LspDiagnosticsTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "lsp_diagnostics"
     }
 
     /// Returns the tool description.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Show compiler errors, warnings, and hints accumulated from connected LSP servers. \
          Pass a file path to filter results, or omit for all diagnostics. \
          Note: diagnostics are pushed by the server on file open — use lsp_symbols or lsp_hover \
@@ -48,7 +48,7 @@ impl Tool for LspDiagnosticsTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "lsp:read"
     }
 
@@ -174,7 +174,7 @@ fn severity_passes(actual: DiagnosticSeverity, min: DiagnosticSeverity) -> bool 
     rank(actual) <= rank(min)
 }
 
-fn severity_label(s: DiagnosticSeverity) -> &'static str {
+const fn severity_label(s: DiagnosticSeverity) -> &'static str {
     match s {
         DiagnosticSeverity::ERROR => "error",
         DiagnosticSeverity::WARNING => "warning",
@@ -186,14 +186,14 @@ fn severity_label(s: DiagnosticSeverity) -> &'static str {
 
 fn shorten_uri(uri: &str, cwd: &str) -> String {
     // Convert file:///path to relative path if inside cwd, else keep as-is.
-    if let Ok(url) = uri.parse::<url::Url>() {
-        if let Ok(path) = url.to_file_path() {
-            let s = path.to_string_lossy();
-            if let Some(rel) = s.strip_prefix(cwd).and_then(|r| r.strip_prefix('/')) {
-                return rel.to_string();
-            }
-            return s.into_owned();
+    if let Ok(url) = uri.parse::<url::Url>()
+        && let Ok(path) = url.to_file_path()
+    {
+        let s = path.to_string_lossy();
+        if let Some(rel) = s.strip_prefix(cwd).and_then(|r| r.strip_prefix('/')) {
+            return rel.to_string();
         }
+        return s.into_owned();
     }
     uri.to_string()
 }

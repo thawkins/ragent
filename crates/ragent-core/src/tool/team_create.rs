@@ -14,11 +14,11 @@ pub struct TeamCreateTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamCreateTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_create"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Create a new named agent team. ALWAYS pass `context` with the user's specific request \
          (e.g. which directory/files to review, what task to perform, where to write output). \
          If a blueprint is provided, all teammates defined in the blueprint's spawn-prompts.json \
@@ -50,7 +50,7 @@ impl Tool for TeamCreateTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 
@@ -70,12 +70,14 @@ impl Tool for TeamCreateTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .map(ToString::to_string)
-            .unwrap_or_else(|| format!("{}-{}", bp, Utc::now().format("%Y%m%d-%H-%M-%S")));
+            .map_or_else(
+                || format!("{}-{}", bp, Utc::now().format("%Y%m%d-%H-%M-%S")),
+                ToString::to_string,
+            );
 
         let project_local = input
             .get("project_local")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(true);
 
         // Work context from the user's request — prepended to every teammate's
@@ -135,16 +137,16 @@ impl Tool for TeamCreateTool {
                 cur_opt = cur.parent();
             }
             // Fallback to global
-            if blueprint_dir.is_none() {
-                if let Some(home) = dirs::home_dir() {
-                    let candidate = home
-                        .join(".ragent")
-                        .join("blueprints")
-                        .join("teams")
-                        .join(bp);
-                    if candidate.is_dir() {
-                        blueprint_dir = Some(candidate);
-                    }
+            if blueprint_dir.is_none()
+                && let Some(home) = dirs::home_dir()
+            {
+                let candidate = home
+                    .join(".ragent")
+                    .join("blueprints")
+                    .join("teams")
+                    .join(bp);
+                if candidate.is_dir() {
+                    blueprint_dir = Some(candidate);
                 }
             }
 
@@ -159,92 +161,83 @@ impl Tool for TeamCreateTool {
 
                 // If task-seed.json exists, parse and execute each seed
                 let seed = bdir.join("task-seed.json");
-                if seed.exists() {
-                    if let Ok(raw) = std::fs::read_to_string(&seed) {
-                        if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&raw) {
-                            if let Some(items) = arr.as_array() {
-                                let registry = crate::tool::create_default_registry();
-                                for item in items {
-                                    if let Some(obj) = item.as_object() {
-                                        if let Some(tool_name) =
-                                            obj.get("tool").and_then(|v| v.as_str())
-                                        {
-                                            let args = obj
-                                                .get("args")
-                                                .or_else(|| obj.get("input"))
-                                                .cloned()
-                                                .unwrap_or(serde_json::json!({}));
-                                            // Always override team_name to the actual team name
-                                            // (seed files may contain placeholder/template names)
-                                            let mut args_obj = if args.is_object() {
-                                                args
-                                            } else {
-                                                serde_json::json!({})
-                                            };
-                                            args_obj.as_object_mut().map(|m| {
-                                                m.insert(
-                                                    "team_name".to_string(),
-                                                    serde_json::Value::String(name.clone()),
-                                                )
-                                            });
-                                            if let Some(tool) = registry.get(tool_name) {
-                                                let args_debug = format!("{args_obj:?}");
-                                                tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking seed tool");
-                                                match tool.execute(args_obj, ctx).await {
-                                                    Ok(_out) => {
-                                                        tracing::info!(tool = %tool_name, "Seed tool executed successfully")
-                                                    }
-                                                    Err(e) => {
-                                                        tracing::error!(tool = %tool_name, error = %e, args = %args_debug, "Seed tool execution failed")
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            // If no tool specified but task fields present, create a task directly
-                                            if obj.get("title").is_some() {
-                                                let title = obj
-                                                    .get("title")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("untitled")
-                                                    .to_string();
-                                                let id =
-                                                    store.next_task_id().unwrap_or_else(|_| {
-                                                        format!(
-                                                            "task-{}",
-                                                            chrono::Utc::now().timestamp_millis()
-                                                        )
-                                                    });
-                                                let mut task =
-                                                    crate::team::task::Task::new(&id, &title);
-                                                if let Some(desc) =
-                                                    obj.get("description").and_then(|v| v.as_str())
-                                                {
-                                                    task.description = desc.to_string();
-                                                }
-                                                let _ = store.add_task(task.clone());
-
-                                                // Run TaskCreated hook; remove task if rejected.
-                                                let hook_stdin = serde_json::json!({
-                                                    "team_name": name,
-                                                    "task_id": id,
-                                                    "title": title,
-                                                    "description": task.description,
-                                                })
-                                                .to_string();
-                                                let outcome = run_team_hook(
-                                                    &store.dir,
-                                                    HookEvent::TaskCreated,
-                                                    Some(&hook_stdin),
-                                                )
-                                                .await;
-                                                if let HookOutcome::Feedback(feedback) = outcome {
-                                                    if let Ok(ts) = TaskStore::open(&store.dir) {
-                                                        let _ = ts.remove_task(&id);
-                                                    }
-                                                    tracing::warn!(task_id = %id, feedback = %feedback, "TaskCreated hook rejected seeded task");
-                                                }
-                                            }
+                if seed.exists()
+                    && let Ok(raw) = std::fs::read_to_string(&seed)
+                    && let Ok(arr) = serde_json::from_str::<serde_json::Value>(&raw)
+                    && let Some(items) = arr.as_array()
+                {
+                    let registry = crate::tool::create_default_registry();
+                    for item in items {
+                        if let Some(obj) = item.as_object() {
+                            if let Some(tool_name) = obj.get("tool").and_then(|v| v.as_str()) {
+                                let args = obj
+                                    .get("args")
+                                    .or_else(|| obj.get("input"))
+                                    .cloned()
+                                    .unwrap_or(serde_json::json!({}));
+                                // Always override team_name to the actual team name
+                                // (seed files may contain placeholder/template names)
+                                let mut args_obj = if args.is_object() {
+                                    args
+                                } else {
+                                    serde_json::json!({})
+                                };
+                                args_obj.as_object_mut().map(|m| {
+                                    m.insert(
+                                        "team_name".to_string(),
+                                        serde_json::Value::String(name.clone()),
+                                    )
+                                });
+                                if let Some(tool) = registry.get(tool_name) {
+                                    let args_debug = format!("{args_obj:?}");
+                                    tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking seed tool");
+                                    match tool.execute(args_obj, ctx).await {
+                                        Ok(_out) => {
+                                            tracing::info!(tool = %tool_name, "Seed tool executed successfully");
                                         }
+                                        Err(e) => {
+                                            tracing::error!(tool = %tool_name, error = %e, args = %args_debug, "Seed tool execution failed");
+                                        }
+                                    }
+                                }
+                            } else {
+                                // If no tool specified but task fields present, create a task directly
+                                if obj.get("title").is_some() {
+                                    let title = obj
+                                        .get("title")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("untitled")
+                                        .to_string();
+                                    let id = store.next_task_id().unwrap_or_else(|_| {
+                                        format!("task-{}", chrono::Utc::now().timestamp_millis())
+                                    });
+                                    let mut task = crate::team::task::Task::new(&id, &title);
+                                    if let Some(desc) =
+                                        obj.get("description").and_then(|v| v.as_str())
+                                    {
+                                        task.description = desc.to_string();
+                                    }
+                                    let _ = store.add_task(task.clone());
+
+                                    // Run TaskCreated hook; remove task if rejected.
+                                    let hook_stdin = serde_json::json!({
+                                        "team_name": name,
+                                        "task_id": id,
+                                        "title": title,
+                                        "description": task.description,
+                                    })
+                                    .to_string();
+                                    let outcome = run_team_hook(
+                                        &store.dir,
+                                        HookEvent::TaskCreated,
+                                        Some(&hook_stdin),
+                                    )
+                                    .await;
+                                    if let HookOutcome::Feedback(feedback) = outcome {
+                                        if let Ok(ts) = TaskStore::open(&store.dir) {
+                                            let _ = ts.remove_task(&id);
+                                        }
+                                        tracing::warn!(task_id = %id, feedback = %feedback, "TaskCreated hook rejected seeded task");
                                     }
                                 }
                             }
@@ -254,204 +247,196 @@ impl Tool for TeamCreateTool {
 
                 // If spawn-prompts.json exists, parse entries and execute listed tools with args
                 let prompts_json = bdir.join("spawn-prompts.json");
-                if prompts_json.exists() {
-                    if let Ok(raw) = std::fs::read_to_string(&prompts_json) {
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                            if let Some(items) = val.as_array() {
-                                let registry = crate::tool::create_default_registry();
-                                for (i, item) in items.iter().enumerate() {
-                                    if let Some(obj) = item.as_object() {
-                                        // Support either {"tool": "name", "args": {...}} or
-                                        // flattened formats using keys like tool_name/team_name/teammate_name
-                                        let tool_name_opt =
-                                            obj.get("tool").and_then(|v| v.as_str()).or_else(
-                                                || obj.get("tool_name").and_then(|v| v.as_str()),
-                                            );
+                if prompts_json.exists()
+                    && let Ok(raw) = std::fs::read_to_string(&prompts_json)
+                    && let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw)
+                    && let Some(items) = val.as_array()
+                {
+                    let registry = crate::tool::create_default_registry();
+                    for (i, item) in items.iter().enumerate() {
+                        if let Some(obj) = item.as_object() {
+                            // Support either {"tool": "name", "args": {...}} or
+                            // flattened formats using keys like tool_name/team_name/teammate_name
+                            let tool_name_opt = obj
+                                .get("tool")
+                                .and_then(|v| v.as_str())
+                                .or_else(|| obj.get("tool_name").and_then(|v| v.as_str()));
 
-                                        if let Some(tool_name) = tool_name_opt {
-                                            // Extract args if present, else build from flattened fields
-                                            let mut args = obj
-                                                .get("args")
-                                                .cloned()
-                                                .unwrap_or(serde_json::json!({}));
-                                            if !args.is_object() {
-                                                args = serde_json::json!({});
-                                            }
+                            if let Some(tool_name) = tool_name_opt {
+                                // Extract args if present, else build from flattened fields
+                                let mut args =
+                                    obj.get("args").cloned().unwrap_or(serde_json::json!({}));
+                                if !args.is_object() {
+                                    args = serde_json::json!({});
+                                }
 
-                                            // If spawn-prompts.json uses flattened keys, copy them into args
-                                            // common flattened keys: team_name, teammate_name, prompt, agent_type, model, memory
-                                            for key in &[
-                                                "team_name",
-                                                "teammate_name",
-                                                "prompt",
-                                                "agent_type",
-                                                "model",
-                                                "memory",
-                                            ] {
-                                                if args.get(*key).is_none() {
-                                                    if let Some(v) = obj.get(*key) {
-                                                        args.as_object_mut().map(|m| {
-                                                            m.insert((*key).to_string(), v.clone())
-                                                        });
-                                                    }
-                                                }
-                                            }
+                                // If spawn-prompts.json uses flattened keys, copy them into args
+                                // common flattened keys: team_name, teammate_name, prompt, agent_type, model, memory
+                                for key in &[
+                                    "team_name",
+                                    "teammate_name",
+                                    "prompt",
+                                    "agent_type",
+                                    "model",
+                                    "memory",
+                                ] {
+                                    if args.get(*key).is_none()
+                                        && let Some(v) = obj.get(*key)
+                                    {
+                                        args.as_object_mut()
+                                            .map(|m| m.insert((*key).to_string(), v.clone()));
+                                    }
+                                }
 
-                                            // Allow "profile" as an alias for "agent_type" so
-                                            // blueprints can reference declarative agent profiles.
-                                            if args.get("agent_type").is_none() {
-                                                if let Some(v) = obj.get("profile") {
-                                                    args.as_object_mut().map(|m| {
-                                                        m.insert(
-                                                            "agent_type".to_string(),
-                                                            v.clone(),
-                                                        )
-                                                    });
-                                                }
-                                            }
+                                // Allow "profile" as an alias for "agent_type" so
+                                // blueprints can reference declarative agent profiles.
+                                if args.get("agent_type").is_none()
+                                    && let Some(v) = obj.get("profile")
+                                {
+                                    args.as_object_mut()
+                                        .map(|m| m.insert("agent_type".to_string(), v.clone()));
+                                }
 
-                                            // Ensure team_name is present
-                                            if args.get("team_name").is_none() {
-                                                args.as_object_mut().map(|m| {
-                                                    m.insert(
-                                                        "team_name".to_string(),
-                                                        serde_json::Value::String(name.clone()),
-                                                    )
-                                                });
-                                            }
-                                            // Ensure teammate_name is present, otherwise auto-generate
-                                            if args.get("teammate_name").is_none() {
-                                                let teammate_name = format!("auto-{}", i + 1);
-                                                args.as_object_mut().map(|m| {
-                                                    m.insert(
-                                                        "teammate_name".to_string(),
-                                                        serde_json::Value::String(teammate_name),
-                                                    )
-                                                });
-                                            }
+                                // Ensure team_name is present
+                                if args.get("team_name").is_none() {
+                                    args.as_object_mut().map(|m| {
+                                        m.insert(
+                                            "team_name".to_string(),
+                                            serde_json::Value::String(name.clone()),
+                                        )
+                                    });
+                                }
+                                // Ensure teammate_name is present, otherwise auto-generate
+                                if args.get("teammate_name").is_none() {
+                                    let teammate_name = format!("auto-{}", i + 1);
+                                    args.as_object_mut().map(|m| {
+                                        m.insert(
+                                            "teammate_name".to_string(),
+                                            serde_json::Value::String(teammate_name),
+                                        )
+                                    });
+                                }
 
-                                            // Prepend work context to the spawn prompt so
-                                            // teammates know which code to target.
-                                            if let Some(ref ctx_text) = work_context {
-                                                let original_prompt = args
-                                                    .get("prompt")
-                                                    .and_then(|v| v.as_str())
-                                                    .unwrap_or("")
-                                                    .to_string();
-                                                let combined = format!(
-                                                    "## Work Context\n{ctx_text}\n\n## Your Role\n{original_prompt}"
-                                                );
-                                                args.as_object_mut().map(|m| {
-                                                    m.insert(
-                                                        "prompt".to_string(),
-                                                        serde_json::Value::String(combined),
-                                                    )
-                                                });
-                                            }
+                                // Prepend work context to the spawn prompt so
+                                // teammates know which code to target.
+                                if let Some(ref ctx_text) = work_context {
+                                    let original_prompt = args
+                                        .get("prompt")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    let combined = format!(
+                                        "## Work Context\n{ctx_text}\n\n## Your Role\n{original_prompt}"
+                                    );
+                                    args.as_object_mut().map(|m| {
+                                        m.insert(
+                                            "prompt".to_string(),
+                                            serde_json::Value::String(combined),
+                                        )
+                                    });
+                                }
 
-                                            if let Some(tool) = registry.get(tool_name) {
-                                                tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking spawn tool from blueprint (spawn-prompts.json)");
-                                                match tool.execute(args.clone(), ctx).await {
-                                                    Ok(out) => {
-                                                        tracing::info!(tool = %tool_name, "Spawn tool executed");
-                                                        if let Some(meta) = out.metadata {
-                                                            if let Some(status) = meta
-                                                                .get("status")
-                                                                .and_then(|v| v.as_str())
-                                                            {
-                                                                if status == "pending_manager" {
-                                                                    tracing::warn!(tool = %tool_name, team = %name, "Spawn returned pending_manager; recording spawning member in team config");
-                                                                    // Record a Spawning member so the team config reflects the queued teammate.
-                                                                    // Reload the store fresh before mutating so we don't clobber state
-                                                                    // written by previous tool calls.
-                                                                    let teammate_name = args
-                                                                        .get("teammate_name")
-                                                                        .and_then(|v| v.as_str())
-                                                                        .unwrap_or("auto")
-                                                                        .to_string();
-                                                                    let agent_type_str = args
-                                                                        .get("agent_type")
-                                                                        .and_then(|v| v.as_str())
-                                                                        .unwrap_or("general")
-                                                                        .to_string();
-                                                                    let prompt_str = args
-                                                                        .get("prompt")
-                                                                        .and_then(|v| v.as_str())
-                                                                        .unwrap_or("")
-                                                                        .to_string();
-                                                                    let model_override = args.get("model").and_then(|v| v.as_str()).and_then(|s| {
-                                                                        s.split_once('/').or_else(|| s.split_once(':')).map(|(p, m)| {
-                                                                            crate::agent::ModelRef { provider_id: p.to_string(), model_id: m.to_string() }
-                                                                        })
-                                                                    });
-                                                                    let memory_scope = match args.get("memory").and_then(|v| v.as_str()) {
-                                                                        Some("user") => crate::team::MemoryScope::User,
-                                                                        Some("project") => crate::team::MemoryScope::Project,
-                                                                        _ => crate::team::MemoryScope::None,
-                                                                    };
-                                                                    if let Ok(mut fresh_store) =
-                                                                        TeamStore::load_by_name(
-                                                                            &name,
-                                                                            &ctx.working_dir,
-                                                                        )
-                                                                    {
-                                                                        // Only add if not already present (idempotency).
-                                                                        if fresh_store
-                                                                            .config
-                                                                            .member_by_name(
-                                                                                &teammate_name,
-                                                                            )
-                                                                            .is_none()
-                                                                        {
-                                                                            let agent_id =
-                                                                                fresh_store
-                                                                                    .next_agent_id(
-                                                                                    );
-                                                                            let mut member = crate::team::config::TeamMember::new(&teammate_name, &agent_id, &agent_type_str);
-                                                                            if !prompt_str
-                                                                                .is_empty()
-                                                                            {
-                                                                                member
-                                                                                    .spawn_prompt =
-                                                                                    Some(prompt_str);
-                                                                            }
-                                                                            member.model_override =
-                                                                                model_override;
-                                                                            member.memory_scope =
-                                                                                memory_scope;
-                                                                            let _ = fresh_store
-                                                                                .add_member(member);
-                                                                        }
+                                if let Some(tool) = registry.get(tool_name) {
+                                    tracing::info!(tool = %tool_name, team = %name, session = %ctx.session_id, team_manager_present = %ctx.team_manager.is_some(), "Invoking spawn tool from blueprint (spawn-prompts.json)");
+                                    match tool.execute(args.clone(), ctx).await {
+                                        Ok(out) => {
+                                            tracing::info!(tool = %tool_name, "Spawn tool executed");
+                                            if let Some(meta) = out.metadata
+                                                && let Some(status) =
+                                                    meta.get("status").and_then(|v| v.as_str())
+                                            {
+                                                if status == "pending_manager" {
+                                                    tracing::warn!(tool = %tool_name, team = %name, "Spawn returned pending_manager; recording spawning member in team config");
+                                                    // Record a Spawning member so the team config reflects the queued teammate.
+                                                    // Reload the store fresh before mutating so we don't clobber state
+                                                    // written by previous tool calls.
+                                                    let teammate_name = args
+                                                        .get("teammate_name")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("auto")
+                                                        .to_string();
+                                                    let agent_type_str = args
+                                                        .get("agent_type")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("general")
+                                                        .to_string();
+                                                    let prompt_str = args
+                                                        .get("prompt")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("")
+                                                        .to_string();
+                                                    let model_override = args
+                                                        .get("model")
+                                                        .and_then(|v| v.as_str())
+                                                        .and_then(|s| {
+                                                            s.split_once('/')
+                                                                .or_else(|| s.split_once(':'))
+                                                                .map(|(p, m)| {
+                                                                    crate::agent::ModelRef {
+                                                                        provider_id: p.to_string(),
+                                                                        model_id: m.to_string(),
                                                                     }
-                                                                    // Keep local store in sync for next_agent_id() calculations.
-                                                                    store =
-                                                                        TeamStore::load_by_name(
-                                                                            &name,
-                                                                            &ctx.working_dir,
-                                                                        )
-                                                                        .unwrap_or(store);
-                                                                } else if status == "spawned" {
-                                                                    // spawn_teammate_internal already persisted the member with the
-                                                                    // correct session_id and Working status.  Adding a new TeamMember
-                                                                    // record here (with default Spawning status and no session_id)
-                                                                    // would overwrite that correct state and leave the member stuck in
-                                                                    // "spawning" forever.  Just refresh the local store reference so
-                                                                    // next_agent_id() stays accurate.
-                                                                    store =
-                                                                        TeamStore::load_by_name(
-                                                                            &name,
-                                                                            &ctx.working_dir,
-                                                                        )
-                                                                        .unwrap_or(store);
-                                                                }
+                                                                })
+                                                        });
+                                                    let memory_scope = match args
+                                                        .get("memory")
+                                                        .and_then(|v| v.as_str())
+                                                    {
+                                                        Some("user") => {
+                                                            crate::team::MemoryScope::User
+                                                        }
+                                                        Some("project") => {
+                                                            crate::team::MemoryScope::Project
+                                                        }
+                                                        _ => crate::team::MemoryScope::None,
+                                                    };
+                                                    if let Ok(mut fresh_store) =
+                                                        TeamStore::load_by_name(
+                                                            &name,
+                                                            &ctx.working_dir,
+                                                        )
+                                                    {
+                                                        // Only add if not already present (idempotency).
+                                                        if fresh_store
+                                                            .config
+                                                            .member_by_name(&teammate_name)
+                                                            .is_none()
+                                                        {
+                                                            let agent_id =
+                                                                fresh_store.next_agent_id();
+                                                            let mut member = crate::team::config::TeamMember::new(&teammate_name, &agent_id, &agent_type_str);
+                                                            if !prompt_str.is_empty() {
+                                                                member.spawn_prompt =
+                                                                    Some(prompt_str);
                                                             }
+                                                            member.model_override = model_override;
+                                                            member.memory_scope = memory_scope;
+                                                            let _ = fresh_store.add_member(member);
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        tracing::error!(tool = %tool_name, error = %e, "Spawn tool execution failed")
-                                                    }
+                                                    // Keep local store in sync for next_agent_id() calculations.
+                                                    store = TeamStore::load_by_name(
+                                                        &name,
+                                                        &ctx.working_dir,
+                                                    )
+                                                    .unwrap_or(store);
+                                                } else if status == "spawned" {
+                                                    // spawn_teammate_internal already persisted the member with the
+                                                    // correct session_id and Working status.  Adding a new TeamMember
+                                                    // record here (with default Spawning status and no session_id)
+                                                    // would overwrite that correct state and leave the member stuck in
+                                                    // "spawning" forever.  Just refresh the local store reference so
+                                                    // next_agent_id() stays accurate.
+                                                    store = TeamStore::load_by_name(
+                                                        &name,
+                                                        &ctx.working_dir,
+                                                    )
+                                                    .unwrap_or(store);
                                                 }
                                             }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(tool = %tool_name, error = %e, "Spawn tool execution failed");
                                         }
                                     }
                                 }
@@ -502,7 +487,7 @@ impl Tool for TeamCreateTool {
                 "lead_session_id": ctx.session_id,
                 "project_local": project_local,
                 "members_spawned": final_store.config.members.len(),
-                "auto_named": input.get("name").and_then(|v| v.as_str()).map(str::trim).map(|s| s.is_empty()).unwrap_or(true)
+                "auto_named": input.get("name").and_then(|v| v.as_str()).map(str::trim).is_none_or(str::is_empty)
             })),
         })
     }

@@ -83,10 +83,10 @@ The "agent_type" and "model" fields are optional — omit or set to null to use 
 "depends_on" is an array of task IDs that must complete first (empty array for independent tasks)."#;
 
 /// Build the user prompt for decomposition, injecting the user's goal.
+#[must_use]
 pub fn build_decomposition_user_prompt(goal: &str) -> String {
     format!(
-        "Decompose the following goal into parallel subtasks for a team of AI coding agents:\n\n{}",
-        goal
+        "Decompose the following goal into parallel subtasks for a team of AI coding agents:\n\n{goal}"
     )
 }
 
@@ -98,12 +98,11 @@ pub fn parse_decomposition(raw: &str) -> Result<SwarmDecomposition, String> {
     // Strip markdown code fences if present
     let trimmed = raw.trim();
     let json_str = if trimmed.starts_with("```") {
-        let inner = trimmed
+        trimmed
             .trim_start_matches("```json")
             .trim_start_matches("```")
             .trim_end_matches("```")
-            .trim();
-        inner
+            .trim()
     } else {
         trimmed
     };

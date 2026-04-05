@@ -20,14 +20,14 @@ pub struct PlanEnterTool;
 
 #[async_trait::async_trait]
 impl Tool for PlanEnterTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "plan_enter"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Delegate to the plan agent for read-only codebase analysis and \
          architecture planning. The plan agent cannot modify files."
     }
@@ -52,7 +52,7 @@ impl Tool for PlanEnterTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "plan"
     }
 
@@ -80,9 +80,9 @@ impl Tool for PlanEnterTool {
         });
 
         let content = if context.is_empty() {
-            format!("Delegating to plan agent: {}", task)
+            format!("Delegating to plan agent: {task}")
         } else {
-            format!("Delegating to plan agent: {}\nContext: {}", task, context)
+            format!("Delegating to plan agent: {task}\nContext: {context}")
         };
 
         Ok(ToolOutput {
@@ -105,14 +105,14 @@ pub struct PlanExitTool;
 
 #[async_trait::async_trait]
 impl Tool for PlanExitTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "plan_exit"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Return control from the plan agent to the previous agent. \
          Pass back a summary of the analysis or plan."
     }
@@ -133,7 +133,7 @@ impl Tool for PlanExitTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "plan"
     }
 
@@ -157,10 +157,7 @@ impl Tool for PlanExitTool {
         });
 
         Ok(ToolOutput {
-            content: format!(
-                "Returning to previous agent with plan summary:\n{}",
-                summary
-            ),
+            content: format!("Returning to previous agent with plan summary:\n{summary}"),
             metadata: Some(json!({
                 "agent_restore": true,
                 "summary_length": summary.len(),

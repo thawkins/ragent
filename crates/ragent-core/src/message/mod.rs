@@ -27,8 +27,8 @@ impl fmt::Display for Role {
     /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Role::User => write!(f, "user"),
-            Role::Assistant => write!(f, "assistant"),
+            Self::User => write!(f, "user"),
+            Self::Assistant => write!(f, "assistant"),
         }
     }
 }
@@ -57,10 +57,10 @@ impl fmt::Display for ToolCallStatus {
     /// Returns an error if writing to the formatter fails.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ToolCallStatus::Pending => write!(f, "pending"),
-            ToolCallStatus::Running => write!(f, "running"),
-            ToolCallStatus::Completed => write!(f, "completed"),
-            ToolCallStatus::Error => write!(f, "error"),
+            Self::Pending => write!(f, "pending"),
+            Self::Running => write!(f, "running"),
+            Self::Completed => write!(f, "completed"),
+            Self::Error => write!(f, "error"),
         }
     }
 }
@@ -223,6 +223,7 @@ impl Message {
     /// );
     /// assert_eq!(msg.text_content(), "Hello world");
     /// ```
+    #[must_use]
     pub fn text_content(&self) -> String {
         self.parts
             .iter()

@@ -16,12 +16,12 @@ pub struct ListTasksTool;
 
 #[async_trait::async_trait]
 impl Tool for ListTasksTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "list_tasks"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List sub-agent tasks for the current session. Shows running and completed \
                background tasks with their status, agent, and result summary."
     }
@@ -42,7 +42,7 @@ impl Tool for ListTasksTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }
 
@@ -51,7 +51,7 @@ impl Tool for ListTasksTool {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - TaskManager is not available in the context
+    /// - `TaskManager` is not available in the context
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let task_manager = ctx.task_manager.as_ref().ok_or_else(|| {
             anyhow::anyhow!(
@@ -215,16 +215,16 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
         &task.child_session_id[..8.min(task.child_session_id.len())],
     );
 
-    if let Some(ref prompt) = Some(&task.task_prompt) {
-        let _ = write!(detail, "\n\nTask Prompt:\n{}", prompt);
+    if let Some(prompt) = Some(&task.task_prompt) {
+        let _ = write!(detail, "\n\nTask Prompt:\n{}", &prompt);
     }
 
     if let Some(ref result) = task.result {
-        let _ = write!(detail, "\n\nResult:\n{}", result);
+        let _ = write!(detail, "\n\nResult:\n{result}");
     }
 
     if let Some(ref error) = task.error {
-        let _ = write!(detail, "\n\nError:\n{}", error);
+        let _ = write!(detail, "\n\nError:\n{error}");
     }
 
     detail

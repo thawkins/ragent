@@ -12,11 +12,11 @@ pub struct TeamTaskCreateTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamTaskCreateTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_task_create"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Add a new task to the team's shared task list. Lead-only. \
          Teammates will be able to claim it via team_task_claim."
     }
@@ -47,7 +47,7 @@ impl Tool for TeamTaskCreateTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 
@@ -73,7 +73,7 @@ impl Tool for TeamTaskCreateTool {
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
                     .collect()
             })
             .unwrap_or_default();

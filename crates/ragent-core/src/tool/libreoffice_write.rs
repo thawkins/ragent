@@ -1,6 +1,6 @@
-//! LibreOffice document writing tool.
+//! `LibreOffice` document writing tool.
 //!
-//! Provides [`LibreWriteTool`], which creates or overwrites OpenDocument files.
+//! Provides [`LibreWriteTool`], which creates or overwrites `OpenDocument` files.
 //!
 //! - **ODS**: written using `spreadsheet-ods`, which provides a proper in-memory
 //!   workbook model for Calc files.
@@ -19,12 +19,12 @@ pub struct LibreWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for LibreWriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "libre_write"
     }
 
     /// Returns the tool description.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Write content to OpenDocument files: Writer (.odt), Calc (.ods), Impress (.odp). \
          ODS uses spreadsheet-ods for full workbook support; ODT/ODP use XML generation."
     }
@@ -65,11 +65,11 @@ impl Tool for LibreWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
-    /// Executes the LibreOffice write operation.
+    /// Executes the `LibreOffice` write operation.
     ///
     /// # Errors
     ///
@@ -122,7 +122,7 @@ impl Tool for LibreWriteTool {
         .context("Background task panicked while writing document")??;
 
         Ok(ToolOutput {
-            content: format!("Successfully wrote {} file: {}", libre_format, path_d),
+            content: format!("Successfully wrote {libre_format} file: {path_d}"),
             metadata: Some(json!({ "path": path_d, "format": libre_format.to_string() })),
         })
     }
@@ -378,7 +378,7 @@ fn odt_content_structured(paras: &[OdtPara]) -> String {
     )
 }
 
-fn odt_styles() -> &'static str {
+const fn odt_styles() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8"?>
 <office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">
   <office:styles/>
@@ -420,29 +420,29 @@ struct OdpSlide {
 
 fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
     // Structured: array of slide objects [{title, content:[...]}]
-    if let Some(arr) = content.as_array() {
-        if arr.first().map(|v| v.is_object()).unwrap_or(false) {
-            return arr
-                .iter()
-                .map(|s| {
-                    let title = s["title"].as_str().unwrap_or("").to_owned();
-                    let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
-                        c.iter()
-                            .map(|item| {
-                                item.as_str()
-                                    .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                                    .to_owned()
-                            })
-                            .collect()
-                    } else if let Some(t) = s["text"].as_str() {
-                        t.lines().map(str::to_owned).collect()
-                    } else {
-                        Vec::new()
-                    };
-                    OdpSlide { title, lines }
-                })
-                .collect();
-        }
+    if let Some(arr) = content.as_array()
+        && arr.first().is_some_and(serde_json::Value::is_object)
+    {
+        return arr
+            .iter()
+            .map(|s| {
+                let title = s["title"].as_str().unwrap_or("").to_owned();
+                let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
+                    c.iter()
+                        .map(|item| {
+                            item.as_str()
+                                .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                                .to_owned()
+                        })
+                        .collect()
+                } else if let Some(t) = s["text"].as_str() {
+                    t.lines().map(str::to_owned).collect()
+                } else {
+                    Vec::new()
+                };
+                OdpSlide { title, lines }
+            })
+            .collect();
     }
     // Object with slides key
     if let Some(arr) = content["slides"].as_array() {
@@ -523,7 +523,9 @@ fn odp_manifest() -> String {
 fn odp_content_structured(slides: &[OdpSlide]) -> String {
     let mut slide_xml = String::new();
     for (i, slide) in slides.iter().enumerate() {
-        let title_xml = if !slide.title.is_empty() {
+        let title_xml = if slide.title.is_empty() {
+            String::new()
+        } else {
             format!(
                 "      <draw:frame draw:name=\"Title\" presentation:class=\"title\" \
                  svg:x=\"0.5in\" svg:y=\"0.5in\" svg:width=\"9in\" svg:height=\"1.2in\">\
@@ -531,8 +533,6 @@ fn odp_content_structured(slides: &[OdpSlide]) -> String {
                  </draw:frame>\n",
                 xml_escape(&slide.title)
             )
-        } else {
-            String::new()
         };
         let body_xml: String = slide
             .lines
@@ -568,7 +568,7 @@ fn odp_content_structured(slides: &[OdpSlide]) -> String {
     )
 }
 
-fn odp_styles() -> &'static str {
+const fn odp_styles() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8"?>
 <office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">
   <office:styles/>

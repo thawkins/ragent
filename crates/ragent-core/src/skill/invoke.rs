@@ -121,6 +121,7 @@ pub async fn invoke_skill(
 /// assert!(msg.contains("deploy"));
 /// assert!(msg.contains("Deploy staging to production"));
 /// ```
+#[must_use]
 pub fn format_skill_message(invocation: &SkillInvocation) -> String {
     format!(
         "[Skill: /{}]\n\n{}",
@@ -252,6 +253,7 @@ pub async fn invoke_forked_skill(
 /// assert!(msg.contains("review"));
 /// assert!(msg.contains("Found 3 issues"));
 /// ```
+#[must_use]
 pub fn format_forked_result(result: &ForkedSkillResult) -> String {
     format!(
         "[Forked Skill Result: /{}]\n\n{}",

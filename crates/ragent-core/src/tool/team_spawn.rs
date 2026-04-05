@@ -13,11 +13,11 @@ pub struct TeamSpawnTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamSpawnTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_spawn"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Spawn a teammate agent session within an existing team. \
          Each teammate receives the team context and works on a single, bounded task. \
          CRITICAL: Spawn ONE teammate per independent work item — never assign a list of \
@@ -64,7 +64,7 @@ impl Tool for TeamSpawnTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:manage"
     }
 
@@ -198,45 +198,43 @@ impl Tool for TeamSpawnTool {
         let task_id = input.get("task_id").and_then(|v| v.as_str());
         let mut task_assignment_msg = String::new();
 
-        if let Some(task_id) = task_id {
-            if let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name) {
-                if let Ok(task_store) = crate::team::task::TaskStore::open(&team_dir) {
-                    match task_store.pre_assign_task(task_id, &agent_id) {
-                        Ok(_) => {
-                            task_assignment_msg =
-                                format!("\n📋 Task '{}' pre-assigned to this teammate.", task_id);
-                            tracing::info!(
-                                agent_id = %agent_id,
-                                task_id = %task_id,
-                                team = %team_name,
-                                "Task pre-assigned to teammate"
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                agent_id = %agent_id,
-                                task_id = %task_id,
-                                error = %e,
-                                "Failed to pre-assign task to teammate"
-                            );
-                            task_assignment_msg =
-                                format!("\n⚠️ Failed to pre-assign task '{}': {}", task_id, e);
-                        }
-                    }
+        if let Some(task_id) = task_id
+            && let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name)
+            && let Ok(task_store) = crate::team::task::TaskStore::open(&team_dir)
+        {
+            match task_store.pre_assign_task(task_id, &agent_id) {
+                Ok(_) => {
+                    task_assignment_msg =
+                        format!("\n📋 Task '{task_id}' pre-assigned to this teammate.");
+                    tracing::info!(
+                        agent_id = %agent_id,
+                        task_id = %task_id,
+                        team = %team_name,
+                        "Task pre-assigned to teammate"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        agent_id = %agent_id,
+                        task_id = %task_id,
+                        error = %e,
+                        "Failed to pre-assign task to teammate"
+                    );
+                    task_assignment_msg =
+                        format!("\n⚠️ Failed to pre-assign task '{task_id}': {e}");
                 }
             }
         }
 
         // Persist memory scope on the member record.
-        if memory_scope != crate::team::MemoryScope::None {
-            if let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name) {
-                if let Ok(mut store) = crate::team::TeamStore::load(&team_dir) {
-                    if let Some(member) = store.config.member_by_id_mut(&agent_id) {
-                        member.memory_scope = memory_scope;
-                    }
-                    let _ = store.save();
-                }
+        if memory_scope != crate::team::MemoryScope::None
+            && let Some(team_dir) = crate::team::find_team_dir(&ctx.working_dir, team_name)
+            && let Ok(mut store) = crate::team::TeamStore::load(&team_dir)
+        {
+            if let Some(member) = store.config.member_by_id_mut(&agent_id) {
+                member.memory_scope = memory_scope;
             }
+            let _ = store.save();
         }
 
         let model_display = teammate_model

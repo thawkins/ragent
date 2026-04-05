@@ -15,14 +15,14 @@ pub struct TodoReadTool;
 
 #[async_trait::async_trait]
 impl Tool for TodoReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "todo_read"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List TODO items for the current session, optionally filtered by status"
     }
 
@@ -39,7 +39,7 @@ impl Tool for TodoReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "todo"
     }
 
@@ -92,14 +92,14 @@ impl Tool for TodoWriteTool {
     /// # Errors
     ///
     /// Returns an error if the name string cannot be converted or returned.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "todo_write"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Add, update, remove, or clear TODO items for the current session"
     }
 
@@ -134,7 +134,7 @@ impl Tool for TodoWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "todo"
     }
 
@@ -170,17 +170,13 @@ impl Tool for TodoWriteTool {
                 let description = input["description"].as_str().unwrap_or("");
                 let id = input["id"]
                     .as_str()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| generate_todo_id());
+                    .map_or_else(generate_todo_id, std::string::ToString::to_string);
 
                 storage
                     .create_todo(&id, &ctx.session_id, title, status, description)
                     .map_err(|e| anyhow::anyhow!("Failed to add todo: {e}"))?;
 
-                (
-                    format!("Added todo '{}' with status '{}'", id, status),
-                    "add",
-                )
+                (format!("Added todo '{id}' with status '{status}'"), "add")
             }
             "update" => {
                 let id = input["id"]
@@ -190,14 +186,14 @@ impl Tool for TodoWriteTool {
                 let status = input["status"].as_str();
                 let description = input["description"].as_str();
 
-                if let Some(s) = status {
-                    if !WRITE_STATUSES.contains(&s) {
-                        bail!(
-                            "Invalid status '{}'. Must be one of: {}",
-                            s,
-                            WRITE_STATUSES.join(", ")
-                        );
-                    }
+                if let Some(s) = status
+                    && !WRITE_STATUSES.contains(&s)
+                {
+                    bail!(
+                        "Invalid status '{}'. Must be one of: {}",
+                        s,
+                        WRITE_STATUSES.join(", ")
+                    );
                 }
 
                 if title.is_none() && status.is_none() && description.is_none() {
@@ -211,10 +207,10 @@ impl Tool for TodoWriteTool {
                     .map_err(|e| anyhow::anyhow!("Failed to update todo: {e}"))?;
 
                 if !updated {
-                    bail!("Todo '{}' not found in this session", id);
+                    bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Updated todo '{}'", id), "update")
+                (format!("Updated todo '{id}'"), "update")
             }
             "remove" => {
                 let id = input["id"]
@@ -226,10 +222,10 @@ impl Tool for TodoWriteTool {
                     .map_err(|e| anyhow::anyhow!("Failed to remove todo: {e}"))?;
 
                 if !removed {
-                    bail!("Todo '{}' not found in this session", id);
+                    bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Removed todo '{}'", id), "remove")
+                (format!("Removed todo '{id}'"), "remove")
             }
             "clear" => {
                 let count = storage
@@ -245,10 +241,7 @@ impl Tool for TodoWriteTool {
                     "clear",
                 )
             }
-            _ => bail!(
-                "Invalid action '{}'. Must be one of: add, update, remove, clear",
-                action
-            ),
+            _ => bail!("Invalid action '{action}'. Must be one of: add, update, remove, clear"),
         };
 
         // Read back the current list after the write
@@ -256,7 +249,7 @@ impl Tool for TodoWriteTool {
             .get_todos(&ctx.session_id, None)
             .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?;
 
-        let mut output = format!("{}\n\n", summary);
+        let mut output = format!("{summary}\n\n");
         output.push_str(&format_todo_list(&todos, "all"));
 
         let metadata = json!({

@@ -11,11 +11,11 @@ pub struct TeamBroadcastTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamBroadcastTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_broadcast"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Send a message to all active (non-stopped) teammates in the team simultaneously."
     }
 
@@ -36,7 +36,7 @@ impl Tool for TeamBroadcastTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -54,8 +54,7 @@ impl Tool for TeamBroadcastTool {
         let from = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| "lead".to_string());
+            .map_or_else(|| "lead".to_string(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;

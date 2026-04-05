@@ -30,7 +30,7 @@ pub struct RemoteAgentDescriptor {
     pub endpoint_url: String,
 }
 
-/// JSON body POSTed to a remote agent.
+/// JSON body `POSTed` to a remote agent.
 #[derive(Serialize)]
 struct RemoteAgentRequest {
     job_id: String,
@@ -121,7 +121,7 @@ impl Router for HttpRouter {
             .await
             .get(agent_id)
             .cloned()
-            .ok_or_else(|| anyhow::anyhow!("remote agent '{}' not registered", agent_id))?;
+            .ok_or_else(|| anyhow::anyhow!("remote agent '{agent_id}' not registered"))?;
 
         let body = RemoteAgentRequest {
             job_id: msg.job_id,
@@ -133,22 +133,20 @@ impl Router for HttpRouter {
             self.client.post(&desc.endpoint_url).json(&body).send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("HTTP request to agent '{}' timed out", agent_id))?
-        .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
+        .map_err(|_| anyhow::anyhow!("HTTP request to agent '{agent_id}' timed out"))?
+        .map_err(|e| anyhow::anyhow!("HTTP request failed: {e}"))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             return Err(anyhow::anyhow!(
-                "remote agent '{}' returned HTTP {}",
-                agent_id,
-                status
+                "remote agent '{agent_id}' returned HTTP {status}"
             ));
         }
 
         let parsed: RemoteAgentResponse = resp
             .json()
             .await
-            .map_err(|e| anyhow::anyhow!("failed to parse agent response: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to parse agent response: {e}"))?;
 
         Ok(parsed.result)
     }
@@ -177,6 +175,7 @@ pub struct RouterComposite {
 impl RouterComposite {
     /// Create a composite from an ordered list of routers.  The first router
     /// that returns `Ok` wins; all others are skipped.
+    #[must_use]
     pub fn new(routers: Vec<Arc<dyn Router>>) -> Self {
         Self { routers }
     }

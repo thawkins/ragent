@@ -79,7 +79,7 @@ impl HumanFallback for LoggingFallback {
         );
         let parts: Vec<String> = responses
             .iter()
-            .map(|(id, resp)| format!("--- agent: {} ---\n{}", id, resp))
+            .map(|(id, resp)| format!("--- agent: {id} ---\n{resp}"))
             .collect();
         format!("[human-review]\n{}", parts.join("\n"))
     }
@@ -96,6 +96,7 @@ pub struct ConflictResolver {
 
 impl ConflictResolver {
     /// Create a resolver with the given policy and the default [`LoggingFallback`].
+    #[must_use]
     pub fn new(policy: ConflictPolicy) -> Self {
         Self {
             policy,
@@ -120,7 +121,7 @@ impl ConflictResolver {
             ConflictPolicy::Concat => {
                 let parts: Vec<String> = responses
                     .iter()
-                    .map(|(id, resp)| format!("--- agent: {} ---\n{}", id, resp))
+                    .map(|(id, resp)| format!("--- agent: {id} ---\n{resp}"))
                     .collect();
                 Ok(parts.join("\n"))
             }
@@ -128,20 +129,17 @@ impl ConflictResolver {
             ConflictPolicy::FirstSuccess => {
                 for (id, resp) in responses {
                     if !resp.trim_start().to_lowercase().starts_with("error:") {
-                        return Ok(format!("--- agent: {} ---\n{}", id, resp));
+                        return Ok(format!("--- agent: {id} ---\n{resp}"));
                     }
                 }
                 // All were errors — return last as Err.
                 let (_, last) = responses.last().unwrap();
-                Err(anyhow::anyhow!(
-                    "all agents returned errors; last: {}",
-                    last
-                ))
+                Err(anyhow::anyhow!("all agents returned errors; last: {last}"))
             }
 
             ConflictPolicy::LastResponse => {
                 let (id, resp) = responses.last().unwrap();
-                Ok(format!("--- agent: {} ---\n{}", id, resp))
+                Ok(format!("--- agent: {id} ---\n{resp}"))
             }
 
             ConflictPolicy::Consensus { threshold } => {
@@ -164,14 +162,13 @@ impl ConflictResolver {
                     let resp = responses
                         .iter()
                         .find(|(id, _)| id == first_id)
-                        .map(|(_, r)| r.as_str())
-                        .unwrap_or("");
-                    Ok(format!("--- agent: {} (consensus) ---\n{}", first_id, resp))
+                        .map_or("", |(_, r)| r.as_str());
+                    Ok(format!("--- agent: {first_id} (consensus) ---\n{resp}"))
                 } else {
                     // No consensus — concatenate all with a warning tag.
                     let parts: Vec<String> = responses
                         .iter()
-                        .map(|(id, resp)| format!("--- agent: {} ---\n{}", id, resp))
+                        .map(|(id, resp)| format!("--- agent: {id} ---\n{resp}"))
                         .collect();
                     Ok(format!("[no consensus]\n{}", parts.join("\n")))
                 }

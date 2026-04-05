@@ -70,6 +70,7 @@ impl LspManager {
     /// `root_path` is the workspace root passed to each LSP server during
     /// initialization. `event_bus` is used to publish [`crate::event::Event::LspStatusChanged`]
     /// events when a server's status changes.
+    #[must_use]
     pub fn new(root_path: PathBuf, event_bus: Arc<EventBus>) -> Self {
         Self {
             servers: Vec::new(),
@@ -154,7 +155,7 @@ impl LspManager {
             self.publish_status(id, &LspStatus::Disabled);
             Ok(())
         } else {
-            anyhow::bail!("LSP server '{}' not found", id)
+            anyhow::bail!("LSP server '{id}' not found")
         }
     }
 
@@ -175,11 +176,13 @@ impl LspManager {
     }
 
     /// Returns a slice of all registered server descriptors (connected, disabled, failed).
+    #[must_use]
     pub fn servers(&self) -> &[LspServer] {
         &self.servers
     }
 
     /// Returns the number of currently connected servers.
+    #[must_use]
     pub fn connected_count(&self) -> usize {
         self.clients.len()
     }
@@ -188,6 +191,7 @@ impl LspManager {
     /// extension (e.g. `"rs"`, `"ts"`).
     ///
     /// Returns `None` if no connected server declares this extension.
+    #[must_use]
     pub fn client_for_extension(&self, ext: &str) -> Option<Arc<LspClient>> {
         // Find a connected server whose config.extensions contains `ext`.
         let server_id = self
@@ -202,6 +206,7 @@ impl LspManager {
     }
 
     /// Find the connected [`LspClient`] best suited for `path` based on file extension.
+    #[must_use]
     pub fn client_for_path(&self, path: &Path) -> Option<Arc<LspClient>> {
         let ext = path.extension()?.to_str()?;
         self.client_for_extension(ext)

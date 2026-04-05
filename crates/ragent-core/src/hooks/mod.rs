@@ -47,10 +47,10 @@ pub enum HookTrigger {
 impl std::fmt::Display for HookTrigger {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HookTrigger::OnSessionStart => write!(f, "on_session_start"),
-            HookTrigger::OnSessionEnd => write!(f, "on_session_end"),
-            HookTrigger::OnError => write!(f, "on_error"),
-            HookTrigger::OnPermissionDenied => write!(f, "on_permission_denied"),
+            Self::OnSessionStart => write!(f, "on_session_start"),
+            Self::OnSessionEnd => write!(f, "on_session_end"),
+            Self::OnError => write!(f, "on_error"),
+            Self::OnPermissionDenied => write!(f, "on_permission_denied"),
         }
     }
 }
@@ -67,7 +67,7 @@ pub struct HookConfig {
     pub timeout_secs: u64,
 }
 
-fn default_hook_timeout() -> u64 {
+const fn default_hook_timeout() -> u64 {
     30
 }
 

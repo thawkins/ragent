@@ -28,7 +28,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Maximum number of concurrent child processes the agent may spawn.
 ///
-/// This covers BashTool executions, dynamic context commands, and MCP stdio
+/// This covers `BashTool` executions, dynamic context commands, and MCP stdio
 /// server processes.  The value is intentionally conservative — most workloads
 /// need at most 4-6 concurrent processes.
 pub const MAX_CONCURRENT_PROCESSES: usize = 16;

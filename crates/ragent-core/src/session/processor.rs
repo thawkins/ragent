@@ -83,7 +83,7 @@ pub struct SessionProcessor {
     pub task_manager: std::sync::OnceLock<Arc<crate::task::TaskManager>>,
     /// Optional LSP manager for code-intelligence tool context.
     /// Uses `OnceLock` so it can be set after the processor is constructed
-    /// (the LspManager is created after the processor in `run_tui`).
+    /// (the `LspManager` is created after the processor in `run_tui`).
     pub lsp_manager: std::sync::OnceLock<crate::lsp::SharedLspManager>,
     /// Optional team manager for spawning and coordinating teammate sessions.
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
@@ -245,22 +245,20 @@ impl SessionProcessor {
         };
 
         // 2. Resolve model and create LLM client
-        let model_ref = match agent.model.as_ref() {
-            Some(m) => m,
-            None => {
-                let err = format!("Agent '{}' has no model configured", agent.name);
-                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-                bail!("{}", err);
-            }
+        let model_ref = if let Some(m) = agent.model.as_ref() {
+            m
+        } else {
+            let err = format!("Agent '{}' has no model configured", agent.name);
+            publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+            bail!("{err}");
         };
 
-        let provider = match self.provider_registry.get(&model_ref.provider_id) {
-            Some(p) => p,
-            None => {
-                let err = format!("Provider '{}' not found", model_ref.provider_id);
-                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-                bail!("{}", err);
-            }
+        let provider = if let Some(p) = self.provider_registry.get(&model_ref.provider_id) {
+            p
+        } else {
+            let err = format!("Provider '{}' not found", model_ref.provider_id);
+            publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+            bail!("{err}");
         };
 
         // Try to get API key from environment or storage
@@ -320,11 +318,10 @@ impl SessionProcessor {
         };
 
         // 3. Build system prompt
-        let working_dir = self
-            .session_manager
-            .get_session(session_id)?
-            .map(|s| s.directory.clone())
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        let working_dir = self.session_manager.get_session(session_id)?.map_or_else(
+            || std::env::current_dir().unwrap_or_default(),
+            |s| s.directory,
+        );
         let team_context_for_session = resolve_team_context_for_session(session_id, &working_dir);
 
         // Load config once for hooks and other config-dependent features
@@ -379,7 +376,7 @@ impl SessionProcessor {
         // unbounded list of items — which causes context-window overflows.
         if team_context_for_session
             .as_deref()
-            .map_or(false, |tc| tc.is_lead)
+            .is_some_and(|tc| tc.is_lead)
         {
             system_prompt.push_str(
                 "\n## Team Lead — Task Distribution Rules\n\n\
@@ -456,7 +453,7 @@ impl SessionProcessor {
         // Skip for subagent/teammate sessions — the guidelines are already
         // embedded in the system prompt and the extra LLM round-trip adds
         // significant latency to team operations.
-        let has_tools = agent.max_steps.map_or(true, |s| s > 1);
+        let has_tools = agent.max_steps.is_none_or(|s| s > 1);
         let has_prior_exchange = history.iter().any(|m| m.role == Role::Assistant);
         let is_subagent = agent.mode == crate::agent::AgentMode::Subagent;
         if !has_prior_exchange && has_tools && !is_subagent {
@@ -553,7 +550,7 @@ impl SessionProcessor {
                 warn!("Reached max steps ({}), stopping agent loop", max_steps);
                 self.event_bus.publish(Event::AgentError {
                     session_id: session_id.to_string(),
-                    error: format!("Reached maximum steps ({})", max_steps),
+                    error: format!("Reached maximum steps ({max_steps})"),
                 });
                 break;
             }
@@ -619,7 +616,7 @@ impl SessionProcessor {
                         &working_dir,
                         &[("RAGENT_ERROR", &error_msg)],
                     );
-                    bail!("LLM call failed: {}", e);
+                    bail!("LLM call failed: {e}");
                 }
             };
 
@@ -875,19 +872,19 @@ impl SessionProcessor {
                             };
                             (Some(val), None)
                         }
-                        Err(e) => (None, Some(format!("{:#}", e))),
+                        Err(e) => (None, Some(format!("{e:#}"))),
                     };
 
                     // Fire on_permission_denied hook when a tool returns a permission error
-                    if let Some(err_msg) = &error {
-                        if err_msg.contains("permission denied") {
-                            crate::hooks::fire_hooks(
-                                &hook_configs,
-                                crate::hooks::HookTrigger::OnPermissionDenied,
-                                &hook_working_dir,
-                                &[("RAGENT_ERROR", err_msg.as_str())],
-                            );
-                        }
+                    if let Some(err_msg) = &error
+                        && err_msg.contains("permission denied")
+                    {
+                        crate::hooks::fire_hooks(
+                            &hook_configs,
+                            crate::hooks::HookTrigger::OnPermissionDenied,
+                            &hook_working_dir,
+                            &[("RAGENT_ERROR", err_msg.as_str())],
+                        );
                     }
 
                     let status = if result.is_ok() {
@@ -907,7 +904,7 @@ impl SessionProcessor {
 
                     let result_content = match &result {
                         Ok(output) => output.content.clone(),
-                        Err(e) => format!("Error: {}", e),
+                        Err(e) => format!("Error: {e}"),
                     };
 
                     // Use metadata "lines" field when available (e.g. write/edit
@@ -918,9 +915,8 @@ impl SessionProcessor {
                         .ok()
                         .and_then(|o| o.metadata.as_ref())
                         .and_then(|m| m.get("lines"))
-                        .and_then(|v| v.as_u64())
-                        .map(|n| n as usize)
-                        .unwrap_or_else(|| result_content.lines().count());
+                        .and_then(serde_json::Value::as_u64)
+                        .map_or_else(|| result_content.lines().count(), |n| n as usize);
 
                     // Log the tool result (truncate at a char boundary)
                     let result_preview = if result_content.len() > 200 {
@@ -1108,10 +1104,10 @@ impl SessionProcessor {
         // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
             // DB first — device flow tokens stored here work for copilot_internal/v2/token
-            if let Ok(Some(key)) = self.storage_op(|s| s.get_provider_auth("copilot")).await {
-                if !key.is_empty() {
-                    return Ok(key);
-                }
+            if let Ok(Some(key)) = self.storage_op(|s| s.get_provider_auth("copilot")).await
+                && !key.is_empty()
+            {
+                return Ok(key);
             }
             let db_lookup = || -> Option<String> { None }; // already checked above
             if let Some(token) =
@@ -1146,18 +1142,16 @@ impl SessionProcessor {
         // Check the database for a stored API key
         {
             let pid = provider_id.to_string();
-            if let Ok(Some(key)) = self.storage_op(move |s| s.get_provider_auth(&pid)).await {
-                if !key.is_empty() {
-                    return Ok(key);
-                }
+            if let Ok(Some(key)) = self.storage_op(move |s| s.get_provider_auth(&pid)).await
+                && !key.is_empty()
+            {
+                return Ok(key);
             }
         }
 
         bail!(
-            "No API key found for provider '{}'. Set the appropriate environment variable \
-             or run `ragent auth {} <key>` to store one.",
-            provider_id,
-            provider_id
+            "No API key found for provider '{provider_id}'. Set the appropriate environment variable \
+             or run `ragent auth {provider_id} <key>` to store one."
         )
     }
 }
@@ -1184,7 +1178,7 @@ fn resolve_team_context_for_session(
         }
         if store.config.lead_session_id == session_id {
             return Some(Arc::new(TeamContext {
-                team_name: store.config.name.clone(),
+                team_name: store.config.name,
                 agent_id: "lead".to_string(),
                 is_lead: true,
             }));
@@ -1242,7 +1236,7 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
                         let result_text = state
                             .output
                             .as_ref()
-                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                            .and_then(|v| v.as_str().map(std::string::ToString::to_string))
                             .or_else(|| state.error.clone())
                             .unwrap_or_default();
                         Some(ContentPart::ToolResult {

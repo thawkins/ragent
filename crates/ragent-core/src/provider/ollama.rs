@@ -69,6 +69,7 @@ impl OllamaProvider {
     ///
     /// let provider = OllamaProvider::with_url("http://gpu-server:11434");
     /// ```
+    #[must_use]
     pub fn with_url(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -160,12 +161,12 @@ fn estimate_context_window(parameter_size: &str) -> usize {
 #[async_trait::async_trait]
 impl Provider for OllamaProvider {
     /// Returns `"ollama"`.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "ollama"
     }
 
     /// Returns `"Ollama"`.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Ollama"
     }
 
@@ -226,7 +227,7 @@ impl Provider for OllamaProvider {
 /// HTTP client for the Ollama OpenAI-compatible API with streaming SSE support.
 ///
 /// Communicates with Ollama's `/v1/chat/completions` endpoint, which mirrors
-/// the OpenAI API format. Supports text streaming, tool calls, and
+/// the `OpenAI` API format. Supports text streaming, tool calls, and
 /// optional Bearer token authentication for remote servers.
 struct OllamaClient {
     /// Optional API key for remote/authenticated Ollama servers.
@@ -238,7 +239,7 @@ struct OllamaClient {
 }
 
 impl OllamaClient {
-    /// Builds the JSON request body in OpenAI chat completions format.
+    /// Builds the JSON request body in `OpenAI` chat completions format.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
 
@@ -389,10 +390,10 @@ impl OllamaClient {
         }
 
         // Reasoning / thinking control via agent options
-        if let Some(thinking_val) = request.options.get("thinking") {
-            if thinking_val.as_str() == Some("disabled") {
-                body["think"] = json!(false);
-            }
+        if let Some(thinking_val) = request.options.get("thinking")
+            && thinking_val.as_str() == Some("disabled")
+        {
+            body["think"] = json!(false);
         }
 
         body
@@ -440,7 +441,7 @@ impl LlmClient for OllamaClient {
                 request_body = %body_str,
                 "Ollama API error — full request logged"
             );
-            bail!("Ollama API error ({}): {}", status, error_body);
+            bail!("Ollama API error ({status}): {error_body}");
         }
 
         let stream = response.bytes_stream();
@@ -622,7 +623,7 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
             let ctx = estimate_context_window(&entry.details.parameter_size);
 
             ModelInfo {
-                id: entry.name.clone(),
+                id: entry.name,
                 provider_id: "ollama".to_string(),
                 name: display_name,
                 cost: Cost {
@@ -648,7 +649,7 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
 fn format_model_name(name: &str, details: &OllamaModelDetails) -> String {
     let base = name.split(':').next().unwrap_or(name);
     let capitalized = base
-        .split(|c: char| c == '-' || c == '_')
+        .split(['-', '_'])
         .map(|word| {
             let mut chars = word.chars();
             match chars.next() {

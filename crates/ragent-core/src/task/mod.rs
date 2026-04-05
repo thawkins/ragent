@@ -332,7 +332,7 @@ impl TaskManager {
         let parent_sid = parent_session_id.to_string();
         let agent = agent_name.to_string();
         let prompt = task_prompt.to_string();
-        let model = model_override.map(|s| s.to_string());
+        let model = model_override.map(std::string::ToString::to_string);
         let event_bus = self.event_bus.clone();
         let tasks = self.tasks.clone();
         let cancel_flags = self.cancel_flags.clone();
@@ -372,16 +372,15 @@ impl TaskManager {
                 };
             agent_info.mode = AgentMode::Subagent;
 
-            if let Some(ref model_str) = model {
-                if let Some((provider, model_id)) = model_str
+            if let Some(ref model_str) = model
+                && let Some((provider, model_id)) = model_str
                     .split_once('/')
                     .or_else(|| model_str.split_once(':'))
-                {
-                    agent_info.model = Some(ModelRef {
-                        provider_id: provider.to_string(),
-                        model_id: model_id.to_string(),
-                    });
-                }
+            {
+                agent_info.model = Some(ModelRef {
+                    provider_id: provider.to_string(),
+                    model_id: model_id.to_string(),
+                });
             }
 
             let result = processor
@@ -494,11 +493,12 @@ impl TaskManager {
         let flags = self.cancel_flags.read().await;
         let tasks = self.tasks.read().await;
         for (tid, entry) in tasks.iter() {
-            if entry.parent_session_id == parent_session_id && entry.status == TaskStatus::Running {
-                if let Some(flag) = flags.get(tid) {
-                    flag.store(true, Ordering::Relaxed);
-                    tracing::info!(task_id = tid, "Cancelling sub-agent task (session cleanup)");
-                }
+            if entry.parent_session_id == parent_session_id
+                && entry.status == TaskStatus::Running
+                && let Some(flag) = flags.get(tid)
+            {
+                flag.store(true, Ordering::Relaxed);
+                tracing::info!(task_id = tid, "Cancelling sub-agent task (session cleanup)");
             }
         }
     }
@@ -539,16 +539,15 @@ impl TaskManager {
         agent.mode = AgentMode::Subagent;
 
         // Apply model override
-        if let Some(model_str) = model_override {
-            if let Some((provider, model_id)) = model_str
+        if let Some(model_str) = model_override
+            && let Some((provider, model_id)) = model_str
                 .split_once('/')
                 .or_else(|| model_str.split_once(':'))
-            {
-                agent.model = Some(ModelRef {
-                    provider_id: provider.to_string(),
-                    model_id: model_id.to_string(),
-                });
-            }
+        {
+            agent.model = Some(ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model_id.to_string(),
+            });
         }
 
         let response_msg = self

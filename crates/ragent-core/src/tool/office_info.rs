@@ -2,7 +2,7 @@
 //!
 //! Provides [`OfficeInfoTool`], which extracts metadata and structural
 //! information from Microsoft Word (`.docx`), Excel (`.xlsx`), and
-//! PowerPoint (`.pptx`) files.
+//! `PowerPoint` (`.pptx`) files.
 //!
 //! Depends on: `docx-rust`, `calamine`, `ooxmlsdk`.
 
@@ -21,11 +21,11 @@ pub struct OfficeInfoTool;
 
 #[async_trait::async_trait]
 impl Tool for OfficeInfoTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "office_info"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get metadata and structural information about a Word, Excel, or PowerPoint file."
     }
 
@@ -42,7 +42,7 @@ impl Tool for OfficeInfoTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -116,8 +116,12 @@ fn info_docx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         .core
         .as_ref()
         .and_then(|c| match c {
-            docx_rust::core::Core::CoreNamespace(cn) => cn.title.as_ref().map(|t| t.to_string()),
-            docx_rust::core::Core::CoreNoNamespace(cn) => cn.title.as_ref().map(|t| t.to_string()),
+            docx_rust::core::Core::CoreNamespace(cn) => {
+                cn.title.as_ref().map(std::string::ToString::to_string)
+            }
+            docx_rust::core::Core::CoreNoNamespace(cn) => {
+                cn.title.as_ref().map(std::string::ToString::to_string)
+            }
         })
         .unwrap_or_default();
 
@@ -125,9 +129,11 @@ fn info_docx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         .core
         .as_ref()
         .and_then(|c| match c {
-            docx_rust::core::Core::CoreNamespace(cn) => cn.creator.as_ref().map(|a| a.to_string()),
+            docx_rust::core::Core::CoreNamespace(cn) => {
+                cn.creator.as_ref().map(std::string::ToString::to_string)
+            }
             docx_rust::core::Core::CoreNoNamespace(cn) => {
-                cn.creator.as_ref().map(|a| a.to_string())
+                cn.creator.as_ref().map(std::string::ToString::to_string)
             }
         })
         .unwrap_or_default();
@@ -177,11 +183,11 @@ fn info_xlsx(path: &Path, file_size: u64) -> Result<(String, Value)> {
     let mut workbook: Xlsx<_> =
         calamine::open_workbook(path).map_err(|e| anyhow::anyhow!("Failed to open xlsx: {e}"))?;
 
-    let sheet_names = workbook.sheet_names().to_owned();
+    let sheet_names = workbook.sheet_names();
     let mut sheets_info: Vec<Value> = Vec::new();
     let mut content_lines: Vec<String> = Vec::new();
 
-    content_lines.push(format!("Format: Excel Workbook (.xlsx)"));
+    content_lines.push("Format: Excel Workbook (.xlsx)".to_string());
     content_lines.push(format!("File size: {file_size} bytes"));
     content_lines.push(format!("Sheets: {}", sheet_names.len()));
 
@@ -214,7 +220,7 @@ fn info_xlsx(path: &Path, file_size: u64) -> Result<(String, Value)> {
     Ok((content_lines.join("\n"), metadata))
 }
 
-/// Extracts metadata from a PowerPoint presentation.
+/// Extracts metadata from a `PowerPoint` presentation.
 ///
 /// # Arguments
 ///
@@ -227,7 +233,9 @@ fn info_xlsx(path: &Path, file_size: u64) -> Result<(String, Value)> {
 fn info_pptx(path: &Path, file_size: u64) -> Result<(String, Value)> {
     use ooxmlsdk::parts::presentation_document::PresentationDocument;
     use ooxmlsdk::schemas::schemas_openxmlformats_org_drawingml_2006_main::ParagraphChildChoice;
-    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::*;
+    use ooxmlsdk::schemas::schemas_openxmlformats_org_presentationml_2006_main::{
+        ShapeTreeChildChoice, SlideChildChoice,
+    };
 
     let doc = PresentationDocument::new_from_file(path)
         .map_err(|e| anyhow::anyhow!("Failed to open pptx: {e}"))?;
@@ -238,7 +246,7 @@ fn info_pptx(path: &Path, file_size: u64) -> Result<(String, Value)> {
     let mut slide_titles: Vec<String> = Vec::new();
     let mut content_lines: Vec<String> = Vec::new();
 
-    content_lines.push(format!("Format: PowerPoint Presentation (.pptx)"));
+    content_lines.push("Format: PowerPoint Presentation (.pptx)".to_string());
     content_lines.push(format!("File size: {file_size} bytes"));
     content_lines.push(format!("Slides: {slide_count}"));
 
@@ -247,23 +255,22 @@ fn info_pptx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         for child in &slide_part.root_element.children {
             if let SlideChildChoice::PCSld(csd) = child {
                 for shape_child in &csd.shape_tree.children {
-                    if let ShapeTreeChildChoice::PSp(shape) = shape_child {
-                        if let Some(text_body) = &shape.text_body {
-                            if title.is_empty() {
-                                let mut text = String::new();
-                                for para in &text_body.a_p {
-                                    for p_child in &para.children {
-                                        if let ParagraphChildChoice::AR(run) = p_child {
-                                            if let Some(ref content) = run.text.xml_content {
-                                                text.push_str(content);
-                                            }
-                                        }
-                                    }
-                                }
-                                if !text.is_empty() {
-                                    title = text;
+                    if let ShapeTreeChildChoice::PSp(shape) = shape_child
+                        && let Some(text_body) = &shape.text_body
+                        && title.is_empty()
+                    {
+                        let mut text = String::new();
+                        for para in &text_body.a_p {
+                            for p_child in &para.children {
+                                if let ParagraphChildChoice::AR(run) = p_child
+                                    && let Some(ref content) = run.text.xml_content
+                                {
+                                    text.push_str(content);
                                 }
                             }
+                        }
+                        if !text.is_empty() {
+                            title = text;
                         }
                     }
                 }

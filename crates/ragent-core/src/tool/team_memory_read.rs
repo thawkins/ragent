@@ -11,11 +11,11 @@ pub struct TeamMemoryReadTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamMemoryReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_memory_read"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read a file from your persistent memory directory. \
          Defaults to MEMORY.md if no path is given. \
          Memory persists across sessions — use it to recall prior context."
@@ -38,7 +38,7 @@ impl Tool for TeamMemoryReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -56,8 +56,7 @@ impl Tool for TeamMemoryReadTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| ctx.session_id.clone());
+            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
@@ -92,14 +91,14 @@ impl Tool for TeamMemoryReadTool {
         let canonical_target = target.canonicalize().unwrap_or_else(|_| target.clone());
         if !canonical_target.starts_with(&canonical_dir) {
             return Ok(ToolOutput {
-                content: format!("Path '{}' escapes the memory directory.", rel_path),
+                content: format!("Path '{rel_path}' escapes the memory directory."),
                 metadata: Some(json!({ "error": "path_escape" })),
             });
         }
 
         if !target.is_file() {
             return Ok(ToolOutput {
-                content: format!("File '{}' not found in memory directory.", rel_path),
+                content: format!("File '{rel_path}' not found in memory directory."),
                 metadata: Some(json!({
                     "memory_dir": mem_dir.display().to_string(),
                     "exists": false
@@ -108,7 +107,7 @@ impl Tool for TeamMemoryReadTool {
         }
 
         let content = std::fs::read_to_string(&target)
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {}", rel_path, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to read {rel_path}: {e}"))?;
 
         Ok(ToolOutput {
             content,

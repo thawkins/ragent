@@ -18,12 +18,12 @@ pub struct CreateTool;
 
 #[async_trait::async_trait]
 impl Tool for CreateTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "create"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Create a new file with content. Truncates the file if it already exists. Creates parent directories if needed."
     }
 
@@ -44,7 +44,7 @@ impl Tool for CreateTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 

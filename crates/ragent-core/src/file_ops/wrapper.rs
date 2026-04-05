@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// Convenience wrapper used by higher-level skills (like /simplify) to apply a
 /// collection of edits concurrently. Keeps the skill logic simple and delegates
-/// staging/commit semantics to the core file_ops module.
+/// staging/commit semantics to the core `file_ops` module.
 ///
 /// # Errors
 ///

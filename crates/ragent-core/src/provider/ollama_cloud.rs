@@ -153,11 +153,11 @@ fn infer_parameter_size(name: &str) -> Option<String> {
 
 #[async_trait::async_trait]
 impl Provider for OllamaCloudProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "ollama_cloud"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Ollama Cloud"
     }
 
@@ -291,8 +291,7 @@ impl OllamaCloudClient {
                                 // Native Ollama /api/chat format: tool results use `name`, not `tool_call_id`.
                                 let name = tool_id_to_name
                                     .get(tool_use_id)
-                                    .map(|s| s.as_str())
-                                    .unwrap_or("");
+                                    .map_or("", std::string::String::as_str);
                                 messages.push(json!({
                                     "role": "tool",
                                     "name": name,
@@ -403,7 +402,7 @@ impl LlmClient for OllamaCloudClient {
                 request_body = %body_str,
                 "Ollama Cloud API error — full request logged"
             );
-            bail!("Ollama Cloud API error ({}): {}", status, error_body);
+            bail!("Ollama Cloud API error ({status}): {error_body}");
         }
 
         let stream = response.bytes_stream();
@@ -460,7 +459,7 @@ impl LlmClient for OllamaCloudClient {
                         .get("message")
                         .and_then(|m| m.get("tool_calls"))
                         .is_some();
-                    let is_done = parsed.get("done").and_then(|v| v.as_bool()) == Some(true);
+                    let is_done = parsed.get("done").and_then(serde_json::Value::as_bool) == Some(true);
                     if line_count <= 3 || has_tool_calls || is_done {
                         tracing::info!(
                             model = %model_name,
@@ -491,9 +490,7 @@ impl LlmClient for OllamaCloudClient {
                             for (idx, tool_call) in tool_calls.iter().enumerate() {
                                 let tool_call_id = tool_call
                                     .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .map(ToString::to_string)
-                                    .unwrap_or_else(|| format!("ollama_cloud_tc_{idx}"));
+                                    .and_then(|v| v.as_str()).map_or_else(|| format!("ollama_cloud_tc_{idx}"), ToString::to_string);
                                 let function = tool_call.get("function").unwrap_or(tool_call);
                                 let name = function
                                     .get("name")
@@ -529,7 +526,7 @@ impl LlmClient for OllamaCloudClient {
                         yield StreamEvent::TextDelta { text: response.to_string() };
                     }
 
-                    if parsed.get("done").and_then(|v| v.as_bool()) == Some(true) {
+                    if parsed.get("done").and_then(serde_json::Value::as_bool) == Some(true) {
                         // Log full done frame so we can see if tool_calls appear there
                         let done_preview = serde_json::to_string(&parsed).unwrap_or_default();
                         let preview_len = done_preview.len().min(500);
@@ -540,9 +537,9 @@ impl LlmClient for OllamaCloudClient {
                             "Ollama Cloud: done frame received"
                         );
 
-                        if let Some(prompt_tokens) = parsed.get("prompt_eval_count").and_then(|v| v.as_u64())
+                        if let Some(prompt_tokens) = parsed.get("prompt_eval_count").and_then(serde_json::Value::as_u64)
                         {
-                            let output_tokens = parsed.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let output_tokens = parsed.get("eval_count").and_then(serde_json::Value::as_u64).unwrap_or(0);
                             if prompt_tokens > 0 || output_tokens > 0 {
                                 yield StreamEvent::Usage {
                                     input_tokens: prompt_tokens,
@@ -553,8 +550,8 @@ impl LlmClient for OllamaCloudClient {
 
                         // Also check done frame for tool_calls (some Ollama versions
                         // batch all tool calls into the final done=true message)
-                        if let Some(msg) = parsed.get("message") {
-                            if let Some(tool_calls_arr) = msg.get("tool_calls").and_then(|v| v.as_array()) {
+                        if let Some(msg) = parsed.get("message")
+                            && let Some(tool_calls_arr) = msg.get("tool_calls").and_then(|v| v.as_array()) {
                                 tracing::info!(
                                     model = %model_name,
                                     count = tool_calls_arr.len(),
@@ -563,9 +560,7 @@ impl LlmClient for OllamaCloudClient {
                                 for (idx, tool_call) in tool_calls_arr.iter().enumerate() {
                                     let tool_call_id = tool_call
                                         .get("id")
-                                        .and_then(|v| v.as_str())
-                                        .map(ToString::to_string)
-                                        .unwrap_or_else(|| format!("ollama_cloud_done_tc_{idx}"));
+                                        .and_then(|v| v.as_str()).map_or_else(|| format!("ollama_cloud_done_tc_{idx}"), ToString::to_string);
                                     let function = tool_call.get("function").unwrap_or(tool_call);
                                     let name = function
                                         .get("name")
@@ -588,7 +583,6 @@ impl LlmClient for OllamaCloudClient {
                                     }
                                 }
                             }
-                        }
 
                         for (id, _name) in open_tool_calls.drain() {
                             yield StreamEvent::ToolCallEnd { id };
@@ -635,10 +629,10 @@ pub async fn list_ollama_cloud_models(
         .map(|entry| {
             let model_id = entry.model.clone().unwrap_or_else(|| entry.name.clone());
             let display_name = format_model_name(&entry.name, &entry.details);
-            let display_name = if model_id != entry.name {
-                format!("{display_name} ({model_id})")
-            } else {
+            let display_name = if model_id == entry.name {
                 display_name
+            } else {
+                format!("{display_name} ({model_id})")
             };
             let ctx = estimate_context_window(&entry.details.parameter_size);
 

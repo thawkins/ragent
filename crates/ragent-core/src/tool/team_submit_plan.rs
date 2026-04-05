@@ -8,16 +8,16 @@ use crate::team::{
     Mailbox, MailboxMessage, MemberStatus, MessageType, PlanStatus, TeamStore, find_team_dir,
 };
 
-/// Teammate submits a plan; sets member plan_status to Pending.
+/// Teammate submits a plan; sets member `plan_status` to Pending.
 pub struct TeamSubmitPlanTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamSubmitPlanTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_submit_plan"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Submit a plan to the team lead for approval before starting implementation. \
          After calling this tool, wait for plan_approved or plan_rejected messages \
          via team_read_messages before proceeding."
@@ -40,7 +40,7 @@ impl Tool for TeamSubmitPlanTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -58,8 +58,7 @@ impl Tool for TeamSubmitPlanTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| ctx.session_id.clone());
+            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
@@ -84,11 +83,10 @@ impl Tool for TeamSubmitPlanTool {
         ))?;
 
         Ok(ToolOutput {
-            content: format!(
-                "Plan submitted to lead for approval.\n\
+            content: "Plan submitted to lead for approval.\n\
                  Use team_read_messages to check for plan_approved or plan_rejected response.\n\
                  Do not start implementation until you receive approval."
-            ),
+                .to_string(),
             metadata: Some(json!({
                 "team_name": team_name,
                 "agent_id": agent_id,

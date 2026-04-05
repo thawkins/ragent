@@ -14,12 +14,12 @@ pub struct RmTool;
 
 #[async_trait::async_trait]
 impl Tool for RmTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "rm"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Delete a single file. Wildcards are not allowed. Fails if the file does not exist."
     }
 
@@ -36,7 +36,7 @@ impl Tool for RmTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -57,8 +57,7 @@ impl Tool for RmTool {
 
         if path_str.contains('*') || path_str.contains('?') || path_str.contains('[') {
             bail!(
-                "Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {}",
-                path_str
+                "Wildcards and glob patterns are not allowed in file paths. Specify a single file to delete: {path_str}"
             );
         }
 

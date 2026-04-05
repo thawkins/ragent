@@ -139,6 +139,8 @@ impl App {
         out
     }
 
+    /// Normalises ASCII table lines in a rendered string, collapsing separator rows
+    /// and aligning column widths for consistent terminal display.
     pub fn normalize_ascii_tables(&self, rendered: &str) -> String {
         let lines: Vec<&str> = rendered.lines().collect();
         let mut out: Vec<String> = Vec::new();
@@ -219,6 +221,10 @@ impl App {
         out.join("\n")
     }
 
+    /// Renders markdown-formatted slash command output to plain ASCII text.
+    ///
+    /// Only processes strings that begin with `"From: /"` (slash command responses).
+    /// Plain runtime assistant text is returned unchanged.
     pub fn render_markdown_to_ascii(&mut self, text: &str) -> String {
         // Only convert markdown-like slash output; preserve plain runtime text.
         if !text.starts_with("From: /") {
@@ -1160,7 +1166,7 @@ impl App {
         }
         let byte_start = self.cursor_byte_pos_at_char_index(clamped_start);
         let byte_end = self.cursor_byte_pos_at_char_index(clamped_end);
-        let removed = clamped_end - clamped_start;
+        let _removed = clamped_end - clamped_start;
         self.input.replace_range(byte_start..byte_end, "");
         self.set_cursor_char_index_clamped(clamped_start);
         self.refresh_input_menus();

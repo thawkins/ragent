@@ -11,11 +11,11 @@ pub struct TeamMemoryWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamMemoryWriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_memory_write"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Write or append to a file in your persistent memory directory. \
          Defaults to MEMORY.md if no path is given. \
          Use mode 'append' to add to an existing file, or 'overwrite' to replace it."
@@ -47,7 +47,7 @@ impl Tool for TeamMemoryWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -75,8 +75,7 @@ impl Tool for TeamMemoryWriteTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| ctx.session_id.clone());
+            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;
@@ -108,7 +107,7 @@ impl Tool for TeamMemoryWriteTool {
         // Create directory if it doesn't exist.
         if !mem_dir.exists() {
             std::fs::create_dir_all(&mem_dir)
-                .map_err(|e| anyhow::anyhow!("Failed to create memory directory: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to create memory directory: {e}"))?;
         }
 
         let target = mem_dir.join(rel_path);
@@ -123,7 +122,7 @@ impl Tool for TeamMemoryWriteTool {
             let parent = target.parent().unwrap_or(&mem_dir);
             if !parent.exists() {
                 std::fs::create_dir_all(parent)
-                    .map_err(|e| anyhow::anyhow!("Failed to create subdirectory: {}", e))?;
+                    .map_err(|e| anyhow::anyhow!("Failed to create subdirectory: {e}"))?;
             }
             parent
                 .canonicalize()
@@ -132,36 +131,32 @@ impl Tool for TeamMemoryWriteTool {
         };
         if !check_path.starts_with(&canonical_dir) {
             return Ok(ToolOutput {
-                content: format!("Path '{}' escapes the memory directory.", rel_path),
+                content: format!("Path '{rel_path}' escapes the memory directory."),
                 metadata: Some(json!({ "error": "path_escape" })),
             });
         }
 
         // Write or append.
         use std::io::Write;
-        let bytes_written = match write_mode {
-            "overwrite" => {
-                std::fs::write(&target, content)
-                    .map_err(|e| anyhow::anyhow!("Failed to write {}: {}", rel_path, e))?;
-                content.len()
-            }
-            _ => {
-                // append
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&target)
-                    .map_err(|e| anyhow::anyhow!("Failed to open {}: {}", rel_path, e))?;
-                file.write_all(content.as_bytes())
-                    .map_err(|e| anyhow::anyhow!("Failed to append to {}: {}", rel_path, e))?;
-                content.len()
-            }
+        let bytes_written = if write_mode == "overwrite" {
+            std::fs::write(&target, content)
+                .map_err(|e| anyhow::anyhow!("Failed to write {rel_path}: {e}"))?;
+            content.len()
+        } else {
+            // append
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&target)
+                .map_err(|e| anyhow::anyhow!("Failed to open {rel_path}: {e}"))?;
+            file.write_all(content.as_bytes())
+                .map_err(|e| anyhow::anyhow!("Failed to append to {rel_path}: {e}"))?;
+            content.len()
         };
 
         Ok(ToolOutput {
             content: format!(
-                "Wrote {} bytes to '{}' in memory directory (mode: {}).",
-                bytes_written, rel_path, write_mode
+                "Wrote {bytes_written} bytes to '{rel_path}' in memory directory (mode: {write_mode})."
             ),
             metadata: Some(json!({
                 "memory_dir": mem_dir.display().to_string(),

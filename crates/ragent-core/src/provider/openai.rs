@@ -1,6 +1,6 @@
-//! OpenAI provider implementation.
+//! `OpenAI` provider implementation.
 //!
-//! Implements the [`Provider`] trait for the OpenAI Chat Completions API, supporting
+//! Implements the [`Provider`] trait for the `OpenAI` Chat Completions API, supporting
 //! streaming responses, tool calls, and usage tracking.
 
 use anyhow::{Context, Result, bail};
@@ -17,7 +17,8 @@ use crate::provider::{ModelInfo, Provider};
 /// Default API base URL for OpenAI-compatible endpoints.
 pub const OPENAI_API_BASE: &str = "https://api.openai.com";
 
-/// Returns the default OpenAI model catalog with `provider_id` attached.
+/// Returns the default `OpenAI` model catalog with `provider_id` attached.
+#[must_use]
 pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
     vec![
         ModelInfo {
@@ -57,7 +58,7 @@ pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
     ]
 }
 
-/// Provider implementation for the OpenAI Chat Completions API.
+/// Provider implementation for the `OpenAI` Chat Completions API.
 pub struct OpenAiProvider;
 
 #[async_trait::async_trait]
@@ -67,7 +68,7 @@ impl Provider for OpenAiProvider {
     /// # Errors
     ///
     /// This function is infallible.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "openai"
     }
 
@@ -76,11 +77,11 @@ impl Provider for OpenAiProvider {
     /// # Errors
     ///
     /// This function is infallible.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "OpenAI"
     }
 
-    /// Returns default OpenAI models (GPT-4o, GPT-4o Mini).
+    /// Returns default `OpenAI` models (GPT-4o, GPT-4o Mini).
     fn default_models(&self) -> Vec<ModelInfo> {
         openai_default_models("openai")
     }
@@ -101,7 +102,7 @@ impl Provider for OpenAiProvider {
     }
 }
 
-/// HTTP client for the OpenAI Chat Completions API with streaming SSE support.
+/// HTTP client for the `OpenAI` Chat Completions API with streaming SSE support.
 pub(crate) struct OpenAiClient {
     api_key: String,
     base_url: String,
@@ -117,7 +118,7 @@ impl OpenAiClient {
         }
     }
 
-    /// Build the JSON request body for the OpenAI Chat Completions API.
+    /// Build the JSON request body for the `OpenAI` Chat Completions API.
     ///
     /// # Errors
     ///
@@ -261,10 +262,10 @@ impl OpenAiClient {
         }
 
         // Reasoning / thinking control via agent options
-        if let Some(thinking_val) = request.options.get("thinking") {
-            if thinking_val.as_str() == Some("disabled") {
-                body["reasoning_effort"] = json!("none");
-            }
+        if let Some(thinking_val) = request.options.get("thinking")
+            && thinking_val.as_str() == Some("disabled")
+        {
+            body["reasoning_effort"] = json!("none");
         }
 
         body
@@ -303,7 +304,7 @@ impl LlmClient for OpenAiClient {
                 error = %body,
                 "OpenAI API error"
             );
-            bail!("OpenAI API error ({}): {}", status, body);
+            bail!("OpenAI API error ({status}): {body}");
         }
 
         let rate_limit_event = parse_openai_rate_limit_headers(response.headers());
@@ -393,7 +394,7 @@ impl LlmClient for OpenAiClient {
                                     if let Some(name) = function["name"].as_str() {
                                         let tc_id = tool_call_ids.get(&index)
                                             .cloned()
-                                            .unwrap_or_else(|| format!("tc_{}", index));
+                                            .unwrap_or_else(|| format!("tc_{index}"));
                                         tool_call_names.insert(index, name.to_string());
                                         yield StreamEvent::ToolCallStart {
                                             id: tc_id,
@@ -406,7 +407,7 @@ impl LlmClient for OpenAiClient {
                                     {
                                         let tc_id = tool_call_ids.get(&index)
                                             .cloned()
-                                            .unwrap_or_else(|| format!("tc_{}", index));
+                                            .unwrap_or_else(|| format!("tc_{index}"));
                                         yield StreamEvent::ToolCallDelta {
                                             id: tc_id,
                                             args_json: args.to_string(),
@@ -443,7 +444,7 @@ impl LlmClient for OpenAiClient {
 
 /// Parses OpenAI-style rate-limit response headers into a `StreamEvent::RateLimit`.
 ///
-/// Used by OpenAI and Copilot providers (both follow the same header convention).
+/// Used by `OpenAI` and Copilot providers (both follow the same header convention).
 /// Headers: `x-ratelimit-limit-requests`, `x-ratelimit-remaining-requests`,
 ///          `x-ratelimit-limit-tokens`, `x-ratelimit-remaining-tokens`.
 pub(crate) fn parse_openai_rate_limit_headers(

@@ -120,10 +120,10 @@ pub fn deregister_notifier(team_dir: &Path, agent_id: &str) {
 /// Wake the poll loop for `agent_id` if a notifier is registered.
 fn signal_notifier(team_dir: &Path, agent_id: &str) {
     let key: NotifyKey = (team_dir.to_path_buf(), agent_id.to_string());
-    if let Ok(map) = notifier_map().read() {
-        if let Some(notify) = map.get(&key) {
-            notify.notify_one();
-        }
+    if let Ok(map) = notifier_map().read()
+        && let Some(notify) = map.get(&key)
+    {
+        notify.notify_one();
     }
 }
 

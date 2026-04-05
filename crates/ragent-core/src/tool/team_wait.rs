@@ -24,11 +24,11 @@ pub struct TeamWaitTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamWaitTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_wait"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Block until all teammates (or specific ones) in the active team finish their current work \
          and become idle. Use this after team_spawn so the lead does not race ahead and duplicate \
          the teammates' work. Returns a summary of each teammate's completion status. \
@@ -57,14 +57,14 @@ impl Tool for TeamWaitTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let timeout_secs = input
             .get("timeout_secs")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .unwrap_or(300);
 
         let working_dir = ctx.working_dir.clone();
@@ -73,12 +73,12 @@ impl Tool for TeamWaitTool {
         let team_name: Option<String> = input
             .get("team_name")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
 
         // Load the team store to discover current membership.
         let store = if let Some(ref name) = team_name {
             TeamStore::load_by_name(name, &working_dir)
-                .map_err(|e| anyhow::anyhow!("Cannot load team '{}': {}", name, e))?
+                .map_err(|e| anyhow::anyhow!("Cannot load team '{name}': {e}"))?
         } else {
             // Find the most recently modified team.
             let teams = TeamStore::list_teams(&working_dir);
@@ -86,7 +86,7 @@ impl Tool for TeamWaitTool {
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("No teams found in this project."))?;
-            TeamStore::load(&dir).map_err(|e| anyhow::anyhow!("Cannot load team store: {}", e))?
+            TeamStore::load(&dir).map_err(|e| anyhow::anyhow!("Cannot load team store: {e}"))?
         };
 
         let resolved_team_name = store.config.name.clone();
@@ -144,8 +144,7 @@ impl Tool for TeamWaitTool {
             let summary = summarise_store(&store.config.members);
             return Ok(ToolOutput {
                 content: format!(
-                    "All teammates in team '{}' are already idle.\n\n{summary}",
-                    resolved_team_name
+                    "All teammates in team '{resolved_team_name}' are already idle.\n\n{summary}"
                 ),
                 metadata: Some(json!({ "team": resolved_team_name, "timed_out": false })),
             });
@@ -201,8 +200,7 @@ impl Tool for TeamWaitTool {
             ));
         } else {
             output.push_str(&format!(
-                "✅ All awaited teammates in team '{}' are now idle.\n\n",
-                resolved_team_name
+                "✅ All awaited teammates in team '{resolved_team_name}' are now idle.\n\n"
             ));
         }
         output.push_str(&summary);

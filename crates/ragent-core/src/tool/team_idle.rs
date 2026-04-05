@@ -1,4 +1,4 @@
-//! `team_idle` — Teammate reports idle state; fires TeammateIdle hook.
+//! `team_idle` — Teammate reports idle state; fires `TeammateIdle` hook.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -12,11 +12,11 @@ pub struct TeamIdleTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamIdleTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_idle"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Notify the team lead that you have no more tasks to work on (idle state). \
          This triggers the TeammateIdle hook (if configured). \
          Use team_task_claim first to verify no tasks remain before calling this."
@@ -39,7 +39,7 @@ impl Tool for TeamIdleTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -57,8 +57,7 @@ impl Tool for TeamIdleTool {
         let agent_id = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| ctx.session_id.clone());
+            .map_or_else(|| ctx.session_id.clone(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;

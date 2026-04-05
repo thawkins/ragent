@@ -2,7 +2,7 @@ use super::{CommitResult, EditStaging};
 use anyhow::Result;
 use std::path::PathBuf;
 
-/// High-level API: apply a batch of (path, new_content) pairs using the EditStaging flow.
+/// High-level API: apply a batch of (path, `new_content`) pairs using the `EditStaging` flow.
 /// This is the entry point used by tools and skills to perform concurrent edits.
 ///
 /// # Errors

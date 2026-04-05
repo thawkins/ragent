@@ -23,7 +23,7 @@ pub struct InProcessRouter {
 impl InProcessRouter {
     /// Create a new in-process router with the given registry.
     #[must_use]
-    pub fn new(registry: AgentRegistry) -> Self {
+    pub const fn new(registry: AgentRegistry) -> Self {
         Self {
             registry,
             request_timeout: Duration::from_secs(5),

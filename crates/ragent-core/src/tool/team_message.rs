@@ -11,11 +11,11 @@ pub struct TeamMessageTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamMessageTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_message"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Send a direct message to one team member (teammate or lead) by agent ID or name."
     }
 
@@ -40,7 +40,7 @@ impl Tool for TeamMessageTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:communicate"
     }
 
@@ -63,8 +63,7 @@ impl Tool for TeamMessageTool {
         let from = ctx
             .team_context
             .as_ref()
-            .map(|tc| tc.agent_id.clone())
-            .unwrap_or_else(|| "lead".to_string());
+            .map_or_else(|| "lead".to_string(), |tc| tc.agent_id.clone());
 
         let team_dir = find_team_dir(&ctx.working_dir, team_name)
             .ok_or_else(|| anyhow::anyhow!("Team '{team_name}' not found"))?;

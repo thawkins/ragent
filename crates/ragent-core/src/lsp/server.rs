@@ -59,7 +59,7 @@ impl LspServer {
     ///
     /// This function is infallible.
     #[must_use]
-    pub fn new(id: String, language: String, config: LspServerConfig) -> Self {
+    pub const fn new(id: String, language: String, config: LspServerConfig) -> Self {
         let status = if config.disabled {
             LspStatus::Disabled
         } else {

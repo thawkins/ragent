@@ -34,11 +34,11 @@ pub struct GrepTool;
 
 #[async_trait::async_trait]
 impl Tool for GrepTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "grep"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Search file contents for a regex pattern using ripgrep. \
          Respects .gitignore rules. Returns matching lines with file path \
          and line number. Supports regex, case-insensitive search, and \
@@ -82,7 +82,7 @@ impl Tool for GrepTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -98,10 +98,10 @@ impl Tool for GrepTool {
             .as_str()
             .context("Missing required 'pattern' parameter")?;
 
-        let search_path = input["path"]
-            .as_str()
-            .map(|p| resolve_path(&ctx.working_dir, p))
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let search_path = input["path"].as_str().map_or_else(
+            || ctx.working_dir.clone(),
+            |p| resolve_path(&ctx.working_dir, p),
+        );
 
         let include_glob = input["include"].as_str().map(str::to_owned);
         let exclude_glob = input["exclude"].as_str().map(str::to_owned);
@@ -109,8 +109,7 @@ impl Tool for GrepTool {
         let multiline = input["multiline"].as_bool().unwrap_or(false);
         let max_results = input["max_results"]
             .as_u64()
-            .map(|n| (n as usize).min(MAX_RESULTS))
-            .unwrap_or(MAX_RESULTS);
+            .map_or(MAX_RESULTS, |n| (n as usize).min(MAX_RESULTS));
 
         // Build the regex matcher — validates the pattern early before spawning
         let matcher = RegexMatcherBuilder::new()
@@ -168,9 +167,13 @@ impl Tool for GrepTool {
             for entry in walk_builder.build().flatten() {
                 // Stop walking if already at limit
                 {
-                    let r = results_bg.lock().unwrap_or_else(|e| e.into_inner());
+                    let r = results_bg
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if r.len() >= max_results {
-                        *truncated_bg.lock().unwrap_or_else(|e| e.into_inner()) = true;
+                        *truncated_bg
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
                         break;
                     }
                 }
@@ -181,7 +184,9 @@ impl Tool for GrepTool {
                 }
 
                 let path = entry.path().to_path_buf();
-                *files_bg.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+                *files_bg
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
 
                 let sink = CollectSink {
                     path: &path,
@@ -204,9 +209,13 @@ impl Tool for GrepTool {
         let results = Arc::try_unwrap(results)
             .map_err(|_| anyhow::anyhow!("results Arc still has other owners"))?
             .into_inner()
-            .unwrap_or_else(|e| e.into_inner());
-        let files_searched = *files_searched.lock().unwrap_or_else(|e| e.into_inner());
-        let truncated = *truncated.lock().unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let files_searched = *files_searched
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let truncated = *truncated
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if results.is_empty() {
             Ok(ToolOutput {
@@ -261,10 +270,16 @@ impl Sink for CollectSink<'_> {
     type Error = std::io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        let mut results = self.results.lock().unwrap_or_else(|e| e.into_inner());
+        let mut results = self
+            .results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if results.len() >= self.max_results {
-            *self.truncated.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            *self
+                .truncated
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
             return Ok(false); // stop searching this file
         }
 

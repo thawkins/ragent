@@ -35,12 +35,12 @@ pub struct EditTool;
 
 #[async_trait::async_trait]
 impl Tool for EditTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "edit"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Replace an exact occurrence of old_str with new_str in a file. \
                The old_str must match exactly one location in the file."
     }
@@ -65,7 +65,7 @@ impl Tool for EditTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -374,7 +374,7 @@ fn leading_ws(line: &str) -> &str {
 fn reindent_with(s: &str, indent: &str) -> String {
     let mut result = s
         .lines()
-        .map(|l| format!("{}{}", indent, l))
+        .map(|l| format!("{indent}{l}"))
         .collect::<Vec<_>>()
         .join("\n");
     if s.ends_with('\n') {

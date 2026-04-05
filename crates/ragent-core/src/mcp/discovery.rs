@@ -15,7 +15,7 @@ use crate::config::McpServerConfig;
 pub enum McpDiscoverySource {
     /// Found on `PATH` via `which` / `where`.
     SystemPath,
-    /// Found in npm global node_modules.
+    /// Found in npm global `node_modules`.
     NpmGlobal {
         /// Path to the npm prefix directory.
         prefix_dir: PathBuf,
@@ -201,7 +201,11 @@ pub async fn discover() -> Vec<DiscoveredMcpServer> {
                     id: server.id.to_string(),
                     name: server.name.to_string(),
                     executable: path,
-                    args: server.args.iter().map(|s| s.to_string()).collect(),
+                    args: server
+                        .args
+                        .iter()
+                        .map(std::string::ToString::to_string)
+                        .collect(),
                     env: HashMap::new(),
                     source: McpDiscoverySource::SystemPath,
                 });
@@ -256,7 +260,7 @@ fn which_sync(exe: &str) -> Option<PathBuf> {
     None
 }
 
-/// Scan npm global node_modules for MCP server packages.
+/// Scan npm global `node_modules` for MCP server packages.
 async fn scan_npm_global() -> Vec<DiscoveredMcpServer> {
     let mut found = Vec::new();
 
@@ -294,10 +298,10 @@ async fn scan_npm_global() -> Vec<DiscoveredMcpServer> {
 
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str.starts_with("mcp-server-") || name_str.starts_with("mcp_server_") {
-                if let Some(server) = try_npm_mcp_package(&entry.path(), &prefix).await {
-                    found.push(server);
-                }
+            if (name_str.starts_with("mcp-server-") || name_str.starts_with("mcp_server_"))
+                && let Some(server) = try_npm_mcp_package(&entry.path(), &prefix).await
+            {
+                found.push(server);
             }
         }
     }
@@ -346,10 +350,10 @@ async fn scan_npm_mcp_scope(
 
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if name_str.starts_with("server-") {
-            if let Some(server) = try_npm_mcp_package(&entry.path(), prefix).await {
-                found.push(server);
-            }
+        if name_str.starts_with("server-")
+            && let Some(server) = try_npm_mcp_package(&entry.path(), prefix).await
+        {
+            found.push(server);
         }
     }
 
@@ -444,14 +448,13 @@ async fn scan_mcp_registry(registry_dir: &std::path::Path) -> Vec<DiscoveredMcpS
         // Check for server.json config files
         if path.is_dir() {
             let server_json = path.join("server.json");
-            if server_json.exists() {
-                if let Some(server) =
+            if server_json.exists()
+                && let Some(server) =
                     try_mcp_registry_entry(&path, &server_json, registry_dir).await
-                {
-                    found.push(server);
-                }
+            {
+                found.push(server);
             }
-        } else if path.extension().map(|e| e == "json").unwrap_or(false) {
+        } else if path.extension().is_some_and(|e| e == "json") {
             // Direct JSON config file
             if let Some(server) = try_mcp_json_config(&path, registry_dir).await {
                 found.push(server);

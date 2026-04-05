@@ -17,14 +17,14 @@ pub struct PdfReadTool;
 
 #[async_trait::async_trait]
 impl Tool for PdfReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "pdf_read"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read text content and metadata from a PDF file. Supports page range selection."
     }
 
@@ -54,7 +54,7 @@ impl Tool for PdfReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -111,21 +111,21 @@ pub(crate) fn read_pdf(
         "metadata" => {
             let mut output = String::new();
             output.push_str(&format!("PDF: {}\n", path.display()));
-            output.push_str(&format!("Pages: {}\n", total_pages));
+            output.push_str(&format!("Pages: {total_pages}\n"));
             if let Some(ref title) = metadata.title {
-                output.push_str(&format!("Title: {}\n", title));
+                output.push_str(&format!("Title: {title}\n"));
             }
             if let Some(ref author) = metadata.author {
-                output.push_str(&format!("Author: {}\n", author));
+                output.push_str(&format!("Author: {author}\n"));
             }
             if let Some(ref subject) = metadata.subject {
-                output.push_str(&format!("Subject: {}\n", subject));
+                output.push_str(&format!("Subject: {subject}\n"));
             }
             if let Some(ref creator) = metadata.creator {
-                output.push_str(&format!("Creator: {}\n", creator));
+                output.push_str(&format!("Creator: {creator}\n"));
             }
             if let Some(ref producer) = metadata.producer {
-                output.push_str(&format!("Producer: {}\n", producer));
+                output.push_str(&format!("Producer: {producer}\n"));
             }
             Ok(output)
         }
@@ -161,7 +161,7 @@ pub(crate) fn read_pdf(
             let mut output = String::new();
             for (page_num, text) in &pages {
                 if pages.len() > 1 {
-                    output.push_str(&format!("--- Page {} ---\n", page_num));
+                    output.push_str(&format!("--- Page {page_num} ---\n"));
                 }
                 output.push_str(text);
                 output.push('\n');
@@ -185,7 +185,7 @@ fn extract_pages_text(
     let end = end_page.unwrap_or(total_pages).min(total_pages);
 
     if start > total_pages {
-        anyhow::bail!("start_page {} exceeds total pages ({})", start, total_pages);
+        anyhow::bail!("start_page {start} exceeds total pages ({total_pages})");
     }
 
     // pdf-extract works on the whole document; extract all then filter
@@ -219,8 +219,7 @@ fn extract_pages_text(
             result.push((
                 start,
                 format!(
-                    "[Pages {}-{} — per-page extraction unavailable, showing full document text]\n\n{}",
-                    start, end, full_text
+                    "[Pages {start}-{end} — per-page extraction unavailable, showing full document text]\n\n{full_text}"
                 ),
             ));
         }
@@ -252,10 +251,10 @@ fn extract_page_text(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> Result<
                                     if *n < -100 {
                                         text.push(' ');
                                     }
-                                } else if let lopdf::Object::Real(n) = item {
-                                    if *n < -100.0 {
-                                        text.push(' ');
-                                    }
+                                } else if let lopdf::Object::Real(n) = item
+                                    && *n < -100.0
+                                {
+                                    text.push(' ');
                                 }
                             }
                         }

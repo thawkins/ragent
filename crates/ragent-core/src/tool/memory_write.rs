@@ -13,11 +13,11 @@ pub struct MemoryWriteTool;
 
 #[async_trait::async_trait]
 impl Tool for MemoryWriteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "memory_write"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Persist notes or learnings to memory files that are automatically loaded in future \
          sessions. Use scope='user' for global memory (~/.ragent/memory/MEMORY.md) or \
          scope='project' for project-specific memory (.ragent/memory/MEMORY.md in the \
@@ -46,7 +46,7 @@ impl Tool for MemoryWriteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -91,11 +91,11 @@ pub struct MemoryReadTool;
 
 #[async_trait::async_trait]
 impl Tool for MemoryReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "memory_read"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read the contents of a memory file. Use to recall facts persisted by memory_write."
     }
 
@@ -116,7 +116,7 @@ impl Tool for MemoryReadTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 

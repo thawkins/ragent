@@ -29,14 +29,14 @@ struct EditOp {
 
 #[async_trait::async_trait]
 impl Tool for MultiEditTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "multiedit"
     }
 
     /// # Errors
     ///
     /// Returns an error if the `edits` array is missing, malformed, or empty.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Apply multiple edits to one or more files atomically. Each edit replaces \
          exactly one occurrence of old_str with new_str. All edits are validated \
          before any files are written — if any match fails, no files are modified."
@@ -73,7 +73,7 @@ impl Tool for MultiEditTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -98,13 +98,13 @@ impl Tool for MultiEditTool {
         for (i, edit) in edits_arr.iter().enumerate() {
             let path_str = edit["path"]
                 .as_str()
-                .with_context(|| format!("Edit {}: missing 'path'", i))?;
+                .with_context(|| format!("Edit {i}: missing 'path'"))?;
             let old_str = edit["old_str"]
                 .as_str()
-                .with_context(|| format!("Edit {}: missing 'old_str'", i))?;
+                .with_context(|| format!("Edit {i}: missing 'old_str'"))?;
             let new_str = edit["new_str"]
                 .as_str()
-                .with_context(|| format!("Edit {}: missing 'new_str'", i))?;
+                .with_context(|| format!("Edit {i}: missing 'new_str'"))?;
 
             ops.push(EditOp {
                 path: resolve_path(&ctx.working_dir, path_str),

@@ -17,12 +17,14 @@ use crate::team::task::{Task, TaskList, TaskStore};
 // ── Directory discovery ───────────────────────────────────────────────────────
 
 /// Return the user-global teams base directory: `~/.ragent/teams/`.
+#[must_use]
 pub fn global_teams_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".ragent").join("teams"))
 }
 
 /// Walk up from `working_dir` to find the nearest project `.ragent/` directory,
 /// returning `[PROJECT]/.ragent/teams/`.
+#[must_use]
 pub fn find_project_teams_dir(working_dir: &Path) -> Option<PathBuf> {
     let mut current = working_dir;
     loop {
@@ -41,6 +43,7 @@ pub fn find_project_teams_dir(working_dir: &Path) -> Option<PathBuf> {
 ///
 /// Searches project-local first (higher priority), then user-global.
 /// Returns `None` if the team does not exist in either location.
+#[must_use]
 pub fn find_team_dir(working_dir: &Path, name: &str) -> Option<PathBuf> {
     // Project-local wins.
     if let Some(proj_teams) = find_project_teams_dir(working_dir) {
@@ -185,34 +188,35 @@ impl TeamStore {
     ///
     /// Returns `(name, dir, is_project_local)` tuples, deduplicating by name
     /// (project-local wins over global).
+    #[must_use]
     pub fn list_teams(working_dir: &Path) -> Vec<(String, PathBuf, bool)> {
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut results: Vec<(String, PathBuf, bool)> = Vec::new();
 
         // Project-local first (higher priority).
-        if let Some(proj_dir) = find_project_teams_dir(working_dir) {
-            if let Ok(entries) = fs::read_dir(&proj_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() && path.join("config.json").exists() {
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        seen.insert(name.clone());
-                        results.push((name, path, true));
-                    }
+        if let Some(proj_dir) = find_project_teams_dir(working_dir)
+            && let Ok(entries) = fs::read_dir(&proj_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("config.json").exists() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    seen.insert(name.clone());
+                    results.push((name, path, true));
                 }
             }
         }
 
         // Global (lower priority; skip if already seen).
-        if let Some(global_dir) = global_teams_dir() {
-            if let Ok(entries) = fs::read_dir(&global_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() && path.join("config.json").exists() {
-                        let name = entry.file_name().to_string_lossy().into_owned();
-                        if !seen.contains(&name) {
-                            results.push((name, path, false));
-                        }
+        if let Some(global_dir) = global_teams_dir()
+            && let Ok(entries) = fs::read_dir(&global_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("config.json").exists() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if !seen.contains(&name) {
+                        results.push((name, path, false));
                     }
                 }
             }
@@ -268,6 +272,7 @@ impl TeamStore {
     }
 
     /// Generate the next available agent ID in the form `tm-NNN`.
+    #[must_use]
     pub fn next_agent_id(&self) -> String {
         let max = self
             .config

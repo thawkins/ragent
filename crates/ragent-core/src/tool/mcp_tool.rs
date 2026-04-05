@@ -68,7 +68,7 @@ impl Tool for McpToolWrapper {
         self.input_schema.clone()
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "mcp"
     }
 

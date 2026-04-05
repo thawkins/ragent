@@ -1,12 +1,12 @@
 //! Multi-agent orchestration primitives (MVP)
 //!
-//! Provides an in-process AgentRegistry, an InProcessRouter (actor-style
+//! Provides an in-process `AgentRegistry`, an `InProcessRouter` (actor-style
 //! inboxes), and a Coordinator that can start jobs synchronously and
 //! asynchronously with basic negotiation and aggregation strategies.
 //!
 //! ## Submodules (Milestone 5 extensions)
-//! - [`transport`] — pluggable transport adapters (HttpRouter, RouterComposite)
-//! - [`leader`]    — in-process leader election and CoordinatorCluster
+//! - [`transport`] — pluggable transport adapters (`HttpRouter`, `RouterComposite`)
+//! - [`leader`]    — in-process leader election and `CoordinatorCluster`
 //! - [`policy`]    — conflict resolution policies and human-in-the-loop fallbacks
 
 /// Coordination layer for orchestrating multi-agent workflows.

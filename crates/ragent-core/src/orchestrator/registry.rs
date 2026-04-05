@@ -85,7 +85,7 @@ impl AgentRegistry {
         if let Some(responder) = responder {
             // create a channel for the agent mailbox
             let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(16);
-            mailbox_opt = Some(tx.clone());
+            mailbox_opt = Some(tx);
 
             // Spawn the agent loop which turns mailbox messages into responder calls.
             tokio::spawn(async move {

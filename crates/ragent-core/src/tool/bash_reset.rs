@@ -14,11 +14,11 @@ pub struct BashResetTool;
 
 #[async_trait::async_trait]
 impl Tool for BashResetTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "bash_reset"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Reset the persistent shell state (clears the saved working directory and environment \
          variables). Use when the shell is in a bad state or you want to start fresh from \
          the agent's working directory."
@@ -31,7 +31,7 @@ impl Tool for BashResetTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "bash:execute"
     }
 

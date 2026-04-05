@@ -31,7 +31,7 @@ fn extract_mime_from_data_uri(uri: &str) -> Option<&str> {
 fn extract_base64_from_data_uri(uri: &str) -> Option<&str> {
     uri.find(",base64,")
         .map(|i| &uri[i + 8..])
-        .or_else(|| uri.find(",").map(|i| &uri[i + 1..]))
+        .or_else(|| uri.find(',').map(|i| &uri[i + 1..]))
 }
 
 /// Provider implementation for the Anthropic Claude API.
@@ -44,12 +44,12 @@ impl AnthropicProvider {
 #[async_trait::async_trait]
 impl Provider for AnthropicProvider {
     /// Returns `"anthropic"`.
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "anthropic"
     }
 
     /// Returns `"Anthropic"`.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Anthropic"
     }
 
@@ -212,7 +212,7 @@ impl AnthropicClient {
                     let budget = request
                         .options
                         .get("thinking_budget_tokens")
-                        .and_then(|v| v.as_u64())
+                        .and_then(serde_json::Value::as_u64)
                         .unwrap_or(10_000);
                     body["thinking"] = json!({"type": "enabled", "budget_tokens": budget});
                 }
@@ -256,7 +256,7 @@ impl LlmClient for AnthropicClient {
                 error = %body,
                 "Anthropic API error"
             );
-            bail!("Anthropic API error ({}): {}", status, body);
+            bail!("Anthropic API error ({status}): {body}");
         }
 
         let rate_limit_event = parse_anthropic_rate_limit_headers(response.headers());

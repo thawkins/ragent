@@ -180,7 +180,7 @@ pub struct ToolDefinition {
     pub parameters: Value,
 }
 
-/// Trait implemented by LLM provider backends (e.g. Anthropic, OpenAI).
+/// Trait implemented by LLM provider backends (e.g. Anthropic, `OpenAI`).
 ///
 /// Implementors convert a [`ChatRequest`] into a stream of [`StreamEvent`]s.
 #[async_trait::async_trait]

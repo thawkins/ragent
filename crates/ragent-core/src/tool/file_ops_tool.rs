@@ -10,13 +10,13 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::Path;
 
-/// Tool that applies a batch of edits using the EditStaging flow.
+/// Tool that applies a batch of edits using the `EditStaging` flow.
 ///
 /// Input JSON schema:
 /// {
 ///   "edits": [{ "path": "path/to/file", "content": "new content" }, ...],
 ///   "concurrency": optional integer,
-///   "dry_run": optional bool
+///   "`dry_run"`: optional bool
 /// }
 pub struct FileOpsTool;
 
@@ -25,14 +25,14 @@ impl Tool for FileOpsTool {
     /// # Errors
     ///
     /// Returns an error if the name string cannot be converted or returned.
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "file_ops"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Apply a batch of staged edits concurrently using the EditStaging APIs"
     }
 
@@ -54,7 +54,7 @@ impl Tool for FileOpsTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -66,8 +66,7 @@ impl Tool for FileOpsTool {
         let edits_arr = input["edits"].as_array().context("Missing 'edits' array")?;
         let concurrency = input["concurrency"]
             .as_i64()
-            .map(|n| n as usize)
-            .unwrap_or_else(|| num_cpus::get());
+            .map_or_else(num_cpus::get, |n| n as usize);
         let dry_run = input["dry_run"].as_bool().unwrap_or(false);
 
         let mut pairs = Vec::with_capacity(edits_arr.len());

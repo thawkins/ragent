@@ -14,7 +14,7 @@ pub enum OfficeFormat {
     Docx,
     /// Microsoft Excel (.xlsx)
     Xlsx,
-    /// Microsoft PowerPoint (.pptx)
+    /// Microsoft `PowerPoint` (.pptx)
     Pptx,
 }
 
@@ -47,13 +47,13 @@ pub fn detect_format(path: &Path) -> Result<OfficeFormat> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
+        .map(str::to_lowercase);
 
     match ext.as_deref() {
         Some("docx") => Ok(OfficeFormat::Docx),
         Some("xlsx") => Ok(OfficeFormat::Xlsx),
         Some("pptx") => Ok(OfficeFormat::Pptx),
-        Some("doc") | Some("xls") | Some("ppt") => {
+        Some("doc" | "xls" | "ppt") => {
             bail!(
                 "Legacy Office format '{}' is not supported. \
                  Please convert to the modern OOXML format (.docx, .xlsx, .pptx).",
@@ -78,6 +78,7 @@ pub fn detect_format(path: &Path) -> Result<OfficeFormat> {
 /// # Returns
 ///
 /// The resolved absolute [`PathBuf`].
+#[must_use]
 pub fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
@@ -99,6 +100,7 @@ pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 /// # Returns
 ///
 /// The original text if within limits, or a truncated version with a notice.
+#[must_use]
 pub fn truncate_output(text: String) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         text

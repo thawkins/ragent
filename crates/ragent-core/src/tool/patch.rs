@@ -17,14 +17,14 @@ pub struct PatchTool;
 
 #[async_trait::async_trait]
 impl Tool for PatchTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "patch"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Apply a unified diff patch to one or more files. The patch must be in \
          unified diff format (as produced by `diff -u` or `git diff`). All hunks \
          are validated before any files are written."
@@ -55,7 +55,7 @@ impl Tool for PatchTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:write"
     }
 
@@ -288,7 +288,7 @@ fn parse_hunk_header(header: &str) -> Result<(usize, usize)> {
 
     let parts: Vec<&str> = inner.split_whitespace().collect();
     if parts.len() < 2 {
-        bail!("Invalid hunk header: {}", header);
+        bail!("Invalid hunk header: {header}");
     }
 
     let old_part = parts[0]

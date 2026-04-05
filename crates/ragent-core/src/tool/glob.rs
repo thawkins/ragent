@@ -17,12 +17,12 @@ pub struct GlobTool;
 
 #[async_trait::async_trait]
 impl Tool for GlobTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "glob"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Find files matching a glob pattern. Recursively searches directories."
     }
 
@@ -43,7 +43,7 @@ impl Tool for GlobTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -58,15 +58,15 @@ impl Tool for GlobTool {
         let pattern = input["pattern"]
             .as_str()
             .context("Missing required 'pattern' parameter")?;
-        let base_dir = input["path"]
-            .as_str()
-            .map(|p| resolve_path(&ctx.working_dir, p))
-            .unwrap_or_else(|| ctx.working_dir.clone());
+        let base_dir = input["path"].as_str().map_or_else(
+            || ctx.working_dir.clone(),
+            |p| resolve_path(&ctx.working_dir, p),
+        );
 
         let glob = globset::GlobBuilder::new(pattern)
             .case_insensitive(false)
             .build()
-            .with_context(|| format!("Invalid glob pattern: {}", pattern))?;
+            .with_context(|| format!("Invalid glob pattern: {pattern}"))?;
         let matcher = glob.compile_matcher();
 
         let mut match_results = Vec::new();

@@ -14,7 +14,7 @@ use std::path::PathBuf;
 ///
 /// * `name` - The skill identifier (e.g., "simplify")
 /// * `description` - Human-readable description
-/// * `argument_hint` - Optional usage hint (e.g., "[output_path]")
+/// * `argument_hint` - Optional usage hint (e.g., "[`output_path`]")
 /// * `disable_model_invocation` - If true, model cannot invoke this skill
 /// * `allowed_tools` - Tools the skill may use
 /// * `body` - The instruction body
@@ -39,6 +39,7 @@ use std::path::PathBuf;
 /// );
 /// assert_eq!(skill.name, "test");
 /// ```
+#[must_use]
 pub fn make_bundled_skill(
     name: &str,
     description: &str,
@@ -50,7 +51,7 @@ pub fn make_bundled_skill(
     SkillInfo {
         name: name.to_string(),
         description: Some(description.to_string()),
-        argument_hint: argument_hint.map(|h| h.to_string()),
+        argument_hint: argument_hint.map(std::string::ToString::to_string),
         disable_model_invocation,
         user_invocable: true,
         allowed_tools,
@@ -96,6 +97,7 @@ pub fn make_bundled_skill(
 /// assert!(names.contains(&"debug"));
 /// assert!(names.contains(&"loop"));
 /// ```
+#[must_use]
 pub fn bundled_skills() -> Vec<SkillInfo> {
     vec![simplify_skill(), batch_skill(), debug_skill(), loop_skill()]
 }

@@ -137,14 +137,14 @@ async fn collect_git_context(working_dir: &Path) -> String {
 
     let mut output = String::new();
     if let Some(branch) = branch {
-        output.push_str(&format!("**Branch:** {}\n", branch));
+        output.push_str(&format!("**Branch:** {branch}\n"));
     }
     if let Some(origin_head) = origin_head {
         let cleaned = origin_head
             .trim()
             .strip_prefix("refs/remotes/origin/")
             .unwrap_or(origin_head.trim());
-        output.push_str(&format!("**Origin HEAD:** {}\n", cleaned));
+        output.push_str(&format!("**Origin HEAD:** {cleaned}\n"));
     }
     if let Some(status) = status {
         output.push_str("**Status:**\n```\n");
@@ -200,7 +200,8 @@ async fn collect_readme_context(working_dir: &Path) -> String {
     };
 
     let path_for_read = path.clone();
-    let content = tokio::task::spawn_blocking(move || {
+
+    tokio::task::spawn_blocking(move || {
         std::fs::read_to_string(&path_for_read).ok().map(|content| {
             let mut lines = content.lines();
             let mut preview = Vec::new();
@@ -226,9 +227,7 @@ async fn collect_readme_context(working_dir: &Path) -> String {
     .await
     .ok()
     .flatten()
-    .unwrap_or_default();
-
-    content
+    .unwrap_or_default()
 }
 
 /// Collect git, README, and agents-md context snippets for prompt injection.
@@ -237,7 +236,7 @@ pub async fn collect_prompt_context(working_dir: &Path) -> (String, String, Stri
     let key = prompt_context_cache_key(working_dir);
     if let Ok(cache) = prompt_context_cache().lock()
         && let Some(entry) = cache.get(&key)
-        && entry.cached_at.map(|t| t.elapsed() < TTL).unwrap_or(false)
+        && entry.cached_at.is_some_and(|t| t.elapsed() < TTL)
     {
         return (
             entry.git.clone(),
@@ -299,8 +298,8 @@ fn build_tree_recursive(
         Err(_) => return,
     };
 
-    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.file_name());
+    let mut entries: Vec<_> = entries.filter_map(std::result::Result::ok).collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
 
     entries.retain(|e| {
         let name = e.file_name();
@@ -321,11 +320,11 @@ fn build_tree_recursive(
         let path = entry.path();
 
         if path.is_dir() {
-            lines.push(format!("{}{}{}/", prefix, connector, name_str));
+            lines.push(format!("{prefix}{connector}{name_str}/"));
             let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
             build_tree_recursive(&path, &new_prefix, depth + 1, max_depth, lines);
         } else {
-            lines.push(format!("{}{}{}", prefix, connector, name_str));
+            lines.push(format!("{prefix}{connector}{name_str}"));
         }
     }
 }
@@ -345,9 +344,9 @@ pub enum AgentMode {
 impl fmt::Display for AgentMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AgentMode::Primary => write!(f, "primary"),
-            AgentMode::Subagent => write!(f, "subagent"),
-            AgentMode::All => write!(f, "all"),
+            Self::Primary => write!(f, "primary"),
+            Self::Subagent => write!(f, "subagent"),
+            Self::All => write!(f, "all"),
         }
     }
 }
@@ -456,6 +455,7 @@ impl Default for AgentInfo {
 /// assert!(names.contains(&"general"));
 /// assert!(names.contains(&"explore"));
 /// ```
+#[must_use]
 pub fn create_builtin_agents() -> Vec<AgentInfo> {
     vec![
         AgentInfo {
@@ -671,6 +671,7 @@ fn rule(
 
 /// Returns the default permission ruleset applied when a custom agent does not
 /// specify its own `permissions` array.
+#[must_use]
 pub fn default_permissions() -> PermissionRuleset {
     vec![
         rule(Permission::Read, "**", PermissionAction::Allow),
@@ -711,7 +712,7 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
     let mut agent = builtins
         .into_iter()
         .find(|a| a.name == name)
-        .unwrap_or_else(|| AgentInfo::new(name, &format!("Custom agent: {}", name)));
+        .unwrap_or_else(|| AgentInfo::new(name, format!("Custom agent: {name}")));
 
     // Apply config overrides
     if let Some(agent_config) = config.agent.get(name) {
@@ -802,6 +803,7 @@ pub fn resolve_agent_with_customs(
 /// let (agents, warnings) = load_all_agents(Path::new("."));
 /// println!("{} agents loaded, {} warnings", agents.len(), warnings.len());
 /// ```
+#[must_use]
 pub fn load_all_agents(working_dir: &Path) -> (Vec<AgentInfo>, Vec<String>) {
     let builtins = create_builtin_agents();
     let builtin_names: std::collections::HashSet<String> =
@@ -865,53 +867,47 @@ fn read_git_status(working_dir: &Path) -> String {
 
     // Get current branch
     if let Ok(result) = Command::new("git")
-        .args(&["branch", "--show-current"])
+        .args(["branch", "--show-current"])
         .current_dir(working_dir)
         .output()
+        && result.status.success()
+        && let Ok(branch) = String::from_utf8(result.stdout)
     {
-        if result.status.success() {
-            if let Ok(branch) = String::from_utf8(result.stdout) {
-                let branch = branch.trim();
-                if !branch.is_empty() {
-                    output.push_str(&format!("**Branch:** {}\n", branch));
-                }
-            }
+        let branch = branch.trim();
+        if !branch.is_empty() {
+            output.push_str(&format!("**Branch:** {branch}\n"));
         }
     }
 
     // Get git status (short format)
     if let Ok(result) = Command::new("git")
-        .args(&["status", "--short"])
+        .args(["status", "--short"])
         .current_dir(working_dir)
         .output()
+        && result.status.success()
+        && let Ok(status) = String::from_utf8(result.stdout)
     {
-        if result.status.success() {
-            if let Ok(status) = String::from_utf8(result.stdout) {
-                let status = status.trim();
-                if !status.is_empty() {
-                    output.push_str("**Status:**\n```\n");
-                    output.push_str(status);
-                    output.push_str("\n```\n");
-                }
-            }
+        let status = status.trim();
+        if !status.is_empty() {
+            output.push_str("**Status:**\n```\n");
+            output.push_str(status);
+            output.push_str("\n```\n");
         }
     }
 
     // Get recent commits (5 most recent, one line each)
     if let Ok(result) = Command::new("git")
-        .args(&["log", "--oneline", "-n", "5"])
+        .args(["log", "--oneline", "-n", "5"])
         .current_dir(working_dir)
         .output()
+        && result.status.success()
+        && let Ok(commits) = String::from_utf8(result.stdout)
     {
-        if result.status.success() {
-            if let Ok(commits) = String::from_utf8(result.stdout) {
-                let commits = commits.trim();
-                if !commits.is_empty() {
-                    output.push_str("**Recent Commits:**\n```\n");
-                    output.push_str(commits);
-                    output.push_str("\n```\n");
-                }
-            }
+        let commits = commits.trim();
+        if !commits.is_empty() {
+            output.push_str("**Recent Commits:**\n```\n");
+            output.push_str(commits);
+            output.push_str("\n```\n");
         }
     }
 
@@ -951,14 +947,14 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
         if !path.is_file() {
             continue;
         }
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if AGENT_FILE_NAMES.contains(&name) {
-                let depth = path
-                    .strip_prefix(working_dir)
-                    .map(|rel| rel.components().count())
-                    .unwrap_or(usize::MAX);
-                found.push((depth, path));
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && AGENT_FILE_NAMES.contains(&name)
+        {
+            let depth = path
+                .strip_prefix(working_dir)
+                .map(|rel| rel.components().count())
+                .unwrap_or(usize::MAX);
+            found.push((depth, path));
         }
     }
 
@@ -1002,6 +998,7 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
 }
 
 /// Build a system prompt for the given agent using cached context.
+#[must_use]
 pub fn build_system_prompt(
     agent: &AgentInfo,
     working_dir: &Path,
@@ -1027,15 +1024,11 @@ pub fn build_system_prompt_with_context(
     let mut prompt = String::new();
 
     // Use provided agents_md content or collect it from the project tree.
-    let agents_md_content = agents_md
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| collect_agents_md_content(working_dir));
-    let git_status_text = git_status
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| read_git_status(working_dir));
-    let readme_text = readme
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| read_readme(working_dir));
+    let agents_md_content =
+        agents_md.map_or_else(|| collect_agents_md_content(working_dir), ToOwned::to_owned);
+    let git_status_text =
+        git_status.map_or_else(|| read_git_status(working_dir), ToOwned::to_owned);
+    let readme_text = readme.map_or_else(|| read_readme(working_dir), ToOwned::to_owned);
 
     // Agent identity and role — substitute template variables used by custom agents.
     if let Some(ref agent_prompt) = agent.prompt {
@@ -1071,7 +1064,7 @@ pub fn build_system_prompt_with_context(
 
     // Single-step agents (e.g. "ask") are tool-free; skip project context
     // so the model focuses on answering the user's question directly.
-    let has_tools = agent.max_steps.map_or(true, |s| s > 1);
+    let has_tools = agent.max_steps.is_none_or(|s| s > 1);
     if !has_tools {
         return prompt;
     }
@@ -1080,7 +1073,7 @@ pub fn build_system_prompt_with_context(
     if agent
         .prompt
         .as_deref()
-        .map_or(true, |p| !p.contains("{{WORKING_DIR}}"))
+        .is_none_or(|p| !p.contains("{{WORKING_DIR}}"))
     {
         prompt.push_str(&format!(
             "## Working Directory\n\
@@ -1093,7 +1086,7 @@ pub fn build_system_prompt_with_context(
     if agent
         .prompt
         .as_deref()
-        .map_or(true, |p| !p.contains("{{FILE_TREE}}"))
+        .is_none_or(|p| !p.contains("{{FILE_TREE}}"))
         && !file_tree.is_empty()
     {
         prompt.push_str("## Project Structure\n");
@@ -1106,7 +1099,7 @@ pub fn build_system_prompt_with_context(
     if agent
         .prompt
         .as_deref()
-        .map_or(true, |p| !p.contains("{{AGENTS_MD}}"))
+        .is_none_or(|p| !p.contains("{{AGENTS_MD}}"))
         && !agents_md_content.is_empty()
     {
         prompt.push_str("## Project Guidelines (AGENTS.md)\n");
@@ -1117,7 +1110,7 @@ pub fn build_system_prompt_with_context(
     if agent
         .prompt
         .as_deref()
-        .map_or(true, |p| !p.contains("{{GIT_STATUS}}"))
+        .is_none_or(|p| !p.contains("{{GIT_STATUS}}"))
         && !git_status_text.trim().is_empty()
     {
         prompt.push_str("## Git Context\n");
@@ -1128,7 +1121,7 @@ pub fn build_system_prompt_with_context(
     if agent
         .prompt
         .as_deref()
-        .map_or(true, |p| !p.contains("{{README}}"))
+        .is_none_or(|p| !p.contains("{{README}}"))
         && !readme_text.trim().is_empty()
     {
         prompt.push_str("## README\n");
@@ -1145,28 +1138,27 @@ pub fn build_system_prompt_with_context(
             .join("PROJECT_ANALYSIS.md");
         let user_mem = dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
 
-        if let Ok(content) = std::fs::read_to_string(&project_mem) {
-            if !content.trim().is_empty() {
-                prompt.push_str("## Project Memory\n");
-                prompt.push_str(&content);
-                prompt.push_str("\n\n");
-            }
+        if let Ok(content) = std::fs::read_to_string(&project_mem)
+            && !content.trim().is_empty()
+        {
+            prompt.push_str("## Project Memory\n");
+            prompt.push_str(&content);
+            prompt.push_str("\n\n");
         }
-        if let Ok(content) = std::fs::read_to_string(&project_analysis) {
-            if !content.trim().is_empty() {
-                prompt.push_str("## Project Analysis\n");
-                prompt.push_str(&content);
-                prompt.push_str("\n\n");
-            }
+        if let Ok(content) = std::fs::read_to_string(&project_analysis)
+            && !content.trim().is_empty()
+        {
+            prompt.push_str("## Project Analysis\n");
+            prompt.push_str(&content);
+            prompt.push_str("\n\n");
         }
-        if let Some(path) = user_mem {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if !content.trim().is_empty() {
-                    prompt.push_str("## User Memory\n");
-                    prompt.push_str(&content);
-                    prompt.push_str("\n\n");
-                }
-            }
+        if let Some(path) = user_mem
+            && let Ok(content) = std::fs::read_to_string(&path)
+            && !content.trim().is_empty()
+        {
+            prompt.push_str("## User Memory\n");
+            prompt.push_str(&content);
+            prompt.push_str("\n\n");
         }
     }
 
@@ -1245,19 +1237,15 @@ pub fn build_system_prompt_with_context(
 
         for sa in &spawnable {
             // Derive key traits for the LLM to reason about
-            let model_tier = sa
-                .model
-                .as_ref()
-                .map(|m| {
-                    if m.model_id.contains("haiku") {
-                        "fast / low-cost"
-                    } else if m.model_id.contains("opus") {
-                        "powerful / higher-cost"
-                    } else {
-                        "standard"
-                    }
-                })
-                .unwrap_or("standard");
+            let model_tier = sa.model.as_ref().map_or("standard", |m| {
+                if m.model_id.contains("haiku") {
+                    "fast / low-cost"
+                } else if m.model_id.contains("opus") {
+                    "powerful / higher-cost"
+                } else {
+                    "standard"
+                }
+            });
 
             let can_write = sa
                 .permission

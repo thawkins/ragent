@@ -200,6 +200,7 @@ impl McpClient {
     /// let client = McpClient::new();
     /// assert!(client.servers().is_empty());
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             servers: Vec::new(),
@@ -387,6 +388,7 @@ impl McpClient {
     /// let tools = client.list_tools();
     /// assert!(tools.is_empty());
     /// ```
+    #[must_use]
     pub fn list_tools(&self) -> Vec<McpToolDef> {
         self.servers
             .iter()
@@ -413,6 +415,7 @@ impl McpClient {
     /// let tools = client.list_tools_for_server("my-server");
     /// assert!(tools.is_empty());
     /// ```
+    #[must_use]
     pub fn list_tools_for_server(&self, server_id: &str) -> Vec<McpToolDef> {
         self.servers
             .iter()
@@ -519,7 +522,7 @@ impl McpClient {
         let conns = self.connections.read().await;
         let conn = conns
             .get(server_id)
-            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' is not connected", server_id))?;
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{server_id}' is not connected"))?;
 
         let tools = conn.service.peer().list_all_tools().await?;
         let tool_defs: Vec<McpToolDef> = tools
@@ -584,7 +587,7 @@ impl McpClient {
         let conns = self.connections.read().await;
         let conn = conns
             .get(server_id)
-            .ok_or_else(|| anyhow::anyhow!("MCP server '{}' is not connected", server_id))?;
+            .ok_or_else(|| anyhow::anyhow!("MCP server '{server_id}' is not connected"))?;
 
         let arguments = match input {
             Value::Object(map) => Some(map),
@@ -655,7 +658,7 @@ impl McpClient {
             })
             .map(|s| s.id.clone())
             .ok_or_else(|| {
-                anyhow::anyhow!("No connected MCP server provides tool '{}'", tool_name)
+                anyhow::anyhow!("No connected MCP server provides tool '{tool_name}'")
             })?;
 
         self.call_tool(&server_id, tool_name, input).await
@@ -687,6 +690,7 @@ impl McpClient {
     /// let client = McpClient::new();
     /// assert!(client.servers().is_empty());
     /// ```
+    #[must_use]
     pub fn servers(&self) -> &[McpServer] {
         &self.servers
     }

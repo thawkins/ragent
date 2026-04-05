@@ -1,4 +1,4 @@
-//! Persistent storage layer backed by SQLite.
+//! Persistent storage layer backed by `SQLite`.
 //!
 //! [`Storage`] manages the database lifecycle (open, migrate) and exposes
 //! CRUD operations for sessions, messages, provider credentials, and MCP
@@ -33,9 +33,10 @@ static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
         .or_else(|_| std::env::var("USERNAME"))
         .unwrap_or_else(|_| "ragent-default-user".to_string());
 
-    let home = dirs::home_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "ragent-default-home".to_string());
+    let home = dirs::home_dir().map_or_else(
+        || "ragent-default-home".to_string(),
+        |p| p.to_string_lossy().into_owned(),
+    );
 
     let input = format!("{username}:{home}");
     blake3::derive_key("ragent credential encryption v2", input.as_bytes())
@@ -58,6 +59,7 @@ static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
 /// let recovered = decrypt_key(&encrypted);
 /// assert_eq!(recovered, "sk-secret-key");
 /// ```
+#[must_use]
 pub fn encrypt_key(key: &str) -> String {
     use rand::Rng;
     let mut nonce = [0u8; NONCE_LEN];
@@ -92,6 +94,7 @@ pub fn encrypt_key(key: &str) -> String {
 /// let recovered = decrypt_key(&encrypted);
 /// assert_eq!(recovered, "my-api-key");
 /// ```
+#[must_use]
 pub fn decrypt_key(encoded: &str) -> String {
     if let Some(v2_data) = encoded.strip_prefix(ENCRYPT_V2_PREFIX) {
         // v2 format: blake3-derived keystream
@@ -120,7 +123,7 @@ pub fn decrypt_key(encoded: &str) -> String {
 
 /// Generates a keystream of the given length using blake3 in XOF mode.
 fn generate_keystream(nonce: &[u8; NONCE_LEN], len: usize) -> Vec<u8> {
-    let mut hasher = blake3::Hasher::new_keyed(&*MACHINE_KEY);
+    let mut hasher = blake3::Hasher::new_keyed(&MACHINE_KEY);
     hasher.update(nonce);
     let mut output = vec![0u8; len];
     let mut reader = hasher.finalize_xof();
@@ -155,6 +158,7 @@ fn deobfuscate_key_v1(encoded: &str) -> String {
 /// assert!(!obfuscated.is_empty());
 /// assert_ne!(obfuscated, "sk-secret-key");
 /// ```
+#[must_use]
 pub fn obfuscate_key(key: &str) -> String {
     encrypt_key(key)
 }
@@ -173,6 +177,7 @@ pub fn obfuscate_key(key: &str) -> String {
 /// let recovered = deobfuscate_key(&obfuscated);
 /// assert_eq!(recovered, "my-api-key");
 /// ```
+#[must_use]
 pub fn deobfuscate_key(encoded: &str) -> String {
     decrypt_key(encoded)
 }
@@ -193,7 +198,7 @@ macro_rules! lock_conn {
 }
 
 impl Storage {
-    /// Opens (or creates) a SQLite database at the given filesystem path and
+    /// Opens (or creates) a `SQLite` database at the given filesystem path and
     /// runs migrations to ensure the schema is up to date.
     ///
     /// # Errors
@@ -577,11 +582,9 @@ impl Storage {
             };
             let parts: Vec<MessagePart> = serde_json::from_str(&parts_json).unwrap_or_default();
             let created_at = DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
             let updated_at = DateTime::parse_from_rfc3339(&updated_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+                .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
             messages.push(Message {
                 id,
                 session_id: sid,
@@ -768,12 +771,12 @@ impl Storage {
             let conn = lock_conn!(self)?;
             let mut stmt = conn.prepare("SELECT api_key FROM provider_auth")?;
             stmt.query_map([], |row| row.get::<_, String>(0))?
-                .filter_map(|r| r.ok())
+                .filter_map(std::result::Result::ok)
                 .map(|encoded| deobfuscate_key(&encoded))
                 .filter(|k| !k.is_empty())
                 .collect()
         };
-        crate::sanitize::seed_secrets(keys.into_iter());
+        crate::sanitize::seed_secrets(keys);
         Ok(())
     }
 
@@ -932,7 +935,7 @@ impl Storage {
         let now = chrono::Utc::now().to_rfc3339();
         let mut sets = vec!["updated_at = ?1"];
         let mut idx = 2u32;
-        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now.clone())];
+        let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
 
         if let Some(t) = title {
             sets.push(if idx == 2 {
@@ -977,7 +980,8 @@ impl Storage {
             id_ph,
             sid_ph
         );
-        let params: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            vals.iter().map(std::convert::AsRef::as_ref).collect();
         let changed = conn.execute(&sql, params.as_slice())?;
         Ok(changed > 0)
     }
@@ -1003,7 +1007,7 @@ impl Storage {
     }
 }
 
-/// Raw row representation of a session as stored in SQLite.
+/// Raw row representation of a session as stored in `SQLite`.
 #[derive(Debug, Clone)]
 pub struct SessionRow {
     /// Unique session identifier.

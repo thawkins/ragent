@@ -33,6 +33,7 @@ fn safe_session_id(session_id: &str) -> String {
 }
 
 /// Return the path of the persistent state file for the given session.
+#[must_use]
 pub fn state_file_path(session_id: &str) -> String {
     format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id))
 }
@@ -229,11 +230,12 @@ const DENIED_PATTERNS: &[&str] = &[
 ];
 
 /// Check if command is in the safe whitelist (exact match or with allowed args).
+#[must_use]
 pub fn is_safe_command(cmd: &str) -> bool {
     let trimmed = cmd.trim();
     SAFE_COMMANDS
         .iter()
-        .any(|safe| trimmed == *safe || trimmed.starts_with(&format!("{} ", safe)))
+        .any(|safe| trimmed == *safe || trimmed.starts_with(&format!("{safe} ")))
 }
 
 /// Check if command uses a banned tool (e.g., curl, wget).
@@ -304,23 +306,23 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
         Ok(Ok(output)) => {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                bail!("Bash syntax error: {}", stderr);
+                bail!("Bash syntax error: {stderr}");
             }
             Ok(())
         }
-        Ok(Err(e)) => bail!("Failed to check bash syntax: {}", e),
+        Ok(Err(e)) => bail!("Failed to check bash syntax: {e}"),
         Err(_) => bail!("Bash syntax check timed out"),
     }
 }
 
 #[async_trait::async_trait]
 impl Tool for BashTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "bash"
     }
 
     /// Returns a human-readable description of what the tool does.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Execute a shell command and return stdout and stderr. \
                Commands are run with bash -c in the working directory."
     }
@@ -341,7 +343,7 @@ impl Tool for BashTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "bash:execute"
     }
 
@@ -409,13 +411,13 @@ impl Tool for BashTool {
         }
 
         // Check user-defined denylist (from ragent.json `bash.denylist`)
-        if !crate::yolo::is_enabled() {
-            if let Some(pattern) = crate::bash_lists::matches_denylist(command) {
-                bail!(
-                    "Command rejected: matches user-defined deny pattern '{pattern}'. \
+        if !crate::yolo::is_enabled()
+            && let Some(pattern) = crate::bash_lists::matches_denylist(command)
+        {
+            bail!(
+                "Command rejected: matches user-defined deny pattern '{pattern}'. \
                     Use `/bash remove deny \"{pattern}\"` to remove this restriction."
-                );
-            }
+            );
         }
 
         // Reject commands that use encoding/eval tricks to bypass the denylist.
@@ -474,13 +476,13 @@ impl Tool for BashTool {
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         // After execution, read the saved cwd and publish ShellCwdChanged.
-        if let Ok(state_content) = std::fs::read_to_string(&state_file) {
-            if let Some(cwd) = parse_cwd_from_state(&state_content) {
-                ctx.event_bus.publish(Event::ShellCwdChanged {
-                    session_id: ctx.session_id.clone(),
-                    cwd,
-                });
-            }
+        if let Ok(state_content) = std::fs::read_to_string(&state_file)
+            && let Some(cwd) = parse_cwd_from_state(&state_content)
+        {
+            ctx.event_bus.publish(Event::ShellCwdChanged {
+                session_id: ctx.session_id.clone(),
+                cwd,
+            });
         }
 
         match result {
@@ -530,8 +532,7 @@ impl Tool for BashTool {
                 let line_count = content.lines().count();
                 Ok(ToolOutput {
                     content: format!(
-                        "Exit code: {}\nDuration: {}ms\n\n{}",
-                        exit_code, elapsed_ms, content
+                        "Exit code: {exit_code}\nDuration: {elapsed_ms}ms\n\n{content}"
                     ),
                     metadata: Some(json!({
                         "exit_code": exit_code,
@@ -541,11 +542,10 @@ impl Tool for BashTool {
                 })
             }
             Ok(Err(e)) => Err(anyhow::anyhow!(
-                "Failed to execute command: {}. Check that the command exists and is accessible.",
-                e
+                "Failed to execute command: {e}. Check that the command exists and is accessible."
             )),
             Err(_) => Ok(ToolOutput {
-                content: format!("Command timed out after {} seconds", timeout_secs),
+                content: format!("Command timed out after {timeout_secs} seconds"),
                 metadata: Some(json!({
                     "timeout": true,
                     "timeout_secs": timeout_secs,

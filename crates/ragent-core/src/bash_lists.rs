@@ -61,6 +61,7 @@ pub fn load_from_config() {
 // ── Read accessors ────────────────────────────────────────────────────────────
 
 /// Returns a snapshot of the current allowlist.
+#[must_use]
 pub fn get_allowlist() -> Vec<String> {
     global()
         .read()
@@ -69,6 +70,7 @@ pub fn get_allowlist() -> Vec<String> {
 }
 
 /// Returns a snapshot of the current denylist.
+#[must_use]
 pub fn get_denylist() -> Vec<String> {
     global()
         .read()
@@ -77,9 +79,10 @@ pub fn get_denylist() -> Vec<String> {
 }
 
 /// Returns `true` if the command's first token matches any user-defined allowlist entry.
+#[must_use]
 pub fn is_allowlisted(command: &str) -> bool {
     let first_token = command.split_whitespace().next().unwrap_or("");
-    global().read().map_or(false, |g| {
+    global().read().is_ok_and(|g| {
         g.allowlist
             .iter()
             .any(|entry| first_token == entry.as_str())
@@ -87,6 +90,7 @@ pub fn is_allowlisted(command: &str) -> bool {
 }
 
 /// Returns the first user-defined denylist pattern that appears in `command`, if any.
+#[must_use]
 pub fn matches_denylist(command: &str) -> Option<String> {
     global().read().ok().and_then(|g| {
         g.denylist
@@ -110,8 +114,8 @@ pub enum Scope {
 impl Scope {
     fn config_path(self) -> Result<PathBuf> {
         match self {
-            Scope::Project => Ok(PathBuf::from("ragent.json")),
-            Scope::Global => {
+            Self::Project => Ok(PathBuf::from("ragent.json")),
+            Self::Global => {
                 let dir = dirs::config_dir().context("Cannot determine global config directory")?;
                 Ok(dir.join("ragent").join("ragent.json"))
             }
@@ -229,11 +233,11 @@ where
     mutate(&mut root["bash"]);
 
     // Write back
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Creating directory {}", parent.display()))?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Creating directory {}", parent.display()))?;
     }
     let text = serde_json::to_string_pretty(&root).context("Serialising updated config")?;
     std::fs::write(&path, text).with_context(|| format!("Writing {}", path.display()))?;

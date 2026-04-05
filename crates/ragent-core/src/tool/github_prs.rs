@@ -23,11 +23,11 @@ pub struct GithubListPrsTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubListPrsTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_list_prs"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "List GitHub pull requests for the current repository. Optional: state (open/closed/all), base branch, limit (default 20)."
     }
 
@@ -52,7 +52,7 @@ impl Tool for GithubListPrsTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:read"
     }
 
@@ -106,11 +106,11 @@ pub struct GithubGetPrTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubGetPrTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_get_pr"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get details of a specific GitHub pull request including description, status, and review comments."
     }
 
@@ -127,7 +127,7 @@ impl Tool for GithubGetPrTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:read"
     }
 
@@ -159,18 +159,18 @@ impl Tool for GithubGetPrTool {
              ### Description\n\n{body}\n"
         );
 
-        if let Some(rev_arr) = reviews.as_array() {
-            if !rev_arr.is_empty() {
-                md.push_str("\n### Reviews\n\n");
-                for rev in rev_arr {
-                    let reviewer = rev["user"]["login"].as_str().unwrap_or("?");
-                    let rev_state = rev["state"].as_str().unwrap_or("?");
-                    let rev_body = rev["body"].as_str().unwrap_or("");
-                    if rev_body.is_empty() {
-                        md.push_str(&format!("- **{reviewer}**: {rev_state}\n"));
-                    } else {
-                        md.push_str(&format!("- **{reviewer}** ({rev_state}): {rev_body}\n"));
-                    }
+        if let Some(rev_arr) = reviews.as_array()
+            && !rev_arr.is_empty()
+        {
+            md.push_str("\n### Reviews\n\n");
+            for rev in rev_arr {
+                let reviewer = rev["user"]["login"].as_str().unwrap_or("?");
+                let rev_state = rev["state"].as_str().unwrap_or("?");
+                let rev_body = rev["body"].as_str().unwrap_or("");
+                if rev_body.is_empty() {
+                    md.push_str(&format!("- **{reviewer}**: {rev_state}\n"));
+                } else {
+                    md.push_str(&format!("- **{reviewer}** ({rev_state}): {rev_body}\n"));
                 }
             }
         }
@@ -189,11 +189,11 @@ pub struct GithubCreatePrTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubCreatePrTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_create_pr"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Create a new GitHub pull request from the current branch."
     }
 
@@ -226,7 +226,7 @@ impl Tool for GithubCreatePrTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 
@@ -285,11 +285,11 @@ pub struct GithubMergePrTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubMergePrTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_merge_pr"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Merge a GitHub pull request."
     }
 
@@ -315,7 +315,7 @@ impl Tool for GithubMergePrTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 
@@ -353,11 +353,11 @@ pub struct GithubReviewPrTool;
 
 #[async_trait::async_trait]
 impl Tool for GithubReviewPrTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "github_review_pr"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Submit a review on a GitHub pull request."
     }
 
@@ -383,7 +383,7 @@ impl Tool for GithubReviewPrTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "github:write"
     }
 

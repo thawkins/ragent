@@ -1,10 +1,10 @@
-//! Common helpers for LibreOffice (OpenDocument) formats.
+//! Common helpers for `LibreOffice` (`OpenDocument`) formats.
 //!
 //! Provides format detection via file extension, a [`LibreFormat`] enum,
 //! a path resolution helper, and XML extraction utilities shared by all
 //! libreoffice tool modules.
 //!
-//! OpenDocument files are ZIP archives containing XML files. The primary
+//! `OpenDocument` files are ZIP archives containing XML files. The primary
 //! content lives in `content.xml`; document metadata is in `meta.xml`.
 //! `quick-xml` is used for robust XML parsing.
 
@@ -15,14 +15,14 @@ use anyhow::{Context, Result, bail};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
-/// Supported LibreOffice / OpenDocument formats.
+/// Supported `LibreOffice` / `OpenDocument` formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibreFormat {
-    /// OpenDocument Text (.odt)
+    /// `OpenDocument` Text (.odt)
     Odt,
-    /// OpenDocument Spreadsheet (.ods)
+    /// `OpenDocument` Spreadsheet (.ods)
     Ods,
-    /// OpenDocument Presentation (.odp)
+    /// `OpenDocument` Presentation (.odp)
     Odp,
 }
 
@@ -36,7 +36,7 @@ impl std::fmt::Display for LibreFormat {
     }
 }
 
-/// Detects the LibreOffice document format from a file path's extension.
+/// Detects the `LibreOffice` document format from a file path's extension.
 ///
 /// # Errors
 ///
@@ -47,7 +47,7 @@ pub fn detect_format(path: &Path) -> Result<LibreFormat> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
+        .map(str::to_lowercase);
 
     match ext.as_deref() {
         Some("odt") => Ok(LibreFormat::Odt),
@@ -61,6 +61,7 @@ pub fn detect_format(path: &Path) -> Result<LibreFormat> {
 /// Resolves a path string against a working directory.
 ///
 /// If `path_str` is absolute, returns it as-is. Otherwise, joins it to `working_dir`.
+#[must_use]
 pub fn resolve_path(working_dir: &Path, path_str: &str) -> PathBuf {
     let p = PathBuf::from(path_str);
     if p.is_absolute() {
@@ -77,6 +78,7 @@ pub const MAX_OUTPUT_BYTES: usize = 100 * 1024;
 ///
 /// If the text is within limits, returns it unchanged. Otherwise, truncates at
 /// the last newline before the limit and appends a truncation notice.
+#[must_use]
 pub fn truncate_output(text: String) -> String {
     if text.len() <= MAX_OUTPUT_BYTES {
         text
@@ -136,6 +138,7 @@ fn decode_attr_value(a: &quick_xml::events::attributes::Attribute<'_>) -> String
 ///
 /// Collects all character data between tags, inserting newlines at paragraph
 /// / heading / list-item boundaries so the output is readable.
+#[must_use]
 pub fn xml_to_text(xml: &str) -> String {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -167,10 +170,11 @@ pub fn xml_to_text(xml: &str) -> String {
                 // Insert newline at paragraph / heading / row boundaries.
                 let local = e.local_name();
                 let name = std::str::from_utf8(local.as_ref()).unwrap_or("");
-                if matches!(name, "p" | "h" | "list-item" | "table-row" | "page") {
-                    if !out.is_empty() && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
+                if matches!(name, "p" | "h" | "list-item" | "table-row" | "page")
+                    && !out.is_empty()
+                    && !out.ends_with('\n')
+                {
+                    out.push('\n');
                 }
             }
             Ok(Event::Eof) | Err(_) => break,
@@ -187,6 +191,7 @@ pub fn xml_to_text(xml: &str) -> String {
 /// # Errors
 ///
 /// Returns `None` if `meta.xml` cannot be read or parsed.
+#[must_use]
 pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
     let xml = read_zip_entry(path, "meta.xml").ok()?;
     let mut reader = Reader::from_str(&xml);
@@ -213,9 +218,10 @@ pub fn read_meta_field(path: &Path, field_local_name: &str) -> Option<String> {
     None
 }
 
-/// Get an attribute value by local name from a BytesStart element.
+/// Get an attribute value by local name from a `BytesStart` element.
 ///
 /// Returns `None` if the attribute is not found.
+#[must_use]
 pub fn attr_value(e: &quick_xml::events::BytesStart<'_>, local_name: &str) -> Option<String> {
     e.attributes()
         .flatten()

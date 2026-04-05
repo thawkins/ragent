@@ -1,6 +1,6 @@
 //! Generic OpenAI-compatible provider implementation.
 //!
-//! This provider mirrors the OpenAI Chat Completions flow but uses a
+//! This provider mirrors the `OpenAI` Chat Completions flow but uses a
 //! configurable API base URL, including custom ports.
 
 use anyhow::Result;
@@ -21,11 +21,11 @@ impl GenericOpenAiProvider {
 
 #[async_trait::async_trait]
 impl Provider for GenericOpenAiProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "generic_openai"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Generic OpenAI API"
     }
 

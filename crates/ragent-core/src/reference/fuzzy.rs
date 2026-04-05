@@ -40,6 +40,7 @@ pub struct FuzzyMatch {
 ///
 /// This function does not return errors. File system errors during directory
 /// traversal are silently ignored and traversal continues with remaining entries.
+#[must_use]
 pub fn collect_project_files(working_dir: &Path, max: usize) -> Vec<PathBuf> {
     let limit = max.min(MAX_PROJECT_FILES);
     let mut files = Vec::new();
@@ -57,8 +58,8 @@ fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {
         Err(_) => return,
     };
 
-    let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    sorted.sort_by_key(|e| e.file_name());
+    let mut sorted: Vec<_> = entries.filter_map(std::result::Result::ok).collect();
+    sorted.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in sorted {
         if files.len() >= max {
@@ -106,6 +107,7 @@ fn walk_dir(root: &Path, dir: &Path, files: &mut Vec<PathBuf>, max: usize) {
 ///
 /// This function does not return errors. Empty queries and empty candidate lists
 /// both return an empty vector.
+#[must_use]
 pub fn fuzzy_match(query: &str, candidates: &[PathBuf]) -> Vec<FuzzyMatch> {
     if query.is_empty() {
         // Return all candidates with equal score for initial menu

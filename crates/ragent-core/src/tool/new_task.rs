@@ -21,14 +21,14 @@ pub struct NewTaskTool;
 
 #[async_trait::async_trait]
 impl Tool for NewTaskTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "new_task"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Spawn a sub-agent to perform a focused task. Supports synchronous (blocking) \
          and background (non-blocking) modes. Use agent names like 'explore', 'build', \
          'plan', or any custom agent."
@@ -59,14 +59,14 @@ impl Tool for NewTaskTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "agent:spawn"
     }
 
     /// # Errors
     ///
     /// Returns an error if required parameters `agent` or `task` are missing,
-    /// if the TaskManager has not been initialized, or if task spawning fails.
+    /// if the `TaskManager` has not been initialized, or if task spawning fails.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         if let Some(team) = ctx.team_context.as_ref() {
             let guidance = if team.is_lead {
@@ -125,13 +125,13 @@ impl Tool for NewTaskTool {
 
         let background = input
             .get("background")
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         let model = input
             .get("model")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .or_else(|| {
                 // Inherit the parent session's provider/model when no explicit override
                 // is given. This prevents failures when the parent uses a provider

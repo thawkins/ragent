@@ -295,6 +295,7 @@ impl ToolRegistry {
     /// let registry = ToolRegistry::new();
     /// assert!(registry.list().is_empty());
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
@@ -400,6 +401,7 @@ impl Default for ToolRegistry {
 /// let registry = create_default_registry();
 /// assert!(registry.list().contains(&"think".to_string()));
 /// ```
+#[must_use]
 pub fn create_default_registry() -> ToolRegistry {
     let registry = ToolRegistry::new();
     registry.register(Arc::new(read::ReadTool));

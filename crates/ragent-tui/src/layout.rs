@@ -1484,7 +1484,7 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Determine which session to display logs for.
     // If a specific agent is selected, show its logs; otherwise show primary session.
-    let display_session = app
+    let _display_session = app
         .selected_agent_session_id
         .clone()
         .or_else(|| app.session_id.clone());

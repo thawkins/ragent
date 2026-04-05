@@ -11,11 +11,11 @@ pub struct TeamStatusTool;
 
 #[async_trait::async_trait]
 impl Tool for TeamStatusTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "team_status"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Get the current status of a team: member list, their states, and task progress summary."
     }
 
@@ -32,7 +32,7 @@ impl Tool for TeamStatusTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "team:read"
     }
 

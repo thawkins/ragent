@@ -31,14 +31,14 @@ pub struct ReadTool;
 
 #[async_trait::async_trait]
 impl Tool for ReadTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "read"
     }
 
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read file contents. For large files (>100 lines) called without a line range, \
          returns the first 100 lines plus a section map of the file's structure. \
          Use start_line/end_line to read specific sections."
@@ -71,7 +71,7 @@ impl Tool for ReadTool {
     /// # Errors
     ///
     /// Returns an error if the category string cannot be converted or returned.
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "file:read"
     }
 
@@ -145,15 +145,13 @@ impl Tool for ReadTool {
 
                 text.push_str("\n\n--- Section Map ---\n");
                 text.push_str(&format!(
-                    "File has {} total lines. Showing first {} lines above.\n",
-                    total_lines, preview_end
+                    "File has {total_lines} total lines. Showing first {preview_end} lines above.\n"
                 ));
                 text.push_str("Use start_line/end_line to read specific sections:\n\n");
 
                 if sections.is_empty() {
                     text.push_str(&format!(
-                        "  No structural sections detected. Read in chunks using line ranges (1-{}).\n",
-                        total_lines
+                        "  No structural sections detected. Read in chunks using line ranges (1-{total_lines}).\n"
                     ));
                 } else {
                     for s in &sections {

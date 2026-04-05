@@ -19,11 +19,11 @@ pub struct TaskCompleteTool;
 
 #[async_trait::async_trait]
 impl Tool for TaskCompleteTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "task_complete"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Signal that the current task is fully complete. Call this when you have \
          finished all requested work. Provide a concise summary of what was \
          accomplished. This stops the autonomous loop and returns control to the user."
@@ -42,7 +42,7 @@ impl Tool for TaskCompleteTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "task:complete"
     }
 
@@ -57,7 +57,7 @@ impl Tool for TaskCompleteTool {
         });
 
         Ok(ToolOutput {
-            content: format!("✅ Task complete.\n\n{}", summary),
+            content: format!("✅ Task complete.\n\n{summary}"),
             metadata: Some(json!({
                 "task_complete": true,
                 "summary": summary
