@@ -7684,7 +7684,6 @@ Type `/swarm help` for more info.\n";
     /// ```
     pub fn handle_event(&mut self, event: Event) {
         // Mark UI dirty for any event handling
-    self.needs_redraw = true;
         self.needs_redraw = true;
         match event {
             Event::SessionCreated { ref session_id } => {

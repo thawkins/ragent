@@ -209,12 +209,16 @@ pub async fn run_tui(
         tokio::select! {
             // Terminal key/mouse events (polled at 50ms intervals)
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                let mut got_input = false;
                 while ct_event::poll(std::time::Duration::ZERO)? {
                     match ct_event::read()? {
-                        CtEvent::Key(key) => app.handle_key_event(key),
-                        CtEvent::Mouse(mouse) => app.handle_mouse_event(mouse),
+                        CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                        CtEvent::Mouse(mouse) => { app.handle_mouse_event(mouse); got_input = true; }
                         _ => {}
                     }
+                }
+                if got_input {
+                    app.needs_redraw = true;
                 }
             }
             // Wake up when a new bus event arrives (handled in drain loop above)
