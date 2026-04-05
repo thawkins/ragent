@@ -37,6 +37,63 @@ Prefer small line ranges (100 lines max) for large files; iterate with `start_li
 Never invent or guess file contents — always read them with the tool.\n\n\
 Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
 
+/// Build a system-prompt section for LSP code-intelligence tools listing only
+/// the LSP servers that are currently connected. Returns an empty string if no
+/// servers are connected so no misleading guidance is injected.
+async fn build_lsp_guidance_section(lsp_manager: &crate::lsp::SharedLspManager) -> String {
+    use crate::lsp::LspStatus;
+
+    let guard = lsp_manager.read().await;
+    let connected: Vec<&crate::lsp::server::LspServer> = guard
+        .servers()
+        .iter()
+        .filter(|s| s.status == LspStatus::Connected)
+        .collect();
+
+    if connected.is_empty() {
+        return String::new();
+    }
+
+    let mut section = String::from(
+        "\n## Code Intelligence — LSP Tools\n\n\
+        The following Language Server Protocol (LSP) servers are **currently connected**. \
+        For source files in these languages, PREFER the LSP tools over `grep`/`glob` — \
+        they are semantic and understand types, scopes, and cross-file relationships.\n\n\
+        **Connected servers and their file extensions:**\n",
+    );
+
+    for server in &connected {
+        let exts: Vec<String> = server
+            .config
+            .extensions
+            .iter()
+            .map(|e| format!("`.{e}`"))
+            .collect();
+        let caps = server
+            .capabilities_summary
+            .as_deref()
+            .unwrap_or("connected");
+        section.push_str(&format!(
+            "- **{}** ({}) — {}\n",
+            server.language,
+            exts.join(", "),
+            caps
+        ));
+    }
+
+    section.push_str(
+        "\n**Use the right tool for each task:**\n\
+        - Find where a symbol is defined → `lsp_definition` (args: `path`, `line`, `column`)\n\
+        - Find all usages of a symbol → `lsp_references` (args: `path`, `line`, `column`)\n\
+        - Get type info / docs for a symbol → `lsp_hover` (args: `path`, `line`, `column`)\n\
+        - List all symbols in a file → `lsp_symbols` (arg: `path`)\n\
+        - Show compiler errors and warnings → `lsp_diagnostics` (optional arg: `path`)\n\n\
+        **Fallback:** Use `grep` or `glob` only for languages not listed above, \
+        or when searching for patterns across many files simultaneously.\n\n",
+    );
+    section
+}
+
 /// Build a concise system-prompt section listing every registered tool by name and description.
 ///
 /// Injected into every session's system prompt so the model always knows the exact tool names
@@ -365,6 +422,13 @@ impl SessionProcessor {
         // tool names like "search" instead of the actual "grep" tool.
         let tool_reference = build_tool_reference_section(&self.tool_registry);
         system_prompt.push_str(&tool_reference);
+
+        // Inject LSP guidance only for the servers that are actually connected.
+        // This avoids telling the model it can use rust-analyzer when none is running.
+        if let Some(lsp) = self.lsp_manager.get() {
+            let lsp_guidance = build_lsp_guidance_section(lsp).await;
+            system_prompt.push_str(&lsp_guidance);
+        }
 
         if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
             system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
