@@ -44,9 +44,41 @@ async fn delegate(
     tool.execute(input, ctx).await
 }
 
-// ---------------------------------------------------------------------------
-// view_file  →  read
-// ---------------------------------------------------------------------------
+/// Extract a shell command from an input Value, trying multiple common parameter names.
+/// Models emit `command`, `code`, or `cmd` (sometimes as an array like `["bash","-c","..."]`).
+fn extract_command(input: &mut Value) -> Option<String> {
+    // Try `command` first (canonical)
+    if let Some(s) = input["command"].as_str() {
+        return Some(s.to_string());
+    }
+    // Then `code`
+    if let Some(s) = input["code"].as_str().map(|s| s.to_string()) {
+        input["command"] = Value::String(s.clone());
+        return Some(s);
+    }
+    // Then `cmd` — may be a string or an array
+    match &input["cmd"] {
+        Value::String(s) => {
+            let cmd = s.clone();
+            input["command"] = Value::String(cmd.clone());
+            return Some(cmd);
+        }
+        Value::Array(arr) => {
+            // Join array elements as a shell command via `bash -c`
+            let parts: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            if !parts.is_empty() {
+                let cmd = parts.join(" ");
+                input["command"] = Value::String(cmd.clone());
+                return Some(cmd);
+            }
+        }
+        _ => {}
+    }
+    None
+}
 
 /// Alias for `read`. Accepts `path` and optional `start_line`/`end_line`.
 pub struct ViewFileTool;
@@ -498,7 +530,10 @@ impl Tool for RunShellCommandTool {
         "bash:execute"
     }
 
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, mut input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        if extract_command(&mut input).is_none() {
+            anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
+        }
         delegate(&bash::BashTool, input, ctx).await
     }
 }
@@ -531,7 +566,10 @@ impl Tool for RunTerminalCmdTool {
         "bash:execute"
     }
 
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, mut input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        if extract_command(&mut input).is_none() {
+            anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
+        }
         delegate(&bash::BashTool, input, ctx).await
     }
 }
@@ -564,7 +602,10 @@ impl Tool for ExecuteBashTool {
         "bash:execute"
     }
 
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+    async fn execute(&self, mut input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        if extract_command(&mut input).is_none() {
+            anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
+        }
         delegate(&bash::BashTool, input, ctx).await
     }
 }
@@ -599,11 +640,8 @@ impl Tool for ExecuteCodeTool {
     }
 
     async fn execute(&self, mut input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        // Promote code → command
-        if input.get("command").is_none() {
-            if let Some(v) = input.get("code").cloned() {
-                input["command"] = v;
-            }
+        if extract_command(&mut input).is_none() {
+            anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
         }
         delegate(&bash::BashTool, input, ctx).await
     }
@@ -639,11 +677,8 @@ impl Tool for RunCodeTool {
     }
 
     async fn execute(&self, mut input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        // Promote code → command
-        if input.get("command").is_none() {
-            if let Some(v) = input.get("code").cloned() {
-                input["command"] = v;
-            }
+        if extract_command(&mut input).is_none() {
+            anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
         }
         delegate(&bash::BashTool, input, ctx).await
     }

@@ -153,10 +153,8 @@ impl Tool for SearchTool {
             }
         }
 
-        let lines = Arc::try_unwrap(results)
-            .expect("single owner")
-            .into_inner()
-            .expect("lock");
+        drop(results_clone);
+        let lines = results.lock().expect("lock").drain(..).collect::<Vec<_>>();
         let truncated = lines.len() >= max_results;
         if lines.is_empty() {
             return Ok(ToolOutput {
