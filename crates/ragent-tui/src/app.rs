@@ -3925,6 +3925,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             number_input: String::new(),
                             number_cursor: 0,
                             feedback: None,
+                            scroll_offset: 0,
                         });
                         if self.current_screen == ScreenMode::Home {
                             self.current_screen = ScreenMode::Chat;

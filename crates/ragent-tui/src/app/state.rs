@@ -746,6 +746,8 @@ pub struct LspDiscoverState {
     pub number_cursor: usize,
     /// Feedback message shown after an enable action or on error.
     pub feedback: Option<String>,
+    /// Vertical scroll offset for the server list (rows scrolled past the top).
+    pub scroll_offset: u16,
 }
 
 /// State for the interactive `/mcp discover` dialog.

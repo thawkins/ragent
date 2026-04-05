@@ -1230,6 +1230,30 @@ fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
             app.lsp_discover = None;
         }
 
+        // Scroll the server list up/down
+        KeyCode::Up => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.scroll_offset = state.scroll_offset.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let Some(ref mut state) = app.lsp_discover {
+                let max = state.servers.len().saturating_sub(1) as u16;
+                state.scroll_offset = (state.scroll_offset + 1).min(max);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(ref mut state) = app.lsp_discover {
+                state.scroll_offset = state.scroll_offset.saturating_sub(10);
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(ref mut state) = app.lsp_discover {
+                let max = state.servers.len().saturating_sub(1) as u16;
+                state.scroll_offset = (state.scroll_offset + 10).min(max);
+            }
+        }
+
         // Confirm selection on Enter
         KeyCode::Enter => {
             let Some(state) = app.lsp_discover.as_mut() else {

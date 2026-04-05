@@ -2595,13 +2595,12 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         return;
     };
 
-    // Size the dialog: taller when there are more servers.
-    let server_rows = state.servers.len().max(1) as u16;
-    let dialog_height = (server_rows + 10).min(40); // header + rows + prompt + padding
+    // Fixed dialog height — scrollable content fits inside.
+    let dialog_height = 24u16;
     let area = {
         let full = frame.area();
         let h = dialog_height.min(full.height.saturating_sub(4));
-        let w = full.width.min(80);
+        let w = full.width.min(82);
         ratatui::layout::Rect {
             x: (full.width.saturating_sub(w)) / 2,
             y: (full.height.saturating_sub(h)) / 2,
@@ -2639,15 +2638,15 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
         // Column header
         lines.push(Line::from(vec![Span::styled(
             format!(
-                "  {:<3}  {:<18}  {:<24}  {}",
-                "#", "Name", "Extensions", "Executable"
+                "  {:<3}  {:<18}  {:<10}  {:<20}  {}",
+                "#", "Name", "Version", "Extensions", "Executable"
             ),
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         )]));
         lines.push(Line::from(Span::styled(
-            format!("  {}", "─".repeat(70)),
+            format!("  {}", "─".repeat(74)),
             Style::default().fg(Color::DarkGray),
         )));
 
@@ -2655,16 +2654,16 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
             let already_enabled = enabled_ids.contains(&srv.id);
             let num = format!("{}", i + 1);
             let exts = srv.extensions.join(", ");
+            let version = srv.version.as_deref().unwrap_or("—");
             let exe = {
                 let s = srv.executable.to_string_lossy();
-                if s.len() > 28 {
-                    format!("…{}", &s[s.len().saturating_sub(27)..])
+                if s.len() > 22 {
+                    format!("…{}", &s[s.len().saturating_sub(21)..])
                 } else {
                     s.into_owned()
                 }
             };
             let (num_color, name_color, ext_color, exe_color) = if already_enabled {
-                // Yellow tones for already-configured servers
                 (Color::Yellow, Color::Yellow, Color::Yellow, Color::Yellow)
             } else {
                 (Color::Cyan, Color::White, Color::Green, Color::DarkGray)
@@ -2679,7 +2678,11 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
                     format!("  {:<18}", format!("{}{}", srv.id, enabled_tag)),
                     Style::default().fg(name_color),
                 ),
-                Span::styled(format!("  {:<24}", exts), Style::default().fg(ext_color)),
+                Span::styled(
+                    format!("  {:<10}", version),
+                    Style::default().fg(Color::Magenta),
+                ),
+                Span::styled(format!("  {:<20}", exts), Style::default().fg(ext_color)),
                 Span::styled(format!("  {}", exe), Style::default().fg(exe_color)),
             ]));
         }
@@ -2688,6 +2691,16 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
             "  (yellow = already enabled in ragent.json)",
             Style::default().fg(Color::DarkGray),
         )));
+
+        // Scroll hint if list overflows visible area
+        let fixed_rows = 7u16; // header + sep + legend + blank + feedback(2) + prompt lines
+        let visible_rows = area.height.saturating_sub(fixed_rows + 2); // +2 for border
+        if state.servers.len() as u16 > visible_rows {
+            lines.push(Line::from(Span::styled(
+                "  ↑/↓ PgUp/PgDn to scroll",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 
     lines.push(Line::from(""));
@@ -2735,7 +2748,8 @@ fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
 
     let paragraph = Paragraph::new(lines)
         .block(block)
-        .alignment(Alignment::Left);
+        .alignment(Alignment::Left)
+        .scroll((state.scroll_offset, 0));
     frame.render_widget(paragraph, area);
 }
 

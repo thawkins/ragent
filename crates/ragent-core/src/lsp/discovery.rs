@@ -37,6 +37,8 @@ pub struct DiscoveredServer {
     pub extensions: Vec<String>,
     /// Where the executable was found.
     pub source: DiscoverySource,
+    /// Version string, if parseable from the executable path or extension dir name.
+    pub version: Option<String>,
 }
 
 impl DiscoveredServer {
@@ -144,7 +146,8 @@ const KNOWN_SERVERS: &[KnownServer] = &[
 /// Scan the system for installed LSP servers and return discovered entries.
 ///
 /// Checks `PATH` for each known executable. Also scans common VS Code extension
-/// directories for bundled language servers.
+/// directories for bundled language servers. VS Code entries are deduplicated to
+/// the highest-versioned install of each server.
 ///
 /// This function never fails — missing servers are silently skipped.
 pub async fn discover() -> Vec<DiscoveredServer> {
@@ -168,6 +171,7 @@ pub async fn discover() -> Vec<DiscoveredServer> {
                         .map(std::string::ToString::to_string)
                         .collect(),
                     source: DiscoverySource::SystemPath,
+                    version: None,
                 });
                 break; // stop at first matching executable for this language
             }
@@ -175,6 +179,7 @@ pub async fn discover() -> Vec<DiscoveredServer> {
     }
 
     // Scan VS Code extension directories for additional bundled servers.
+    // scan_vscode_extensions already deduplicates to the latest version per language.
     for ext_dir in vscode_extension_dirs() {
         found.extend(scan_vscode_extensions(&ext_dir).await);
     }
@@ -215,9 +220,38 @@ fn vscode_extension_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Parse a semver-like version string from a VS Code extension directory name.
+///
+/// Extension directories are named `<publisher>.<name>-<version>[-<platform>]`,
+/// e.g. `rust-lang.rust-analyzer-0.3.2234-linux-x64`.
+/// Returns the version component as a comparable tuple of (major, minor, patch).
+fn parse_ext_version(dir_name: &str, prefix: &str) -> Option<(u64, u64, u64)> {
+    // Strip the prefix, leaving e.g. "-0.3.2234-linux-x64"
+    let after = dir_name.strip_prefix(prefix)?;
+    // Must start with '-' followed by the version number
+    let version_str = after.strip_prefix('-')?;
+    // Take only the leading version digits (stop at the next '-' which is the platform)
+    let version_part = version_str.split('-').next()?;
+    let mut parts = version_part.splitn(3, '.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next().unwrap_or("0").parse().ok()?;
+    let patch: u64 = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// Format a version tuple back to a display string.
+fn format_version(v: (u64, u64, u64)) -> String {
+    if v.2 == 0 {
+        format!("{}.{}", v.0, v.1)
+    } else {
+        format!("{}.{}.{}", v.0, v.1, v.2)
+    }
+}
+
 /// Scan a VS Code extensions directory for bundled language server executables.
 ///
-/// Returns any discovered servers not already found via PATH.
+/// For each known extension prefix, collects all installed versions and returns
+/// only the highest-versioned one, with the version displayed in the entry.
 async fn scan_vscode_extensions(ext_dir: &std::path::Path) -> Vec<DiscoveredServer> {
     let mut found = Vec::new();
 
@@ -227,8 +261,8 @@ async fn scan_vscode_extensions(ext_dir: &std::path::Path) -> Vec<DiscoveredServ
     };
 
     // Well-known paths within VS Code extensions for common language servers.
+    // (extension_name_prefix, relative_exe_path, language, extensions)
     const EXT_SERVER_HINTS: &[(&str, &str, &str, &[&str])] = &[
-        // (extension_name_prefix, relative_exe_path, language, extensions)
         (
             "rust-lang.rust-analyzer",
             "server/rust-analyzer",
@@ -244,37 +278,57 @@ async fn scan_vscode_extensions(ext_dir: &std::path::Path) -> Vec<DiscoveredServ
         ),
     ];
 
+    // Collect all entries from the extensions directory.
+    let mut all_entries: Vec<(std::ffi::OsString, PathBuf)> = Vec::new();
     let mut rd = read_dir;
     loop {
         let entry = match rd.next_entry().await {
             Ok(Some(e)) => e,
-            Ok(None) => break,
-            Err(_) => break,
+            Ok(None) | Err(_) => break,
         };
+        all_entries.push((entry.file_name(), entry.path()));
+    }
 
-        let dir_name = entry.file_name();
-        let dir_str = dir_name.to_string_lossy();
-
-        for &(prefix, rel_path, language, extensions) in EXT_SERVER_HINTS {
-            if dir_str.starts_with(prefix) {
-                let candidate = entry.path().join(rel_path);
-                if candidate.is_file() {
-                    found.push(DiscoveredServer {
-                        language: language.to_string(),
-                        id: format!("{language}-vscode"),
-                        executable: candidate,
-                        args: vec!["--stdio".to_string()],
-                        extensions: extensions
-                            .iter()
-                            .map(std::string::ToString::to_string)
-                            .collect(),
-                        source: DiscoverySource::VsCodeExtension {
-                            ext_dir: ext_dir.to_path_buf(),
-                        },
-                    });
-                }
+    // For each extension hint, find the highest-versioned matching directory.
+    for &(prefix, rel_path, language, extensions) in EXT_SERVER_HINTS {
+        // Collect all (version_tuple, dir_path) candidates for this prefix.
+        let mut candidates: Vec<((u64, u64, u64), PathBuf)> = Vec::new();
+        for (dir_name, dir_path) in &all_entries {
+            let dir_str = dir_name.to_string_lossy();
+            if !dir_str.starts_with(prefix) {
+                continue;
             }
+            let candidate_exe = dir_path.join(rel_path);
+            if !candidate_exe.is_file() {
+                continue;
+            }
+            let version = parse_ext_version(&dir_str, prefix).unwrap_or((0, 0, 0));
+            candidates.push((version, dir_path.clone()));
         }
+
+        if candidates.is_empty() {
+            continue;
+        }
+
+        // Pick the highest version.
+        candidates.sort_by_key(|(v, _)| *v);
+        let (best_version, best_dir) = candidates.into_iter().last().unwrap();
+        let candidate_exe = best_dir.join(rel_path);
+
+        found.push(DiscoveredServer {
+            language: language.to_string(),
+            id: format!("{language}-vscode"),
+            executable: candidate_exe,
+            args: vec!["--stdio".to_string()],
+            extensions: extensions
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            source: DiscoverySource::VsCodeExtension {
+                ext_dir: ext_dir.to_path_buf(),
+            },
+            version: Some(format_version(best_version)),
+        });
     }
 
     found
