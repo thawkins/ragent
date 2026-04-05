@@ -179,10 +179,32 @@ pub async fn discover() -> Vec<DiscoveredServer> {
     }
 
     // Scan VS Code extension directories for additional bundled servers.
-    // scan_vscode_extensions already deduplicates to the latest version per language.
+    // Collect all candidates from all vscode dirs, then deduplicate by language
+    // keeping the highest version (handles .vscode vs .vscode-server duplicates).
+    let mut vscode_candidates: Vec<DiscoveredServer> = Vec::new();
     for ext_dir in vscode_extension_dirs() {
-        found.extend(scan_vscode_extensions(&ext_dir).await);
+        vscode_candidates.extend(scan_vscode_extensions(&ext_dir).await);
     }
+
+    // For each language, keep only the highest-versioned vscode entry.
+    let mut best_vscode: HashMap<String, DiscoveredServer> = HashMap::new();
+    for srv in vscode_candidates {
+        let version_tuple = srv
+            .version
+            .as_deref()
+            .and_then(|v| parse_version_tuple(v))
+            .unwrap_or((0, 0, 0));
+        let entry = best_vscode.entry(srv.language.clone()).or_insert_with(|| srv.clone());
+        let existing_tuple = entry
+            .version
+            .as_deref()
+            .and_then(|v| parse_version_tuple(v))
+            .unwrap_or((0, 0, 0));
+        if version_tuple > existing_tuple {
+            *entry = srv;
+        }
+    }
+    found.extend(best_vscode.into_values());
 
     found
 }
@@ -207,6 +229,15 @@ fn which_sync(exe: &str) -> Option<PathBuf> {
         // On Windows also try .exe — but ragent targets Linux/macOS.
     }
     None
+}
+
+/// Parse a dotted version string (e.g. `"0.3.2845"`) into a comparable tuple.
+fn parse_version_tuple(v: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = v.splitn(3, '.');
+    let major: u64 = parts.next()?.parse().ok()?;
+    let minor: u64 = parts.next().unwrap_or("0").parse().ok()?;
+    let patch: u64 = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
 }
 
 /// Common locations of VS Code extension directories.
