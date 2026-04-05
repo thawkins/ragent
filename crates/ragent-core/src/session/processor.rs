@@ -814,6 +814,12 @@ impl SessionProcessor {
                 // No tool calls — check whether an Ollama model wrote planning text
                 // instead of calling a tool, and inject a nudge to make it act.
                 let is_ollama = matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
+                let trimmed_text = text_buffer.trim();
+                // Detect "stall" responses: model output is only dots/whitespace,
+                // indicating it was thinking out loud and didn't produce tool calls.
+                let looks_like_stall = !trimmed_text.is_empty()
+                    && !tool_definitions.is_empty()
+                    && trimmed_text.chars().all(|c| c == '.' || c == ' ' || c == '\n');
                 let looks_like_planning = !text_buffer.is_empty()
                     && !tool_definitions.is_empty()
                     && (text_buffer.contains("Let me")
@@ -828,13 +834,17 @@ impl SessionProcessor {
                         || text_buffer.contains("exploring")
                         || text_buffer.contains("examine")
                         || text_buffer.contains("analyze"));
-                // Only nudge on early steps to avoid infinite loops
-                let should_nudge = is_ollama && looks_like_planning && step <= 3;
-                if should_nudge {
+                // Only nudge on early steps to avoid infinite loops.
+                // Stall responses (dots-only) are nudged for any provider; planning
+                // text nudges are limited to Ollama which commonly narrates before acting.
+                let should_nudge_stall = looks_like_stall && step <= 8;
+                let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
+                if should_nudge_stall || should_nudge_planning {
+                    let reason = if should_nudge_stall { "stall (dots-only output)" } else { "planning text without tool calls" };
                     tracing::info!(
                         session_id = %session_id,
                         step,
-                        "Ollama model produced planning text without tool calls — injecting nudge"
+                        "Model produced {reason} — injecting nudge to continue"
                     );
                     chat_messages.push(ChatMessage {
                         role: "assistant".to_string(),
@@ -843,8 +853,8 @@ impl SessionProcessor {
                     chat_messages.push(ChatMessage {
                         role: "user".to_string(),
                         content: ChatContent::Text(
-                            "Please proceed now using tool calls. Do not write more planning \
-                             text — call the appropriate tool immediately."
+                            "Please continue — use tool calls to proceed with the task. \
+                             Do not output dots or placeholder text."
                                 .to_string(),
                         ),
                     });
