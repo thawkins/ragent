@@ -1,5 +1,7 @@
+//! Integration test for live team reconciliation.
+#![allow(missing_docs)]
+
 use std::sync::Arc;
-use tempfile::TempDir;
 
 use ragent_core::event::EventBus;
 use ragent_core::session::SessionManager;

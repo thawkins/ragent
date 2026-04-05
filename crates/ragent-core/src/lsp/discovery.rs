@@ -194,7 +194,9 @@ pub async fn discover() -> Vec<DiscoveredServer> {
             .as_deref()
             .and_then(parse_version_tuple)
             .unwrap_or((0, 0, 0));
-        let entry = best_vscode.entry(srv.language.clone()).or_insert_with(|| srv.clone());
+        let entry = best_vscode
+            .entry(srv.language.clone())
+            .or_insert_with(|| srv.clone());
         let existing_tuple = entry
             .version
             .as_deref()
