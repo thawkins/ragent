@@ -83,6 +83,25 @@ pub(crate) fn capitalize_tool_name(name: &str) -> String {
     }
 }
 
+/// Map an alias tool name to its canonical equivalent for display purposes.
+///
+/// When a model calls an alias tool (e.g. `read_file` instead of `read`),
+/// both the input summary and result summary functions should produce the same
+/// rich display as the canonical tool.
+pub(crate) fn canonical_tool_name(tool: &str) -> &str {
+    match tool {
+        "view_file" | "read_file" | "get_file_contents" => "read",
+        "list_files" | "list_directory" => "list",
+        "find_files" => "glob",
+        "search_in_repo" | "file_search" => "search",
+        "replace_in_file" => "edit",
+        "update_file" => "write",
+        "run_shell_command" | "run_terminal_cmd" | "execute_bash" | "execute_code"
+        | "run_code" => "bash",
+        other => other,
+    }
+}
+
 /// Strip the working directory prefix from a path to produce a project-relative path.
 pub(crate) fn make_relative_path(path: &str, cwd: &str) -> String {
     // Expand ~ in cwd to the home directory for comparison
@@ -110,24 +129,111 @@ pub(crate) fn make_relative_path(path: &str, cwd: &str) -> String {
 
 /// Extract a brief summary from tool input for display next to the tool name.
 pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
+    // Resolve alias tool names to their canonical equivalents so aliases get
+    // the same rich display as canonical tools.
+    let tool = canonical_tool_name(tool);
+    // Helper: try multiple field names, return first that has a str value.
+    let get_str = |keys: &[&str]| -> Option<String> {
+        keys.iter().find_map(|k| input.get(*k)?.as_str().map(|s| s.to_string()))
+    };
     match tool {
-        "bash" => input
-            .get("command")
-            .and_then(|v| v.as_str())
-            .and_then(|s| s.lines().next())
-            .map(|s| format!("$ {}", s))
-            .unwrap_or_default(),
-        "read" => input
-            .get("path")
-            .and_then(|v| v.as_str())
+        "bash" => {
+            // Aliases may send code/cmd instead of command.
+            get_str(&["command", "code", "cmd"])
+                .as_deref()
+                .and_then(|s| s.lines().next())
+                .map(|s| format!("$ {}", s))
+                .unwrap_or_default()
+        }
+        "read" => get_str(&["path"])
+            .as_deref()
             .map(|p| make_relative_path(p, cwd))
             .unwrap_or_default(),
-        "write" | "create" | "edit" | "patch" | "list" | "rm" | "office_read" | "office_write"
-        | "office_info" | "pdf_read" | "pdf_write" => input
-            .get("path")
-            .and_then(|v| v.as_str())
+        "list" => {
+            // list_directory uses "directory"; canonical list uses "path".
+            get_str(&["path", "directory"])
+                .as_deref()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default()
+        }
+        "search" => {
+            let query = get_str(&["query", "pattern"]).unwrap_or_default();
+            let path = get_str(&["path"]).as_deref().map(|p| make_relative_path(p, cwd));
+            match path {
+                Some(p) if !p.is_empty() => format!("\"{}\" in {}", query, p),
+                _ => format!("\"{}\"", query),
+            }
+        }
+        "write" | "create" | "edit" | "patch" | "rm" | "office_read" | "office_write"
+        | "office_info" | "pdf_read" | "pdf_write" => get_str(&["path"])
+            .as_deref()
             .map(|p| make_relative_path(p, cwd))
             .unwrap_or_default(),
+        // New filesystem tools
+        "move_file" | "rename_file" => {
+            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
+            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
+            if dst.is_empty() {
+                make_relative_path(&src, cwd)
+            } else {
+                format!("{} → {}", make_relative_path(&src, cwd), make_relative_path(&dst, cwd))
+            }
+        }
+        "copy_file" => {
+            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
+            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
+            format!("{} → {}", make_relative_path(&src, cwd), make_relative_path(&dst, cwd))
+        }
+        "append_to_file" | "append_file" => get_str(&["path"])
+            .as_deref()
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
+        "make_directory" | "mkdir" => get_str(&["path", "directory"])
+            .as_deref()
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
+        "file_info" => get_str(&["path"])
+            .as_deref()
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default(),
+        "diff_files" => {
+            let a = get_str(&["path_a", "file_a", "original"]).unwrap_or_default();
+            let b = get_str(&["path_b", "file_b", "modified"]).unwrap_or_default();
+            format!("{} ↔ {}", make_relative_path(&a, cwd), make_relative_path(&b, cwd))
+        }
+        "execute_python" => {
+            // Show first non-empty line of the code snippet.
+            get_str(&["code", "script"])
+                .as_deref()
+                .and_then(|s| s.lines().find(|l| !l.trim().is_empty()))
+                .map(|l| format!("py: {}", truncate_str(l, 50)))
+                .unwrap_or_default()
+        }
+        "str_replace_editor" => {
+            let cmd = get_str(&["command", "cmd"]).unwrap_or_else(|| "view".to_string());
+            let path = get_str(&["path"])
+                .as_deref()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            format!("{}: {}", cmd, path)
+        }
+        "calculator" => {
+            let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
+            truncate_str(&expr, 50)
+        }
+        "get_env" => {
+            let key = get_str(&["key", "name", "variable"]).unwrap_or_default();
+            if key.is_empty() {
+                "all vars".to_string()
+            } else {
+                key
+            }
+        }
+        "http_request" | "web_request" => {
+            let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
+            let url = get_str(&["url"]).unwrap_or_default();
+            format!("{} {}", method, truncate_str(&url, 55))
+        }
         "webfetch" => input
             .get("url")
             .and_then(|v| v.as_str())
@@ -264,6 +370,7 @@ pub(crate) fn tool_inline_diff(
     output: &Option<serde_json::Value>,
 ) -> Option<(usize, usize)> {
     let out = output.as_ref()?;
+    let tool = canonical_tool_name(tool);
     match tool {
         "edit" => {
             let old_lines = out.get("old_lines").and_then(|v| v.as_u64())? as usize;
@@ -294,6 +401,8 @@ pub(crate) fn tool_result_summary(
     cwd: &str,
 ) -> Option<String> {
     let out = output.as_ref()?;
+    // Resolve alias tool names to their canonical equivalents for display.
+    let tool = canonical_tool_name(tool);
     // Convenience: count output lines from content when metadata has no explicit count.
     // Tools that return structured metadata override this below.
     let line_count = out
@@ -606,6 +715,88 @@ pub(crate) fn tool_result_summary(
                 Some("marked idle".to_string())
             }
         }
+        "search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let truncated = out
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trunc = if truncated { "+" } else { "" };
+            Some(format!("{}{} found", count, trunc))
+        }
+        "move_file" | "rename_file" => Some("moved".to_string()),
+        "copy_file" => {
+            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            if bytes > 0 {
+                Some(format!("{} bytes copied", bytes))
+            } else {
+                Some("copied".to_string())
+            }
+        }
+        "append_to_file" | "append_file" => {
+            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            if bytes > 0 {
+                Some(format!("{} bytes appended", bytes))
+            } else {
+                Some("appended".to_string())
+            }
+        }
+        "make_directory" | "mkdir" => Some("directory created".to_string()),
+        "file_info" => {
+            let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");
+            let size = out.get("size").and_then(|v| v.as_u64());
+            match size {
+                Some(s) if s >= 1024 * 1024 => {
+                    Some(format!("{} ({:.1} MiB)", kind, s as f64 / (1024.0 * 1024.0)))
+                }
+                Some(s) if s >= 1024 => Some(format!("{} ({:.1} KiB)", kind, s as f64 / 1024.0)),
+                Some(s) => Some(format!("{} ({} bytes)", kind, s)),
+                None => Some(kind.to_string()),
+            }
+        }
+        "diff_files" => {
+            let changes = out.get("changes").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(changes, "change", "changes")))
+        }
+        "execute_python" => {
+            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
+            match exit_code {
+                Some(0) => Some(format!("{} output", pluralize(line_count, "line", "lines"))),
+                Some(c) => Some(format!("{} (exit {})", pluralize(line_count, "line", "lines"), c)),
+                None => Some(format!("{} output", pluralize(line_count, "line", "lines"))),
+            }
+        }
+        "str_replace_editor" => {
+            let cmd = out.get("command").and_then(|v| v.as_str()).unwrap_or("done");
+            match cmd {
+                "view" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
+                "create" => Some("file created".to_string()),
+                "str_replace" => Some("replaced".to_string()),
+                "insert" => Some("inserted".to_string()),
+                "delete" => Some("deleted".to_string()),
+                _ => Some(format!("{} done", cmd)),
+            }
+        }
+        "calculator" => {
+            let result = out.get("result").and_then(|v| v.as_str());
+            result.map(|r| format!("= {}", truncate_str(r, 50)))
+        }
+        "get_env" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if count > 0 {
+                Some(pluralize(count, "var", "vars"))
+            } else {
+                Some("not found".to_string())
+            }
+        }
+        "http_request" | "web_request" => {
+            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "HTTP {} ({})",
+                status,
+                pluralize(line_count, "line", "lines")
+            ))
+        }
         _ => None,
     }
 }
@@ -745,8 +936,8 @@ impl<'a> MessageWidget<'a> {
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
                         spans.push(Span::styled(summary, Style::default().fg(Color::DarkGray)));
                     }
-                    // Show line range for read tool in bold
-                    if tool == "read" {
+                    // Show line range for read tool (and aliases) in bold
+                    if canonical_tool_name(tool) == "read" {
                         if let Some(range) = read_line_range(&state.output) {
                             spans.push(Span::styled(
                                 format!(" {}", range),

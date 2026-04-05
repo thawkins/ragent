@@ -477,6 +477,7 @@ impl App {
             webapi_server: None,
             webapi_addr: "127.0.0.1:3000".to_string(),
             webapi_token: None,
+            needs_redraw: false,
         };
 
         // Log any warnings from custom agent loading into the log panel
@@ -7681,6 +7682,8 @@ Type `/swarm help` for more info.\n";
     /// # }
     /// ```
     pub fn handle_event(&mut self, event: Event) {
+        // Mark UI dirty for any state change
+        self.needs_redraw = true;
         match event {
             Event::SessionCreated { ref session_id } => {
                 if self.session_id.is_none() {

@@ -788,6 +788,8 @@ pub struct McpDiscoverState {
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
 /// token usage counters, and a reference to the shared [`EventBus`].
 pub struct App {
+    /// Flag indicating whether a UI redraw is required.
+    pub needs_redraw: bool,
     /// Chat message history.
     pub messages: Vec<Message>,
     /// Current text input buffer.
