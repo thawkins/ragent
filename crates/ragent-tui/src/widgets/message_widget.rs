@@ -248,6 +248,10 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             let q = get_str(&["question", "query"]).unwrap_or_default();
             format!("❓ {}", truncate_str(&q, 60))
         }
+        "think" => {
+            let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
+            format!("💭 {}", truncate_str(&thought, 70))
+        }
         "multiedit" => {
             let count = input
                 .get("edits")
@@ -550,6 +554,10 @@ pub(crate) fn tool_result_summary(
                 .or_else(|| out.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
             Some(format!("↩ {}", truncate_str(response, 60)))
+        }
+        "think" => {
+            // The think tool records reasoning; show a brief note.
+            Some("Thinking ...".to_string())
         }
         "todo_read" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -860,6 +868,27 @@ impl<'a> MessageWidget<'a> {
         for part in &self.message.parts {
             match part {
                 MessagePart::Text { text } => {
+                    // Detect the model "thinking out loud" with minimal text like "..." or "......"
+                    // and render it as a distinct greyed-out thinking indicator.
+                    let trimmed = text.trim();
+                    let is_thinking_placeholder = trimmed.chars().all(|c| c == '.' || c == ' ')
+                        && !trimmed.is_empty()
+                        && trimmed.len() <= 6;
+                    if is_thinking_placeholder && self.message.role == Role::Assistant {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "💭 ",
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                            Span::styled(
+                                "Thinking ...",
+                                Style::default()
+                                    .fg(Color::DarkGray)
+                                    .add_modifier(Modifier::ITALIC),
+                            ),
+                        ]));
+                        continue;
+                    }
                     let (dot, dot_style, indent) = match self.message.role {
                         Role::User => (
                             "You: ",
