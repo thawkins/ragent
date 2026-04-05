@@ -4,7 +4,6 @@ use tokio::time::{Duration, timeout};
 
 use super::coordinator::OrchestrationMessage;
 use super::registry::{AgentRegistry, OrchestrationRequest};
-
 /// Router trait abstracts request delivery to agents.
 #[async_trait::async_trait]
 pub trait Router: Send + Sync + 'static {
@@ -34,6 +33,8 @@ impl InProcessRouter {
 #[async_trait::async_trait]
 impl Router for InProcessRouter {
     async fn send(&self, agent_id: &str, msg: OrchestrationMessage) -> Result<String> {
+        let span = tracing::info_span!("router_send", agent_id = %agent_id, job_id = %msg.job_id);
+        let _enter = span.enter();
         let ent = self.registry.get(agent_id).await;
         let ent = ent.ok_or_else(|| anyhow::anyhow!("agent '{agent_id}' not found"))?;
 

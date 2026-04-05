@@ -2,10 +2,15 @@
 //!
 //! Provides [`GlobTool`], which recursively searches directories for files
 //! matching a glob pattern (e.g., `**/*.rs`), skipping hidden and generated directories.
+//!
+//! The directory walk is parallelised with Rayon when the entry count is large,
+//! reducing latency on big codebases.
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::{Tool, ToolContext, ToolOutput};
 
@@ -109,9 +114,7 @@ impl Tool for GlobTool {
 
 /// Recursively collects file paths matching a glob pattern.
 ///
-/// # Errors
-///
-/// Returns an error if a directory cannot be read due to permission issues.
+/// Uses Rayon for parallel directory walking to accelerate large trees.
 /// IO errors on individual entries are silently skipped.
 fn collect_matches(
     root: &Path,
@@ -120,46 +123,72 @@ fn collect_matches(
     results: &mut Vec<String>,
     max: usize,
 ) -> Result<()> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
+    // Gather all entries in this directory
+    let entries: Vec<_> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
         Err(_) => return Ok(()),
     };
 
-    for entry in entries {
-        if results.len() >= max {
-            break;
-        }
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let path = entry.path();
+    let root = Arc::new(root.to_path_buf());
+    let matcher = Arc::new(matcher.clone());
+    let max_results = max;
 
-        // Skip hidden entries
-        if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with('.'))
-        {
+    // Partition entries into files and sub-directories
+    let mut subdirs: Vec<PathBuf> = Vec::new();
+    let mut matched: Vec<String> = Vec::new();
+
+    for entry in &entries {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with('.') {
             continue;
         }
-
         if path.is_dir() {
-            let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if matches!(
-                dir_name,
+            if !matches!(
+                name,
                 "node_modules" | "target" | "__pycache__" | "dist" | "build"
             ) {
-                continue;
+                subdirs.push(path);
             }
-            collect_matches(root, &path, matcher, results, max)?;
-        } else {
-            // Match relative path against glob
-            if let Ok(rel) = path.strip_prefix(root)
-                && matcher.is_match(rel)
-            {
-                results.push(rel.display().to_string());
+        } else if let Ok(rel) = path.strip_prefix(root.as_path())
+            && matcher.is_match(rel)
+        {
+            matched.push(rel.display().to_string());
+        }
+    }
+
+    // Collect matching files from this level
+    for m in matched {
+        if results.len() >= max_results {
+            return Ok(());
+        }
+        results.push(m);
+    }
+
+    // Walk sub-directories in parallel when there are many of them
+    if subdirs.len() > 4 {
+        let parallel_results: Vec<Vec<String>> = subdirs
+            .par_iter()
+            .map(|sub| {
+                let mut local = Vec::new();
+                let _ = collect_matches(sub, sub, matcher.as_ref(), &mut local, max_results);
+                local
+            })
+            .collect();
+        for batch in parallel_results {
+            for item in batch {
+                if results.len() >= max_results {
+                    return Ok(());
+                }
+                results.push(item);
             }
+        }
+    } else {
+        for sub in &subdirs {
+            if results.len() >= max_results {
+                return Ok(());
+            }
+            collect_matches(sub, sub, matcher.as_ref(), results, max_results)?;
         }
     }
     Ok(())

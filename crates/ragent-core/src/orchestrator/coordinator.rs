@@ -1,8 +1,8 @@
 use anyhow::Result;
+use dashmap::DashMap;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast};
+use tokio::sync::broadcast;
 use tokio::time::Duration;
 
 use super::policy;
@@ -120,7 +120,7 @@ pub struct MetricsSnapshot {
 pub struct Coordinator {
     registry: AgentRegistry,
     router: Arc<dyn Router>,
-    jobs: Arc<RwLock<HashMap<String, JobEntry>>>,
+    jobs: Arc<DashMap<String, JobEntry>>,
     metrics: Arc<Metrics>,
     /// Optional conflict-resolution policy applied by `start_job_sync`.
     policy: Option<Arc<policy::ConflictResolver>>,
@@ -154,7 +154,7 @@ impl Coordinator {
 impl std::fmt::Debug for Coordinator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Coordinator")
-            .field("jobs_count", &self.jobs.blocking_read().len())
+            .field("jobs_count", &self.jobs.len())
             .finish()
     }
 }
@@ -167,7 +167,7 @@ impl Coordinator {
         Self {
             registry,
             router,
-            jobs: Arc::new(RwLock::new(HashMap::new())),
+            jobs: Arc::new(DashMap::new()),
             metrics: Arc::new(Metrics::new()),
             policy: None,
         }
@@ -178,7 +178,7 @@ impl Coordinator {
         Self {
             registry,
             router,
-            jobs: Arc::new(RwLock::new(HashMap::new())),
+            jobs: Arc::new(DashMap::new()),
             metrics: Arc::new(Metrics::new()),
             policy: None,
         }
@@ -193,7 +193,7 @@ impl Coordinator {
         Self {
             registry,
             router,
-            jobs: Arc::new(RwLock::new(HashMap::new())),
+            jobs: Arc::new(DashMap::new()),
             metrics: Arc::new(Metrics::new()),
             policy: None,
         }
@@ -211,6 +211,8 @@ impl Coordinator {
     /// Start a job synchronously: match agents, send the payload to each matched
     /// agent, and aggregate responses. Returns concatenated results.
     pub async fn start_job_sync(&self, desc: JobDescriptor) -> Result<String> {
+        let span = tracing::info_span!("start_job_sync", job_id = %desc.id);
+        let _enter = span.enter();
         tracing::info!(job_id = %desc.id, "start_job_sync");
         self.metrics
             .active_jobs
@@ -305,6 +307,8 @@ impl Coordinator {
     /// semantics used by integration tests). Real deployments should use proper
     /// Result types from agents.
     pub async fn start_job_first_success(&self, desc: JobDescriptor) -> Result<String> {
+        let span = tracing::info_span!("start_job_first_success", job_id = %desc.id);
+        let _enter = span.enter();
         tracing::info!(job_id = %desc.id, "start_job_first_success");
         self.metrics
             .active_jobs
@@ -374,7 +378,7 @@ impl Coordinator {
             result: None,
             events_tx: tx.clone(),
         };
-        self.jobs.write().await.insert(job_id.clone(), entry);
+        self.jobs.insert(job_id.clone(), entry);
 
         let registry = self.registry.clone();
         let router = self.router.clone();
@@ -400,7 +404,7 @@ impl Coordinator {
                     job_id: job_id_for_spawn.clone(),
                     error: "no agents match".to_string(),
                 });
-                if let Some(j) = jobs.write().await.get_mut(&job_id_for_spawn) {
+                if let Some(mut j) = jobs.get_mut(&job_id_for_spawn) {
                     j.status = "failed".to_string();
                 }
                 metrics
@@ -456,7 +460,7 @@ impl Coordinator {
             }
 
             let result = parts.join("\n");
-            if let Some(j) = jobs.write().await.get_mut(&job_id_for_spawn) {
+            if let Some(mut j) = jobs.get_mut(&job_id_for_spawn) {
                 j.status = "completed".to_string();
                 j.result = Some(result.clone());
             }
@@ -481,8 +485,8 @@ impl Coordinator {
         &self,
         job_id: &str,
     ) -> Result<broadcast::Receiver<JobEvent>> {
-        let jobs = self.jobs.read().await;
-        let entry = jobs
+        let entry = self
+            .jobs
             .get(job_id)
             .ok_or_else(|| anyhow::anyhow!("job not found"))?;
         Ok(entry.events_tx.subscribe())
@@ -491,8 +495,6 @@ impl Coordinator {
     /// Get job result/status if available.
     pub async fn get_job_result(&self, job_id: &str) -> Option<(String, Option<String>)> {
         self.jobs
-            .read()
-            .await
             .get(job_id)
             .map(|j| (j.status.clone(), j.result.clone()))
     }

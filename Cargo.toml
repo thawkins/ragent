@@ -208,6 +208,11 @@ lopdf = "0.39"
 lsp-types = "0.97"
 url = "2"
 
+# ── Concurrent collections ──────────────────────────────────────────────
+dashmap = "6"
+lru = "0.12"
+rayon = "1"
+
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }
 

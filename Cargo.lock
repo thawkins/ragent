@@ -906,6 +906,7 @@ dependencies = [
  "ciborium",
  "clap",
  "criterion-plot",
+ "futures",
  "is-terminal",
  "itertools 0.10.5",
  "num-traits",
@@ -918,6 +919,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -1029,6 +1031,20 @@ dependencies = [
  "darling_core",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -3274,6 +3290,7 @@ dependencies = [
  "calamine",
  "chrono",
  "criterion",
+ "dashmap",
  "dirs",
  "docx-rust",
  "fs2",
@@ -3284,6 +3301,7 @@ dependencies = [
  "html2text",
  "ignore",
  "lopdf 0.39.0",
+ "lru 0.12.5",
  "lsp-types",
  "num_cpus",
  "ooxmlsdk",
@@ -3292,6 +3310,7 @@ dependencies = [
  "printpdf",
  "quick-xml 0.39.2",
  "rand 0.8.5",
+ "rayon",
  "regex",
  "reqwest 0.12.28",
  "rmcp",

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use prompt_opt::{optimize, system_prompt, Completer, OptMethod};
+use prompt_opt::{Completer, OptMethod, optimize, system_prompt};
 
 struct MockCompleter;
 

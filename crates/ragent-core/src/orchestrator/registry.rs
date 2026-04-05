@@ -84,7 +84,7 @@ impl AgentRegistry {
         let mut mailbox_opt = None;
         if let Some(responder) = responder {
             // create a channel for the agent mailbox
-            let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(16);
+            let (tx, mut rx) = mpsc::channel::<OrchestrationRequest>(100);
             mailbox_opt = Some(tx);
 
             // Spawn the agent loop which turns mailbox messages into responder calls.

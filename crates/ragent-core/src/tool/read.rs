@@ -6,12 +6,70 @@
 //! For large files (>100 lines) without a specified range, returns the first
 //! 100 lines plus a section map summarising the file's structure so the agent
 //! can request specific sections.
+//!
+//! File content is cached in a process-wide LRU cache (keyed on path + mtime)
+//! to avoid redundant disk reads when the same file is accessed multiple times
+//! within a session.
 
 use anyhow::{Context, Result};
+use lru::LruCache;
 use serde_json::{Value, json};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use super::{Tool, ToolContext, ToolOutput};
+
+/// Maximum number of cached file entries (each entry is an `Arc<String>`).
+const CACHE_MAX_ENTRIES: usize = 256;
+
+/// Cache key: absolute path + last-modified timestamp.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct CacheKey(PathBuf, SystemTime);
+
+/// Global LRU cache for file contents.
+fn read_cache() -> &'static Mutex<LruCache<CacheKey, Arc<String>>> {
+    static CACHE: OnceLock<Mutex<LruCache<CacheKey, Arc<String>>>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(CACHE_MAX_ENTRIES).expect("cache size > 0"),
+        ))
+    })
+}
+
+/// Read a file, using the LRU cache when the mtime has not changed.
+async fn cached_read(path: &Path) -> Result<Arc<String>> {
+    let mtime = tokio::fs::metadata(path)
+        .await
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+
+    let key = CacheKey(path.to_path_buf(), mtime);
+
+    // Check cache first (avoid holding lock across await)
+    {
+        let mut cache = read_cache().lock().expect("cache poisoned");
+        if let Some(content) = cache.get(&key) {
+            return Ok(Arc::clone(content));
+        }
+    }
+
+    // Cache miss — read from disk
+    let raw = tokio::fs::read_to_string(path).await.with_context(|| {
+        format!(
+            "Cannot read file '{}': file may not exist or is not accessible",
+            path.display()
+        )
+    })?;
+    let arc = Arc::new(raw);
+    {
+        let mut cache = read_cache().lock().expect("cache poisoned");
+        cache.put(key, Arc::clone(&arc));
+    }
+    Ok(arc)
+}
 
 /// Lines threshold above which we return a summary instead of the full file.
 const LARGE_FILE_THRESHOLD: usize = 100;
@@ -93,12 +151,7 @@ impl Tool for ReadTool {
             );
         }
 
-        let content = tokio::fs::read_to_string(&path).await.with_context(|| {
-            format!(
-                "Cannot read file '{}': file may not exist or is not accessible",
-                path.display()
-            )
-        })?;
+        let content = cached_read(&path).await?;
 
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
         let end_line = input["end_line"].as_u64().map(|n| n as usize);

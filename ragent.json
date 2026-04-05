@@ -20,6 +20,16 @@
       "extensions": [
         "rs"
       ]
+    },
+    "rust-vscode": {
+      "args": [
+        "--stdio"
+      ],
+      "command": "/home/thawkins/.vscode/extensions/rust-lang.rust-analyzer-0.3.2845-linux-x64/server/rust-analyzer",
+      "disabled": true,
+      "extensions": [
+        "rs"
+      ]
     }
   },
   "provider": {
