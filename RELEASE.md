@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-alpha.25
+## Current Version: 0.1.0-alpha.26
+
+### Fixed
+- **LSP discover** — deduplicates across all VS Code extension directories; shows version column; scrollable with ↑/↓/PgUp/PgDn
+- **LSP system prompt** — only injects guidance for actually-connected servers
+- **CI** — bench and test unused-mut / missing-docs warnings resolved
+
+## Previous: 0.1.0-alpha.25
 
 ### Fixed
 - **CI lint fixes** — resolved 1339 Clippy warnings/errors across 127 files workspace-wide

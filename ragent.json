@@ -1,5 +1,18 @@
 {
   "lsp": {
+    "c-vscode": {
+      "args": [
+        "--stdio"
+      ],
+      "command": "/home/thawkins/.vscode/extensions/ms-vscode.cpptools-1.29.3-linux-x64/bin/cpptools",
+      "disabled": false,
+      "extensions": [
+        "c",
+        "h",
+        "cpp",
+        "hpp"
+      ]
+    },
     "rust": {
       "args": [],
       "command": "/home/thawkins/.cargo/bin/rust-analyzer",
@@ -11,7 +24,9 @@
   },
   "provider": {
     "tavily": {
-      "env": ["TAVILY_API_KEY"],
+      "env": [
+        "TAVILY_API_KEY"
+      ],
       "options": {
         "api_key": "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"
       }

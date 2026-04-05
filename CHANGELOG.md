@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.26] - 2026-04-05
+
+### Fixed
+- **LSP discover deduplication** — `/lsp discover` no longer shows duplicate entries when the same language server is installed in multiple VS Code extension directories (e.g. `.vscode` and `.vscode-server`)
+- **LSP discover version display** — VSCode extension entries now show the installed version (e.g. `0.3.2845`) in a new Version column; PATH-installed servers show `—`
+- **LSP discover scrolling** — dialog is now fixed-height with `↑`/`↓`/`PgUp`/`PgDn` scroll support for long lists
+- **Dynamic LSP system prompt** — system prompt now only lists LSP tools for servers that are actually connected, not all possible servers
+
+### Fixed (CI)
+- Removed unused `mut` from test and bench variables (`test_markdown_table`, `bench_markdown`)
+- Added `#![allow(missing_docs)]` to all bench files (criterion macro generates undocumented fn)
+- Added `#[allow(unused_variables)]` to `debug_log_input_transition` (params used only under `#[cfg(debug_assertions)]`)
+
 ## [0.1.0-alpha.25] - 2026-04-05
 
 ### Fixed
