@@ -110,11 +110,11 @@ impl Tool for TodoWriteTool {
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                    "enum": ["add", "update", "remove", "clear"]
+                "enum": ["add", "update", "remove", "clear", "complete"]
                 },
                 "id": {
                     "type": "string",
-                    "description": "TODO item ID (required for update/remove)"
+                    "description": "TODO item ID (required for update/remove/complete)"
                 },
                 "title": {
                     "type": "string",
@@ -147,7 +147,7 @@ impl Tool for TodoWriteTool {
 
         let action = input["action"].as_str().ok_or_else(|| {
             anyhow::anyhow!(
-                "Missing required 'action' parameter. Must be one of: add, update, remove, clear"
+                "Missing required 'action' parameter. Must be one of: add, update, remove, clear, complete"
             )
         })?;
 
@@ -212,6 +212,22 @@ impl Tool for TodoWriteTool {
 
                 (format!("Updated todo '{id}'"), "update")
             }
+            "complete" => {
+                // Mark a specific todo as done by id.
+                let id = input["id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for complete action. Specify which TODO item to mark as done."))?;
+
+                let updated = storage
+                    .update_todo(id, &ctx.session_id, None, Some("done"), None)
+                    .map_err(|e| anyhow::anyhow!("Failed to complete todo: {e}"))?;
+
+                if !updated {
+                    bail!("Todo '{id}' not found in this session");
+                }
+
+                (format!("Marked todo '{id}' as done"), "complete")
+            }
             "remove" => {
                 let id = input["id"]
                     .as_str()
@@ -241,7 +257,7 @@ impl Tool for TodoWriteTool {
                     "clear",
                 )
             }
-            _ => bail!("Invalid action '{action}'. Must be one of: add, update, remove, clear"),
+            _ => bail!("Invalid action '{action}'. Must be one of: add, update, remove, clear, complete"),
         };
 
         // Read back the current list after the write

@@ -300,6 +300,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             match action {
                 "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
                 "update" => format!("📋 ~{}", id),
+                "complete" => format!("📋 ✓{}", id),
                 "remove" => format!("📋 -{}", id),
                 "clear" => "📋 clear all".to_string(),
                 _ => format!("📋 {}", action),
