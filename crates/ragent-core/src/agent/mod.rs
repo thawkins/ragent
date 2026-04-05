@@ -497,8 +497,10 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                 "You are a powerful AI coding assistant. You help users with software development \
                  tasks including writing code, debugging, reviewing, and explaining code. \
                  You have access to tools for reading, writing, and editing files, executing \
-                 shell commands, and searching codebases. Always prefer using tools to verify \
-                 your assumptions rather than guessing."
+                 shell commands, and searching codebases. \
+                 Use 'grep' or 'search' to find text/code patterns, 'glob' to find files by name, \
+                 'list' to view directory contents, and 'read' to view file contents. \
+                 Always prefer using tools to verify your assumptions rather than guessing."
                     .to_string(),
             ),
             permission: default_permissions(),

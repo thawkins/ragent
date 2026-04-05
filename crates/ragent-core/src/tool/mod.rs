@@ -55,6 +55,7 @@ pub mod plan;
 pub mod question;
 pub mod read;
 pub mod rm;
+pub mod search;
 pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 pub mod team_approve_plan;
@@ -413,6 +414,7 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(bash::BashTool));
     registry.register(Arc::new(bash_reset::BashResetTool));
     registry.register(Arc::new(grep::GrepTool));
+    registry.register(Arc::new(search::SearchTool));
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(list::ListTool));
     registry.register(Arc::new(question::QuestionTool));
