@@ -221,34 +221,32 @@ impl OllamaCloudClient {
         }
 
         for msg in &request.messages {
-            let content = match &msg.content {
-                ChatContent::Text(text) => json!(text),
+            // Ollama Cloud requires content to always be a plain string.
+            // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
+            let (content_str, images): (String, Vec<String>) = match &msg.content {
+                ChatContent::Text(text) => (text.clone(), vec![]),
                 ChatContent::Parts(parts) => {
-                    let content_parts: Vec<Value> = parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({
-                                "type": "text",
-                                "text": text
-                            })),
-                            ContentPart::ImageUrl { url } => Some(json!({
-                                "type": "image_url",
-                                "image_url": { "url": url }
-                            })),
-                            ContentPart::ToolResult {
-                                tool_use_id: _,
-                                content: _,
-                            } => None,
-                            ContentPart::ToolUse { .. } => None,
-                        })
-                        .collect();
-                    if content_parts.len() == 1 {
-                        content_parts[0]["text"].clone()
-                    } else {
-                        json!(content_parts)
+                    let mut texts: Vec<String> = Vec::new();
+                    let mut imgs: Vec<String> = Vec::new();
+                    for part in parts {
+                        match part {
+                            ContentPart::Text { text } => texts.push(text.clone()),
+                            ContentPart::ImageUrl { url } => {
+                                // Strip data-URL prefix: "data:image/png;base64,<data>"
+                                let b64 = if let Some(idx) = url.find(";base64,") {
+                                    url[idx + 8..].to_string()
+                                } else {
+                                    url.clone()
+                                };
+                                imgs.push(b64);
+                            }
+                            ContentPart::ToolUse { .. } | ContentPart::ToolResult { .. } => {}
+                        }
                     }
+                    (texts.join("\n"), imgs)
                 }
             };
+            let content = json!(content_str);
 
             match &msg.content {
                 ChatContent::Parts(parts) => {
@@ -300,16 +298,26 @@ impl OllamaCloudClient {
                             }
                         }
                     } else {
-                        messages.push(json!({
+                        let mut msg_json = json!({
                             "role": msg.role,
                             "content": content
-                        }));
+                        });
+                        if !images.is_empty() {
+                            msg_json["images"] = json!(images);
+                        }
+                        messages.push(msg_json);
                     }
                 }
-                _ => messages.push(json!({
-                    "role": msg.role,
-                    "content": content
-                })),
+                _ => {
+                    let mut msg_json = json!({
+                        "role": msg.role,
+                        "content": content
+                    });
+                    if !images.is_empty() {
+                        msg_json["images"] = json!(images);
+                    }
+                    messages.push(msg_json);
+                }
             }
         }
 
