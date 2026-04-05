@@ -240,6 +240,22 @@ User Input
     └─────────┘ └──────┘ └────────┘
 ```
 
+## Performance
+
+`ragent-core` includes Criterion benchmarks for the orchestrator, tools, snapshots, and team mailbox. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md) for full instructions.
+
+```bash
+# Run all benchmarks
+cargo bench -p ragent-core
+```
+
+Key optimisations in the current release:
+- **DashMap** replaces `RwLock<HashMap>` in the orchestrator, reducing lock contention
+- **LRU file-read cache** (256-entry, mtime-keyed) avoids redundant disk I/O
+- **Rayon parallel glob** walk for large directory trees
+- **Incremental snapshots** store only changed files (via `similar` diffs)
+- **Async storage writes** via `tokio::task::spawn_blocking` keep the executor free
+
 ## Project Status
 
 **v0.1.0-alpha.19** — Early development with active Teams and Copilot UX improvements.

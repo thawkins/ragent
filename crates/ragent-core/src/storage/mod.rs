@@ -3,12 +3,31 @@
 //! [`Storage`] manages the database lifecycle (open, migrate) and exposes
 //! CRUD operations for sessions, messages, provider credentials, and MCP
 //! server configuration. All access is thread-safe via an internal `Mutex`.
+//!
+//! # Async writes
+//!
+//! Because `rusqlite` is synchronous, write operations block the calling
+//! thread. Use [`Storage::write_async`] to off-load any write closure onto a
+//! `tokio` blocking thread-pool thread, keeping the async executor free:
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use ragent_core::storage::Storage;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! let storage = Arc::new(Storage::open_in_memory()?);
+//! let id = "sess-1".to_string();
+//! Storage::write_async(Arc::clone(&storage), move |s| {
+//!     s.create_session(&id, "/tmp")
+//! }).await?;
+//! # Ok(()) }
+//! ```
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
@@ -1004,6 +1023,41 @@ impl Storage {
             params![session_id],
         )?;
         Ok(changed)
+    }
+
+    /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.
+    ///
+    /// All `rusqlite` operations are synchronous. Call this from async code to
+    /// avoid stalling the async executor during writes. The closure receives a
+    /// reference to the storage and returns any `Result<T>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the blocking task panics or if the closure itself
+    /// returns an error.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use ragent_core::storage::Storage;
+    ///
+    /// # async fn example() -> anyhow::Result<()> {
+    /// let storage = Arc::new(Storage::open_in_memory()?);
+    /// let id = "sess-1".to_string();
+    /// Storage::write_async(Arc::clone(&storage), move |s| {
+    ///     s.create_session(&id, "/tmp")
+    /// }).await?;
+    /// # Ok(()) }
+    /// ```
+    pub async fn write_async<F, T>(storage: Arc<Self>, f: F) -> Result<T>
+    where
+        F: FnOnce(&Self) -> Result<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(move || f(&storage))
+            .await
+            .context("storage write task panicked")?
     }
 }
 

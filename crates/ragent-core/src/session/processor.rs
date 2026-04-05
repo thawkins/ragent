@@ -600,10 +600,10 @@ impl SessionProcessor {
         // the agent loop finishes.  We update it incrementally after each step.
         let assistant_msg_id = {
             let placeholder = Message::new(session_id, Role::Assistant, vec![]);
-            self.session_manager
-                .storage()
-                .create_message(&placeholder)?;
-            placeholder.id
+            let id = placeholder.id.clone();
+            self.storage_op(move |s| s.create_message(&placeholder))
+                .await?;
+            id
         };
 
         loop {
@@ -625,15 +625,16 @@ impl SessionProcessor {
                 // Save partial progress (update the pre-created placeholder).
                 let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
                 assistant_msg.id = assistant_msg_id;
-                self.session_manager
-                    .storage()
-                    .update_message(&assistant_msg)?;
+                let cancelled_id = assistant_msg.id.clone();
+                self.storage_op(move |s| s.update_message(&assistant_msg))
+                    .await?;
                 self.event_bus.publish(Event::MessageEnd {
                     session_id: session_id.to_string(),
-                    message_id: assistant_msg.id.clone(),
+                    message_id: cancelled_id,
                     reason: FinishReason::Cancelled,
                 });
-                return Ok(assistant_msg);
+                // Return a fresh placeholder since assistant_msg was moved
+                return Ok(Message::new(session_id, Role::Assistant, vec![]));
             }
 
             debug!("Agent loop step {}/{}", step, max_steps);

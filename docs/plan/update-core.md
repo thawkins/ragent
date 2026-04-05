@@ -92,7 +92,23 @@ All results should be stored in `docs/plan/perf-baseline.md` for later compariso
 
 ---
 
-## 8. Timeline (estimated effort)
+## Implementation Status
+
+| Section | Task | Status |
+|---------|------|--------|
+| §1.1 | Tracing spans on coordinator/router | ✅ Done |
+| §1.2 | New benchmark files (orchestrator, tools, snapshot, team) | ✅ Done |
+| §2.1 | Replace `RwLock<HashMap>` with DashMap | ✅ Done |
+| §3.1 | LRU file-I/O cache in `read.rs` | ✅ Done |
+| §3.2 | Rayon parallelism in `glob.rs` | ✅ Done |
+| §4.1 | Incremental snapshots (`similar` diffs) | ✅ Done |
+| §4.2 | Async storage writes (`spawn_blocking`) | ✅ Done |
+| §5.1 | Bounded mailbox channel (capacity 100) | ✅ Done |
+| §6.2 | CI clippy/fmt quality gate | ✅ Done |
+| §7 | `docs/performance/benchmark-guide.md` + README Performance section | ✅ Done |
+
+---
+
 
 | Milestone | Duration |
 |-----------|----------|
