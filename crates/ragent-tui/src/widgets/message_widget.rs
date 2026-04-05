@@ -467,6 +467,7 @@ pub(crate) fn tool_result_summary(
         }
         "edit" => None,
         "multiedit" => {
+            // Return a brief top-level summary; per-file detail rows are rendered separately.
             let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
@@ -1063,6 +1064,62 @@ impl<'a> MessageWidget<'a> {
                                         },
                                     )));
                                 }
+                            }
+                        } else if tool == "multiedit" {
+                            // Render per-file edit stats as a tabular list
+                            if let Some(file_stats) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("file_stats"))
+                                .and_then(|v| v.as_array())
+                            {
+                                // Find the longest relative path for alignment
+                                let rel_paths: Vec<String> = file_stats
+                                    .iter()
+                                    .map(|fs| {
+                                        fs.get("path")
+                                            .and_then(|p| p.as_str())
+                                            .map(|p| make_relative_path(p, self.cwd))
+                                            .unwrap_or_default()
+                                    })
+                                    .collect();
+                                let max_len = rel_paths.iter().map(|p| p.len()).max().unwrap_or(0);
+                                for (fs, rel_path) in file_stats.iter().zip(rel_paths.iter()) {
+                                    let added = fs
+                                        .get("added")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0);
+                                    let removed = fs
+                                        .get("removed")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0);
+                                    let padding = " ".repeat(max_len.saturating_sub(rel_path.len()));
+                                    lines.push(Line::from(vec![
+                                        Span::styled(
+                                            format!("  └ {}{} ", rel_path, padding),
+                                            Style::default().fg(Color::DarkGray),
+                                        ),
+                                        Span::styled(
+                                            format!("+{}", added),
+                                            Style::default().fg(Color::Green),
+                                        ),
+                                        Span::styled(
+                                            " ",
+                                            Style::default(),
+                                        ),
+                                        Span::styled(
+                                            format!("-{}", removed),
+                                            Style::default().fg(Color::Red),
+                                        ),
+                                    ]));
+                                }
+                            } else if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::DarkGray),
+                                )));
                             }
                         } else if let Some(result) =
                             tool_result_summary(tool, &state.output, &state.input, self.cwd)

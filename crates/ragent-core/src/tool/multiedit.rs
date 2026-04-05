@@ -135,10 +135,17 @@ impl Tool for MultiEditTool {
                 file_contents.insert(op.path.clone(), content);
             }
         }
-        // Phase 2: Apply edits in order to in-memory content, validating each
-        let mut files_modified: HashMap<PathBuf, usize> = HashMap::new();
+        // Phase 2: Apply edits in order to in-memory content, validating each.
+        // Track per-file stats for display.
+        struct FileStats {
+            edits: usize,
+            added: usize,
+            removed: usize,
+        }
+        let mut file_stats: HashMap<PathBuf, FileStats> = HashMap::new();
         let mut total_edits = 0usize;
-        let mut total_lines_changed = 0usize;
+        let mut total_added = 0usize;
+        let mut total_removed = 0usize;
 
         for (i, op) in ops.iter().enumerate() {
             let content = file_contents
@@ -162,27 +169,56 @@ impl Tool for MultiEditTool {
                     ),
                 };
 
+            let old_line_count = op.old_str.lines().count();
+            let new_line_count = effective_new_str.lines().count();
+
             *content = format!(
                 "{}{}{}",
                 &content[..start],
                 effective_new_str,
                 &content[end..]
             );
-            *files_modified.entry(op.path.clone()).or_insert(0) += 1;
+
+            let stats = file_stats.entry(op.path.clone()).or_insert(FileStats {
+                edits: 0,
+                added: 0,
+                removed: 0,
+            });
+            stats.edits += 1;
+            stats.added += new_line_count;
+            stats.removed += old_line_count;
             total_edits += 1;
-            total_lines_changed += effective_new_str.lines().count();
+            total_added += new_line_count;
+            total_removed += old_line_count;
         }
 
         // Phase 3: Write all modified files
         for (path, content) in &file_contents {
-            if files_modified.contains_key(path) {
+            if file_stats.contains_key(path) {
                 tokio::fs::write(path, content)
                     .await
                     .with_context(|| format!("Failed to write file: {}", path.display()))?;
             }
         }
 
-        let file_count = files_modified.len();
+        let file_count = file_stats.len();
+
+        // Build per-file stats array sorted by path for stable display order.
+        let mut sorted_paths: Vec<&PathBuf> = file_stats.keys().collect();
+        sorted_paths.sort();
+        let per_file: Vec<serde_json::Value> = sorted_paths
+            .iter()
+            .map(|p| {
+                let s = &file_stats[*p];
+                json!({
+                    "path": p.to_string_lossy(),
+                    "edits": s.edits,
+                    "added": s.added,
+                    "removed": s.removed,
+                })
+            })
+            .collect();
+
         let summary = format!(
             "Applied {} edit{} across {} file{}",
             total_edits,
@@ -196,7 +232,9 @@ impl Tool for MultiEditTool {
             metadata: Some(json!({
                 "files": file_count,
                 "edits": total_edits,
-                "lines": total_lines_changed,
+                "lines_added": total_added,
+                "lines_removed": total_removed,
+                "file_stats": per_file,
             })),
         })
     }
