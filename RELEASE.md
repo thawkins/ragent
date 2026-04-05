@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.26
+## Current Version: 0.1.0-alpha.27
+
+### Fixed
+- CI Clippy: redundant closures in `lsp/discovery.rs`
+
+## Previous: 0.1.0-alpha.26
 
 ### Fixed
 - **LSP discover** — deduplicates across all VS Code extension directories; shows version column; scrollable with ↑/↓/PgUp/PgDn

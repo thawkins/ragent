@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.0-alpha.27] - 2026-04-05
+
+### Fixed
+- **CI Clippy** — replaced redundant closures with function references in `lsp/discovery.rs` (`and_then(|v| parse_version_tuple(v))` → `and_then(parse_version_tuple)`)
+
 ## [0.1.0-alpha.26] - 2026-04-05
 
 ### Fixed
