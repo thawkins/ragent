@@ -535,5 +535,6 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(aliases::ExecuteCodeTool));
     registry.register(Arc::new(aliases::RunCodeTool));
     registry.register(Arc::new(aliases::AskUserTool));
+    registry.register(Arc::new(aliases::OpenFileTool));
     registry
 }

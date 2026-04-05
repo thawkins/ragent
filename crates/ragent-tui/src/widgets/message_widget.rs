@@ -90,7 +90,7 @@ pub(crate) fn capitalize_tool_name(name: &str) -> String {
 /// rich display as the canonical tool.
 pub(crate) fn canonical_tool_name(tool: &str) -> &str {
     match tool {
-        "view_file" | "read_file" | "get_file_contents" => "read",
+        "view_file" | "read_file" | "get_file_contents" | "open_file" => "read",
         "list_files" | "list_directory" => "list",
         "find_files" => "glob",
         "search_in_repo" | "file_search" => "search",

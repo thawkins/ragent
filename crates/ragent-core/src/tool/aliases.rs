@@ -27,6 +27,7 @@
 //! | `run_code`          | `bash`         | `code` → `command`                |
 
 //! | `ask_user`          | `question`     | free-text question to the user    |
+//! | `open_file`         | `read`         | `line_start`/`line_end` → `start_line`/`end_line` |
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -721,5 +722,60 @@ impl Tool for AskUserTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         delegate(&question::QuestionTool, input, ctx).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// open_file  →  read  (maps line_start/line_end → start_line/end_line)
+// ---------------------------------------------------------------------------
+
+/// Alias for `read`. Some models emit `open_file` or `Open_File` to view a file.
+/// Accepts `line_start`/`line_end` (as well as the canonical `start_line`/`end_line`).
+pub struct OpenFileTool;
+
+#[async_trait::async_trait]
+impl Tool for OpenFileTool {
+    fn name(&self) -> &'static str {
+        "open_file"
+    }
+
+    fn description(&self) -> &'static str {
+        "Open and read the contents of a file. Alias for 'read'. \
+         Use 'path' to specify the file; optionally provide 'start_line'/'end_line' \
+         (or 'line_start'/'line_end') to view a specific line range."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "Path to the file to open" },
+                "start_line": { "type": "integer", "description": "First line to include (1-based)" },
+                "end_line": { "type": "integer", "description": "Last line to include (1-based, inclusive)" },
+                "line_start": { "type": "integer", "description": "Alias for start_line" },
+                "line_end": { "type": "integer", "description": "Alias for end_line" }
+            },
+            "required": ["path"]
+        })
+    }
+
+    fn permission_category(&self) -> &'static str {
+        "file:read"
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let mut v = input.clone();
+        // Normalise line_start → start_line and line_end → end_line
+        if v["start_line"].is_null() {
+            if let Some(n) = v["line_start"].as_i64() {
+                v["start_line"] = json!(n);
+            }
+        }
+        if v["end_line"].is_null() {
+            if let Some(n) = v["line_end"].as_i64() {
+                v["end_line"] = json!(n);
+            }
+        }
+        delegate(&read::ReadTool, v, ctx).await
     }
 }
