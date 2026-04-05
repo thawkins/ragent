@@ -4,6 +4,8 @@
 //! - save_history with varying history sizes
 //! - load_history reading back saved histories
 
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};

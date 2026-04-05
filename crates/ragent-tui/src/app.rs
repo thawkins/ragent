@@ -1061,6 +1061,7 @@ impl App {
         }
     }
 
+    #[allow(unused_variables)]
     fn debug_log_input_transition(&self, source: &str, before_input: &str, before_cursor: usize) {
         #[cfg(debug_assertions)]
         {

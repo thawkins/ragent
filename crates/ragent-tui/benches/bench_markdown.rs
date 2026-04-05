@@ -4,6 +4,8 @@
 //! - render_markdown_to_ascii with varying input sizes (1 KB, 10 KB, 100 KB)
 //! - normalize_ascii_tables with varying table sizes
 
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
@@ -116,7 +118,7 @@ fn bench_render_markdown(c: &mut Criterion) {
 }
 
 fn bench_normalize_ascii_tables(c: &mut Criterion) {
-    let mut app = make_app();
+    let app = make_app();
 
     let mut group = c.benchmark_group("normalize_ascii_tables");
     for &rows in &[10, 100, 1_000] {
