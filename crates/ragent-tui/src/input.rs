@@ -172,6 +172,58 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
 
     // If permission dialog is active, intercept keys
     if app.permission_pending.is_some() {
+        let is_question = app
+            .permission_pending
+            .as_ref()
+            .map(|r| r.permission == "question")
+            .unwrap_or(false);
+
+        if is_question {
+            // Question-type: accept free-text input, submit on Enter, cancel on Esc.
+            return match key.code {
+                KeyCode::Enter => {
+                    if let Some(ref req) = app.permission_pending.clone() {
+                        let response = app.pending_question_input.trim().to_string();
+                        if !response.is_empty() {
+                            app.event_bus
+                                .publish(ragent_core::event::Event::UserInput {
+                                    session_id: req.session_id.clone(),
+                                    request_id: req.id.clone(),
+                                    response,
+                                });
+                            app.permission_pending = None;
+                            app.pending_question_input.clear();
+                        }
+                    }
+                    None
+                }
+                KeyCode::Esc => {
+                    // Cancel — send empty string so the tool can return gracefully.
+                    if let Some(ref req) = app.permission_pending.clone() {
+                        app.event_bus
+                            .publish(ragent_core::event::Event::UserInput {
+                                session_id: req.session_id.clone(),
+                                request_id: req.id.clone(),
+                                response: "[User dismissed question]".to_string(),
+                            });
+                    }
+                    app.permission_pending = None;
+                    app.pending_question_input.clear();
+                    None
+                }
+                KeyCode::Backspace => {
+                    app.pending_question_input.pop();
+                    None
+                }
+                KeyCode::Char(c) => {
+                    app.pending_question_input.push(c);
+                    None
+                }
+                _ => None,
+            };
+        }
+
+        // Standard permission dialog: y/a/n only.
         return match key.code {
             KeyCode::Char('y') => {
                 if let Some(ref req) = app.permission_pending {

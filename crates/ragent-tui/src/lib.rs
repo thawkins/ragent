@@ -201,10 +201,11 @@ pub async fn run_tui(
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
 
-                  if app.needs_redraw {
-                        terminal.draw(|frame| layout::render(frame, &mut app))?;
-                        app.needs_redraw = false;
-                    }
+        // Only draw when UI dirty or periodic refresh
+        if app.needs_redraw {
+            terminal.draw(|frame| layout::render(frame, &mut app))?;
+            app.needs_redraw = false;
+        }
         tokio::select! {
             // Terminal key/mouse events (polled at 50ms intervals)
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {

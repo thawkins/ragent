@@ -7,6 +7,7 @@ use anyhow::Result;
 use arboard::ImageData;
 use image::{ImageBuffer, Rgba};
 use ratatui::layout::Rect;
+use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
@@ -810,6 +811,9 @@ pub struct App {
     pub status: String,
     /// Active permission request overlay, if any.
     pub permission_pending: Option<PermissionRequest>,
+    /// Text typed by the user in response to a `question`-type permission dialog.
+    /// Only active when `permission_pending.permission == "question"`.
+    pub pending_question_input: String,
     /// Cumulative (input, output) token counts.
     pub token_usage: (u64, u64),
     /// Completed LLM request samples used to compute `/llmstats`.
@@ -1025,7 +1029,7 @@ pub struct App {
     pub history_save_deadline: Option<std::time::Instant>,
     /// Cache for rendered markdown output, keyed by FNV-style hash of input text.
     /// Cleared when messages change.
-    pub md_render_cache: HashMap<u64, String>,
+    pub md_render_cache: LruCache<u64, String>,
 
     // ── Autopilot (M2 Task 2.1) ─────────────────────────────────────────────
     /// True when autopilot mode is active. Agent continues autonomously until

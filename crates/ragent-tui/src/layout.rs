@@ -2519,41 +2519,90 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
 }
 
 fn render_permission_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 30, frame.area());
-    frame.render_widget(Clear, area);
+    let Some(ref req) = app.permission_pending else {
+        return;
+    };
 
-    if let Some(ref req) = app.permission_pending {
+    if req.permission == "question" {
+        // Question-type: show a text-input dialog so the user can type a response.
+        let area = centered_rect(70, 40, frame.area());
+        frame.render_widget(Clear, area);
+
+        let question_text = req.patterns.first().map(|s| s.as_str()).unwrap_or("");
+        let input_display = format!("▶ {}_", app.pending_question_input);
+
         let text = vec![
             Line::from(Span::styled(
-                "Permission Required",
+                "Agent Question",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from(format!("Permission: {}", req.permission)),
-            Line::from(format!(
-                "Details: {}",
-                req.patterns.first().map(|s| s.as_str()).unwrap_or("")
+            Line::from(Span::styled(
+                question_text,
+                Style::default().fg(Color::White),
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "[y]es  [a]lways  [n]o",
-                Style::default().fg(Color::Cyan),
+                input_display,
+                Style::default().fg(Color::Green),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Enter to submit  Esc to dismiss",
+                Style::default().fg(Color::DarkGray),
             )),
         ];
 
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" Permission ")
-            .style(Style::default().fg(Color::Yellow));
+            .title(" Question ")
+            .style(Style::default().fg(Color::Cyan));
 
         let paragraph = Paragraph::new(text)
             .block(block)
-            .alignment(Alignment::Center);
+            .alignment(Alignment::Left)
+            .wrap(ratatui::widgets::Wrap { trim: false });
 
         frame.render_widget(paragraph, area);
+        return;
     }
+
+    // Standard permission dialog: y/a/n.
+    let area = centered_rect(60, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let text = vec![
+        Line::from(Span::styled(
+            "Permission Required",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!("Permission: {}", req.permission)),
+        Line::from(format!(
+            "Details: {}",
+            req.patterns.first().map(|s| s.as_str()).unwrap_or("")
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[y]es  [a]lways  [n]o",
+            Style::default().fg(Color::Cyan),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Permission ")
+        .style(Style::default().fg(Color::Yellow));
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, area);
 }
 
 fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {

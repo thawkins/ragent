@@ -3373,6 +3373,7 @@ dependencies = [
  "futures",
  "html2text",
  "image",
+ "lru 0.12.5",
  "prompt_opt",
  "pulldown-cmark",
  "ragent-core",

@@ -26,11 +26,13 @@
 //! | `execute_code`      | `bash`         | `code` → `command`                |
 //! | `run_code`          | `bash`         | `code` → `command`                |
 
+//! | `ask_user`          | `question`     | free-text question to the user    |
+
 use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use super::{bash, edit, glob, list, read, search, write};
+use super::{bash, edit, glob, list, question, read, search, write};
 
 // ---------------------------------------------------------------------------
 // Helper: build a normalised input Value and delegate to a canonical tool
@@ -681,5 +683,43 @@ impl Tool for RunCodeTool {
             anyhow::bail!("Missing required 'command', 'code', or 'cmd' parameter");
         }
         delegate(&bash::BashTool, input, ctx).await
+    }
+}
+
+/// Alias: `ask_user` → [`question::QuestionTool`].
+///
+/// Some models emit `ask_user` when they want to prompt the user for input.
+pub struct AskUserTool;
+
+#[async_trait::async_trait]
+impl Tool for AskUserTool {
+    fn name(&self) -> &'static str {
+        "ask_user"
+    }
+
+    fn description(&self) -> &'static str {
+        "Ask the user a question and wait for their typed response. \
+         Use this when you need clarification or prioritisation help before proceeding."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user"
+                }
+            },
+            "required": ["question"]
+        })
+    }
+
+    fn permission_category(&self) -> &'static str {
+        "question"
+    }
+
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        delegate(&question::QuestionTool, input, ctx).await
     }
 }

@@ -5,8 +5,11 @@
 //! and agent bus events to drive the UI.
 
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+
+use lru::LruCache;
 
 use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use pulldown_cmark::{Options, Parser, html};
@@ -240,10 +243,9 @@ impl App {
             }
             h
         };
-        if let Some(cached) = self.md_render_cache.get(&hash) {
-            return cached.clone();
-        }
-
+                  if let Some(cached) = self.md_render_cache.get(&hash) {
+                      return cached.clone();
+                  }
         let mut opts = Options::empty();
         opts.insert(Options::ENABLE_TABLES);
         opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -266,10 +268,9 @@ impl App {
 
         // Limit cache size to avoid unbounded growth.
         if self.md_render_cache.len() >= 256 {
-            self.md_render_cache.clear();
+            self.md_render_cache.clear(); // LRU handles eviction
         }
-        self.md_render_cache.insert(hash, result.clone());
-        result
+                    self.md_render_cache.put(hash, result.clone());        result
     }
 
     /// Create a new [`App`] with default state and the given event bus.
@@ -371,6 +372,7 @@ impl App {
             agent_name,
             status: "ready".to_string(),
             permission_pending: None,
+            pending_question_input: String::new(),
             token_usage: (0, 0),
             llm_request_stats: Vec::new(),
             last_input_tokens: 0,
@@ -466,7 +468,7 @@ impl App {
             opt_result: Arc::new(std::sync::Mutex::new(None)),
             history_dirty: false,
             history_save_deadline: None,
-            md_render_cache: HashMap::new(),
+            md_render_cache: LruCache::new(NonZeroUsize::new(256).unwrap()),
             autopilot_enabled: false,
             autopilot_token_budget: None,
             autopilot_time_limit_secs: None,
@@ -477,7 +479,7 @@ impl App {
             webapi_server: None,
             webapi_addr: "127.0.0.1:3000".to_string(),
             webapi_token: None,
-            needs_redraw: false,
+            needs_redraw: true,
         };
 
         // Log any warnings from custom agent loading into the log panel
@@ -1043,8 +1045,7 @@ impl App {
     }
 
     #[inline]
-    fn assert_ui_invariants(&self) {
-        self.assert_input_cursor_invariant();
+          fn assert_ui_invariants(&self) {        self.assert_input_cursor_invariant();
         if let Some(sel) = &self.text_selection {
             debug_assert!(
                 self.pane_area(sel.pane).area() > 0,
@@ -7682,7 +7683,8 @@ Type `/swarm help` for more info.\n";
     /// # }
     /// ```
     pub fn handle_event(&mut self, event: Event) {
-        // Mark UI dirty for any state change
+        // Mark UI dirty for any event handling
+    self.needs_redraw = true;
         self.needs_redraw = true;
         match event {
             Event::SessionCreated { ref session_id } => {
@@ -7927,6 +7929,7 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.permission_pending = None;
+                    self.pending_question_input.clear();
                     self.status = "processing...".to_string();
                     self.push_log_no_agent(
                         LogLevel::Info,
@@ -8483,6 +8486,14 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.shell_cwd = Some(cwd.clone());
+                }
+            }
+            Event::UserInput { ref session_id, .. } => {
+                if self.is_current_session(session_id) {
+                    // The tool is unblocked; clear the question UI and resume.
+                    self.permission_pending = None;
+                    self.pending_question_input.clear();
+                    self.status = "processing...".to_string();
                 }
             }
             _ => {}

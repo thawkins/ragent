@@ -244,6 +244,10 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             .and_then(|v| v.as_str())
             .map(|q| format!("\"{}\"", q))
             .unwrap_or_default(),
+        "question" | "ask_user" => {
+            let q = get_str(&["question", "query"]).unwrap_or_default();
+            format!("❓ {}", truncate_str(&q, 60))
+        }
         "multiedit" => {
             let count = input
                 .get("edits")
@@ -540,6 +544,12 @@ pub(crate) fn tool_result_summary(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             Some(format!("returned ({} chars)", len))
+        }
+        "question" | "ask_user" => {
+            let response = out.get("response").and_then(|v| v.as_str())
+                .or_else(|| out.get("content").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            Some(format!("↩ {}", truncate_str(response, 60)))
         }
         "todo_read" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;

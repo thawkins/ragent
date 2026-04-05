@@ -30,6 +30,7 @@ pulldown-cmark = "0.12"
 prompt_opt = { path = "../prompt_opt" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
+lru = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }

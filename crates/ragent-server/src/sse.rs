@@ -280,6 +280,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::LspStatusChanged { .. } => "lsp_status_changed",
         Event::TaskCompleted { .. } => "task_completed",
         Event::ShellCwdChanged { .. } => "shell_cwd_changed",
+        Event::UserInput { .. } => "user_input",
     }
 }
 
@@ -636,6 +637,16 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         Event::ShellCwdChanged { session_id, cwd } => to_data(&serde_json::json!({
             "session_id": session_id,
             "cwd": cwd,
+        })),
+
+        Event::UserInput {
+            session_id,
+            request_id,
+            response,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "request_id": request_id,
+            "response": response,
         })),
     };
 
