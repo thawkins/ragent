@@ -107,7 +107,7 @@ fn test_render_markdown_table() {
 
 #[test]
 fn test_normalize_tables_non_table_passthrough() {
-    let mut app = make_app();
+    let app = make_app();
     let input = "Hello\nWorld\nNo tables here";
     let output = app.normalize_ascii_tables(input);
     assert_eq!(output, input);
@@ -115,7 +115,7 @@ fn test_normalize_tables_non_table_passthrough() {
 
 #[test]
 fn test_normalize_tables_aligns_columns() {
-    let mut app = make_app();
+    let app = make_app();
     // Simulate html2text output with │ separators
     let input = "│ Name │ Value │\n─────────────────\n│ foo │ 42 │\n│ barbaz │ 1 │";
     let output = app.normalize_ascii_tables(input);
@@ -138,7 +138,7 @@ fn test_normalize_tables_aligns_columns() {
 
 #[test]
 fn test_normalize_tables_adds_borders() {
-    let mut app = make_app();
+    let app = make_app();
     // Table with │ separators — normalize should add +---+---+ borders.
     let input = "│ A │ B │\n──────────\n│ 1 │ 2 │";
     let output = app.normalize_ascii_tables(input);
