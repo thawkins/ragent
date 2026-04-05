@@ -726,9 +726,7 @@ impl App {
         };
         let msg = Message::user_text(&sid, &display_text);
         self.messages.push(msg);
-        self.input_history.push(text.clone());
-        self.history_index = None;
-        self.history_draft.clear();
+        self.add_to_history(text.clone());
         self.input.clear();
         self.input_cursor = 0;
         self.file_menu = None;
