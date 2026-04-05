@@ -11,25 +11,43 @@
 pub mod mcp_tool;
 pub use mcp_tool::McpToolWrapper;
 
+/// Alias tools that map commonly hallucinated tool names to canonical implementations.
+pub mod aliases;
+/// File append tool.
+pub mod append_file;
 /// Shell command execution tool.
 pub mod bash;
 /// Persistent shell state reset tool.
 pub mod bash_reset;
+/// Math expression calculator tool.
+pub mod calculator;
 /// Task cancellation tool.
 pub mod cancel_task;
+/// File copy tool.
+pub mod copy_file;
 /// File creation tool.
 pub mod create;
+/// File diff tool.
+pub mod diff;
 /// File editing tool.
 pub mod edit;
+/// Python code execution tool.
+pub mod execute_python;
+/// File metadata / info tool.
+pub mod file_info;
 /// Per-file locking for concurrent edit operations.
 mod file_lock;
 /// Concurrent file operations tool (batch read/write).
 pub mod file_ops_tool;
+/// Environment variable read tool.
+pub mod get_env;
 pub mod github_issues;
 pub mod github_prs;
 /// File globbing tool.
 pub mod glob;
 pub mod grep;
+/// Full HTTP client tool.
+pub mod http_request;
 pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
@@ -42,6 +60,10 @@ pub mod lsp_hover;
 pub mod lsp_references;
 pub mod lsp_symbols;
 pub mod memory_write;
+/// Directory creation tool.
+pub mod mkdir;
+/// File move / rename tool.
+pub mod move_file;
 pub mod multiedit;
 pub mod new_task;
 pub mod office_common;
@@ -56,6 +78,8 @@ pub mod question;
 pub mod read;
 pub mod rm;
 pub mod search;
+/// Claude-compatible multi-command file editor.
+pub mod str_replace_editor;
 pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 pub mod team_approve_plan;
@@ -480,5 +504,35 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(github_prs::GithubCreatePrTool));
     registry.register(Arc::new(github_prs::GithubMergePrTool));
     registry.register(Arc::new(github_prs::GithubReviewPrTool));
+    // Phase 2 — new file-system tools
+    registry.register(Arc::new(move_file::MoveFileTool));
+    registry.register(Arc::new(copy_file::CopyFileTool));
+    registry.register(Arc::new(append_file::AppendFileTool));
+    registry.register(Arc::new(mkdir::MakeDirTool));
+    registry.register(Arc::new(file_info::FileInfoTool));
+    registry.register(Arc::new(diff::DiffFilesTool));
+    // Phase 3 — code execution & Claude-compatible editor
+    registry.register(Arc::new(execute_python::ExecutePythonTool));
+    registry.register(Arc::new(str_replace_editor::StrReplaceEditorTool));
+    // Phase 4 — utilities
+    registry.register(Arc::new(calculator::CalculatorTool));
+    registry.register(Arc::new(get_env::GetEnvTool));
+    registry.register(Arc::new(http_request::HttpRequestTool));
+    // Phase 1 — alias layer (commonly hallucinated tool names)
+    registry.register(Arc::new(aliases::ViewFileTool));
+    registry.register(Arc::new(aliases::ReadFileTool));
+    registry.register(Arc::new(aliases::GetFileContentsTool));
+    registry.register(Arc::new(aliases::ListFilesTool));
+    registry.register(Arc::new(aliases::ListDirectoryTool));
+    registry.register(Arc::new(aliases::FindFilesTool));
+    registry.register(Arc::new(aliases::SearchInRepoTool));
+    registry.register(Arc::new(aliases::FileSearchTool));
+    registry.register(Arc::new(aliases::ReplaceInFileTool));
+    registry.register(Arc::new(aliases::UpdateFileTool));
+    registry.register(Arc::new(aliases::RunShellCommandTool));
+    registry.register(Arc::new(aliases::RunTerminalCmdTool));
+    registry.register(Arc::new(aliases::ExecuteBashTool));
+    registry.register(Arc::new(aliases::ExecuteCodeTool));
+    registry.register(Arc::new(aliases::RunCodeTool));
     registry
 }
