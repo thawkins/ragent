@@ -164,7 +164,7 @@ fn test_provider_auth_auto_migrates_to_v2() {
         .enumerate()
         .map(|(i, b)| b ^ obfuscation_key[i % obfuscation_key.len()])
         .collect();
-    let v1_encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &xored);
+    let _v1_encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &xored);
 
     // Insert v1-format directly into the DB
     storage.set_setting("_test_skip", "true").unwrap(); // ensure DB is open
