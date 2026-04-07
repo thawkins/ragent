@@ -413,8 +413,7 @@ Report only high-signal issues with file paths and concrete fixes.
     "payload": {
       "system_prompt": "You are a helpful AI agent.\nWorking directory: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
       "mode": "primary",
-      "max_steps": 50
-    }
+              "max_steps": 500    }
   }]
 }
 ```

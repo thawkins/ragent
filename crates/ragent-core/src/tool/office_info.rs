@@ -138,16 +138,6 @@ fn info_docx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         })
         .unwrap_or_default();
 
-    let metadata = json!({
-        "format": "docx",
-        "file_size_bytes": file_size,
-        "title": title,
-        "author": author,
-        "paragraph_count": paragraph_count,
-        "word_count": word_count,
-        "table_count": table_count,
-    });
-
     let content = format!(
         "Format: Word Document (.docx)\n\
          File size: {} bytes\n\
@@ -163,6 +153,19 @@ fn info_docx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         word_count,
         table_count,
     );
+
+    let line_count = content.lines().count();
+
+    let metadata = json!({
+        "format": "docx",
+        "file_size_bytes": file_size,
+        "title": title,
+        "author": author,
+        "paragraph_count": paragraph_count,
+        "word_count": word_count,
+        "table_count": table_count,
+        "line_count": line_count,
+    });
 
     Ok((content, metadata))
 }
@@ -210,14 +213,18 @@ fn info_xlsx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         }
     }
 
+    let content = content_lines.join("\n");
+    let line_count = content.lines().count();
+
     let metadata = json!({
         "format": "xlsx",
         "file_size_bytes": file_size,
         "sheet_count": sheet_names.len(),
+        "line_count": line_count,
         "sheets": sheets_info,
     });
 
-    Ok((content_lines.join("\n"), metadata))
+    Ok((content, metadata))
 }
 
 /// Extracts metadata from a `PowerPoint` presentation.
@@ -285,12 +292,16 @@ fn info_pptx(path: &Path, file_size: u64) -> Result<(String, Value)> {
         content_lines.push(format!("  {}. {display_title}", i + 1));
     }
 
+    let content = content_lines.join("\n");
+    let line_count = content.lines().count();
+
     let metadata = json!({
         "format": "pptx",
         "file_size_bytes": file_size,
         "slide_count": slide_count,
+        "line_count": line_count,
         "slide_titles": slide_titles,
     });
 
-    Ok((content_lines.join("\n"), metadata))
+    Ok((content, metadata))
 }

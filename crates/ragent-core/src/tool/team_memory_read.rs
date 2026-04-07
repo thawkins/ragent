@@ -101,20 +101,25 @@ impl Tool for TeamMemoryReadTool {
                 content: format!("File '{rel_path}' not found in memory directory."),
                 metadata: Some(json!({
                     "memory_dir": mem_dir.display().to_string(),
+                    "path": rel_path,
+                    "line_count": 0,
+                    "byte_count": 0,
                     "exists": false
                 })),
             });
         }
-
         let content = std::fs::read_to_string(&target)
             .map_err(|e| anyhow::anyhow!("Failed to read {rel_path}: {e}"))?;
 
+        let line_count = content.lines().count();
+        let byte_count = content.len();
         Ok(ToolOutput {
             content,
             metadata: Some(json!({
                 "memory_dir": mem_dir.display().to_string(),
                 "path": rel_path,
-                "bytes": canonical_target.metadata().map(|m| m.len()).unwrap_or(0)
+                "line_count": line_count,
+                "byte_count": byte_count
             })),
         })
     }

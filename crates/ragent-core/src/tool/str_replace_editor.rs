@@ -178,12 +178,7 @@ async fn handle_insert(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
 
     let inserted_count = new_text.lines().count();
     Ok(ToolOutput {
-        content: format!(
-            "Inserted {} line(s) after line {} in {}",
-            inserted_count,
-            insert_line,
-            path.display()
-        ),
+        content: String::new(), // Empty on success; errors are returned as Err
         metadata: Some(json!({
             "path": path.display().to_string(),
             "insert_after_line": insert_line,
@@ -241,10 +236,7 @@ async fn handle_delete(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         .with_context(|| format!("Failed to write file: {}", path.display()))?;
 
     Ok(ToolOutput {
-        content: format!(
-            "Deleted lines {start}–{end_clamped} ({removed} line(s)) from {}",
-            path.display()
-        ),
+        content: String::new(), // Empty on success; errors are returned as Err
         metadata: Some(json!({
             "path": path.display().to_string(),
             "start_line": start,

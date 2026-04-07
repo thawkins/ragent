@@ -509,8 +509,9 @@ impl Event {
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
             | Self::LspStatusChanged { .. } => None,
-            Self::ShellCwdChanged { session_id, .. }
-            | Self::UserInput { session_id, .. } => Some(session_id.as_str()),
+            Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
+                Some(session_id.as_str())
+            }
         }
     }
 }

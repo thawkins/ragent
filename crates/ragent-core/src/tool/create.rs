@@ -95,8 +95,9 @@ impl Tool for CreateTool {
             ),
             metadata: Some(json!({
                 "path": path.display().to_string(),
-                "bytes": bytes,
-                "lines": lines,
+                "byte_count": bytes,
+                "line_count": lines,
+                "file_count": 1,
             })),
         })
     }

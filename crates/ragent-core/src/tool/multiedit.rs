@@ -230,7 +230,7 @@ impl Tool for MultiEditTool {
         Ok(ToolOutput {
             content: summary,
             metadata: Some(json!({
-                "files": file_count,
+                "file_count": file_count,
                 "edits": total_edits,
                 "lines_added": total_added,
                 "lines_removed": total_removed,

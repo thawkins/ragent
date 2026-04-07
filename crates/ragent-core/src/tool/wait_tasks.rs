@@ -224,9 +224,9 @@ impl Tool for WaitTasksTool {
         Ok(ToolOutput {
             content: output,
             metadata: Some(json!({
-                "completed": results.len(),
+                "completed_count": results.len(),
                 "timed_out": timed_out,
-                "still_running": waiting_for.len(),
+                "still_running_count": waiting_for.len(),
                 "tasks": task_details,
             })),
         })

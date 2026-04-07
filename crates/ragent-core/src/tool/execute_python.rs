@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 
 use super::{Tool, ToolContext, ToolOutput};
@@ -68,6 +68,8 @@ impl Tool for ExecutePythonTool {
             .await
             .with_context(|| "Failed to write Python snippet to temp file")?;
 
+        let start = Instant::now();
+
         let result = tokio::time::timeout(
             Duration::from_secs(timeout_secs),
             Command::new("python3")
@@ -77,12 +79,22 @@ impl Tool for ExecutePythonTool {
         )
         .await;
 
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
         // Always clean up
         let _ = tokio::fs::remove_file(&tmp_path).await;
 
         match result {
-            Err(_) => anyhow::bail!("Python execution timed out after {timeout_secs}s"),
-            Ok(Err(e)) => anyhow::bail!("Failed to launch python3: {e}"),
+            Err(_) => Ok(ToolOutput {
+                content: format!("Python execution timed out after {timeout_secs}s"),
+                metadata: Some(json!({
+                    "timed_out": true,
+                    "timeout_secs": timeout_secs,
+                })),
+            }),
+            Ok(Err(e)) => Err(anyhow::anyhow!(
+                "Failed to launch python3: {e}. Check that python3 is installed and accessible."
+            )),
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -96,19 +108,23 @@ impl Tool for ExecutePythonTool {
                     if !content.is_empty() {
                         content.push('\n');
                     }
-                    content.push_str("--- stderr ---\n");
+                    content.push_str("[stderr]\n");
                     content.push_str(&stderr);
                 }
                 if content.is_empty() {
-                    content = format!("(exit code {exit_code}, no output)");
+                    content = "(no output)".to_string();
                 }
 
+                let line_count = content.lines().count();
+
                 Ok(ToolOutput {
-                    content,
+                    content: format!(
+                        "Exit code: {exit_code}\nDuration: {elapsed_ms}ms\n\n{content}"
+                    ),
                     metadata: Some(json!({
                         "exit_code": exit_code,
-                        "stdout_len": stdout.len(),
-                        "stderr_len": stderr.len(),
+                        "duration_ms": elapsed_ms,
+                        "line_count": line_count,
                     })),
                 })
             }

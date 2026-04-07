@@ -84,7 +84,8 @@ impl Tool for TeamMessageTool {
             metadata: Some(json!({
                 "team_name": team_name,
                 "from": from,
-                "to": recipient_id
+                "to": recipient_id,
+                "message_count": 1
             })),
         })
     }

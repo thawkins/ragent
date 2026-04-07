@@ -125,7 +125,7 @@ impl Tool for TeamTaskCreateTool {
                 "team_name": team_name,
                 "task_id": task_id,
                 "title": title,
-                "depends_on": depends_on
+                "depends_on_count": depends_on.len()
             })),
         })
     }

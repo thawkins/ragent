@@ -243,7 +243,7 @@ async fn test_multiedit_metadata() {
         .unwrap();
 
     let meta = result.metadata.unwrap();
-    assert_eq!(meta["files"], 2);
+    assert_eq!(meta["file_count"], 2);
     assert_eq!(meta["edits"], 2);
     let _ = std::fs::remove_dir_all(&dir);
 }

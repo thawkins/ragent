@@ -120,12 +120,14 @@ fn test_slash_help_shows_commands() {
 }
 
 #[test]
-fn test_slash_help_switches_to_chat_screen() {
+fn test_slash_help_executes_in_chat_screen() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
-    assert_eq!(app.current_screen, ScreenMode::Home);
+    // App now starts in Chat mode - home screen has been removed
+    assert_eq!(app.current_screen, ScreenMode::Chat);
 
     app.execute_slash_command("/help");
+    // Should remain in Chat mode
     assert_eq!(app.current_screen, ScreenMode::Chat);
 }
 
@@ -729,25 +731,12 @@ fn test_history_picker_enter_sets_char_cursor_for_unicode() {
 }
 
 #[test]
-fn test_home_and_chat_keystrokes_have_same_edit_result() {
-    let mut home = make_app();
-    home.current_screen = ScreenMode::Home;
-
+fn test_chat_keystrokes_produce_expected_edit_result() {
+    // Test that input handling works correctly in chat mode
     let mut chat = make_app();
-    chat.current_screen = ScreenMode::Chat;
+    // App now starts in Chat mode - home screen has been removed
+    assert_eq!(chat.current_screen, ScreenMode::Chat);
 
-    let sequence = vec![
-        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Char('💡'), KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Char('Z'), KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
-        KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-    ];
-
-    for key in sequence {
-        home.handle_key_event(key);
-    }
     let sequence = vec![
         KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
         KeyEvent::new(KeyCode::Char('💡'), KeyModifiers::NONE),
@@ -760,8 +749,9 @@ fn test_home_and_chat_keystrokes_have_same_edit_result() {
         chat.handle_key_event(key);
     }
 
-    assert_eq!(home.input, chat.input);
-    assert_eq!(home.input_cursor, chat.input_cursor);
+    // Verify the final state
+    assert_eq!(chat.input, "aZ💡");
+    assert_eq!(chat.input_cursor, 3);
 }
 
 #[test]
@@ -1360,13 +1350,15 @@ fn test_slash_opt_help_shows_markdown_table() {
 }
 
 #[test]
-fn test_slash_opt_help_switches_to_chat() {
+fn test_slash_opt_help_stays_in_chat() {
     let mut app = make_app();
     app.session_id = Some("s1".to_string());
-    assert_eq!(app.current_screen, ScreenMode::Home);
+    // App now starts in Chat mode - home screen has been removed
+    assert_eq!(app.current_screen, ScreenMode::Chat);
 
     app.execute_slash_command("/opt help");
 
+    // Should remain in Chat mode
     assert_eq!(app.current_screen, ScreenMode::Chat);
 }
 

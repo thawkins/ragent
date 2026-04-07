@@ -245,8 +245,8 @@ impl Tool for GrepTool {
             Ok(ToolOutput {
                 content: format!("{summary}\n\n{content}"),
                 metadata: Some(json!({
-                    "matches": match_count,
-                    "files_searched": files_searched,
+                    "count": match_count,
+                    "file_count": files_searched,
                     "truncated": truncated,
                     "pattern": pattern,
                 })),

@@ -121,6 +121,7 @@ impl Tool for TeamStatusTool {
             metadata: Some(json!({
                 "team_name": team_name,
                 "team_status": format!("{:?}", store.config.status).to_lowercase(),
+                "member_count": store.config.members.len(),
                 "members": members_json,
                 "tasks": {
                     "total": total_tasks,

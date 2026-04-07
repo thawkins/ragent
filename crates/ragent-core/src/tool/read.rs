@@ -226,12 +226,12 @@ impl Tool for ReadTool {
         let lines_read = actual_end.saturating_sub(actual_start - 1);
 
         let mut meta = serde_json::json!({
+            "path": path.display().to_string(),
             "start_line": actual_start,
             "end_line": actual_end,
             "total_lines": total_lines,
-            "lines": lines_read,
+            "line_count": lines_read,
         });
-
         if summarised {
             meta["summarised"] = serde_json::json!(true);
             meta["message"] = serde_json::json!(

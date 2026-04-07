@@ -20,8 +20,7 @@
       "payload": {
         "system_prompt": "You are a technical writer for this project.\nProject root: {{WORKING_DIR}}\nDate: {{DATE}}\n\nYour responsibilities:\n- Write clear, concise Markdown documentation\n- Follow the existing style found in the project docs/ folder\n- Always include practical examples with code blocks\n- Keep headings hierarchical and scannable\n- Update tables of contents when adding new sections\n- Cross-reference related documents with relative links\n\n{{AGENTS_MD}}",
         "mode": "all",
-        "max_steps": 50,
-        "temperature": 0.7,
+                  "max_steps": 500,        "temperature": 0.7,
         "permissions": [
           { "permission": "read",  "pattern": "**",      "action": "allow" },
           { "permission": "edit",  "pattern": "docs/**", "action": "allow" },

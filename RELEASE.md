@@ -1,6 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.27
+## Current Version: 0.1.0-alpha.29
+
+### Changed
+- Version bump to 0.1.0-alpha.29
+
+## Previous: 0.1.0-alpha.28
+
+### Changed
+- Version bump to 0.1.0-alpha.28
+
+## Previous: 0.1.0-alpha.27
 
 ### Fixed
 - CI Clippy: redundant closures in `lsp/discovery.rs`

@@ -143,20 +143,51 @@ impl Tool for PdfWriteTool {
         let working_dir = ctx.working_dir.clone();
         let path_clone = path.clone();
 
-        let bytes_written =
-            tokio::task::spawn_blocking(move || write_pdf(&path_clone, &content, &working_dir))
-                .await
-                .context("Failed to write PDF: the background task exited unexpectedly")??;
+        let content_clone = content.clone();
+        let bytes_written = tokio::task::spawn_blocking(move || {
+            write_pdf(&path_clone, &content_clone, &working_dir)
+        })
+        .await
+        .context("Failed to write PDF: the background task exited unexpectedly")??;
+
+        // Estimate page count from bytes (approximate)
+        let page_count = estimate_page_count(&content);
 
         Ok(ToolOutput {
             content: format!("Wrote PDF ({} bytes) to {}", bytes_written, path.display()),
             metadata: Some(json!({
                 "path": path.display().to_string(),
-                "bytes": bytes_written,
+                "byte_count": bytes_written,
+                "line_count": page_count,
                 "format": "pdf",
             })),
         })
     }
+}
+
+/// Estimates the page count from PDF content for metadata purposes.
+///
+/// Pages are created based on content elements and page breaks.
+fn estimate_page_count(content: &Value) -> usize {
+    let mut page_count = 1; // At least one page
+
+    if let Some(elements) = content["elements"].as_array() {
+        // Count explicit page breaks in elements
+        for elem in elements {
+            if let Some(elem_type) = elem["type"].as_str() {
+                if elem_type == "page_break" {
+                    page_count += 1;
+                }
+            }
+        }
+    }
+
+    // Also check content structure
+    if content.get("title").is_some() {
+        page_count = page_count.max(1);
+    }
+
+    page_count
 }
 
 /// Cursor tracking Y position and managing page breaks.

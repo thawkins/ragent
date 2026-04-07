@@ -14,7 +14,7 @@ use ratatui::{
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 /// Helper to build a ternary for pluralization (e.g., "1 item" vs "2 items").
-fn pluralize(count: usize, singular: &str, plural: &str) -> String {
+pub fn pluralize(count: usize, singular: &str, plural: &str) -> String {
     if count == 1 {
         format!("{} {}", count, singular)
     } else {
@@ -23,7 +23,7 @@ fn pluralize(count: usize, singular: &str, plural: &str) -> String {
 }
 
 /// Truncate a string to a maximum length, appending ellipsis if truncated.
-fn truncate_str(s: &str, max_len: usize) -> String {
+pub fn truncate_str(s: &str, max_len: usize) -> String {
     if s.chars().count() > max_len {
         let truncated: String = s.chars().take(max_len).collect();
         format!("{truncated}...")
@@ -75,7 +75,7 @@ fn summarize_tool_args(input: &serde_json::Value, max_str_len: usize) -> String 
 }
 
 /// Capitalize the first letter of a tool name for display (e.g., "read" → "Read").
-pub(crate) fn capitalize_tool_name(name: &str) -> String {
+pub fn capitalize_tool_name(name: &str) -> String {
     let mut chars = name.chars();
     match chars.next() {
         None => String::new(),
@@ -88,7 +88,7 @@ pub(crate) fn capitalize_tool_name(name: &str) -> String {
 /// When a model calls an alias tool (e.g. `read_file` instead of `read`),
 /// both the input summary and result summary functions should produce the same
 /// rich display as the canonical tool.
-pub(crate) fn canonical_tool_name(tool: &str) -> &str {
+pub fn canonical_tool_name(tool: &str) -> &str {
     match tool {
         "view_file" | "read_file" | "get_file_contents" | "open_file" => "read",
         "list_files" | "list_directory" => "list",
@@ -96,14 +96,15 @@ pub(crate) fn canonical_tool_name(tool: &str) -> &str {
         "search_in_repo" | "file_search" => "search",
         "replace_in_file" => "edit",
         "update_file" => "write",
-        "run_shell_command" | "run_terminal_cmd" | "execute_bash" | "execute_code"
-        | "run_code" => "bash",
+        "run_shell_command" | "run_terminal_cmd" | "execute_bash" | "execute_code" | "run_code" => {
+            "bash"
+        }
         other => other,
     }
 }
 
 /// Strip the working directory prefix from a path to produce a project-relative path.
-pub(crate) fn make_relative_path(path: &str, cwd: &str) -> String {
+pub fn make_relative_path(path: &str, cwd: &str) -> String {
     // Expand ~ in cwd to the home directory for comparison
     let expanded_cwd = if cwd.starts_with('~') {
         if let Some(home) = std::env::var_os("HOME") {
@@ -128,129 +129,83 @@ pub(crate) fn make_relative_path(path: &str, cwd: &str) -> String {
 }
 
 /// Extract a brief summary from tool input for display next to the tool name.
-pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
+/// Visual Style Guide for Tool Input/Output Summaries
+///
+/// Tool categories with their associated emoji icons:
+/// - 📄 File Operations: read, write, create, edit, patch, rm, multiedit
+/// - 📁 Directory Operations: list, make_directory/mkdir
+/// - ℹ️  File Info: file_info
+/// - 🔍 Search Operations: search, grep, glob
+/// - ⚡ Execution: bash, execute_python, str_replace_editor, calculator
+/// - 🌐 Network: webfetch, websearch, http_request
+/// - 🔧 Environment: get_env
+/// - ❓ User Interaction: question, ask_user
+/// - 💭 Reasoning: think
+/// - 📝 Planning: plan_enter, plan_exit
+/// - 📋 Task Management: todo_read, todo_write
+/// - 🤖 Sub-agent: new_task, cancel_task, list_tasks, wait_tasks
+/// - 👥 Team Coordination: team_*
+/// - 🔎 LSP/Code Intelligence: lsp_*
+/// - 📄 Document: office_*, pdf_*
+/// - 📋 GitHub: github_issues, github_prs
+/// - ✨ Utility: format, metadata, truncate, read_line_range
+pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
     // Resolve alias tool names to their canonical equivalents so aliases get
     // the same rich display as canonical tools.
     let tool = canonical_tool_name(tool);
+
     // Helper: try multiple field names, return first that has a str value.
     let get_str = |keys: &[&str]| -> Option<String> {
-        keys.iter().find_map(|k| input.get(*k)?.as_str().map(|s| s.to_string()))
+        keys.iter()
+            .find_map(|k| input.get(*k)?.as_str().map(|s| s.to_string()))
     };
+
+    // Helper: get path and make it relative to cwd
+    let get_relative_path = |keys: &[&str]| -> String {
+        get_str(keys)
+            .as_deref()
+            .map(|p| make_relative_path(p, cwd))
+            .unwrap_or_default()
+    };
+
+    // Helper: truncate to standard 50 chars
+    let trunc50 = |s: &str| truncate_str(s, 50);
+
     match tool {
-        "bash" => {
-            // Aliases may send code/cmd instead of command.
-            get_str(&["command", "code", "cmd"])
-                .as_deref()
-                .and_then(|s| s.lines().next())
-                .map(|s| format!("$ {}", s))
-                .unwrap_or_default()
-        }
-        "read" => get_str(&["path"])
-            .as_deref()
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        "list" => {
-            // list_directory uses "directory"; canonical list uses "path".
-            get_str(&["path", "directory"])
-                .as_deref()
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default()
-        }
-        "search" => {
-            let query = get_str(&["query", "pattern"]).unwrap_or_default();
-            let path = get_str(&["path"]).as_deref().map(|p| make_relative_path(p, cwd));
-            match path {
-                Some(p) if !p.is_empty() => format!("\"{}\" in {}", query, p),
-                _ => format!("\"{}\"", query),
-            }
-        }
-        "write" | "create" | "edit" | "patch" | "rm" | "office_read" | "office_write"
-        | "office_info" | "pdf_read" | "pdf_write" => get_str(&["path"])
-            .as_deref()
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        // New filesystem tools
-        "move_file" | "rename_file" => {
-            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
-            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
-            if dst.is_empty() {
-                make_relative_path(&src, cwd)
+        // ═══════════════════════════════════════════════════════════════════
+        // 📄 FILE OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════
+        "read" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
             } else {
-                format!("{} → {}", make_relative_path(&src, cwd), make_relative_path(&dst, cwd))
+                format!("📄 {}", path)
             }
         }
-        "copy_file" => {
-            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
-            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
-            format!("{} → {}", make_relative_path(&src, cwd), make_relative_path(&dst, cwd))
-        }
-        "append_to_file" | "append_file" => get_str(&["path"])
-            .as_deref()
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        "make_directory" | "mkdir" => get_str(&["path", "directory"])
-            .as_deref()
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        "file_info" => get_str(&["path"])
-            .as_deref()
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        "diff_files" => {
-            let a = get_str(&["path_a", "file_a", "original"]).unwrap_or_default();
-            let b = get_str(&["path_b", "file_b", "modified"]).unwrap_or_default();
-            format!("{} ↔ {}", make_relative_path(&a, cwd), make_relative_path(&b, cwd))
-        }
-        "execute_python" => {
-            // Show first non-empty line of the code snippet.
-            get_str(&["code", "script"])
-                .as_deref()
-                .and_then(|s| s.lines().find(|l| !l.trim().is_empty()))
-                .map(|l| format!("py: {}", truncate_str(l, 50)))
-                .unwrap_or_default()
-        }
-        "str_replace_editor" => {
-            let cmd = get_str(&["command", "cmd"]).unwrap_or_else(|| "view".to_string());
-            let path = get_str(&["path"])
-                .as_deref()
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default();
-            format!("{}: {}", cmd, path)
-        }
-        "calculator" => {
-            let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
-            truncate_str(&expr, 50)
-        }
-        "get_env" => {
-            let key = get_str(&["key", "name", "variable"]).unwrap_or_default();
-            if key.is_empty() {
-                "all vars".to_string()
+        "write" | "create" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
             } else {
-                key
+                format!("📄 {}", path)
             }
         }
-        "http_request" | "web_request" => {
-            let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
-            let url = get_str(&["url"]).unwrap_or_default();
-            format!("{} {}", method, truncate_str(&url, 55))
+        "edit" | "patch" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("📄 {}", path)
+            }
         }
-        "webfetch" => input
-            .get("url")
-            .and_then(|v| v.as_str())
-            .map(|u| truncate_str(u, 60))
-            .unwrap_or_default(),
-        "websearch" => input
-            .get("query")
-            .and_then(|v| v.as_str())
-            .map(|q| format!("\"{}\"", q))
-            .unwrap_or_default(),
-        "question" | "ask_user" => {
-            let q = get_str(&["question", "query"]).unwrap_or_default();
-            format!("❓ {}", truncate_str(&q, 60))
-        }
-        "think" => {
-            let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
-            format!("💭 {}", truncate_str(&thought, 70))
+        "rm" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("📄 {}", path)
+            }
         }
         "multiedit" => {
             let count = input
@@ -258,13 +213,98 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .and_then(|v| v.as_array())
                 .map(|a| a.len())
                 .unwrap_or(0);
-            pluralize(count, "edit", "edits")
+            format!("📄 {}", pluralize(count, "edit", "edits"))
         }
-        "glob" => input
-            .get("pattern")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        "append_to_file" | "append_file" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("📄 {}", path)
+            }
+        }
+        "diff_files" => {
+            let a = get_str(&["path_a", "file_a", "original"]).unwrap_or_default();
+            let b = get_str(&["path_b", "file_b", "modified"]).unwrap_or_default();
+            format!(
+                "📄 {} ↔ {}",
+                make_relative_path(&a, cwd),
+                make_relative_path(&b, cwd)
+            )
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📁 DIRECTORY OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════
+        "list" => {
+            // list_directory uses "directory"; canonical list uses "path".
+            let path = get_relative_path(&["path", "directory"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("📁 {}", path)
+            }
+        }
+        "make_directory" | "mkdir" => {
+            let path = get_relative_path(&["path", "directory"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("📁 {}", path)
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ℹ️ FILE INFO
+        // ═══════════════════════════════════════════════════════════════════
+        "file_info" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                String::new()
+            } else {
+                format!("ℹ️  {}", path)
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔄 FILE MOVE/COPY
+        // ═══════════════════════════════════════════════════════════════════
+        "move_file" | "rename_file" => {
+            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
+            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
+            if dst.is_empty() {
+                format!("📄 {}", make_relative_path(&src, cwd))
+            } else {
+                format!(
+                    "📄 {} → {}",
+                    make_relative_path(&src, cwd),
+                    make_relative_path(&dst, cwd)
+                )
+            }
+        }
+        "copy_file" => {
+            let src = get_str(&["source", "src", "from", "path"]).unwrap_or_default();
+            let dst = get_str(&["destination", "dst", "to"]).unwrap_or_default();
+            format!(
+                "📄 {} → {}",
+                make_relative_path(&src, cwd),
+                make_relative_path(&dst, cwd)
+            )
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔍 SEARCH OPERATIONS
+        // ══════════════════════════════════════���════════════════════════════
+        "search" => {
+            let query = get_str(&["query", "pattern"]).unwrap_or_default();
+            let path = get_str(&["path"])
+                .as_deref()
+                .map(|p| make_relative_path(p, cwd));
+            match path {
+                Some(p) if !p.is_empty() => format!("🔍 \"{}\" in {}", trunc50(&query), p),
+                _ => format!("🔍 \"{}\"", trunc50(&query)),
+            }
+        }
         "grep" => {
             let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
             let path = input
@@ -272,20 +312,113 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .and_then(|v| v.as_str())
                 .map(|p| make_relative_path(p, cwd));
             match path {
-                Some(p) if !p.is_empty() => format!("\"{}\" in {}", pattern, p),
-                _ => format!("\"{}\"", pattern),
+                Some(p) if !p.is_empty() => {
+                    format!("🔍 \"{}\" in {}", trunc50(pattern), p)
+                }
+                _ => format!("🔍 \"{}\"", trunc50(pattern)),
             }
         }
+        "glob" => {
+            let pattern = input
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            format!("🔍 {}", pattern)
+        }
+
+        // ══��════════════════════════════════════════════════════════════════
+        // ⚡ EXECUTION
+        // ═══════════════════════════════════════════════════════════════════
+        "bash" => {
+            // Aliases may send code/cmd instead of command.
+            get_str(&["command", "code", "cmd"])
+                .as_deref()
+                .and_then(|s| s.lines().next())
+                .map(|s| format!("⚡ $ {}", trunc50(s)))
+                .unwrap_or_else(|| "⚡ bash".to_string())
+        }
+        "execute_python" => {
+            // Show first non-empty line of the code snippet.
+            get_str(&["code", "script"])
+                .as_deref()
+                .and_then(|s| s.lines().find(|l| !l.trim().is_empty()))
+                .map(|l| format!("⚡ py: {}", trunc50(l)))
+                .unwrap_or_else(|| "⚡ python".to_string())
+        }
+        "str_replace_editor" => {
+            let cmd = get_str(&["command", "cmd"]).unwrap_or_else(|| "view".to_string());
+            let path = get_relative_path(&["path"]);
+            format!("⚡ {}: {}", cmd, path)
+        }
+        "calculator" => {
+            let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
+            format!("⚡ {}", trunc50(&expr))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🌐 NETWORK
+        // ═══════════════════════════════════════════════════════════════════
+        "http_request" | "web_request" => {
+            let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
+            let url = get_str(&["url"]).unwrap_or_default();
+            format!("🌐 {} {}", method, trunc50(&url))
+        }
+        "webfetch" => input
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|u| format!("🌐 {}", trunc50(u)))
+            .unwrap_or_else(|| "🌐 fetch".to_string()),
+        "websearch" => input
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(|q| format!("🌐 \"{}\"", trunc50(q)))
+            .unwrap_or_else(|| "🌐 search".to_string()),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔧 ENVIRONMENT
+        // ═══════════════════════════════════════════════════════════════════
+        "get_env" => {
+            let key = get_str(&["key", "name", "variable"]).unwrap_or_default();
+            if key.is_empty() {
+                "🔧 all vars".to_string()
+            } else {
+                format!("🔧 {}", key)
+            }
+        }
+        "bash_reset" => "🔧 reset shell".to_string(),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // ❓ USER INTERACTION
+        // ═══════════════════════════════════════════════════════════════════
+        "question" | "ask_user" => {
+            let q = get_str(&["question", "query"]).unwrap_or_default();
+            format!("❓ {}", trunc50(&q))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 💭 REASONING
+        // ═══════════════════════════════════════════════════════════════════
+        "think" => {
+            let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
+            format!("💭 {}", trunc50(&thought))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📝 PLANNING
+        // ═══════════════════════════════════════════════════════════════════
         "plan_enter" => {
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            let truncated = truncate_str(task, 60);
-            format!("→ plan: {}", truncated)
+            format!("📝 → {}", trunc50(task))
         }
         "plan_exit" => {
             let summary = input.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-            let truncated = truncate_str(summary, 60);
-            format!("← plan: {}", truncated)
+            format!("📝 ← {}", trunc50(summary))
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 TASK MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════════
         "todo_read" => {
             let status = input
                 .get("status")
@@ -298,7 +431,7 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
             match action {
-                "add" => format!("📋 +{}", truncate_str(title, 40).as_str()),
+                "add" => format!("📋 +{}", trunc50(&title)),
                 "update" => format!("📋 ~{}", id),
                 "complete" => format!("📋 ✓{}", id),
                 "remove" => format!("📋 -{}", id),
@@ -306,22 +439,25 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 _ => format!("📋 {}", action),
             }
         }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🤖 SUB-AGENT
+        // ═══════════════════════════════════════════════════════════════════
         "new_task" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            let truncated = truncate_str(task, 50);
-            format!("{} → {}", agent, truncated)
+            format!("🤖 {} → {}", agent, trunc50(&task))
         }
         "cancel_task" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
-            format!("cancel task: {}", &task_id[..8.min(task_id.len())])
+            format!("🤖 cancel {}", &task_id[..8.min(task_id.len())])
         }
         "list_tasks" => {
             let status = input
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("all");
-            format!("filter: {}", status)
+            format!("🤖 filter: {}", status)
         }
         "wait_tasks" => {
             let task_ids = input
@@ -330,28 +466,195 @@ pub(crate) fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &st
                 .map(|a| a.len())
                 .unwrap_or(0);
             if task_ids > 0 {
-                format!("wait on {} task(s)", task_ids)
+                format!("🤖 wait on {} task(s)", task_ids)
             } else {
-                "wait on all tasks".to_string()
+                "🤖 wait on all tasks".to_string()
             }
         }
-        "lsp_definition" => {
-            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 👥 TEAM COORDINATION
+        // ═══════════════════════════════════════════════════════════════════
+        "team_create" => {
+            let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("👥 create {}", name)
+        }
+        "team_spawn" => {
+            let agent = input
+                .get("agent_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            format!("👥 spawn {}", agent)
+        }
+        "team_status" => "👥 status".to_string(),
+        "team_idle" => "👥 idle".to_string(),
+        "team_cleanup" => "👥 cleanup".to_string(),
+        "team_broadcast" => {
+            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            if content.is_empty() {
+                "👥 broadcast".to_string()
+            } else {
+                format!("👥 broadcast: {}", trunc50(content))
+            }
+        }
+        "team_message" => {
+            let to = input.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            format!("👥 msg to {}: {}", to, trunc50(content))
+        }
+        "team_read_messages" => "👥 read messages".to_string(),
+        "team_task_create" => {
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            format!("👥 task: {}", trunc50(&title))
+        }
+        "team_task_list" => "👥 list tasks".to_string(),
+        "team_task_claim" => {
+            let task_id = input.get("task_id").and_then(|v| v.as_str());
+            match task_id {
+                Some(id) => format!("👥 claim {}", id),
+                None => "👥 claim next".to_string(),
+            }
+        }
+        "team_task_complete" => {
+            let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("👥 complete {}", task_id)
+        }
+        "team_assign_task" => {
+            let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let to = input.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("👥 assign {} to {}", task_id, to)
+        }
+        "team_submit_plan" => "👥 submit plan".to_string(),
+        "team_approve_plan" => {
+            let approved = input
+                .get("approved")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if approved {
+                "👥 approve plan".to_string()
+            } else {
+                "👥 reject plan".to_string()
+            }
+        }
+        "team_memory_read" => "👥 read memory".to_string(),
+        "team_memory_write" => "👥 write memory".to_string(),
+        "team_wait" => {
+            let agent_ids = input
+                .get("agent_ids")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            if agent_ids > 0 {
+                format!("👥 wait on {} agent(s)", agent_ids)
+            } else {
+                "👥 wait on all agents".to_string()
+            }
+        }
+        "team_shutdown_teammate" => {
+            let teammate = input
+                .get("teammate")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            format!("👥 shutdown {}", teammate)
+        }
+        "team_shutdown_ack" => "👥 ack shutdown".to_string(),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔎 LSP / CODE INTELLIGENCE
+        // ═══════════════════════════════════════════════════════════════════
+        "lsp_definition" | "lsp_references" => {
+            let path = get_relative_path(&["path"]);
             let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("line {}, col {}", line, column)
+            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+            if path.is_empty() {
+                format!("🔎 L{}:{}", line, column)
+            } else {
+                format!("🔎 {} L{}:{}", path, line, column)
+            }
         }
         "lsp_hover" => {
-            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+            let path = get_relative_path(&["path"]);
             let line = input.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
-            format!("line {}, col {}", line, column)
+            let column = input.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+            if path.is_empty() {
+                format!("🔎 L{}:{}", line, column)
+            } else {
+                format!("🔎 {} L{}:{}", path, line, column)
+            }
         }
-        "lsp_references" | "lsp_symbols" | "lsp_diagnostics" => input
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|p| make_relative_path(p, cwd))
-            .unwrap_or_default(),
-        t if t.starts_with("team_") => summarize_tool_args(input, 40),
-        _ => summarize_tool_args(input, 40),
+        "lsp_symbols" | "lsp_diagnostics" => {
+            let path = get_relative_path(&["path"]);
+            if path.is_empty() {
+                "🔎 analyze".to_string()
+            } else {
+                format!("🔎 {}", path)
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📄 DOCUMENT (Office/PDF)
+        // ═══════���═══════════════════════════════════════════════════════════
+        "office_read" | "pdf_read" | "libreoffice_read" => {
+            let path = get_relative_path(&["path"]);
+            format!("📄 {}", path)
+        }
+        "office_write" | "pdf_write" | "libreoffice_write" => {
+            let path = get_relative_path(&["path"]);
+            format!("📄 {}", path)
+        }
+        "office_info" | "libreoffice_info" => {
+            let path = get_relative_path(&["path"]);
+            format!("📄 {}", path)
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 GITHUB
+        // ═══════════════════════════════════════════════════════════════════
+        "github_issues" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let number = input.get("number").and_then(|v| v.as_u64());
+            match (action, number) {
+                ("list", _) => "📋 list issues".to_string(),
+                ("create", _) => "📋 create issue".to_string(),
+                ("get", Some(n)) => format!("📋 issue #{}", n),
+                ("comment", Some(n)) => format!("📋 comment on #{}", n),
+                ("close", Some(n)) => format!("📋 close #{}", n),
+                _ => format!("📋 {} issue", action),
+            }
+        }
+        "github_prs" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let number = input.get("number").and_then(|v| v.as_u64());
+            match (action, number) {
+                ("list", _) => "📋 list PRs".to_string(),
+                ("create", _) => "📋 create PR".to_string(),
+                ("get", Some(n)) => format!("📋 PR #{}", n),
+                ("review", Some(n)) => format!("📋 review #{}", n),
+                ("merge", Some(n)) => format!("📋 merge #{}", n),
+                _ => format!("📋 {} PR", action),
+            }
+        }
+
+        // ══════════════════════════════════════════════════���════════════════
+        // ✨ UTILITY
+        // ═══════════════════════════════════════════════════════════════════
+        "format" => "✨ format".to_string(),
+        "metadata" => "✨ metadata".to_string(),
+        "truncate" => "✨ truncate".to_string(),
+        "read_line_range" => "✨ line range".to_string(),
+        "memory_read" => "✨ read memory".to_string(),
+        "memory_write" => "✨ write memory".to_string(),
+
+        // ═══════════════════════════════════════════════════════════════════
+        // DEFAULT: Unknown tools
+        // ═══════════════════════════════════════════════════════════════════
+        _ => {
+            if tool.starts_with("team_") {
+                format!("👥 {}", summarize_tool_args(input, 40))
+            } else {
+                summarize_tool_args(input, 40)
+            }
+        }
     }
 }
 
@@ -410,15 +713,21 @@ pub(crate) fn tool_inline_diff(
 }
 
 /// Generate a result summary line for a completed tool call.
-pub(crate) fn tool_result_summary(
+/// Generate a result summary line for a completed tool call.
+///
+/// Uses emoji icons consistent with tool_input_summary for visual alignment.
+/// Returns `None` for tools that don't produce meaningful summaries.
+pub fn tool_result_summary(
     tool: &str,
     output: &Option<serde_json::Value>,
     input: &serde_json::Value,
     cwd: &str,
 ) -> Option<String> {
     let out = output.as_ref()?;
+
     // Resolve alias tool names to their canonical equivalents for display.
     let tool = canonical_tool_name(tool);
+
     // Convenience: count output lines from content when metadata has no explicit count.
     // Tools that return structured metadata override this below.
     let line_count = out
@@ -426,7 +735,11 @@ pub(crate) fn tool_result_summary(
         .or_else(|| out.get("line_count"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
+
     match tool {
+        // ═════════════════════════════════════════════════════════���═════════
+        // 📄 FILE OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════
         "read" => {
             let summarised = out
                 .get("summarised")
@@ -449,7 +762,7 @@ pub(crate) fn tool_result_summary(
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
             Some(format!(
-                "{} written to {}",
+                "📄 {} written to {}",
                 pluralize(line_count, "line", "lines"),
                 path
             ))
@@ -460,16 +773,29 @@ pub(crate) fn tool_result_summary(
                 .map(|p| make_relative_path(p, cwd))
                 .unwrap_or_default();
             Some(format!(
-                "{} created in {}",
+                "📄 {} created in {}",
                 pluralize(line_count, "line", "lines"),
                 path
             ))
         }
-        "edit" => None,
+        "edit" => {
+            let path = out
+                .get("path")
+                .and_then(|v| v.as_str())
+                .or_else(|| input.get("path").and_then(|v| v.as_str()))
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            let old_lines = out.get("old_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let new_lines = out.get("new_lines").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "📄 Edited {}: {} → {} lines",
+                path, old_lines, new_lines
+            ))
+        }
         "multiedit" => {
             // Return a brief top-level summary; per-file detail rows are rendered separately.
             let edits = out.get("edits").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let files = out.get("files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let files = out.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             Some(format!(
                 "{} across {}",
                 pluralize(edits, "edit", "edits"),
@@ -485,116 +811,6 @@ pub(crate) fn tool_result_summary(
                 pluralize(files, "file", "files")
             ))
         }
-        "bash" => {
-            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
-            let timed_out = out
-                .get("timeout")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            if timed_out {
-                Some("timed out".to_string())
-            } else if let Some(code) = exit_code {
-                Some(format!(
-                    "{}…  (exit {})",
-                    pluralize(line_count, "line", "lines"),
-                    code
-                ))
-            } else {
-                Some(format!("{}…", pluralize(line_count, "line", "lines")))
-            }
-        }
-        "grep" => {
-            let matches = out.get("matches").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let files = out
-                .get("files_searched")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            let truncated = out
-                .get("truncated")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let trunc = if truncated { "+" } else { "" };
-            Some(format!(
-                "{}{} matched in {} searched",
-                matches,
-                trunc,
-                pluralize(files, "file", "files")
-            ))
-        }
-        "glob" => {
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(count, "file", "files")))
-        }
-        "list" => {
-            let entries = out.get("entries").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let path = out
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default();
-            let label = if entries == 1 { "entry" } else { "entries" };
-            Some(format!("{} {} in {}", entries, label, path))
-        }
-        "webfetch" => {
-            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!(
-                "{} (HTTP {})",
-                pluralize(line_count, "line", "lines"),
-                status
-            ))
-        }
-        "websearch" => {
-            let results = out.get("results").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(results, "result", "results")))
-        }
-        "plan_enter" => {
-            let task = out.get("task").and_then(|v| v.as_str()).unwrap_or("plan");
-            Some(format!("delegated → plan: {}", task))
-        }
-        "plan_exit" => {
-            let len = out
-                .get("summary_length")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            Some(format!("returned ({} chars)", len))
-        }
-        "question" | "ask_user" => {
-            let response = out.get("response").and_then(|v| v.as_str())
-                .or_else(|| out.get("content").and_then(|v| v.as_str()))
-                .unwrap_or("");
-            Some(format!("↩ {}", truncate_str(response, 60)))
-        }
-        "think" => {
-            // The think tool records reasoning; show a brief note.
-            Some("Thinking ...".to_string())
-        }
-        "todo_read" => {
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(pluralize(count, "item", "items"))
-        }
-        "todo_write" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("{} → {} remaining", action, count))
-        }
-        "office_read" | "pdf_read" => {
-            Some(format!("{} read", pluralize(line_count, "line", "lines")))
-        }
-        "office_write" | "pdf_write" => {
-            let path = input["path"]
-                .as_str()
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default();
-            Some(format!(
-                "{} written to {}",
-                pluralize(line_count, "line", "lines"),
-                path
-            ))
-        }
-        "office_info" => Some(format!(
-            "{} of metadata",
-            pluralize(line_count, "line", "lines")
-        )),
         "rm" => {
             let deleted = out
                 .get("deleted")
@@ -606,6 +822,249 @@ pub(crate) fn tool_result_summary(
                 Some("failed".to_string())
             }
         }
+        "append_to_file" | "append_file" => {
+            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            if bytes > 0 {
+                Some(format!("{} bytes appended", bytes))
+            } else {
+                Some("appended".to_string())
+            }
+        }
+        "diff_files" => {
+            let changes = out.get("changes").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(changes, "change", "changes")))
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 📁 DIRECTORY OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════
+        "list" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let path = out
+                .get("path")
+                .and_then(|v| v.as_str())
+                .or_else(|| input.get("path").and_then(|v| v.as_str()))
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} in {}",
+                pluralize(count, "entry", "entries"),
+                path
+            ))
+        }
+        "make_directory" | "mkdir" => Some("directory created".to_string()),
+        // ═══════════════════════════════════════════════════════════════════
+        // ℹ️ FILE INFO
+        // ═══════════════════════════════════════════════════════════════════
+        "file_info" => {
+            let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");
+            let size = out.get("size").and_then(|v| v.as_u64());
+            match size {
+                Some(s) if s >= 1024 * 1024 => Some(format!(
+                    "{} ({:.1} MiB)",
+                    kind,
+                    s as f64 / (1024.0 * 1024.0)
+                )),
+                Some(s) if s >= 1024 => Some(format!("{} ({:.1} KiB)", kind, s as f64 / 1024.0)),
+                Some(s) => Some(format!("{} ({} bytes)", kind, s)),
+                None => Some(format!("{}", kind)),
+            }
+        }
+
+        // ════════════════════════════════════════════════════════════════���══
+        // 🔄 FILE MOVE/COPY
+        // ═══════════════════════════════════════════════════════════════════
+        "move_file" | "rename_file" => Some("moved".to_string()),
+        "copy_file" => {
+            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            if bytes > 0 {
+                Some(format!("{} bytes copied", bytes))
+            } else {
+                Some("copied".to_string())
+            }
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔍 SEARCH OPERATIONS
+        // ═══════════════════════════════════════════════════════════════════
+        "search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let truncated = out
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trunc = if truncated { "+" } else { "" };
+            Some(format!("{}{} found", count, trunc))
+        }
+        "grep" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let files = out.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let truncated = out
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trunc = if truncated { "+" } else { "" };
+            Some(format!(
+                "{}{} matched in {} searched",
+                count,
+                trunc,
+                pluralize(files, "file", "files")
+            ))
+        }
+        "glob" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let truncated = out
+                .get("truncated")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trunc = if truncated { "+" } else { "" };
+            Some(format!(
+                "{}{} found",
+                pluralize(count, "file", "files"),
+                trunc
+            ))
+        }
+
+        // ════════════════════════���══════════════════════════════════════════
+        // ⚡ EXECUTION
+        // ═══════════════════════════════════════════════════════════════════
+        "bash" => {
+            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
+            let timed_out = out
+                .get("timed_out")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let duration_ms = out.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            if timed_out {
+                Some(format!("timed out after {}ms", duration_ms))
+            } else if let Some(code) = exit_code {
+                Some(format!(
+                    "{}… (exit {})",
+                    pluralize(line_count, "line", "lines"),
+                    code
+                ))
+            } else {
+                Some(format!("{}…", pluralize(line_count, "line", "lines")))
+            }
+        }
+        "execute_python" => {
+            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
+            let timed_out = out
+                .get("timed_out")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let duration_ms = out.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            if timed_out {
+                Some(format!("timed out after {}ms", duration_ms))
+            } else if let Some(code) = exit_code {
+                Some(format!(
+                    "{}… (exit {})",
+                    pluralize(line_count, "line", "lines"),
+                    code
+                ))
+            } else {
+                Some(format!("{}…", pluralize(line_count, "line", "lines")))
+            }
+        }
+        "str_replace_editor" => {
+            let cmd = out
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("done");
+            match cmd {
+                "view" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
+                "create" => Some("file created".to_string()),
+                "str_replace" => Some("replaced".to_string()),
+                "insert" => Some("inserted".to_string()),
+                "delete" => Some("deleted".to_string()),
+                _ => Some(format!("{} done", cmd)),
+            }
+        }
+        "calculator" => {
+            let result = out.get("result").and_then(|v| v.as_str());
+            result.map(|r| format!("= {}", truncate_str(r, 50)))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 🌐 NETWORK
+        // ═══════════════════════════════════════════════════════════════════
+        "webfetch" => {
+            let status = out.get("http_status").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{} (HTTP {})",
+                pluralize(line_count, "line", "lines"),
+                status
+            ))
+        }
+        "websearch" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "result", "results")))
+        }
+        "http_request" | "web_request" => {
+            let status = out.get("http_status").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "HTTP {} ({})",
+                status,
+                pluralize(line_count, "line", "lines")
+            ))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔧 ENVIRONMENT
+        // ═══════════════════════════════════════════════════════════════════
+        "get_env" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if count > 0 {
+                Some(format!("{}", pluralize(count, "var", "vars")))
+            } else {
+                Some("not found".to_string())
+            }
+        }
+        "bash_reset" => Some("shell reset".to_string()),
+        // ═══════════════════════════════════════════════════════════════════
+        // ❓ USER INTERACTION
+        // ═══════════════════════════════════════════════════════════════════
+        "question" | "ask_user" => {
+            let response = out
+                .get("response")
+                .and_then(|v| v.as_str())
+                .or_else(|| out.get("content").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            Some(format!("{}", truncate_str(response, 60)))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 💭 REASONING
+        // ═══════════════════════════════════════════════════════════════════
+        "think" => {
+            // The think tool records reasoning; show a brief note.
+            Some("Thinking ...".to_string())
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📝 PLANNING
+        // ═══════════════════════════════════════════════════════════════════
+        "plan_enter" => {
+            let task = out.get("task").and_then(|v| v.as_str()).unwrap_or("plan");
+            Some(format!("delegated → {}", task))
+        }
+        "plan_exit" => {
+            let len = out
+                .get("summary_length")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("returned ({} chars)", len))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 TASK MANAGEMENT
+        // ═══════════════════════════════════════════════════��═══════════════
+        "todo_read" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{}", pluralize(count, "item", "items")))
+        }
+        "todo_write" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("{} → {} remaining", action, count))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 🤖 SUB-AGENT
+        // ═══════════════════════════════════════════════════════════════════
         "new_task" => {
             let agent = out.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let background = out
@@ -643,7 +1102,7 @@ pub(crate) fn tool_result_summary(
         }
         "list_tasks" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(pluralize(count, "task", "tasks"))
+            Some(format!("{}", pluralize(count, "task", "tasks")))
         }
         "wait_tasks" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -657,39 +1116,53 @@ pub(crate) fn tool_result_summary(
                 Some(format!("timeout waiting for {} task(s)", count))
             }
         }
-        "lsp_definition" | "lsp_references" => {
-            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!(
-                "{} found",
-                pluralize(count, "location", "locations")
-            ))
+        // ═══════════════════════════════════════════════════════════════════
+        // 👥 TEAM COORDINATION
+        // ═══════════════════════════════════════════════════════════════════
+        "team_create" => {
+            let name = out.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("created {}", name))
         }
-        "lsp_symbols" => {
-            let count = out
-                .get("symbol_count")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
-            let path = out
-                .get("path")
+        "team_spawn" => {
+            let teammate = out
+                .get("teammate_name")
                 .and_then(|v| v.as_str())
-                .map(|p| make_relative_path(p, cwd))
-                .unwrap_or_default();
-            Some(format!(
-                "{} in {}",
-                pluralize(count, "symbol", "symbols"),
-                path
-            ))
+                .unwrap_or("?");
+            Some(format!("spawned {}", teammate))
         }
-        "lsp_hover" => Some(format!(
-            "{} of info",
-            pluralize(line_count, "line", "lines")
-        )),
-        "lsp_diagnostics" => {
-            let count = out.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!(
-                "{} found",
-                pluralize(count, "diagnostic", "diagnostics")
-            ))
+        "team_status" => {
+            let members = out.get("members").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("{} member(s)", members))
+        }
+        "team_idle" => {
+            let idle_blocked = out
+                .get("idle_blocked")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if idle_blocked {
+                let task_id = out
+                    .get("blocked_by_task")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                Some(format!("blocked by task '{}'", task_id))
+            } else {
+                Some("marked idle".to_string())
+            }
+        }
+        "team_cleanup" => Some("cleanup complete".to_string()),
+        "team_broadcast" => Some("broadcast sent".to_string()),
+        "team_message" => Some("message sent".to_string()),
+        "team_read_messages" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} new", pluralize(count, "message", "messages")))
+        }
+        "team_task_create" => {
+            let task_id = out.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("created task '{}'", task_id))
+        }
+        "team_task_list" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} tasks", count))
         }
         "team_task_claim" => {
             let claimed = out
@@ -727,104 +1200,175 @@ pub(crate) fn tool_result_summary(
                 Some("task not found or already completed".to_string())
             }
         }
-        "team_idle" => {
-            let idle_blocked = out
-                .get("idle_blocked")
+        "team_assign_task" => {
+            let task_id = out
+                .get("task_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let to = out.get("to").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("assigned '{}' to {}", task_id, to))
+        }
+        "team_submit_plan" => Some("plan submitted".to_string()),
+        "team_approve_plan" => {
+            let approved = out
+                .get("approved")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            if idle_blocked {
-                let task_id = out
-                    .get("blocked_by_task")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                Some(format!("blocked by uncompleted task '{}'", task_id))
+            if approved {
+                Some("plan approved".to_string())
             } else {
-                Some("marked idle".to_string())
+                Some("plan rejected".to_string())
             }
         }
-        "search" => {
+        "team_memory_read" => {
+            let found = out.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+            if found {
+                Some("memory read".to_string())
+            } else {
+                Some("memory not found".to_string())
+            }
+        }
+        "team_memory_write" => Some("memory written".to_string()),
+        "team_wait" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            let truncated = out
-                .get("truncated")
+            let success = out
+                .get("success")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let trunc = if truncated { "+" } else { "" };
-            Some(format!("{}{} found", count, trunc))
-        }
-        "move_file" | "rename_file" => Some("moved".to_string()),
-        "copy_file" => {
-            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
-            if bytes > 0 {
-                Some(format!("{} bytes copied", bytes))
+            if success {
+                Some(format!("waited on {} agent(s)", count))
             } else {
-                Some("copied".to_string())
+                Some(format!("timeout waiting for {} agent(s)", count))
             }
         }
-        "append_to_file" | "append_file" => {
-            let bytes = out.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
-            if bytes > 0 {
-                Some(format!("{} bytes appended", bytes))
-            } else {
-                Some("appended".to_string())
-            }
-        }
-        "make_directory" | "mkdir" => Some("directory created".to_string()),
-        "file_info" => {
-            let kind = out.get("kind").and_then(|v| v.as_str()).unwrap_or("file");
-            let size = out.get("size").and_then(|v| v.as_u64());
-            match size {
-                Some(s) if s >= 1024 * 1024 => {
-                    Some(format!("{} ({:.1} MiB)", kind, s as f64 / (1024.0 * 1024.0)))
-                }
-                Some(s) if s >= 1024 => Some(format!("{} ({:.1} KiB)", kind, s as f64 / 1024.0)),
-                Some(s) => Some(format!("{} ({} bytes)", kind, s)),
-                None => Some(kind.to_string()),
-            }
-        }
-        "diff_files" => {
-            let changes = out.get("changes").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            Some(format!("{} found", pluralize(changes, "change", "changes")))
-        }
-        "execute_python" => {
-            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
-            match exit_code {
-                Some(0) => Some(format!("{} output", pluralize(line_count, "line", "lines"))),
-                Some(c) => Some(format!("{} (exit {})", pluralize(line_count, "line", "lines"), c)),
-                None => Some(format!("{} output", pluralize(line_count, "line", "lines"))),
-            }
-        }
-        "str_replace_editor" => {
-            let cmd = out.get("command").and_then(|v| v.as_str()).unwrap_or("done");
-            match cmd {
-                "view" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
-                "create" => Some("file created".to_string()),
-                "str_replace" => Some("replaced".to_string()),
-                "insert" => Some("inserted".to_string()),
-                "delete" => Some("deleted".to_string()),
-                _ => Some(format!("{} done", cmd)),
-            }
-        }
-        "calculator" => {
-            let result = out.get("result").and_then(|v| v.as_str());
-            result.map(|r| format!("= {}", truncate_str(r, 50)))
-        }
-        "get_env" => {
+        "team_shutdown_teammate" => Some("shutdown requested".to_string()),
+        "team_shutdown_ack" => Some("shutdown acknowledged".to_string()),
+        // ═══════════════════════════════════════════════════════════════════
+        // 🔎 LSP / CODE INTELLIGENCE
+        // ═══════════════════════════════════════════════════════════════════
+        "lsp_definition" | "lsp_references" => {
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-            if count > 0 {
-                Some(pluralize(count, "var", "vars"))
-            } else {
-                Some("not found".to_string())
-            }
-        }
-        "http_request" | "web_request" => {
-            let status = out.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(format!(
-                "HTTP {} ({})",
-                status,
-                pluralize(line_count, "line", "lines")
+                "{} found",
+                pluralize(count, "location", "locations")
             ))
         }
-        _ => None,
+        "lsp_symbols" => {
+            let count = out
+                .get("symbol_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let path = out
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} in {}",
+                pluralize(count, "symbol", "symbols"),
+                path
+            ))
+        }
+        "lsp_hover" => Some(format!(
+            "{} of info",
+            pluralize(line_count, "line", "lines")
+        )),
+        "lsp_diagnostics" => {
+            let count = out.get("total").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(count, "diagnostic", "diagnostics")
+            ))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📄 DOCUMENT (Office/PDF)
+        // ═════════════════════��═════════════════════════════════════════════
+        "office_read" | "pdf_read" | "libreoffice_read" => {
+            Some(format!("{} read", pluralize(line_count, "line", "lines")))
+        }
+        "office_write" | "pdf_write" | "libreoffice_write" => {
+            let path = input["path"]
+                .as_str()
+                .map(|p| make_relative_path(p, cwd))
+                .unwrap_or_default();
+            Some(format!(
+                "{} written to {}",
+                pluralize(line_count, "line", "lines"),
+                path
+            ))
+        }
+        "office_info" | "libreoffice_info" => Some(format!(
+            "{} of metadata",
+            pluralize(line_count, "line", "lines")
+        )),
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 GITHUB
+        // ═════════════════════════════════════════════════════════��═════════
+        "github_issues" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let number = out.get("number").and_then(|v| v.as_u64());
+            match (action, number) {
+                ("list", _) => Some("issues listed".to_string()),
+                ("create", _) => Some("issue created".to_string()),
+                ("get", Some(n)) => Some(format!("issue #{} retrieved", n)),
+                ("comment", Some(n)) => Some(format!("commented on #{}", n)),
+                ("close", Some(n)) => Some(format!("issue #{} closed", n)),
+                _ => Some(format!("{} issue", action)),
+            }
+        }
+        "github_prs" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let number = out.get("number").and_then(|v| v.as_u64());
+            match (action, number) {
+                ("list", _) => Some("PRs listed".to_string()),
+                ("create", _) => Some("PR created".to_string()),
+                ("get", Some(n)) => Some(format!("PR #{} retrieved", n)),
+                ("review", Some(n)) => Some(format!("reviewed #{}", n)),
+                ("merge", Some(n)) => Some(format!("PR #{} merged", n)),
+                _ => Some(format!("{} PR", action)),
+            }
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // ✨ UTILITY
+        // ═══════════════════════════════════════════════════════════════════
+        "format" => Some("formatted".to_string()),
+        "metadata" => Some("metadata extracted".to_string()),
+        "truncate" => {
+            let original = out.get("original").and_then(|v| v.as_u64()).unwrap_or(0);
+            let truncated = out.get("truncated").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("{} → {} chars", original, truncated))
+        }
+        "read_line_range" => {
+            let start = out.get("start_line").and_then(|v| v.as_u64());
+            let end = out.get("end_line").and_then(|v| v.as_u64());
+            match (start, end) {
+                (Some(s), Some(e)) => Some(format!("lines {}-{}", s, e)),
+                (Some(s), None) => Some(format!("from line {}", s)),
+                _ => Some("line range".to_string()),
+            }
+        }
+        "memory_read" => {
+            let found = out.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+            if found {
+                Some("memory read".to_string())
+            } else {
+                Some("memory not found".to_string())
+            }
+        }
+        "memory_write" => Some("memory written".to_string()),
+        // ═══════════════════════════════════════════════════════════════════
+        // DEFAULT: Unknown tools
+        // ═══════════════════════════════════════════════════════════════════
+        _ => {
+            if tool.starts_with("team_") {
+                Some(format!(
+                    "{}",
+                    out.get("status").and_then(|v| v.as_str()).unwrap_or("done")
+                ))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -885,10 +1429,7 @@ impl<'a> MessageWidget<'a> {
                         && trimmed.len() <= 6;
                     if is_thinking_placeholder && self.message.role == Role::Assistant {
                         lines.push(Line::from(vec![
-                            Span::styled(
-                                "💭 ",
-                                Style::default().fg(Color::DarkGray),
-                            ),
+                            Span::styled("💭 ", Style::default().fg(Color::DarkGray)),
                             Span::styled(
                                 "Thinking ...",
                                 Style::default()
@@ -1085,15 +1626,12 @@ impl<'a> MessageWidget<'a> {
                                     .collect();
                                 let max_len = rel_paths.iter().map(|p| p.len()).max().unwrap_or(0);
                                 for (fs, rel_path) in file_stats.iter().zip(rel_paths.iter()) {
-                                    let added = fs
-                                        .get("added")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    let removed = fs
-                                        .get("removed")
-                                        .and_then(|v| v.as_u64())
-                                        .unwrap_or(0);
-                                    let padding = " ".repeat(max_len.saturating_sub(rel_path.len()));
+                                    let added =
+                                        fs.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    let removed =
+                                        fs.get("removed").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    let padding =
+                                        " ".repeat(max_len.saturating_sub(rel_path.len()));
                                     lines.push(Line::from(vec![
                                         Span::styled(
                                             format!("  └ {}{} ", rel_path, padding),
@@ -1103,10 +1641,7 @@ impl<'a> MessageWidget<'a> {
                                             format!("+{}", added),
                                             Style::default().fg(Color::Green),
                                         ),
-                                        Span::styled(
-                                            " ",
-                                            Style::default(),
-                                        ),
+                                        Span::styled(" ", Style::default()),
                                         Span::styled(
                                             format!("-{}", removed),
                                             Style::default().fg(Color::Red),
@@ -1186,9 +1721,9 @@ mod tests {
             "agent_type": "general"
         });
         let summary = tool_input_summary("team_spawn", &input, "/tmp");
-        assert!(summary.contains("team_name=\"alpha\""));
-        assert!(summary.contains("teammate_name=\"reviewer-1\""));
-        assert!(summary.contains("agent_type=\"general\""));
+        // New format: "👥 spawn {agent_type}"
+        assert!(summary.contains("👥 spawn"));
+        assert!(summary.contains("general"));
     }
 
     #[test]
@@ -1196,13 +1731,16 @@ mod tests {
         let long = "x".repeat(60);
         let input = json!({
             "team_name": "alpha",
-            "prompt": long
+            "content": long
         });
-        let summary = tool_input_summary("team_spawn", &input, "/tmp");
-        assert!(summary.contains("prompt=\""));
+        let summary = tool_input_summary("team_broadcast", &input, "/tmp");
+        // New format: "👥 broadcast: {content}" with truncation
+        assert!(summary.contains("👥 broadcast:"));
+        // The string should be truncated (50 chars + "...")
         assert!(
-            summary.contains("...\""),
-            "summary should use three dots: {summary}"
+            summary.len() <= 70, // "👥 broadcast: " is ~14 chars + 50 + "..." = ~67
+            "summary should be truncated, got: {summary} (len: {})",
+            summary.len()
         );
     }
 

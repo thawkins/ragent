@@ -149,16 +149,18 @@ impl Tool for WebFetchTool {
             processed
         };
 
-        let lines = truncated.lines().count();
+        let line_count = truncated.lines().count();
+        let byte_count = truncated.len();
 
         Ok(ToolOutput {
             content: truncated,
             metadata: Some(json!({
                 "url": url,
-                "status": status,
+                "http_status": status,
                 "content_type": content_type,
                 "content_length": content_length,
-                "lines": lines,
+                "line_count": line_count,
+                "byte_count": byte_count,
             })),
         })
     }

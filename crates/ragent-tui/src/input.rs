@@ -185,12 +185,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                     if let Some(ref req) = app.permission_pending.clone() {
                         let response = app.pending_question_input.trim().to_string();
                         if !response.is_empty() {
-                            app.event_bus
-                                .publish(ragent_core::event::Event::UserInput {
-                                    session_id: req.session_id.clone(),
-                                    request_id: req.id.clone(),
-                                    response,
-                                });
+                            app.event_bus.publish(ragent_core::event::Event::UserInput {
+                                session_id: req.session_id.clone(),
+                                request_id: req.id.clone(),
+                                response,
+                            });
                             app.permission_pending = None;
                             app.pending_question_input.clear();
                         }
@@ -200,12 +199,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 KeyCode::Esc => {
                     // Cancel — send empty string so the tool can return gracefully.
                     if let Some(ref req) = app.permission_pending.clone() {
-                        app.event_bus
-                            .publish(ragent_core::event::Event::UserInput {
-                                session_id: req.session_id.clone(),
-                                request_id: req.id.clone(),
-                                response: "[User dismissed question]".to_string(),
-                            });
+                        app.event_bus.publish(ragent_core::event::Event::UserInput {
+                            session_id: req.session_id.clone(),
+                            request_id: req.id.clone(),
+                            response: "[User dismissed question]".to_string(),
+                        });
                     }
                     app.permission_pending = None;
                     app.pending_question_input.clear();

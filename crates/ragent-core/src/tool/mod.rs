@@ -109,6 +109,13 @@ pub mod webfetch;
 pub mod websearch;
 pub mod write;
 
+/// Content formatting utilities for standardized tool output.
+pub mod format;
+/// Metadata builder for consistent tool output metadata.
+pub mod metadata;
+/// Content truncation utilities for managing large tool outputs.
+pub mod truncate;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

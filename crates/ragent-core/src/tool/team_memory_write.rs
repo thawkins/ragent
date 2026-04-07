@@ -154,6 +154,7 @@ impl Tool for TeamMemoryWriteTool {
             content.len()
         };
 
+        let content_line_count = content.lines().count();
         Ok(ToolOutput {
             content: format!(
                 "Wrote {bytes_written} bytes to '{rel_path}' in memory directory (mode: {write_mode})."
@@ -162,7 +163,8 @@ impl Tool for TeamMemoryWriteTool {
                 "memory_dir": mem_dir.display().to_string(),
                 "path": rel_path,
                 "mode": write_mode,
-                "bytes_written": bytes_written
+                "byte_count": bytes_written,
+                "line_count": content_line_count
             })),
         })
     }

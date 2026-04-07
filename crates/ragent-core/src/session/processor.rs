@@ -595,6 +595,10 @@ impl SessionProcessor {
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
 
+        // Timing tracking for the agent loop
+        let total_start = Instant::now();
+        let mut cumulative_model_wait_ms: u64 = 0;
+
         // Pre-create a placeholder assistant message so that partial progress
         // is visible in the output view (e.g. teammate inspection) even before
         // the agent loop finishes.  We update it incrementally after each step.
@@ -622,6 +626,19 @@ impl SessionProcessor {
             // Check if the user cancelled (e.g. pressed ESC)
             if cancel_flag.load(Ordering::Relaxed) {
                 warn!("Agent loop cancelled by user at step {}", step);
+                // Calculate timing breakdown before returning
+                let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
+                let other_ms = total_elapsed_ms.saturating_sub(cumulative_model_wait_ms);
+                tracing::info!(
+                    session_id = %session_id,
+                    total_ms = total_elapsed_ms,
+                    model_wait_ms = cumulative_model_wait_ms,
+                    other_ms = other_ms,
+                    "Agent loop cancelled - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
+                    total_elapsed_ms,
+                    cumulative_model_wait_ms,
+                    other_ms
+                );
                 // Save partial progress (update the pre-created placeholder).
                 let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
                 assistant_msg.id = assistant_msg_id;
@@ -795,10 +812,12 @@ impl SessionProcessor {
                 } else {
                     text_buffer.clone()
                 };
+                let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
+                cumulative_model_wait_ms += model_elapsed_ms;
                 self.event_bus.publish(Event::ModelResponse {
                     session_id: session_id.to_string(),
                     text: response_preview,
-                    elapsed_ms: llm_request_start.elapsed().as_millis() as u64,
+                    elapsed_ms: model_elapsed_ms,
                     input_tokens: last_input_tokens,
                     output_tokens: last_output_tokens,
                 });
@@ -819,7 +838,9 @@ impl SessionProcessor {
                 // indicating it was thinking out loud and didn't produce tool calls.
                 let looks_like_stall = !trimmed_text.is_empty()
                     && !tool_definitions.is_empty()
-                    && trimmed_text.chars().all(|c| c == '.' || c == ' ' || c == '\n');
+                    && trimmed_text
+                        .chars()
+                        .all(|c| c == '.' || c == ' ' || c == '\n');
                 let looks_like_planning = !text_buffer.is_empty()
                     && !tool_definitions.is_empty()
                     && (text_buffer.contains("Let me")
@@ -840,7 +861,11 @@ impl SessionProcessor {
                 let should_nudge_stall = looks_like_stall && step <= 8;
                 let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
                 if should_nudge_stall || should_nudge_planning {
-                    let reason = if should_nudge_stall { "stall (dots-only output)" } else { "planning text without tool calls" };
+                    let reason = if should_nudge_stall {
+                        "stall (dots-only output)"
+                    } else {
+                        "planning text without tool calls"
+                    };
                     tracing::info!(
                         session_id = %session_id,
                         step,
@@ -1152,6 +1177,20 @@ impl SessionProcessor {
             let msg = assistant_msg.clone();
             self.storage_op(move |s| s.update_message(&msg)).await?;
         }
+
+        // Calculate and log timing breakdown
+        let total_elapsed_ms = total_start.elapsed().as_millis() as u64;
+        let other_ms = total_elapsed_ms.saturating_sub(cumulative_model_wait_ms);
+        tracing::info!(
+            session_id = %session_id,
+            total_ms = total_elapsed_ms,
+            model_wait_ms = cumulative_model_wait_ms,
+            other_ms = other_ms,
+            "Agent loop finished - timing breakdown: total={}ms, model_wait={}ms, other={}ms",
+            total_elapsed_ms,
+            cumulative_model_wait_ms,
+            other_ms
+        );
 
         self.event_bus.publish(Event::MessageEnd {
             session_id: session_id.to_string(),

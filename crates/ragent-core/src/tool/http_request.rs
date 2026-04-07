@@ -147,13 +147,16 @@ impl Tool for HttpRequestTool {
             content.push_str("\n\n[Response truncated at 1 MiB]");
         }
 
+        let line_count = content.lines().count();
+
         Ok(ToolOutput {
             content,
             metadata: Some(json!({
-                "status_code": status_code,
+                "http_status": status_code,
                 "content_type": content_type,
-                "body_len": bytes.len(),
+                "byte_count": bytes.len(),
                 "truncated": truncated,
+                "line_count": line_count,
             })),
         })
     }

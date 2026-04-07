@@ -243,9 +243,9 @@ impl App {
             }
             h
         };
-                  if let Some(cached) = self.md_render_cache.get(&hash) {
-                      return cached.clone();
-                  }
+        if let Some(cached) = self.md_render_cache.get(&hash) {
+            return cached.clone();
+        }
         let mut opts = Options::empty();
         opts.insert(Options::ENABLE_TABLES);
         opts.insert(Options::ENABLE_STRIKETHROUGH);
@@ -270,7 +270,8 @@ impl App {
         if self.md_render_cache.len() >= 256 {
             self.md_render_cache.clear(); // LRU handles eviction
         }
-                    self.md_render_cache.put(hash, result.clone());        result
+        self.md_render_cache.put(hash, result.clone());
+        result
     }
 
     /// Create a new [`App`] with default state and the given event bus.
@@ -377,7 +378,7 @@ impl App {
             llm_request_stats: Vec::new(),
             last_input_tokens: 0,
             quota_percent: None,
-            current_screen: ScreenMode::Home,
+            current_screen: ScreenMode::Chat,
             tip: tips::random_tip(),
             cwd,
             shell_cwd: None,
@@ -416,7 +417,6 @@ impl App {
             message_content_lines: Vec::new(),
             log_content_lines: Vec::new(),
             input_area: Rect::default(),
-            home_input_area: Rect::default(),
             teams_area: Rect::default(),
             output_view_area: Rect::default(),
             agents_button_area: Rect::default(),
@@ -474,6 +474,11 @@ impl App {
             autopilot_time_limit_secs: None,
             autopilot_started_at: None,
             autopilot_pending_continue: None,
+            sid_to_display_name: HashMap::new(),
+            next_agent_index: 1,
+            prompt_start_time: None,
+            tool_time_ms: 0,
+            llm_time_ms: 0,
             plan_approval_pending: None,
             role_mode: None,
             webapi_server: None,
@@ -481,7 +486,6 @@ impl App {
             webapi_token: None,
             needs_redraw: true,
         };
-
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -1040,12 +1044,12 @@ impl App {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
             SelectionPane::Input => self.input_area,
-            SelectionPane::HomeInput => self.home_input_area,
         }
     }
 
     #[inline]
-          fn assert_ui_invariants(&self) {        self.assert_input_cursor_invariant();
+    fn assert_ui_invariants(&self) {
+        self.assert_input_cursor_invariant();
         if let Some(sel) = &self.text_selection {
             debug_assert!(
                 self.pane_area(sel.pane).area() > 0,
@@ -1177,14 +1181,10 @@ impl App {
 
     /// Compute selected input char range for input/home-input panes.
     fn input_selection_char_range(&self, sel: &TextSelection) -> Option<(usize, usize)> {
-        if !matches!(sel.pane, SelectionPane::Input | SelectionPane::HomeInput) {
+        if !matches!(sel.pane, SelectionPane::Input) {
             return None;
         }
-        let area = if sel.pane == SelectionPane::Input {
-            self.input_area
-        } else {
-            self.home_input_area
-        };
+        let area = self.input_area;
         if area.width < 2 || area.height < 2 {
             return None;
         }
@@ -1216,11 +1216,7 @@ impl App {
 
     /// Return the currently active input widget area for overlay geometry.
     fn active_input_widget_area(&self) -> Rect {
-        if self.home_input_area.area() > 0 {
-            self.home_input_area
-        } else {
-            self.input_area
-        }
+        self.input_area
     }
 
     /// Return the byte offset corresponding to the current cursor position.
@@ -1607,7 +1603,11 @@ impl App {
         let dir = std::env::current_dir().unwrap_or_default();
         match self.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
-                self.session_id = Some(session.id);
+                self.session_id = Some(session.id.clone());
+                // Map the primary session's short_sid to the current agent name
+                let short_sid = short_session_id(&session.id);
+                self.sid_to_display_name
+                    .insert(short_sid, self.agent_name.clone());
                 true
             }
             Err(e) => {
@@ -1775,6 +1775,11 @@ impl App {
         // Rebuild tool_step_map from restored tool calls and populate log
         // (step count comes from event_bus, not local counter)
         self.tool_step_map.clear();
+        self.sid_to_display_name.clear();
+        // Map the primary session's short_sid to the current agent name
+        let short_sid = short_session_id(session_id);
+        self.sid_to_display_name
+            .insert(short_sid, self.agent_name.clone());
         let mut restored_logs: Vec<(u64, String, String)> = Vec::new();
         let mut step_counter = 0u64;
         for msg in &self.messages {
@@ -2686,9 +2691,7 @@ impl App {
                     env!("BUILD_TIMESTAMP"),
                 );
                 self.append_assistant_text(&format!("From: /about\n{about}"));
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "about".to_string();
             }
             "agent" => {
@@ -2808,9 +2811,7 @@ impl App {
                 }
 
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "agents".to_string();
             }
             "context" => match args.trim() {
@@ -2842,9 +2843,6 @@ impl App {
                     LogLevel::Info,
                     "init: starting project analysis".to_string(),
                 );
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
 
                 // Find the explore agent and dispatch the analysis task directly
                 // (no agent-stack push — init runs as a one-shot subagent that writes memory).
@@ -2970,16 +2968,12 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.append_assistant_text(
                         "From: /cost\nNo completed LLM responses yet for this session.\n",
                     );
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
+
                     self.status = "cost unavailable".to_string();
                     return;
                 };
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "cost summary".to_string();
             }
             "help" => {
@@ -3015,9 +3009,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                 }
                 self.append_assistant_text(&help_lines);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "help".to_string();
             }
             "opt" => {
@@ -3025,9 +3017,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 if args.is_empty() || args == "help" {
                     let table = OptMethod::help_table();
                     self.append_assistant_text(&format!("From: /opt help\n\n{}", table));
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
+
                     self.status = "opt help".to_string();
                     return;
                 }
@@ -3076,9 +3066,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 let method_name = method.name().to_string();
 
                 self.status = format!("⏳ opt/{}: optimizing…", method_name);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
 
                 tokio::spawn(async move {
                     let completer = RagentCompleter {
@@ -3111,23 +3098,22 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     .unwrap_or_else(|| "none".to_string());
                 let diag = format!(
                     "From: /inputdiag\n\
-                     Input diagnostics:\n\
-                       screen: {:?}\n\
-                       input chars: {}\n\
-                       input cursor: {}\n\
-                       slash menu: {}\n\
-                       file menu: {}\n\
-                       history picker: {}\n\
-                       selection: {}\n\
-                       context menu: {}\n\
-                       message area: {:?}\n\
-                       log area: {:?}\n\
-                       input area: {:?}\n\
-                       home input area: {:?}\n\
-                       browse cache cwd: {:?}\n\
-                       browse cache entries: {}\n\
-                       browse cache refreshed: {:?}\n\
-                       browse menu state: {}",
+                                       Input diagnostics:\n\
+                                         screen: {:?}\n\
+                                         input chars: {}\n\
+                                         input cursor: {}\n\
+                                         slash menu: {}\n\
+                                         file menu: {}\n\
+                                         history picker: {}\n\
+                                         selection: {}\n\
+                                         context menu: {}\n\
+                                         message area: {:?}\n\
+                                         log area: {:?}\n\
+                                         input area: {:?}\n\
+                                         browse cache cwd: {:?}\n\
+                                         browse cache entries: {}\n\
+                                         browse cache refreshed: {:?}\n\
+                                         browse menu state: {}",
                     self.current_screen,
                     self.input_len_chars(),
                     self.input_cursor,
@@ -3139,7 +3125,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.message_area,
                     self.log_area,
                     self.input_area,
-                    self.home_input_area,
                     self.project_files_cache_cwd,
                     self.project_files_cache_count,
                     self.project_files_cache_refreshed_at,
@@ -3156,9 +3141,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         .unwrap_or_else(|| "none".to_string())
                 );
                 self.append_assistant_text(&diag);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "inputdiag".to_string();
             }
             "log" => {
@@ -3181,9 +3164,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         "From: /llmstats\nNo completed LLM responses yet for {}.\n",
                         model_ref
                     ));
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
+
                     self.status = "llm stats unavailable".to_string();
                     return;
                 };
@@ -3202,9 +3183,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     summary.avg_output_tps
                 );
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "llm stats".to_string();
             }
             "history" => {
@@ -3411,9 +3390,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
 
                 self.append_assistant_text(&report);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "reload".to_string();
                 // Reload bash lists alongside other config
                 ragent_core::bash_lists::load_from_config();
@@ -3439,10 +3416,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.messages.push(msg);
                 self.status = "processing...".to_string();
                 self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
-
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
 
                 let mut agent = self.agent_info.clone();
                 if let Some(ref model_str) = self.selected_model {
@@ -3473,9 +3446,6 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         self.append_assistant_text(&format!(
                             "From: /system\nCurrent system prompt:\n{prompt}"
                         ));
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     } else {
                         self.status = "No system prompt set".to_string();
                     }
@@ -3793,9 +3763,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
 
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "tools".to_string();
             }
             "skills" => {
@@ -3879,9 +3847,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
 
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "skills".to_string();
             }
             "tasks" => {
@@ -3929,9 +3895,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 ));
 
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "tasks".to_string();
             }
             "lsp" => {
@@ -3959,9 +3923,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                                 feedback: None,
                             });
                         }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     "discover" => {
@@ -3977,9 +3939,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             feedback: None,
                             scroll_offset: 0,
                         });
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     "connect" => {
@@ -4005,9 +3965,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         } else {
                             self.status = "Usage: /lsp connect <id>".to_string();
                         }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     "disconnect" => {
@@ -4026,9 +3984,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         } else {
                             self.status = "Usage: /lsp disconnect <id>".to_string();
                         }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     _ => {
@@ -4072,9 +4028,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         self.append_assistant_text(&out);
                     }
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "lsp".to_string();
             }
             "mcp" => {
@@ -4093,9 +4047,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             number_cursor: 0,
                             feedback: None,
                         });
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     "connect" => {
@@ -4112,9 +4064,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         } else {
                             self.status = "Usage: /mcp connect <id>".to_string();
                         }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     "disconnect" => {
@@ -4124,9 +4074,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         } else {
                             self.status = "Usage: /mcp disconnect <id>".to_string();
                         }
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         return;
                     }
                     _ => {
@@ -4166,9 +4114,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         self.append_assistant_text(&out);
                     }
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = "mcp".to_string();
             }
             "team" | "teams" => {
@@ -5250,9 +5196,6 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                         );
                     }
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
             }
             "todos" => {
                 if !self.ensure_session() {
@@ -5295,9 +5238,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                             }
                         }
                         self.append_assistant_text(&output);
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
+
                         self.status = format!("{} todo(s)", todos.len());
                     }
                     Err(e) => {
@@ -5376,9 +5317,6 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                             Use `/bash help` for more information.*\n",
                         );
                         self.append_assistant_text(&out);
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     "add" | "remove" => {
                         // Parse: [allow|deny] <entry> [--global]
@@ -5397,9 +5335,7 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                             self.append_assistant_text(&format!(
                                 "From: /bash {sub}\n\nUsage: `/bash {sub} allow|deny <entry> [--global]`"
                             ));
-                            if self.current_screen == ScreenMode::Home {
-                                self.current_screen = ScreenMode::Chat;
-                            }
+
                             return;
                         }
 
@@ -5503,19 +5439,12 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                                 ));
                             }
                         }
-
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     _ => {
                         self.append_assistant_text(&format!(
                             "From: /bash\n\nUnknown subcommand `{sub}`. \
                             Run `/bash help` for usage."
                         ));
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                 }
             }
@@ -5541,9 +5470,7 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                     output.push_str("All safety checks have been **re-enabled**.\n");
                 }
                 self.append_assistant_text(&output);
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
+
                 self.status = format!("YOLO mode {label}");
                 self.push_log_no_agent(
                     if new_state {
@@ -5574,9 +5501,6 @@ From: /swarm help\n\
 The swarm analyses your prompt, breaks it into independent subtasks with dependency \
 edges, creates an ephemeral team, and orchestrates parallel execution.\n";
                         self.append_assistant_text(help);
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     "status" => {
                         self.handle_swarm_status();
@@ -5599,9 +5523,7 @@ edges, creates an ephemeral team, and orchestrates parallel execution.\n";
 Usage: `/swarm <prompt>` — describe what you want the swarm to accomplish.\n\
 Type `/swarm help` for more info.\n";
                             self.append_assistant_text(help);
-                            if self.current_screen == ScreenMode::Home {
-                                self.current_screen = ScreenMode::Chat;
-                            }
+
                             return;
                         }
 
@@ -5634,10 +5556,6 @@ Type `/swarm help` for more info.\n";
                                 &full_prompt[..full_prompt.len().min(80)]
                             ),
                         );
-
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
 
                         // Show user message in chat
                         self.append_assistant_text(&format!(
@@ -5724,9 +5642,6 @@ Type `/swarm help` for more info.\n";
                         self.append_assistant_text(&format!("From: /autopilot\n{msg}"));
                         self.status = "⚡ autopilot".to_string();
                         self.push_log_no_agent(LogLevel::Info, "autopilot enabled".to_string());
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     "off" => {
                         self.autopilot_enabled = false;
@@ -5737,9 +5652,6 @@ Type `/swarm help` for more info.\n";
                         self.append_assistant_text("From: /autopilot\n⚡ **Autopilot OFF** — returning to interactive mode.");
                         self.status = "ready".to_string();
                         self.push_log_no_agent(LogLevel::Info, "autopilot disabled".to_string());
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     "status" => {
                         let state = if self.autopilot_enabled {
@@ -5752,18 +5664,12 @@ Type `/swarm help` for more info.\n";
                             "⚡ Autopilot: **OFF**".to_string()
                         };
                         self.append_assistant_text(&format!("From: /autopilot status\n{state}"));
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                     _ => {
                         self.append_assistant_text(
                             "From: /autopilot\n\
                              Usage: `/autopilot on [--max-tokens N] [--max-time N]` | `off` | `status`"
                         );
-                        if self.current_screen == ScreenMode::Home {
-                            self.current_screen = ScreenMode::Chat;
-                        }
                     }
                 }
             }
@@ -5780,9 +5686,6 @@ Type `/swarm help` for more info.\n";
                 } else {
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
-                }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
                 }
             }
 
@@ -5824,9 +5727,6 @@ Type `/swarm help` for more info.\n";
                          Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
                         sub
                     ));
-                }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
                 }
             }
 
@@ -5907,22 +5807,18 @@ Type `/swarm help` for more info.\n";
                         );
                     }
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
             }
 
-            "github" => {
-                match args.trim() {
-                    "login" => {
-                        self.append_assistant_text(
+            "github" => match args.trim() {
+                "login" => {
+                    self.append_assistant_text(
                             "From: /github login\n🔐 Starting GitHub OAuth device flow…\n\nPlease wait for the authorization URL…",
                         );
-                        let event_bus = self.event_bus.clone();
-                        let sid = self.session_id.clone().unwrap_or_default();
-                        tokio::spawn(async move {
-                            let client_id = ragent_core::github::GitHubClient::client_id();
-                            let result = ragent_core::github::auth::device_flow_login(
+                    let event_bus = self.event_bus.clone();
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    tokio::spawn(async move {
+                        let client_id = ragent_core::github::GitHubClient::client_id();
+                        let result = ragent_core::github::auth::device_flow_login(
                                 &client_id,
                                 |user_code, verification_uri| {
                                     event_bus.publish(ragent_core::event::Event::AgentError {
@@ -5935,79 +5831,71 @@ Type `/swarm help` for more info.\n";
                             )
                             .await;
 
-                            match result {
-                                Ok(token) => match ragent_core::github::auth::save_token(&token) {
-                                    Ok(_) => {
-                                        event_bus.publish(
+                        match result {
+                            Ok(token) => match ragent_core::github::auth::save_token(&token) {
+                                Ok(_) => {
+                                    event_bus.publish(
                                                 ragent_core::event::Event::AgentError {
                                                     session_id: sid,
                                                     error: "✅ GitHub authentication successful! Token saved to ~/.ragent/github_token.".to_string(),
                                                 },
                                             );
-                                    }
-                                    Err(e) => {
-                                        event_bus.publish(ragent_core::event::Event::AgentError {
-                                            session_id: sid,
-                                            error: format!("Failed to save GitHub token: {e}"),
-                                        });
-                                    }
-                                },
+                                }
                                 Err(e) => {
                                     event_bus.publish(ragent_core::event::Event::AgentError {
                                         session_id: sid,
-                                        error: format!("GitHub login failed: {e}"),
+                                        error: format!("Failed to save GitHub token: {e}"),
                                     });
                                 }
+                            },
+                            Err(e) => {
+                                event_bus.publish(ragent_core::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!("GitHub login failed: {e}"),
+                                });
                             }
-                        });
-                    }
-                    "logout" => match ragent_core::github::auth::delete_token() {
-                        Ok(_) => {
-                            self.append_assistant_text("From: /github\n✅ GitHub token removed.")
                         }
-                        Err(e) => self.append_assistant_text(&format!(
-                            "From: /github\n❌ Failed to remove token: {e}"
-                        )),
-                    },
-                    "status" | "" => match ragent_core::github::auth::load_token() {
-                        Some(_) => {
-                            self.append_assistant_text(
+                    });
+                }
+                "logout" => match ragent_core::github::auth::delete_token() {
+                    Ok(_) => self.append_assistant_text("From: /github\n✅ GitHub token removed."),
+                    Err(e) => self.append_assistant_text(&format!(
+                        "From: /github\n❌ Failed to remove token: {e}"
+                    )),
+                },
+                "status" | "" => match ragent_core::github::auth::load_token() {
+                    Some(_) => {
+                        self.append_assistant_text(
                                     "From: /github\n✅ GitHub token configured. (GITHUB_TOKEN env or ~/.ragent/github_token)",
                                 );
-                        }
-                        None => {
-                            self.append_assistant_text(
+                    }
+                    None => {
+                        self.append_assistant_text(
                                     "From: /github\n❌ No GitHub token configured.\n\nRun `/github login` to authenticate via OAuth device flow.",
                                 );
-                        }
-                    },
-                    _ => {
-                        self.append_assistant_text(
+                    }
+                },
+                _ => {
+                    self.append_assistant_text(
                             "From: /github\nUsage: `/github login` | `/github logout` | `/github status`",
                         );
-                    }
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
-            }
+            },
 
-            "update" => {
-                match args.trim() {
-                    "install" => {
-                        self.append_assistant_text(
-                            "From: /update install\n⬇️ Downloading latest release…",
-                        );
-                        let event_bus = self.event_bus.clone();
-                        let sid = self.session_id.clone().unwrap_or_default();
-                        tokio::spawn(async move {
-                            match ragent_core::updater::check_for_update().await {
-                                Some(info) => match info.download_url {
-                                    Some(ref url) => {
-                                        match ragent_core::updater::download_and_replace(url).await
-                                        {
-                                            Ok(()) => {
-                                                event_bus.publish(
+            "update" => match args.trim() {
+                "install" => {
+                    self.append_assistant_text(
+                        "From: /update install\n⬇️ Downloading latest release…",
+                    );
+                    let event_bus = self.event_bus.clone();
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    tokio::spawn(async move {
+                        match ragent_core::updater::check_for_update().await {
+                            Some(info) => match info.download_url {
+                                Some(ref url) => {
+                                    match ragent_core::updater::download_and_replace(url).await {
+                                        Ok(()) => {
+                                            event_bus.publish(
                                                     ragent_core::event::Event::AgentError {
                                                         session_id: sid,
                                                         error: format!(
@@ -6016,76 +5904,72 @@ Type `/swarm help` for more info.\n";
                                                         ),
                                                     },
                                                 );
-                                            }
-                                            Err(e) => {
-                                                event_bus.publish(
-                                                    ragent_core::event::Event::AgentError {
-                                                        session_id: sid,
-                                                        error: format!("❌ Install failed: {e}"),
-                                                    },
-                                                );
-                                            }
+                                        }
+                                        Err(e) => {
+                                            event_bus.publish(
+                                                ragent_core::event::Event::AgentError {
+                                                    session_id: sid,
+                                                    error: format!("❌ Install failed: {e}"),
+                                                },
+                                            );
                                         }
                                     }
-                                    None => {
-                                        event_bus.publish(ragent_core::event::Event::AgentError {
+                                }
+                                None => {
+                                    event_bus.publish(ragent_core::event::Event::AgentError {
                                             session_id: sid,
                                             error: format!(
                                                 "⚠️  Update v{} found but no binary available for this platform.\n\nVisit https://github.com/thawkins/ragent/releases to download manually.",
                                                 info.version
                                             ),
                                         });
-                                    }
-                                },
-                                None => {
-                                    event_bus.publish(ragent_core::event::Event::AgentError {
-                                        session_id: sid,
-                                        error: format!(
-                                            "✅ Already up to date (v{}).",
-                                            ragent_core::updater::CURRENT_VERSION
-                                        ),
-                                    });
                                 }
+                            },
+                            None => {
+                                event_bus.publish(ragent_core::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!(
+                                        "✅ Already up to date (v{}).",
+                                        ragent_core::updater::CURRENT_VERSION
+                                    ),
+                                });
                             }
-                        });
-                    }
-                    _ => {
-                        self.append_assistant_text("From: /update\n🔍 Checking for updates…");
-                        let event_bus = self.event_bus.clone();
-                        let sid = self.session_id.clone().unwrap_or_default();
-                        tokio::spawn(async move {
-                            match ragent_core::updater::check_for_update().await {
-                                Some(info) => {
-                                    let notes = if info.body.is_empty() {
-                                        "No release notes.".to_string()
-                                    } else {
-                                        info.body.chars().take(500).collect::<String>()
-                                    };
-                                    event_bus.publish(ragent_core::event::Event::AgentError {
+                        }
+                    });
+                }
+                _ => {
+                    self.append_assistant_text("From: /update\n🔍 Checking for updates…");
+                    let event_bus = self.event_bus.clone();
+                    let sid = self.session_id.clone().unwrap_or_default();
+                    tokio::spawn(async move {
+                        match ragent_core::updater::check_for_update().await {
+                            Some(info) => {
+                                let notes = if info.body.is_empty() {
+                                    "No release notes.".to_string()
+                                } else {
+                                    info.body.chars().take(500).collect::<String>()
+                                };
+                                event_bus.publish(ragent_core::event::Event::AgentError {
                                         session_id: sid,
                                         error: format!(
                                             "🆕 Update available: **v{}**\n\n{}\n\nRun `/update install` to install.",
                                             info.version, notes
                                         ),
                                     });
-                                }
-                                None => {
-                                    event_bus.publish(ragent_core::event::Event::AgentError {
-                                        session_id: sid,
-                                        error: format!(
-                                            "✅ ragent is up to date (v{}).",
-                                            ragent_core::updater::CURRENT_VERSION
-                                        ),
-                                    });
-                                }
                             }
-                        });
-                    }
+                            None => {
+                                event_bus.publish(ragent_core::event::Event::AgentError {
+                                    session_id: sid,
+                                    error: format!(
+                                        "✅ ragent is up to date (v{}).",
+                                        ragent_core::updater::CURRENT_VERSION
+                                    ),
+                                });
+                            }
+                        }
+                    });
                 }
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
-            }
+            },
 
             "doctor" => {
                 self.append_assistant_text("From: /doctor\n🩺 Running diagnostics…");
@@ -6179,9 +6063,6 @@ Type `/swarm help` for more info.\n";
                         error: lines.join("\n"),
                     });
                 });
-                if self.current_screen == ScreenMode::Home {
-                    self.current_screen = ScreenMode::Chat;
-                }
             }
 
             "webapi" => match args.trim() {
@@ -6232,9 +6113,6 @@ Type `/swarm help` for more info.\n";
                                 Run `/webapi help` to see all endpoints."
                         ));
                     }
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
                 }
                 "disable" | "stop" => {
                     if let Some(handle) = self.webapi_server.take() {
@@ -6245,9 +6123,6 @@ Type `/swarm help` for more info.\n";
                         self.append_assistant_text(
                             "ℹ️ Web API is not running. Use `/webapi enable` to start it.",
                         );
-                    }
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
                     }
                 }
                 "help" | "status" | "" => {
@@ -6304,9 +6179,6 @@ Type `/swarm help` for more info.\n";
                               {base}/sessions/SESSION_ID/messages\n\
                             ```"
                         ));
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
                 }
                 _ => {
                     self.append_assistant_text(
@@ -6352,9 +6224,6 @@ Type `/swarm help` for more info.\n";
                                 return;
                             }
                         }
-                    }
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
                     }
 
                     let sid = self.session_id.clone().unwrap_or_default();
@@ -6799,7 +6668,7 @@ Type `/swarm help` for more info.\n";
 
                 let selection_for_pane =
                     self.text_selection.as_ref().is_some_and(|s| s.pane == pane);
-                let in_input = matches!(pane, SelectionPane::Input | SelectionPane::HomeInput);
+                let in_input = matches!(pane, SelectionPane::Input);
                 let has_clipboard = Self::get_clipboard().is_some_and(|s| !s.is_empty());
                 let provider_setup_input = matches!(
                     self.provider_setup,
@@ -6843,8 +6712,6 @@ Type `/swarm help` for more info.\n";
             Some(SelectionPane::Log)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
             Some(SelectionPane::Input)
-        } else if self.home_input_area.area() > 0 && self.home_input_area.contains(pos) {
-            Some(SelectionPane::HomeInput)
         } else {
             None
         }
@@ -6866,14 +6733,10 @@ Type `/swarm help` for more info.\n";
         let lines: &[String] = match sel.pane {
             SelectionPane::Messages => &self.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
-            SelectionPane::Input | SelectionPane::HomeInput => {
+            SelectionPane::Input => {
                 // For input widgets, build a single-line content from app.input
                 let input_text = format!("> {}", self.input);
-                let area = if sel.pane == SelectionPane::Input {
-                    self.input_area
-                } else {
-                    self.home_input_area
-                };
+                let area = self.input_area;
                 let inner_x = area.x + 1; // inside border
                 let inner_y = area.y + 1;
                 let inner_w = area.width.saturating_sub(2).max(1) as usize;
@@ -7079,12 +6942,9 @@ Type `/swarm help` for more info.\n";
                 self.copy_selection(false);
             }
             ContextAction::Cut => {
-                // Copy selected text then remove only the selected span in input panes.
+                // Copy selected text then remove only the selected span in input pane.
                 self.copy_selection(true);
-                if matches!(
-                    pane,
-                    Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
-                ) {
+                if matches!(pane, Some(SelectionPane::Input)) {
                     if let Some(sel) = selection.as_ref()
                         && let Some((start, end)) = self.input_selection_char_range(sel)
                     {
@@ -7098,10 +6958,7 @@ Type `/swarm help` for more info.\n";
                     Some(ProviderSetupStep::EnterKey { .. })
                 ) {
                     self.paste_provider_setup_from_clipboard();
-                } else if matches!(
-                    pane,
-                    Some(SelectionPane::Input) | Some(SelectionPane::HomeInput)
-                ) {
+                } else if matches!(pane, Some(SelectionPane::Input)) {
                     if let Some(text) = Self::get_clipboard() {
                         // Strip carriage returns but keep newlines (multiline input supported).
                         let clean: String = text.chars().filter(|&c| c != '\r').collect();
@@ -7242,15 +7099,17 @@ Type `/swarm help` for more info.\n";
                         return;
                     }
                     // Transition from Home to Chat on first message
-                    if self.current_screen == ScreenMode::Home {
-                        self.current_screen = ScreenMode::Chat;
-                    }
+
                     // Create session if needed
                     if self.session_id.is_none() {
                         let dir = std::env::current_dir().unwrap_or_default();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
-                                self.session_id = Some(session.id);
+                                self.session_id = Some(session.id.clone());
+                                // Map the primary session's short_sid to the current agent name
+                                let short_sid = short_session_id(&session.id);
+                                self.sid_to_display_name
+                                    .insert(short_sid, self.agent_name.clone());
                             }
                             Err(e) => {
                                 self.status = format!("error: {}", e);
@@ -7689,6 +7548,10 @@ Type `/swarm help` for more info.\n";
             Event::SessionCreated { ref session_id } => {
                 if self.session_id.is_none() {
                     self.session_id = Some(session_id.clone());
+                    // Map the primary session's short_sid to the current agent name
+                    let short_sid = short_session_id(session_id);
+                    self.sid_to_display_name
+                        .insert(short_sid, self.agent_name.clone());
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
@@ -8178,6 +8041,11 @@ Type `/swarm help` for more info.\n";
                 ..
             } => {
                 if self.is_current_session(session_id) {
+                    // Map the child session's short_sid to the agent name for display
+                    let short_sid = short_session_id(child_session_id);
+                    self.sid_to_display_name
+                        .insert(short_sid, agent.clone());
+
                     // Add to active_tasks so the agent panel shows it immediately.
                     let entry = ragent_core::task::TaskEntry {
                         id: task_id.clone(),
@@ -8951,10 +8819,6 @@ Type `/swarm help` for more info.\n";
 
     /// Handle `/swarm status` — display progress of active swarm.
     fn handle_swarm_status(&mut self) {
-        if self.current_screen == ScreenMode::Home {
-            self.current_screen = ScreenMode::Chat;
-        }
-
         let Some(ref swarm) = self.swarm_state else {
             self.append_assistant_text(
                 "From: /swarm status\n\nNo active swarm. Use `/swarm <prompt>` to start one.\n",
@@ -9070,10 +8934,6 @@ Type `/swarm help` for more info.\n";
 
     /// Handle `/swarm cancel` — tear down the swarm team.
     fn handle_swarm_cancel(&mut self) {
-        if self.current_screen == ScreenMode::Home {
-            self.current_screen = ScreenMode::Chat;
-        }
-
         let Some(swarm) = self.swarm_state.take() else {
             self.append_assistant_text("From: /swarm cancel\n\nNo active swarm to cancel.\n");
             return;

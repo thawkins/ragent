@@ -134,14 +134,7 @@ impl Tool for EditTool {
         let lines_changed = old_lines.max(new_lines);
 
         Ok(ToolOutput {
-            content: format!(
-                "Edited {}: replaced {} line{} with {} line{}",
-                path.display(),
-                old_lines,
-                if old_lines == 1 { "" } else { "s" },
-                new_lines,
-                if new_lines == 1 { "" } else { "s" },
-            ),
+            content: String::new(), // Empty on success; errors are returned as Err
             metadata: Some(json!({
                 "path": path.display().to_string(),
                 "old_lines": old_lines,

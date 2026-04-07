@@ -257,7 +257,9 @@ impl Tool for TodoWriteTool {
                     "clear",
                 )
             }
-            _ => bail!("Invalid action '{action}'. Must be one of: add, update, remove, clear, complete"),
+            _ => bail!(
+                "Invalid action '{action}'. Must be one of: add, update, remove, clear, complete"
+            ),
         };
 
         // Read back the current list after the write

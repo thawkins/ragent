@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0-alpha.29] - 2026-04-07
+
+### Changed
+- Version bump to 0.1.0-alpha.29
+
+## [0.1.0-alpha.28] - 2026-04-07
+
+### Changed
+- Version bump to 0.1.0-alpha.28
+
 ## [0.1.0-alpha.27] - 2026-04-05
 
 ### Fixed

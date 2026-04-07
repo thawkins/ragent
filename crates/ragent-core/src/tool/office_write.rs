@@ -12,6 +12,66 @@ use std::path::Path;
 use super::office_common::{OfficeFormat, detect_format, resolve_path};
 use super::{Tool, ToolContext, ToolOutput};
 
+/// Estimates the line count from office document content for metadata purposes.
+///
+/// For docx: counts paragraphs and list items
+/// For xlsx: counts rows across all sheets
+/// For pptx: counts slides
+fn estimate_line_count(content: &Value) -> usize {
+    if let Some(arr) = content.as_array() {
+        // Count elements in a direct array (docx paragraphs or pptx slides)
+        arr.iter()
+            .map(|elem| {
+                // Each element is at least 1 line
+                let base = 1;
+                // Add lines for list items if present
+                let list_items = elem
+                    .get("items")
+                    .and_then(|i| i.as_array())
+                    .map(|items| items.len())
+                    .unwrap_or(0);
+                // Add lines for rows if present (xlsx)
+                let rows = elem
+                    .get("rows")
+                    .and_then(|r| r.as_array())
+                    .map(|r| r.len())
+                    .unwrap_or(0);
+                base + list_items + rows
+            })
+            .sum()
+    } else if let Some(paragraphs) = content["paragraphs"].as_array() {
+        // Legacy docx format with paragraphs
+        paragraphs.len()
+    } else if let Some(content_arr) = content["content"].as_array() {
+        // Docx with content array
+        content_arr
+            .iter()
+            .map(|elem| {
+                let base = 1;
+                let list_items = elem
+                    .get("items")
+                    .and_then(|i| i.as_array())
+                    .map(|items| items.len())
+                    .unwrap_or(0);
+                base + list_items
+            })
+            .sum()
+    } else if let Some(sheets) = content["sheets"].as_array() {
+        // Excel format: sum rows across all sheets
+        sheets
+            .iter()
+            .filter_map(|sheet| sheet.get("rows").and_then(|r| r.as_array()))
+            .map(|rows| rows.len())
+            .sum()
+    } else if let Some(slides) = content["slides"].as_array() {
+        // PowerPoint format: count slides
+        slides.len()
+    } else {
+        // Unknown format, return 1 as a default
+        1
+    }
+}
+
 /// Writes content to Word, Excel, or `PowerPoint` files.
 ///
 /// Accepts structured JSON content and creates the specified document type.
@@ -104,6 +164,9 @@ impl Tool for OfficeWriteTool {
             .map(|m| m.len())
             .unwrap_or(0);
 
+        // Calculate line count from content for consistency with other write tools
+        let line_count = estimate_line_count(&content);
+
         Ok(ToolOutput {
             content: format!(
                 "Wrote {} file ({} bytes) to {}",
@@ -114,7 +177,8 @@ impl Tool for OfficeWriteTool {
             metadata: Some(json!({
                 "path": path.display().to_string(),
                 "format": doc_type.to_string(),
-                "bytes": file_size,
+                "byte_count": file_size,
+                "line_count": line_count,
             })),
         })
     }

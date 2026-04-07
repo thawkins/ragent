@@ -208,8 +208,10 @@ impl Tool for TeamWaitTool {
         Ok(ToolOutput {
             content: output,
             metadata: Some(json!({
-                "team": resolved_team_name,
+                "team_name": resolved_team_name,
                 "timed_out": timed_out,
+                "idle_count": final_store.config.members.len() - waiting_for.len(),
+                "still_working_count": waiting_for.len(),
                 "still_working": waiting_for.iter().cloned().collect::<Vec<_>>(),
             })),
         })

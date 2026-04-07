@@ -91,7 +91,7 @@ fn test_load_session_switches_to_chat_screen() {
     let dir = std::env::current_dir().unwrap_or_default();
     let session = mgr.create_session(dir).expect("create session");
 
-    assert_eq!(app.current_screen, ScreenMode::Home);
+    assert_eq!(app.current_screen, ScreenMode::Chat);
     app.load_session(&session.id).unwrap();
 
     assert_eq!(app.current_screen, ScreenMode::Chat);

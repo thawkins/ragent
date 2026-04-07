@@ -238,9 +238,69 @@ pub fn is_safe_command(cmd: &str) -> bool {
         .any(|safe| trimmed == *safe || trimmed.starts_with(&format!("{safe} ")))
 }
 
+/// Extract the bare heredoc delimiter from a line that contains `<<`.
+///
+/// Handles `<<EOF`, `<< EOF`, `<<'EOF'`, `<<"EOF"`, and `<<-EOF` variants.
+/// Returns `None` if no heredoc marker is found.
+fn extract_heredoc_delimiter(line: &str) -> Option<String> {
+    let pos = line.find("<<")?;
+    // <<- is allowed (strip leading tabs from body); skip the optional '-'
+    let rest = line[pos + 2..].trim_start_matches('-').trim_start();
+    let delimiter = if let Some(inner) = rest.strip_prefix('\'') {
+        inner.split('\'').next()?.to_string()
+    } else if let Some(inner) = rest.strip_prefix('"') {
+        inner.split('"').next()?.to_string()
+    } else {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, ';' | '&' | '|' | ')'))
+            .unwrap_or(rest.len());
+        rest[..end].to_string()
+    };
+    if delimiter.is_empty() {
+        None
+    } else {
+        Some(delimiter)
+    }
+}
+
+/// Return a copy of `cmd` with heredoc bodies removed.
+///
+/// The line containing the `<<` marker and the closing delimiter line are
+/// kept so that the structural shell command is still present for subsequent
+/// checks; only the body lines (the literal data) are dropped.  This
+/// prevents heredoc content (e.g. Rust string literals containing `\nc\n`)
+/// from producing false positives in the banned-command scan.
+fn strip_heredoc_bodies(cmd: &str) -> String {
+    let mut result = String::with_capacity(cmd.len());
+    let mut iter = cmd.split('\n');
+    'outer: loop {
+        let Some(line) = iter.next() else { break };
+        if let Some(delimiter) = extract_heredoc_delimiter(line) {
+            result.push_str(line);
+            result.push('\n');
+            // Skip body lines until the closing delimiter.
+            for body_line in iter.by_ref() {
+                if body_line.trim_end() == delimiter {
+                    result.push_str(body_line);
+                    result.push('\n');
+                    continue 'outer;
+                }
+                // body content intentionally omitted
+            }
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+    result
+}
+
 /// Check if command uses a banned tool (e.g., curl, wget).
 fn contains_banned_command(cmd: &str) -> bool {
-    let cmd_lower = cmd.trim().to_lowercase();
+    // Strip heredoc bodies first so that literal data inside a heredoc
+    // (e.g. Rust string escapes like `\nc\n`) cannot trigger false positives.
+    let cmd_stripped = strip_heredoc_bodies(cmd);
+    let cmd_lower = cmd_stripped.trim().to_lowercase();
     let bytes = cmd_lower.as_bytes();
     let clen = bytes.len();
 
@@ -269,7 +329,9 @@ fn contains_banned_command(cmd: &str) -> bool {
 /// Check if command tries to escape the working directory.
 /// Rejects cd/pushd with .., /, ~, $HOME, or ${HOME}.
 fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool {
-    let canonical_wd = working_dir.canonicalize().unwrap_or_else(|_| working_dir.to_path_buf());
+    let canonical_wd = working_dir
+        .canonicalize()
+        .unwrap_or_else(|_| working_dir.to_path_buf());
 
     for token in &["cd ", "pushd "] {
         // Find each occurrence of the token in the command
@@ -277,7 +339,11 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
         while let Some(pos) = cmd[search_start..].find(token) {
             let abs_pos = search_start + pos;
             // Only treat it as a cd if it's at the start or after a shell separator
-            let before = if abs_pos == 0 { b';' } else { cmd.as_bytes()[abs_pos - 1] };
+            let before = if abs_pos == 0 {
+                b';'
+            } else {
+                cmd.as_bytes()[abs_pos - 1]
+            };
             let is_after_separator = matches!(before, b';' | b'&' | b'|' | b'(' | b'\n' | b' ');
             if abs_pos == 0 || is_after_separator {
                 let arg_start = abs_pos + token.len();
@@ -297,7 +363,9 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
                 if arg.starts_with('/') {
                     // Allow if the absolute path resolves to the working directory or a subdirectory of it
                     let target = std::path::Path::new(arg);
-                    let canonical_target = target.canonicalize().unwrap_or_else(|_| target.to_path_buf());
+                    let canonical_target = target
+                        .canonicalize()
+                        .unwrap_or_else(|_| target.to_path_buf());
                     if !canonical_target.starts_with(&canonical_wd) {
                         return true;
                     }
@@ -553,7 +621,7 @@ impl Tool for BashTool {
                     metadata: Some(json!({
                         "exit_code": exit_code,
                         "duration_ms": elapsed_ms,
-                        "lines": line_count,
+                        "line_count": line_count,
                     })),
                 })
             }
@@ -563,8 +631,8 @@ impl Tool for BashTool {
             Err(_) => Ok(ToolOutput {
                 content: format!("Command timed out after {timeout_secs} seconds"),
                 metadata: Some(json!({
-                    "timeout": true,
-                    "timeout_secs": timeout_secs,
+                    "timed_out": true,
+                    "duration_ms": timeout_secs * 1000,
                 })),
             }),
         }

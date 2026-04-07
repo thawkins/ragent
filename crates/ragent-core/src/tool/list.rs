@@ -76,7 +76,7 @@ impl Tool for ListTool {
         Ok(ToolOutput {
             content: lines.join("\n"),
             metadata: Some(serde_json::json!({
-                "entries": entry_count,
+                "count": entry_count,
                 "path": dir.display().to_string(),
             })),
         })

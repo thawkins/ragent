@@ -75,12 +75,17 @@ impl Tool for MemoryWriteTool {
         file.write_all(entry.as_bytes())
             .with_context(|| format!("Failed to write to memory file: {}", file_path.display()))?;
 
+        let content_line_count = content.lines().count();
         Ok(ToolOutput {
-            content: format!("Memory written to {} (scope: {scope})", file_path.display()),
+            content: format!(
+                "Memory written to {} (scope: {scope})\n\n{content}",
+                file_path.display()
+            ),
             metadata: Some(json!({
                 "file": file_path.display().to_string(),
                 "scope": scope,
-                "bytes_written": entry.len(),
+                "byte_count": entry.len(),
+                "line_count": content_line_count
             })),
         })
     }
@@ -133,13 +138,20 @@ impl Tool for MemoryReadTool {
                     "No memory file found at {} (scope: {scope})",
                     file_path.display()
                 ),
-                metadata: None,
+                metadata: Some(json!({
+                    "file": file_path.display().to_string(),
+                    "scope": scope,
+                    "line_count": 0,
+                    "byte_count": 0
+                })),
             });
         }
 
         let content = std::fs::read_to_string(&file_path)
             .with_context(|| format!("Failed to read memory file: {}", file_path.display()))?;
 
+        let content_line_count = content.lines().count();
+        let byte_count = content.len();
         Ok(ToolOutput {
             content: if content.trim().is_empty() {
                 format!("Memory file {} is empty", file_path.display())
@@ -149,7 +161,12 @@ impl Tool for MemoryReadTool {
                     file_path.display()
                 )
             },
-            metadata: None,
+            metadata: Some(json!({
+                "file": file_path.display().to_string(),
+                "scope": scope,
+                "line_count": content_line_count,
+                "byte_count": byte_count
+            })),
         })
     }
 }

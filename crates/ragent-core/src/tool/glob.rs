@@ -90,7 +90,10 @@ impl Tool for GlobTool {
         if match_results.is_empty() {
             Ok(ToolOutput {
                 content: format!("No files matching '{}' in {}", pattern, base_dir.display()),
-                metadata: None,
+                metadata: Some(json!({
+                    "count": 0,
+                    "pattern": pattern,
+                })),
             })
         } else {
             let truncated = match_results.len() >= MAX_MATCHES;
@@ -106,6 +109,7 @@ impl Tool for GlobTool {
                 metadata: Some(json!({
                     "count": match_results.len(),
                     "truncated": truncated,
+                    "pattern": pattern,
                 })),
             })
         }

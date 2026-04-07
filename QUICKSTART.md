@@ -308,8 +308,7 @@ cat > ~/.ragent/agents/my-agent.json << 'EOF'
     "payload": {
       "system_prompt": "You are a helpful AI agent.\nProject: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
       "mode": "primary",
-      "max_steps": 50
-    }
+              "max_steps": 500    }
   }]
 }
 EOF

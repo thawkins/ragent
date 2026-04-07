@@ -1,113 +1,452 @@
 # TUI Performance & Consistency Improvement Plan
 
-**Target crate:** `crates/ragent-tui`
-
 ## Overview
-The TUI module is feature‑rich but exhibits several performance hotspots and consistency issues identified in the existing `performance_findings.md`. This plan outlines concrete, prioritized steps to address the most impactful problems, improve UI responsiveness, and make the codebase more maintainable.
+
+This document outlines a comprehensive plan to improve the performance and UI consistency of the `ragent-tui` crate. The plan is based on analysis of the existing codebase, performance review findings, security audit results, and test coverage gaps.
+
+## Current State Analysis
+
+### Architecture Summary
+
+The TUI is built on:
+- **ratatui**: Terminal UI framework with immediate-mode rendering
+- **crossterm**: Cross-platform terminal event handling
+- **tokio**: Async runtime for background tasks
+- **EventBus**: Pub/sub messaging between agent and UI
+
+### Key Files
+
+| File | Purpose | Lines |
+|------|---------|-------|
+| `src/app.rs` | Main application logic & event handling | ~9,600 |
+| `src/app/state.rs` | App state struct definitions | ~1,270 |
+| `src/layout.rs` | UI layout & rendering | ~1,100 |
+| `src/layout_active_agents.rs` | Active agents subpanel | ~200 |
+| `src/layout_teams.rs` | Teams subpanel | ~200 |
+| `src/widgets/message_widget.rs` | Message rendering widget | ~500 |
+| `src/input.rs` | Keyboard input handling | ~900 |
+| `src/lib.rs` | Main TUI event loop | ~250 |
+
+### Existing Performance Optimizations
+
+The codebase already has some performance optimizations in place:
+
+1. **Dirty flag rendering** (`needs_redraw`): Already implemented in `App` struct
+2. **LRU cache for markdown rendering**: Uses `lru::LruCache` with 256-entry capacity
+3. **Debounced history flushing**: `history_dirty` flag with time-based flushing
+
+### Identified Issues
+
+Based on the performance findings document and code analysis:
+
+#### High Priority
+
+1. **Unnecessary/redraw-per-frame of entire TUI** (Partially Fixed)
+   - **Status**: `needs_redraw` flag exists but may not be set consistently
+   - **Location**: `src/lib.rs` main loop
+   - **Issue**: The 50ms timer branch still forces ~20 FPS even with no changes
+
+2. **Quadratic traversal in active-agents panel**
+   - **Location**: `src/layout_active_agents.rs`
+   - **Issue**: `build_task_rows` scans full tasks list for each node → O(n²)
+   - **Impact**: Frame stalls with many active tasks
+
+3. **Per-frame HashSet allocations in active panel**
+   - **Location**: `src/layout_active_agents.rs` lines ~140-151
+   - **Issue**: `custom_names` and `teammate_ids` rebuilt on every render
+
+#### Medium Priority
+
+4. **UI-blocking synchronous model discovery**
+   - **Location**: `src/app.rs` `models_for_provider`
+   - **Issue**: Uses `block_in_place` + `block_on` for Ollama/Copilot discovery
+   - **Impact**: UI freeze during model discovery
+
+5. **Markdown cache eviction strategy**
+   - **Location**: `src/app.rs` `render_markdown_to_ascii`
+   - **Issue**: Full cache clear when size >= 256 (bursty behavior)
+   - **Current**: Already using LRU cache but with aggressive clearing
+
+6. **Hot-path formatting allocations**
+   - **Location**: Layout and widget rendering code
+   - **Issue**: Numerous `format!` calls per-line on every draw
+
+#### Low Priority
+
+7. **Blocking git detection at startup**
+   - **Location**: `src/app.rs` `detect_git_branch`
+   - **Impact**: Slight startup delay
+
+8. **Large clipboard image handling**
+   - **Location**: `src/app/state.rs` `save_clipboard_image_to_temp`
+   - **Issue**: Double-copy of pixel buffer
+
+### Security & Consistency Issues
+
+1. **Secret exposure in logs** (High)
+   - API keys/tokens may appear in logs and UI
+   - Need masking helper
+
+2. **Executable path validation** (High)
+   - Discovered server paths not validated before persistence
+   - Risk of command injection
+
+3. **Percent-decoding fragility** (Medium)
+   - Uses `unwrap_or` in hex parsing
+
+## Improvement Plan
+
+### Phase 1: Critical Performance Fixes (High Impact)
+
+#### 1.1 Fix Dirty Flag Consistency
+
+**Goal**: Ensure `needs_redraw` is set consistently when state changes
+
+**Tasks**:
+- [ ] Audit all App state mutation sites for missing `needs_redraw = true`
+- [ ] Create a helper method `App::mark_dirty()` for consistency
+- [ ] Add dirty flag setting to:
+  - Event handlers (`handle_event`)
+  - Input handlers (`insert_char`, `delete_char`, etc.)
+  - Log entry additions (`push_log`)
+  - Message appends
+  - Scroll position changes
+  - Menu state changes
+
+**Code Pattern**:
+```rust
+impl App {
+    #[inline]
+    pub fn mark_dirty(&mut self) {
+        self.needs_redraw = true;
+    }
+}
+```
+
+**Estimated Effort**: 2-3 hours
+
+#### 1.2 Optimize Active Agents Panel Rendering
+
+**Goal**: Eliminate O(n²) traversal and per-frame allocations
+
+**Tasks**:
+- [ ] Precompute parent->children map once per render pass
+- [ ] Replace recursive filtering with map lookup
+- [ ] Cache `custom_names` and `teammate_ids` until data changes
+- [ ] Avoid cloning `active_tasks` vector
+
+**Current Code** (problematic):
+```rust
+fn build_task_rows<'a>(
+    tasks: &[TaskEntry],  // Full list scanned repeatedly
+    parent_sid: &str,
+    ...
+) {
+    let children: Vec<_> = tasks.iter().filter(|t| t.parent_session_id == parent_sid).collect();
+    // Recurses for each child, scanning full list again
+}
+```
+
+**Optimized Code**:
+```rust
+fn build_task_rows<'a>(
+    tasks_map: &HashMap<&str, Vec<&TaskEntry>>,  // Pre-built map
+    parent_sid: &str,
+    ...
+) {
+    let children = tasks_map.get(parent_sid).unwrap_or(&[]);
+    // Direct lookup, no scanning
+}
+```
+
+**Estimated Effort**: 3-4 hours
+
+#### 1.3 Reduce Frame Rate When Idle
+
+**Goal**: Lower CPU usage when UI is static
+
+**Tasks**:
+- [ ] Increase idle poll interval from 50ms to 250ms
+- [ ] Use event-driven wakeups when possible
+- [ ] Only use short poll interval when animations active
+
+**Code Changes**:
+```rust
+// In lib.rs main loop
+const IDLE_POLL_MS: u64 = 250;
+const ACTIVE_POLL_MS: u64 = 50;
+
+let poll_duration = if app.has_animations() {
+    ACTIVE_POLL_MS
+} else {
+    IDLE_POLL_MS
+};
+```
+
+**Estimated Effort**: 1-2 hours
+
+### Phase 2: Async Operations & Caching (Medium Impact)
+
+#### 2.1 Async Model Discovery
+
+**Goal**: Prevent UI blocking during model discovery
+
+**Tasks**:
+- [ ] Create async model discovery task
+- [ ] Add `ModelDiscoveryInProgress` state
+- [ ] Send results via event bus
+- [ ] Show loading indicator in UI
+
+**Code Pattern**:
+```rust
+// Spawn discovery in background
+tokio::spawn(async move {
+    let models = discover_models(provider).await;
+    event_bus.publish(Event::ModelsDiscovered { provider, models });
+});
+
+// In event handler
+Event::ModelsDiscovered { provider, models } => {
+    self.provider_models.insert(provider, models);
+    self.mark_dirty();
+}
+```
+
+**Estimated Effort**: 4-6 hours
+
+#### 2.2 Optimize Markdown Cache
+
+**Goal**: Improve cache hit rate and reduce allocations
+
+**Tasks**:
+- [ ] Remove manual cache clearing (LRU handles eviction)
+- [ ] Return `Arc<str>` instead of cloning Strings
+- [ ] Consider using `string_cache` for repeated strings
+
+**Current Code**:
+```rust
+if self.md_render_cache.len() >= 256 {
+    self.md_render_cache.clear();  // Too aggressive
+}
+```
+
+**Optimized Code**:
+```rust
+// Remove the clear - LRU handles eviction
+// Change cache type to LruCache<u64, Arc<str>>
+```
+
+**Estimated Effort**: 2-3 hours
+
+#### 2.3 String Pool for Common Formats
+
+**Goal**: Reduce per-frame format! allocations
+
+**Tasks**:
+- [ ] Identify hot format patterns (timestamps, IDs, etc.)
+- [ ] Use `format_args!` where possible
+- [ ] Cache formatted strings that don't change often
+
+**Example**:
+```rust
+// Instead of:
+Span::styled(format!("{:<8}", elapsed), style)
+
+// Use:
+Span::styled(format_args!("{:<8}", elapsed), style)
+```
+
+**Estimated Effort**: 3-4 hours
+
+### Phase 3: Security & Consistency (High Priority)
+
+#### 3.1 Secret Masking
+
+**Goal**: Prevent API keys from appearing in logs
+
+**Tasks**:
+- [ ] Add `mask_secret(s: &str) -> String` helper
+- [ ] Apply masking to all env var reads
+- [ ] Audit all `push_log` and `tracing!` calls
+- [ ] Add CI lint for secret patterns
+
+**Code Pattern**:
+```rust
+pub fn mask_secret(s: &str) -> String {
+    if s.len() <= 8 {
+        "***".to_string()
+    } else {
+        format!("{}***{}", &s[..4], &s[s.len()-4..])
+    }
+}
+```
+
+**Estimated Effort**: 3-5 hours
+
+#### 3.2 Executable Path Validation
+
+**Goal**: Prevent command injection via discovered servers
+
+**Tasks**:
+- [ ] Add `validate_executable_path` function
+- [ ] Check for shell metacharacters
+- [ ] Verify file permissions on Unix
+- [ ] Apply validation before persisting
+
+**Code Pattern**:
+```rust
+fn validate_executable_path(p: &Path) -> bool {
+    if let Some(s) = p.to_str() {
+        if s.chars().any(|c| matches!(c, '\n' | '\r' | ';' | '|' | '&')) {
+            return false;
+        }
+    }
+    #[cfg(unix)] {
+        if let Ok(meta) = std::fs::metadata(p) {
+            if !meta.is_file() { return false; }
+            use std::os::unix::fs::PermissionsExt;
+            if meta.permissions().mode() & 0o111 == 0 { return false; }
+        }
+    }
+    true
+}
+```
+
+**Estimated Effort**: 2-3 hours
+
+#### 3.3 UI Consistency Improvements
+
+**Goal**: Ensure consistent behavior across all UI components
+
+**Tasks**:
+- [ ] Standardize focus indicators across dialogs
+- [ ] Ensure consistent keyboard navigation (Tab/Shift+Tab)
+- [ ] Add missing Esc handlers to all dialogs
+- [ ] Standardize error message display
+- [ ] Ensure consistent color scheme usage
+
+**Estimated Effort**: 4-6 hours
+
+### Phase 4: Testing & Validation
+
+#### 4.1 Performance Benchmarks
+
+**Tasks**:
+- [ ] Add benchmark for active agents panel with many tasks
+- [ ] Benchmark markdown rendering cache
+- [ ] Add memory allocation profiling tests
+- [ ] Create benchmark for message rendering
+
+**Estimated Effort**: 3-4 hours
+
+#### 4.2 Test Coverage Improvements
+
+**Tasks**:
+- [ ] Add test for `mask_secret` function
+- [ ] Add test for `validate_executable_path`
+- [ ] Test dirty flag propagation
+- [ ] Add test for active agents panel with mock data
+- [ ] Test async model discovery
+
+**Estimated Effort**: 4-6 hours
+
+## Implementation Order
+
+### Immediate (Week 1)
+
+1. **Fix dirty flag consistency** - Highest impact for least effort
+2. **Optimize active agents panel** - Fixes O(n²) issue
+3. **Add secret masking** - Security critical
+
+### Short-term (Week 2)
+
+4. **Async model discovery** - Improves UI responsiveness
+5. **Executable path validation** - Security hardening
+6. **Reduce frame rate when idle** - Lower CPU usage
+
+### Medium-term (Week 3)
+
+7. **Markdown cache optimization**
+8. **String allocation reduction**
+9. **UI consistency improvements**
+
+### Long-term (Week 4)
+
+10. **Comprehensive testing**
+11. **Performance validation**
+12. **Documentation updates**
+
+## Success Metrics
+
+### Performance Targets
+
+| Metric | Current | Target | Measurement |
+|--------|---------|--------|-------------|
+| CPU usage (idle) | ~20% | <5% | `top` or Activity Monitor |
+| Frame time (active) | ~50ms | <16ms (60 FPS) | Internal timing |
+| Memory churn/frame | High | Reduced 50% | Allocation profiler |
+| Startup time | ~500ms | <300ms | `time ragent --help` proxy |
+
+### Consistency Targets
+
+- All dialogs respond to Esc key
+- Consistent focus indicators
+- No UI freezes >100ms
+- All text input supports unicode correctly
+
+## Testing Strategy
+
+### Unit Tests
+
+- Dirty flag propagation
+- Secret masking edge cases
+- Path validation
+- Task tree building logic
+
+### Integration Tests
+
+- Full TUI lifecycle
+- Event handling pipeline
+- Async operation cancellation
+
+### Performance Tests
+
+- Benchmark with 1000+ messages
+- Benchmark with 100+ active tasks
+- Memory profiling over extended use
+
+## Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Dirty flag misses | UI not updating | Comprehensive audit + tests |
+| Async complexity | Race conditions | Proper cancellation tokens |
+| Breaking changes | User disruption | Feature flags for changes |
+| Performance regression | Slower than before | Benchmark comparison in CI |
+
+## Dependencies
+
+- `lru` - Already in use for caching
+- `tokio` - Already in use for async
+- `tracing` - Already in use for logging
+
+No new dependencies required for Phase 1-3.
+
+## Notes
+
+- All changes should maintain backward compatibility
+- Prefer small, reviewable PRs over large changes
+- Each phase should be independently testable
+- Document any API changes in CHANGELOG.md
+
+## References
+
+- `performance_findings.md` - Detailed performance analysis
+- `security_findings.md` - Security audit results
+- `test_findings.md` - Test coverage gaps
+- `COMPLIANCE.md` - Compliance requirements
 
 ---
 
-## High‑Impact Items (Priority: 0‑1)
-
-### 1. Reduce Unnecessary Redraws (Dirty‑Flag)
-- **Problem:** The main loop in `src/lib.rs` calls `terminal.draw(...)` on every iteration, even when nothing changed. A fixed 20 fps timer forces continuous CPU work.
-- **Goal:** Render only when the UI state actually changes, or at a capped minimum interval (e.g., 250 ms).
-- **Action Steps:**
-  1. Add a `needs_redraw: bool` field to `App` (or an `AtomicBool` if accessed from other threads).
-  2. Set `needs_redraw = true` in every place that mutates UI‑visible state: input handling, event handling, log appends, agent step updates, markdown cache changes, provider discovery, model list arrival, etc.
-  3. In the main loop, replace the unconditional `draw` with:
-     ```rust
-     if app.needs_redraw || last_draw.elapsed() >= MIN_REDRAW {
-         terminal.draw(|f| layout::render(f, &mut app))?;
-         app.needs_redraw = false;
-         last_draw = Instant::now();
-     }
-     ```
-  4. Provide a fallback timer (e.g., `MIN_REDRAW = Duration::from_millis(250)`) for things like clock display.
-  5. Add unit tests exercising the flag via a mock event bus.
-- **Owner:** performance reviewer / UI lead.
-- **Effort:** Medium.
-
-### 2. Fix Quadratic Traversal in Active‑Agents Panel
-- **Problem:** `layout_active_agents.rs` builds the tree of tasks by scanning the full task list for each node (`children: Vec<&TaskEntry> = tasks.iter().filter(...).collect()`). This is O(n²) with many sub‑agents.
-- **Goal:** Linear‑time construction per render pass.
-- **Action Steps:**
-  1. In `render_active_agents_subpanel`, compute a `HashMap<&str, Vec<&TaskEntry>>` that groups tasks by `parent_session_id` in a single pass.
-  2. Pass this map to a revised `build_task_rows` that looks up children via `map.get(parent_sid)` instead of filtering the whole list.
-  3. Change the signature to accept `&HashMap<...>` and avoid cloning `app.active_tasks` (use a shared reference).
-  4. Update the unit tests (e.g., `test_active_agents_render`) to reflect the new function signature.
-- **Owner:** layout maintainer.
-- **Effort:** Medium.
-
----
-
-## Medium‑Impact Items (Priority: 2)
-
-### 3. Cache & Allocation Optimisations in Active‑Agents Rendering
-- **Problem:** Per‑frame recreation of `HashSet`s (`custom_names`, `teammate_ids`) and many `format!`/`String` allocations.
-- **Goal:** Reuse cached collections and avoid allocation churn.
-- **Action Steps:**
-  1. Store `custom_names` and `teammate_ids` as fields on `App` that are updated only when the underlying vectors change (e.g., after a team member joins or custom agent list updates).
-  2. Use `Cow<'a, str>` or `&str` where possible in `build_task_rows` to avoid copying strings.
-  3. Replace `format!` for static column widths with `write!` into a pre‑allocated `String` buffer reused across rows.
-- **Owner:** performance reviewer.
-- **Effort:** Low‑Medium.
-
-### 4. Asynchronous Model Discovery
-- **Problem:** `models_for_provider` blocks the UI thread with `block_in_place` while performing network‑bound discovery for Ollama/Copilot.
-- **Goal:** Perform discovery in the background and update UI when ready.
-- **Action Steps:**
-  1. Refactor the discovery code into an async function returning `Result<Vec<Model>, Error>`.
-  2. When the provider selection UI opens, set a “loading” state and spawn a tokio task that sends a `ModelListReady` event via the bus.
-  3. On receipt, update `app.provider_models` and set `needs_redraw = true`.
-  4. Remove any `block_in_place` calls.
-- **Owner:** input/provider feature owner.
-- **Effort:** Medium.
-
-### 5. Markdown Rendering Cache – LRU Instead of Full Clear
-- **Problem:** `md_render_cache` (a `HashMap<u64, String>`) is cleared wholesale when it reaches 256 entries, causing bursty re‑renders.
-- **Goal:** Use an LRU cache to evict only the least‑recently‑used entry.
-- **Action Steps:**
-  1. Add `lru = "0.12"` (or similar) to `ragent-tui` Cargo.toml.
-  2. Replace `HashMap<u64, String>` with `lru::LruCache<u64, Arc<String>>` capped at 256.
-  3. Store `Arc<String>` to avoid cloning on retrieval.
-  4. Adjust `render_markdown_to_ascii` to use `Arc::clone()` when returning cached content.
-- **Owner:** performance reviewer / markdown module maintainer.
-- **Effort:** Low‑Medium.
-
----
-
-## Low‑Impact / Polish Items (Priority: 3‑4)
-
-| # | Item | Description | Owner | Effort |
-|---|------|-------------|-------|--------|
-| 6 | Reduce lower‑casing allocations in directory listing (`populate_directory_menu`). | Compute `name_lower` once per entry. | UI/FS maintainer | Low |
-| 7 | Clipboard image copy – avoid `to_vec()` duplication. | Use `ImageData::into_owned()` or `ImageBuffer::from_raw` directly. | State maintainer | Low |
-| 8 | Git branch detection at startup – make async. | Spawn a background task that runs `git rev-parse --abbrev-ref HEAD` and updates `app.git_branch`. | Startup maintainer | Low |
-| 9 | Hot‑path formatting across layout files – combine with redraw optimisation to minimise impact. | Audit `format!` usage, replace with reusable buffers where profiling shows hot spots. | Layout maintainer | Medium (profiling required) |
-
----
-
-## Implementation Roadmap
-
-| Milestone | Tasks | Estimated Duration |
-|-----------|-------|-------------------|
-| **M1 – Redraw & Async Discovery** | 1, 4 | 2 weeks |
-| **M2 – Active‑Agents Optimisation** | 2, 3 | 1.5 weeks |
-| **M3 – Markdown LRU Cache** | 5 | 1 week |
-| **M4 – Polish & Misc** | 6‑9 | 1 week |
-
-All milestones include unit‑test coverage and CI validation. After M1‑M2, run a performance benchmark suite (`cargo bench -p ragent-tui`) to verify CPU usage drops and frame latency improves.
-
----
-
-## Acceptance Criteria
-- UI CPU usage on idle screen drops below 5 % on a mid‑range laptop.
-- Rendering remains smooth (≥30 fps) when 200+ active tasks are displayed.
-- Model discovery no longer blocks the UI; a loading spinner appears briefly.
-- Markdown cache hit‑rate > 90 % after warm‑up.
-- No new regression tests fail; existing tests pass.
-
----
-
-*Prepared by the planning agent after reviewing the codebase and performance findings.*
+**Last Updated**: 2025-01-15
+**Next Review**: After Phase 1 completion

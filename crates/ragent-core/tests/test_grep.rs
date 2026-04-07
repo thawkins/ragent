@@ -76,3 +76,41 @@ async fn test_grep_skips_git_dir() {
         result.content
     );
 }
+
+/// Test that grep tool returns standardized metadata fields.
+#[tokio::test]
+async fn test_grep_metadata_standardized() {
+    let result = GrepTool
+        .execute(json!({"pattern": "GrepTool", "path": "tests"}), &ctx())
+        .await
+        .unwrap();
+
+    let metadata = result.metadata.expect("should have metadata");
+
+    // Check standardized field names
+    assert!(
+        metadata.get("count").is_some(),
+        "should have 'count' field, got: {:?}",
+        metadata
+    );
+    assert!(
+        metadata.get("file_count").is_some(),
+        "should have 'file_count' field, got: {:?}",
+        metadata
+    );
+    assert!(
+        metadata.get("pattern").is_some(),
+        "should have 'pattern' field, got: {:?}",
+        metadata
+    );
+
+    // Old field names should NOT exist
+    assert!(
+        metadata.get("matches").is_none(),
+        "should NOT have old 'matches' field"
+    );
+    assert!(
+        metadata.get("files_searched").is_none(),
+        "should NOT have old 'files_searched' field"
+    );
+}

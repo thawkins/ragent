@@ -132,8 +132,8 @@ impl Tool for TeamIdleTool {
         Ok(ToolOutput {
             content: format!(
                 "Teammate '{agent_id}' is now idle in team '{team_name}'.\n\
-                 Summary: {summary}\n\
-                 Waiting for new tasks or shutdown instructions."
+                           Summary: {summary}\n\
+                           Waiting for new tasks or shutdown instructions."
             ),
             metadata: Some(json!({
                 "team_name": team_name,

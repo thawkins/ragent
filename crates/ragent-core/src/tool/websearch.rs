@@ -102,15 +102,15 @@ impl Tool for WebSearchTool {
             output.push_str("No results found.");
         }
 
-        let lines = output.lines().count();
+        let line_count = output.lines().count();
         let result_count = results.len();
 
         Ok(ToolOutput {
             content: output,
             metadata: Some(json!({
                 "query": query,
-                "results": result_count,
-                "lines": lines,
+                "count": result_count,
+                "line_count": line_count,
             })),
         })
     }

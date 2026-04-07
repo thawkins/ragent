@@ -6,8 +6,8 @@
 use anyhow::Result;
 use arboard::ImageData;
 use image::{ImageBuffer, Rgba};
-use ratatui::layout::Rect;
 use lru::LruCache;
+use ratatui::layout::Rect;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
@@ -254,8 +254,6 @@ pub struct LlmStatsSummary {
 /// Which screen the TUI is currently showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenMode {
-    /// Centered landing page with logo, prompt, and tips.
-    Home,
     /// Three-panel chat layout with status bar, messages, and input.
     Chat,
 }
@@ -630,8 +628,6 @@ pub enum SelectionPane {
     Log,
     /// Selection in the chat-screen input widget.
     Input,
-    /// Selection in the home-screen input widget.
-    HomeInput,
 }
 
 /// A mouse-driven text selection within a pane.
@@ -910,8 +906,6 @@ pub struct App {
     pub log_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
-    /// Cached area of the home-screen input widget (set during render).
-    pub home_input_area: Rect,
     /// Cached area of the teams subpanel.
     pub teams_area: Rect,
     /// Cached area of the output overlay.
@@ -972,6 +966,11 @@ pub struct App {
     /// Maps tool call IDs to their `(short_session_id, step_number)` for log/message correlation.
     /// Step number comes from EventBus, which is the single source of truth.
     pub tool_step_map: HashMap<String, (String, u32)>,
+    /// Maps short session IDs (`short_sid`) to display agent names.
+    /// Display names are "ag[nnn]" (auto-allocated) or the actual agent name if available.
+    pub sid_to_display_name: HashMap<String, String>,
+    /// Counter for auto-allocating "ag[nnn]" display names.
+    pub next_agent_index: u32,
     /// Active background sub-agent tasks (F14).
     pub active_tasks: Vec<ragent_core::task::TaskEntry>,
     /// Whether the keybindings help panel is currently visible.
@@ -1045,8 +1044,15 @@ pub struct App {
     /// auto-send this text to the agent to continue processing.
     pub autopilot_pending_continue: Option<String>,
 
-    // ── Plan approval (M2 Task 2.2) ─────────────────────────────────────────
-    /// When Some, the plan approval overlay is shown. Holds the plan text and
+    // ── Processing timing (for log breakdown) ───────────────────────────────
+    /// Wall-clock instant when the current prompt was sent (for total elapsed time).
+    pub prompt_start_time: Option<std::time::Instant>,
+    /// Cumulative time spent in tool calls during this processing cycle.
+    pub tool_time_ms: u64,
+    /// Cumulative time spent waiting for LLM responses during this processing cycle.
+    pub llm_time_ms: u64,
+
+    // ── Plan approval (M2 Task 2.2) ��────────────────────────────────────────    /// When Some, the plan approval overlay is shown. Holds the plan text and
     /// the agent to restore on approval.
     pub plan_approval_pending: Option<PlanApprovalState>,
 

@@ -97,8 +97,8 @@ impl Tool for TeamTaskListTool {
             content: lines.join("\n"),
             metadata: Some(json!({
                 "team_name": team_name,
-                "tasks": tasks_json,
-                "total": list.tasks.len()
+                "task_count": list.tasks.len(),
+                "tasks": tasks_json
             })),
         })
     }

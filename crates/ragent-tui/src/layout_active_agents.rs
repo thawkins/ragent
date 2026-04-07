@@ -37,104 +37,109 @@ fn short_id(id: &str) -> &str {
 /// `last_stack` is a slice of booleans indicating whether each ancestor at that
 /// depth was the last sibling; this lets us draw vertical continuation lines.
 /// `custom_names` is the set of custom OASF agent names; matching entries get a `[C]` badge.
-    fn build_task_rows<'a>(
-        tasks_map: &std::collections::HashMap<&'a str, Vec<&'a TaskEntry>>,
-        parent_sid: &str,
-        depth: usize,
-        last_stack: &[bool],
-        event_bus: &ragent_core::event::EventBus,
-        custom_names: &std::collections::HashSet<String>,
-        teammate_ids: &std::collections::HashSet<String>,
-        out: &mut Vec<Line<'a>>,
-    ) {
-        let children = tasks_map.get(parent_sid).cloned().unwrap_or_default();
-        for (idx, task) in children.iter().enumerate() {
-            let is_last = idx + 1 == children.len();
-            // Build indent using ancestor info: use '│ ' when ancestor was not last, else two spaces
-            let mut indent = String::new();
-            for &ancestor_was_last in last_stack {
-                if ancestor_was_last {
-                    indent.push_str("  ");
-                } else {
-                    indent.push_str("│ ");
-                }
-            }
-            // Prefix for hierarchy in the name column.
-            let prefix = if depth == 0 {
-                "└─ "
-            } else if is_last {
-                "  └─ "
+fn build_task_rows<'a>(
+    tasks_map: &std::collections::HashMap<&'a str, Vec<&'a TaskEntry>>,
+    parent_sid: &str,
+    depth: usize,
+    last_stack: &[bool],
+    event_bus: &ragent_core::event::EventBus,
+    custom_names: &std::collections::HashSet<String>,
+    teammate_ids: &std::collections::HashSet<String>,
+    out: &mut Vec<Line<'a>>,
+) {
+    let children = tasks_map.get(parent_sid).cloned().unwrap_or_default();
+    for (idx, task) in children.iter().enumerate() {
+        let is_last = idx + 1 == children.len();
+        // Build indent using ancestor info: use '│ ' when ancestor was not last, else two spaces
+        let mut indent = String::new();
+        for &ancestor_was_last in last_stack {
+            if ancestor_was_last {
+                indent.push_str("  ");
             } else {
-                "  ├─ "
-            };
-            let steps = event_bus.current_step(&task.child_session_id);
-            let elapsed = format_elapsed(task.created_at);
-            let type_label = if task.background { "bg" } else { "fg" };
-            let is_custom = custom_names.contains(&task.agent_name);
-            let is_teammate = teammate_ids.contains(&task.child_session_id);
-            let mut agent_label = format!("{indent}{prefix}{}", task.agent_name);
-            if is_custom {
-                agent_label.push_str(" [C]");
+                indent.push_str("│ ");
             }
-            if is_teammate {
-                agent_label.push_str(" [T]");
-            }
-            let tid = short_id(&task.id);
-            let (dot_color, name_color) = if task.background {
-                (Color::Yellow, Color::Yellow)
-            } else {
-                (Color::Cyan, Color::Cyan)
-            };
-            let spans = vec![
-                Span::styled("◦ ", Style::default().fg(dot_color)),
-                Span::styled(
-                    format!("{:<10} ", tid),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{:<32}", agent_label),
-                    Style::default().fg(name_color),
-                ),
-                Span::styled(
-                    format!("{:<8} ", type_label),
-                    Style::default().fg(name_color),
-                ),
-                Span::styled(
-                    format!("{:>8} ", elapsed),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("{:>7}", steps),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ];
-            out.push(Line::from(spans));
-            // Recurse
-            let mut new_stack = last_stack.to_vec();
-            new_stack.push(is_last);
-            build_task_rows(
-                tasks_map,
-                &task.child_session_id,
-                depth + 1,
-                &new_stack,
-                event_bus,
-                custom_names,
-                teammate_ids,
-                out,
-            );
         }
+        // Prefix for hierarchy in the name column.
+        let prefix = if depth == 0 {
+            "└─ "
+        } else if is_last {
+            "  └─ "
+        } else {
+            "  ├─ "
+        };
+        let steps = event_bus.current_step(&task.child_session_id);
+        let elapsed = format_elapsed(task.created_at);
+        let type_label = if task.background { "bg" } else { "fg" };
+        let is_custom = custom_names.contains(&task.agent_name);
+        let is_teammate = teammate_ids.contains(&task.child_session_id);
+        let mut agent_label = format!("{indent}{prefix}{}", task.agent_name);
+        if is_custom {
+            agent_label.push_str(" [C]");
+        }
+        if is_teammate {
+            agent_label.push_str(" [T]");
+        }
+        let tid = short_id(&task.id);
+        let (dot_color, name_color) = if task.background {
+            (Color::Yellow, Color::Yellow)
+        } else {
+            (Color::Cyan, Color::Cyan)
+        };
+        let spans = vec![
+            Span::styled("◦ ", Style::default().fg(dot_color)),
+            Span::styled(
+                format!("{:<10} ", tid),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("{:<32}", agent_label),
+                Style::default().fg(name_color),
+            ),
+            Span::styled(
+                format!("{:<8} ", type_label),
+                Style::default().fg(name_color),
+            ),
+            Span::styled(
+                format!("{:>8} ", elapsed),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("{:>7}", steps),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ];
+        out.push(Line::from(spans));
+        // Recurse
+        let mut new_stack = last_stack.to_vec();
+        new_stack.push(is_last);
+        build_task_rows(
+            tasks_map,
+            &task.child_session_id,
+            depth + 1,
+            &new_stack,
+            event_bus,
+            custom_names,
+            teammate_ids,
+            out,
+        );
     }
+}
 
 /// Render the active-agents subpanel into `area` (8 rows including border).
 pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     // Snapshot data we need so we don't keep borrowing `app`.
     let primary_session = app.session_id.clone().unwrap_or_default();
     let primary_name = app.agent_name.clone();
-          // Build a map from parent_session_id to child tasks for O(1) lookup
-          let mut tasks_map: std::collections::HashMap<&str, Vec<&TaskEntry>> = std::collections::HashMap::new();
-          for task in &app.active_tasks {
-              tasks_map.entry(&task.parent_session_id[..]).or_default().push(task);
-          }    let primary_steps = app.event_bus.current_step(&primary_session);
+    // Build a map from parent_session_id to child tasks for O(1) lookup
+    let mut tasks_map: std::collections::HashMap<&str, Vec<&TaskEntry>> =
+        std::collections::HashMap::new();
+    for task in &app.active_tasks {
+        tasks_map
+            .entry(&task.parent_session_id[..])
+            .or_default()
+            .push(task);
+    }
+    let primary_steps = app.event_bus.current_step(&primary_session);
 
     // Build the set of custom agent names for badge lookup
     let custom_names: std::collections::HashSet<String> = app

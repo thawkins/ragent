@@ -4,7 +4,7 @@
   "description": "Technical documentation specialist for this project",
   "version": "1.0.0",
   "mode": "all",
-  "max_steps": 50,
+  "max_steps": 500,
   "temperature": 0.7,
   "permissions": [
     { "permission": "read",  "pattern": "**",      "action": "allow" },

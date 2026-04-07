@@ -174,8 +174,8 @@ impl Tool for ListTasksTool {
         Ok(ToolOutput {
             content: output,
             metadata: Some(json!({
-                "count": filtered.len(),
-                "running": running_count,
+                "task_count": filtered.len(),
+                "running_count": running_count,
             })),
         })
     }

@@ -6,6 +6,8 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::tool::metadata::MetadataBuilder;
+
 use super::{Tool, ToolContext, ToolOutput};
 
 /// Spawns a named teammate into an existing team.
@@ -250,18 +252,18 @@ impl Tool for TeamSpawnTool {
         Ok(ToolOutput {
             content: format!(
                 "Teammate '{teammate_name}' spawned in team '{team_name}'.\nAgent ID: {agent_id}\n\
-                 Model: {model_display}{task_assignment_msg}\n\
-                 ⏳ Teammate is now working. Call `team_wait` (not `wait_tasks`) after all spawns \
-                 to block until teammates finish before the lead continues."
+                           Model: {model_display}{task_assignment_msg}\n\
+                           ⏳ Teammate is now working. Call `team_wait` (not `wait_tasks`) after all spawns \
+                           to block until teammates finish before the lead continues."
             ),
-            metadata: Some(json!({
-                "team_name": team_name,
-                "teammate_name": teammate_name,
-                "agent_id": agent_id,
-                "model": model_display,
-                "task_id": task_id,
-                "status": "spawned"
-            })),
+            metadata: MetadataBuilder::new()
+                .custom("team_name", team_name)
+                .custom("teammate_name", teammate_name)
+                .custom("agent_id", &agent_id)
+                .custom("model", model_display)
+                .task_id(task_id.unwrap_or(""))
+                .custom("status", "spawned")
+                .build(),
         })
     }
 }

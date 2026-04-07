@@ -81,11 +81,15 @@ impl Tool for PdfReadTool {
         .await
         .context("Failed to read PDF: the background task exited unexpectedly")??;
 
+        let content = truncate_output(result);
+        let line_count = content.lines().count();
+
         Ok(ToolOutput {
-            content: truncate_output(result),
+            content,
             metadata: Some(json!({
                 "path": path.display().to_string(),
                 "format": "pdf",
+                "line_count": line_count,
             })),
         })
     }

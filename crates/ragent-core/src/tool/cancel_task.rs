@@ -84,13 +84,18 @@ impl Tool for CancelTaskTool {
         match task_manager.cancel_task(task_id).await {
             Ok(()) => Ok(ToolOutput {
                 content: format!("Task '{task_id}' has been cancelled."),
-                metadata: Some(json!({ "task_id": task_id, "cancelled": true })),
+                metadata: Some(json!({
+                    "task_id": task_id,
+                    "status": "cancelled"
+                })),
             }),
             Err(e) => Ok(ToolOutput {
                 content: format!("Could not cancel task '{task_id}': {e}"),
-                metadata: Some(
-                    json!({ "task_id": task_id, "cancelled": false, "error": e.to_string() }),
-                ),
+                metadata: Some(json!({
+                    "task_id": task_id,
+                    "status": "cancel_failed",
+                    "error": e.to_string()
+                })),
             }),
         }
     }

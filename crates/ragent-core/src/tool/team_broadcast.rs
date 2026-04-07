@@ -85,7 +85,7 @@ impl Tool for TeamBroadcastTool {
             metadata: Some(json!({
                 "team_name": team_name,
                 "recipients": active,
-                "sent_count": sent
+                "message_count": sent
             })),
         })
     }

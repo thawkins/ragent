@@ -92,7 +92,7 @@ impl Tool for TeamCleanupTool {
                 "team_name": team_name,
                 "status": "disbanded",
                 "forced": force,
-                "active_at_cleanup": active
+                "member_count": active.len()
             })),
         })
     }

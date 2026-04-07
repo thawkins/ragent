@@ -8,6 +8,7 @@ use super::{Tool, ToolContext, ToolOutput};
 use crate::team::TeamStore;
 use crate::team::manager::HookOutcome;
 use crate::team::{HookEvent, TaskStore, run_team_hook};
+use crate::tool::metadata::MetadataBuilder;
 
 /// Creates a new team directory and initial config.
 pub struct TeamCreateTool;
@@ -475,20 +476,27 @@ impl Tool for TeamCreateTool {
         Ok(ToolOutput {
             content: format!(
                 "Team '{}' created successfully.\nDirectory: {}\nLead session: {}\n\n{}\n\n\
-                 Next: call `team_wait` to block until all teammates finish their initial work.",
+                           Next: call `team_wait` to block until all teammates finish their initial work.",
                 name,
                 final_store.dir.display(),
                 ctx.session_id,
                 member_summary
             ),
-            metadata: Some(json!({
-                "team_name": name,
-                "team_dir": final_store.dir.to_string_lossy(),
-                "lead_session_id": ctx.session_id,
-                "project_local": project_local,
-                "members_spawned": final_store.config.members.len(),
-                "auto_named": input.get("name").and_then(|v| v.as_str()).map(str::trim).is_none_or(str::is_empty)
-            })),
+            metadata: MetadataBuilder::new()
+                .custom("team_name", &name)
+                .custom("team_dir", final_store.dir.to_string_lossy())
+                .custom("lead_session_id", &ctx.session_id)
+                .custom("project_local", project_local)
+                .custom("members_spawned", final_store.config.members.len())
+                .custom(
+                    "auto_named",
+                    input
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .is_none_or(str::is_empty),
+                )
+                .build(),
         })
     }
 }

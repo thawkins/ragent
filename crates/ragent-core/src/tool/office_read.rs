@@ -89,12 +89,14 @@ impl Tool for OfficeReadTool {
         .context("Failed to read document: the background task exited unexpectedly")??;
 
         let content = truncate_output(content);
+        let line_count = content.lines().count();
 
         Ok(ToolOutput {
             content,
             metadata: Some(json!({
                 "path": path_display,
                 "format": office_format.to_string(),
+                "line_count": line_count,
             })),
         })
     }
