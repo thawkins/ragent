@@ -1,11 +1,22 @@
 # Release
 
-## Current Version: 0.1.0-alpha.29
+## Current Version: 0.1.0-alpha.31
+
+### Added
+- **SECPLAN.md** — Comprehensive security remediation plan consolidating findings from 5 existing security audit documents covering Critical (P0), High (P1), Medium (P2), and Low (P3) issues
 
 ### Changed
-- Version bump to 0.1.0-alpha.29
+- Version bump to 0.1.0-alpha.31
 
-## Previous: 0.1.0-alpha.28
+## Previous: 0.1.0-alpha.30
+
+### Added
+- **Alt+L keybinding** — Toggle the log panel visibility on/off (previously only available via `/log` command)
+
+### Changed
+- Version bump to 0.1.0-alpha.30
+
+## Previous: 0.1.0-alpha.29
 
 ### Changed
 - Version bump to 0.1.0-alpha.28

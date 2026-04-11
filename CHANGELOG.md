@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.0-alpha.31] - 2026-04-09
+
+### Added
+- **SECPLAN.md** — Comprehensive security remediation plan consolidating findings from 5 existing security audit documents covering Critical (P0), High (P1), Medium (P2), and Low (P3) issues
+
+### Changed
+- Version bump to 0.1.0-alpha.31
+
+## [0.1.0-alpha.30] - 2026-04-08
+
+### Added
+- **Alt+L keybinding** — Toggle the log panel visibility on/off (previously only available via `/log` command)
+
+### Changed
+- Version bump to 0.1.0-alpha.30
+
 ## [0.1.0-alpha.29] - 2026-04-07
 
 ### Changed

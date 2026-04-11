@@ -258,10 +258,10 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.19** — Early development with active Teams and Copilot UX improvements.
+**v0.1.0-alpha.31** — Early development with active Teams and Copilot UX improvements, and comprehensive security planning.
 Recent updates include expanded Teams lifecycle commands (`/team open|close|delete|clear`),
 tabular `/team tasks`, automatic pre-send context compaction, Copilot reasoning-level
-selection, and improved model metadata/compatibility handling.
+selection, improved model metadata/compatibility handling, and a consolidated security remediation plan (SECPLAN.md).
 
 ## License
 
