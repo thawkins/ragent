@@ -387,15 +387,18 @@ impl LlmClient for OllamaCloudClient {
             tracing::debug!(body = %&body_preview[..preview_len], "Ollama Cloud request body (truncated)");
         }
 
-        let response = self
-            .http
-            .post(&url)
-            .header("content-type", "application/json")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&body)
-            .send()
-            .await
-            .context("Failed to connect to Ollama Cloud")?;
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            self.http
+                .post(&url)
+                .header("content-type", "application/json")
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .json(&body)
+                .send(),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("Ollama Cloud: initial response timed out after 180s"))?
+        .context("Failed to connect to Ollama Cloud")?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -424,9 +427,20 @@ impl LlmClient for OllamaCloudClient {
             futures::pin_mut!(stream);
 
             while !stream_done {
-                let chunk_result = match stream.next().await {
-                    Some(r) => r,
-                    None => break,
+                let chunk_result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(180),
+                    stream.next(),
+                )
+                .await
+                {
+                    Ok(Some(r)) => r,
+                    Ok(None) => break,
+                    Err(_) => {
+                        yield StreamEvent::Error {
+                            message: "Ollama Cloud: stream stalled — no data received for 180s".to_string(),
+                        };
+                        break;
+                    }
                 };
                 let chunk = match chunk_result {
                     Ok(c) => c,

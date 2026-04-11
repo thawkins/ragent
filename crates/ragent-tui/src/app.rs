@@ -444,6 +444,8 @@ impl App {
             pending_send_after_compact: None,
             agent_halted: false,
             tool_step_map: HashMap::new(),
+            last_step_per_session: HashMap::new(),
+            substep_counter_per_session: HashMap::new(),
             active_tasks: Vec::new(),
             show_shortcuts: false,
             quit_armed: false,
@@ -1478,6 +1480,19 @@ impl App {
         self.lsp_manager = Some(manager);
     }
 
+    /// Register the primary session's short_sid → agent_name mapping.
+    ///
+    /// This must be called after setting `self.session_id` so that tool call
+    /// step tags display the agent name (e.g. `[general:5]`) instead of the
+    /// raw session ID suffix.
+    pub fn register_primary_session_mapping(&mut self) {
+        if let Some(ref sid) = self.session_id {
+            let short_sid = short_session_id(sid);
+            self.sid_to_display_name
+                .insert(short_sid, self.agent_name.clone());
+        }
+    }
+
     /// Toggle the `disabled` flag for a configured LSP server in ragent.json.
     pub fn toggle_lsp_server_enabled(&self, id: &str) -> Result<String, String> {
         let config_path = std::env::current_dir()
@@ -1735,6 +1750,15 @@ impl App {
                 member.current_task_id = stored_member.current_task_id.clone();
             }
         }
+        // Register session_id → teammate name mappings for log display.
+        for member in &self.team_members {
+            if let Some(ref sid) = member.session_id {
+                let short_sid = short_session_id(sid);
+                self.sid_to_display_name
+                    .entry(short_sid)
+                    .or_insert_with(|| member.name.clone());
+            }
+        }
     }
 
     /// Load an existing session from storage and restore its state.
@@ -1768,6 +1792,10 @@ impl App {
         let msg_count = messages.len();
 
         self.session_id = Some(session_id.to_string());
+        // Map the primary session's short_sid to the current agent name
+        let short_sid = short_session_id(session_id);
+        self.sid_to_display_name
+            .insert(short_sid, self.agent_name.clone());
         self.messages = messages;
         self.current_screen = ScreenMode::Chat;
         self.status = format!("resumed ({} messages)", msg_count);
@@ -1775,13 +1803,15 @@ impl App {
         // Rebuild tool_step_map from restored tool calls and populate log
         // (step count comes from event_bus, not local counter)
         self.tool_step_map.clear();
+        self.last_step_per_session.clear();
+        self.substep_counter_per_session.clear();
         self.sid_to_display_name.clear();
         // Map the primary session's short_sid to the current agent name
         let short_sid = short_session_id(session_id);
         self.sid_to_display_name
             .insert(short_sid, self.agent_name.clone());
-        let mut restored_logs: Vec<(u64, String, String)> = Vec::new();
-        let mut step_counter = 0u64;
+        let mut restored_logs: Vec<(u32, u32, String, String)> = Vec::new();
+        let mut step_counter = 0u32;
         for msg in &self.messages {
             for part in &msg.parts {
                 if let MessagePart::ToolCall {
@@ -1790,24 +1820,26 @@ impl App {
                     state,
                 } = part
                 {
+                    // For restoration, treat each tool call as a unique step.1
                     step_counter += 1;
+                    let substep = 1u32;
                     let short_sid = self
                         .session_id
                         .as_deref()
                         .map(short_session_id)
                         .unwrap_or_default();
                     self.tool_step_map
-                        .insert(call_id.clone(), (short_sid, step_counter as u32));
+                        .insert(call_id.clone(), (short_sid, step_counter, substep));
                     let icon = match state.status {
                         ragent_core::message::ToolCallStatus::Completed => "✓",
                         ragent_core::message::ToolCallStatus::Error => "✗",
                         _ => "…",
                     };
-                    restored_logs.push((step_counter, tool.clone(), icon.to_string()));
+                    restored_logs.push((step_counter, substep, tool.clone(), icon.to_string()));
                 }
             }
         }
-        for (step, tool, icon) in restored_logs {
+        for (step, substep, tool, icon) in restored_logs {
             let short_sid = self
                 .session_id
                 .as_deref()
@@ -1815,7 +1847,7 @@ impl App {
                 .unwrap_or_default();
             self.push_log_no_agent(
                 LogLevel::Tool,
-                format!("[{short_sid}:{step}] {tool} {icon} (restored)"),
+                format!("[{short_sid}:{step}.{substep}] {tool} {icon} (restored)"),
             );
         }
 
@@ -2911,6 +2943,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.messages.clear();
                 self.scroll_offset = 0;
                 self.tool_step_map.clear();
+                self.last_step_per_session.clear();
+                self.substep_counter_per_session.clear();
                 ragent_core::agent::clear_prompt_context_cache();
                 self.status = "messages cleared".to_string();
                 self.push_log_no_agent(LogLevel::Info, "Message history cleared".to_string());
@@ -6217,7 +6251,11 @@ Type `/swarm help` for more info.\n";
                         let dir = std::env::current_dir().unwrap_or_default();
                         match self.session_processor.session_manager.create_session(dir) {
                             Ok(session) => {
-                                self.session_id = Some(session.id);
+                                self.session_id = Some(session.id.clone());
+                                // Map the primary session's short_sid to the current agent name
+                                let short_sid = short_session_id(&session.id);
+                                self.sid_to_display_name
+                                    .insert(short_sid, self.agent_name.clone());
                             }
                             Err(e) => {
                                 self.status = format!("error: {}", e);
@@ -7159,6 +7197,14 @@ Type `/swarm help` for more info.\n";
                 InputAction::LogScrollDown => {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
                 }
+                InputAction::ToggleLog => {
+                    self.show_log = !self.show_log;
+                    self.status = if self.show_log {
+                        "log panel visible".to_string()
+                    } else {
+                        "log panel hidden".to_string()
+                    };
+                }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
                 }
@@ -7584,15 +7630,30 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     // Get the current step count from the event bus (single source of truth)
-                    let step = self.event_bus.current_step(session_id);
+                    let step = self.event_bus.current_step(session_id) as u32;
                     let short_sid = short_session_id(session_id);
+                    // Check if step changed - if so, reset substep counter to 0
+                    let last_step = self.last_step_per_session.get(session_id).copied().unwrap_or(0);
+                    if step != last_step {
+                        self.substep_counter_per_session.insert(session_id.clone(), 0);
+                        self.last_step_per_session.insert(session_id.clone(), step);
+                    }
+                    // Increment sub-step counter for this session
+                    let substep = self.substep_counter_per_session.entry(session_id.clone()).or_insert(0);
+                    *substep += 1;
+                    let current_substep = *substep;
                     self.tool_step_map
-                        .insert(call_id.clone(), (short_sid.clone(), step as u32));
+                        .insert(call_id.clone(), (short_sid.clone(), step, current_substep));
                     self.add_tool_call_part(tool, call_id);
                     self.status = format!("running: {}", tool);
+                    let display_name = self
+                        .sid_to_display_name
+                        .get(&short_sid)
+                        .cloned()
+                        .unwrap_or(short_sid);
                     self.push_log_no_agent(
                         LogLevel::Tool,
-                        format!("[{short_sid}:{step}] tool call: {}", tool),
+                        format!("[{display_name}:{step}.{current_substep}] tool call: {}", tool),
                     );
                 }
             }
@@ -7605,10 +7666,18 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.update_tool_call_status(call_id, error.is_none(), error.as_deref());
+                    self.status = "processing...".to_string();
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|(sid, s)| format!("[{sid}:{s}] "))
+                        .map(|(sid, step, substep)| {
+                            let name = self
+                                .sid_to_display_name
+                                .get(sid)
+                                .cloned()
+                                .unwrap_or_else(|| sid.clone());
+                            format!("[{name}:{step}.{substep}] ")
+                        })
                         .unwrap_or_default();
                     if let Some(err) = error {
                         self.push_log_no_agent(
@@ -7645,10 +7714,19 @@ Type `/swarm help` for more info.\n";
             }
             Event::MessageEnd {
                 ref session_id,
+                ref message_id,
                 ref reason,
-                ..
             } => {
                 if self.is_current_session(session_id) {
+                    // The "init" message_id is used exclusively by the AGENTS.md
+                    // acknowledgment exchange that runs before the main agent loop.
+                    // It must NOT reset processing state — the main loop hasn't
+                    // started yet.  Only set force_new_message so the real response
+                    // starts in a fresh message block.
+                    if message_id == "init" {
+                        self.force_new_message = true;
+                        return;
+                    }
                     let was_auto_compaction = self.auto_compact_in_progress;
                     self.is_processing = false;
                     self.cancel_flag = None;
@@ -7806,6 +7884,11 @@ Type `/swarm help` for more info.\n";
             } => {
                 if self.is_current_session(session_id) {
                     self.agent_name = to.clone();
+                    // Update the display name mapping for the current session
+                    if let Some(ref sid) = self.session_id {
+                        let short_sid = short_session_id(sid);
+                        self.sid_to_display_name.insert(short_sid, to.clone());
+                    }
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("agent switched: {} → {}", from, to),
@@ -7951,45 +8034,51 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             }
-            Event::ToolCallArgs {
-                ref session_id,
-                ref call_id,
-                ref tool,
-                ref args,
-            } => {
-                if self.is_current_session(session_id) {
-                    self.update_tool_call_input(call_id, args);
-                    let step_tag = self
-                        .tool_step_map
-                        .get(call_id)
-                        .map(|(sid, s)| format!("[{sid}:{s}] "))
-                        .unwrap_or_default();
-                    // Pretty-print JSON args across multiple log lines
-                    let pretty = serde_json::from_str::<serde_json::Value>(args)
-                        .ok()
-                        .and_then(|v| serde_json::to_string_pretty(&v).ok());
-                    if let Some(formatted) = pretty {
-                        let mut first = true;
-                        for line in formatted.lines() {
-                            if first {
-                                self.push_log_no_agent(
-                                    LogLevel::Tool,
-                                    format!("{}→ {} {}", step_tag, tool, line),
-                                );
-                                first = false;
-                            } else {
-                                self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
-                            }
-                        }
-                    } else {
-                        self.push_log_no_agent(
-                            LogLevel::Tool,
-                            format!("{}→ {}({})", step_tag, tool, args),
-                        );
-                    }
-                }
-            }
-            Event::ToolResult {
+                                        Event::ToolCallArgs {
+                                            ref session_id,
+                                            ref call_id,
+                                            ref tool,
+                                            ref args,
+                                        } => {
+                                            if self.is_current_session(session_id) {
+                                                self.update_tool_call_input(call_id, args);
+                                                let step_tag = self
+                                                    .tool_step_map
+                                                    .get(call_id)
+                                                    .map(|(sid, step, substep)| {
+                                                        let display = self
+                                                            .sid_to_display_name
+                                                            .get(sid)
+                                                            .cloned()
+                                                            .unwrap_or_else(|| sid.clone());
+                                                        format!("[{display}:{step}.{substep}] ")
+                                                    })
+                                                    .unwrap_or_default();
+                                                // Pretty-print JSON args across multiple log lines
+                                                let pretty = serde_json::from_str::<serde_json::Value>(args)
+                                                    .ok()
+                                                    .and_then(|v| serde_json::to_string_pretty(&v).ok());
+                                                if let Some(formatted) = pretty {
+                                                    let mut first = true;
+                                                    for line in formatted.lines() {
+                                                        if first {
+                                                            self.push_log_no_agent(
+                                                                LogLevel::Tool,
+                                                                format!("{}→ {} {}", step_tag, tool, line),
+                                                            );
+                                                            first = false;
+                                                        } else {
+                                                            self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
+                                                        }
+                                                    }
+                                                } else {
+                                                    self.push_log_no_agent(
+                                                        LogLevel::Tool,
+                                                        format!("{}→ {}({})", step_tag, tool, args),
+                                                    );
+                                                }
+                                            }
+                                        }            Event::ToolResult {
                 ref session_id,
                 ref call_id,
                 ref tool,
@@ -8019,20 +8108,26 @@ Type `/swarm help` for more info.\n";
                             self.ensure_team_manager_for_team_inner(&name, Some(team_dir), true);
                         }
                     }
-                    let step_tag = self
-                        .tool_step_map
-                        .get(call_id)
-                        .map(|(sid, s)| format!("[{sid}:{s}] "))
-                        .unwrap_or_default();
-                    let icon = if success { "✓" } else { "✗" };
-                    self.push_log_no_agent(
-                        LogLevel::Tool,
-                        format!("{}← {} {} {}", step_tag, tool, icon, content),
-                    );
-                }
-            }
-            Event::SubagentStart {
-                ref session_id,
+                                          let step_tag = self
+                                              .tool_step_map
+                                              .get(call_id)
+                                              .map(|(sid, step, substep)| {
+                                                  let display = self
+                                                      .sid_to_display_name
+                                                      .get(sid)
+                                                      .cloned()
+                                                      .unwrap_or_else(|| sid.clone());
+                                                  format!("[{display}:{step}.{substep}] ")
+                                              })
+                                              .unwrap_or_default();
+                                          let icon = if success { "✓" } else { "✗" };
+                                          self.push_log_no_agent(
+                                              LogLevel::Tool,
+                                              format!("{}← {} {} {}", step_tag, tool, icon, content),
+                                          );
+                                      }
+                                  }
+                                  Event::SubagentStart {                ref session_id,
                 ref task_id,
                 ref child_session_id,
                 ref agent,
@@ -8177,6 +8272,12 @@ Type `/swarm help` for more info.\n";
                             m.session_id = stored.session_id.clone();
                             m.status = stored.status.clone();
                             m.current_task_id = stored.current_task_id.clone();
+                            // Map this teammate's session short_sid → name for log display
+                            if let Some(ref sid) = stored.session_id {
+                                let short_sid = short_session_id(sid);
+                                self.sid_to_display_name
+                                    .insert(short_sid, teammate_name.clone());
+                            }
                         }
                     }
                     self.show_teams = true;

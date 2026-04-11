@@ -3,6 +3,7 @@
 //! Renders the active team as a compact table with lead + teammates, including
 //! status, elapsed time, step count, and tasks claimed/completed.
 
+use crate::theme::colors;
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -42,9 +43,9 @@ fn status_label(status: &MemberStatus) -> (&'static str, Color) {
         MemberStatus::Working => ("working", Color::Cyan),
         MemberStatus::Idle => ("idle", Color::Green),
         MemberStatus::PlanPending => ("planning", Color::Magenta),
-        MemberStatus::Blocked => ("blocked", Color::DarkGray),
+        MemberStatus::Blocked => ("blocked", colors::HINT),
         MemberStatus::ShuttingDown => ("stopping", Color::Yellow),
-        MemberStatus::Stopped => ("stopped", Color::DarkGray),
+        MemberStatus::Stopped => ("stopped", colors::HINT),
         MemberStatus::Failed => ("failed", Color::Red),
     }
 }
@@ -104,10 +105,9 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
 
     // Column widths (tight but readable).
     // id=8, name=35, status=10, model=18, elapsed=7, steps=5, claimed=7, done=6, sent=5, recv=5
-    let dim = Style::default()
-        .fg(Color::DarkGray)
-        .add_modifier(Modifier::DIM);
-
+          let dim = Style::default()
+              .fg(colors::HINT)
+              .add_modifier(Modifier::DIM);
     // ── header ────────────────────────────────────────────────────────────
     lines.push(Line::from(vec![
         Span::styled("  ", Style::default()),
@@ -148,52 +148,51 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             format!("{:<10} ", "active"),
             Style::default().fg(lead_status_color),
         ),
-        Span::styled(
-            format!("{:<18} ", "lead"),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("{:>7} ", lead_elapsed),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("{:>5} ", lead_steps),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(format!("{:>7} ", "-"), Style::default().fg(Color::DarkGray)),
-        Span::styled(format!("{:>6} ", "-"), Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!(
-                "{:>5} ",
-                if lead_sent > 0 {
-                    lead_sent.to_string()
-                } else {
-                    "-".to_string()
-                }
-            ),
-            Style::default().fg(if lead_sent > 0 {
-                Color::Cyan
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!(
-                "{:>5} ",
-                if lead_recv > 0 {
-                    lead_recv.to_string()
-                } else {
-                    "-".to_string()
-                }
-            ),
-            Style::default().fg(if lead_recv > 0 {
-                Color::Cyan
-            } else {
-                Color::DarkGray
-            }),
-        ),
-    ]));
-
+                  Span::styled(
+                      format!("{:<18} ", "lead"),
+                      Style::default().fg(colors::HINT),
+                  ),
+                  Span::styled(
+                      format!("{:>7} ", lead_elapsed),
+                      Style::default().fg(colors::HINT),
+                  ),
+                  Span::styled(
+                      format!("{:>5} ", lead_steps),
+                      Style::default().fg(colors::HINT),
+                  ),
+                  Span::styled(format!("{:>7} ", "-"), Style::default().fg(colors::HINT)),
+                  Span::styled(format!("{:>6} ", "-"), Style::default().fg(colors::HINT)),
+                  Span::styled(
+                      format!(
+                          "{:>5} ",
+                          if lead_sent > 0 {
+                              lead_sent.to_string()
+                          } else {
+                              "-".to_string()
+                          }
+                      ),
+                      Style::default().fg(if lead_sent > 0 {
+                          Color::Cyan
+                      } else {
+                          colors::HINT
+                      }),
+                  ),
+                  Span::styled(
+                      format!(
+                          "{:>5} ",
+                          if lead_recv > 0 {
+                              lead_recv.to_string()
+                          } else {
+                              "-".to_string()
+                          }
+                      ),
+                      Style::default().fg(if lead_recv > 0 {
+                          Color::Cyan
+                      } else {
+                          colors::HINT
+                      }),
+                  ),
+              ]));
     // ── teammate rows ─────────────────────────────────────────────────────
     for (i, member) in members.iter().enumerate() {
         let (status_str, status_color) = status_label(&member.status);
@@ -259,82 +258,81 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
             ),
         ];
 
-        // Model column: show override or "(inherited)"
-        let model_label: String = member
-            .model_override
-            .as_ref()
-            .map(|mr| {
-                let full = format!("{}/{}", mr.provider_id, mr.model_id);
-                full.chars().take(17).collect()
-            })
-            .unwrap_or_else(|| "(inherited)".to_string());
-        let model_color = if member.model_override.is_some() {
-            Color::Magenta
-        } else {
-            Color::DarkGray
-        };
-        spans.push(Span::styled(
-            format!("{:<18} ", model_label),
-            Style::default().fg(model_color),
-        ));
-
-        spans.extend_from_slice(&[
-            Span::styled(
-                format!("{:>7} ", format_elapsed(member.created_at)),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!("{:>5} ", steps),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!("{:>7} ", claimed),
-                Style::default().fg(if claimed > 0 {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(
-                format!("{:>6} ", done),
-                Style::default().fg(if done > 0 {
-                    Color::Green
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(
-                format!(
-                    "{:>5} ",
-                    if sent > 0 {
-                        sent.to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                ),
-                Style::default().fg(if sent > 0 {
-                    Color::Cyan
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(
-                format!(
-                    "{:>5} ",
-                    if recv > 0 {
-                        recv.to_string()
-                    } else {
-                        "0".to_string()
-                    }
-                ),
-                Style::default().fg(if recv > 0 {
-                    Color::Cyan
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-        ]);
-
+                  // Model column: show override or "(inherited)"
+                  let model_label: String = member
+                      .model_override
+                      .as_ref()
+                      .map(|mr| {
+                          let full = format!("{}/{}", mr.provider_id, mr.model_id);
+                          full.chars().take(17).collect()
+                      })
+                      .unwrap_or_else(|| "(inherited)".to_string());
+                  let model_color = if member.model_override.is_some() {
+                      Color::Magenta
+                  } else {
+                      colors::HINT
+                  };
+                  spans.push(Span::styled(
+                      format!("{:<18} ", model_label),
+                      Style::default().fg(model_color),
+                  ));
+        
+                  spans.extend_from_slice(&[
+                      Span::styled(
+                          format!("{:>7} ", format_elapsed(member.created_at)),
+                          Style::default().fg(colors::HINT),
+                      ),
+                      Span::styled(
+                          format!("{:>5} ", steps),
+                          Style::default().fg(colors::HINT),
+                      ),
+                      Span::styled(
+                          format!("{:>7} ", claimed),
+                          Style::default().fg(if claimed > 0 {
+                              Color::Yellow
+                          } else {
+                              colors::HINT
+                          }),
+                      ),
+                      Span::styled(
+                          format!("{:>6} ", done),
+                          Style::default().fg(if done > 0 {
+                              Color::Green
+                          } else {
+                              colors::HINT
+                          }),
+                      ),
+                      Span::styled(
+                          format!(
+                              "{:>5} ",
+                              if sent > 0 {
+                                  sent.to_string()
+                              } else {
+                                  "0".to_string()
+                              }
+                          ),
+                          Style::default().fg(if sent > 0 {
+                              Color::Cyan
+                          } else {
+                              colors::HINT
+                          }),
+                      ),
+                      Span::styled(
+                          format!(
+                              "{:>5} ",
+                              if recv > 0 {
+                                  recv.to_string()
+                              } else {
+                                  "0".to_string()
+                              }
+                          ),
+                          Style::default().fg(if recv > 0 {
+                              Color::Cyan
+                          } else {
+                              colors::HINT
+                          }),
+                      ),
+                  ]);
         // [T] badge — clickable hint
         spans.push(Span::styled(
             " [T]",
@@ -346,16 +344,15 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         lines.push(Line::from(spans));
     }
 
-    // Show a hint when no teammates yet.
-    if members.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "  (no teammates yet — use team_spawn tool or blueprint)",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        )]));
-    }
-
+          // Show a hint when no teammates yet.
+          if members.is_empty() {
+              lines.push(Line::from(vec![Span::styled(
+                  "  (no teammates yet — use team_spawn tool or blueprint)",
+                  Style::default()
+                      .fg(colors::HINT)
+                      .add_modifier(Modifier::DIM),
+              )]));
+          }
     let total_lines = lines.len() as u16;
     let visible_lines = area.height.saturating_sub(2); // 2 for border
     app.teams_max_scroll = total_lines.saturating_sub(visible_lines);

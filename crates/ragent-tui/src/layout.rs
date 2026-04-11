@@ -23,7 +23,7 @@ use crate::layout_active_agents::render_active_agents_subpanel;
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
-    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, ScreenMode,
+    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep,
     SelectionPane,
 };
 use crate::logo;
@@ -48,6 +48,7 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
 }
 
 /// The version string shown on the home screen.
+#[allow(dead_code)]
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Render the full TUI, dispatching to the Home or Chat screen.
@@ -188,6 +189,7 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
 // Home screen
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 fn render_home(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     app.message_area = Rect::default();
@@ -299,6 +301,7 @@ fn render_home(frame: &mut Frame, app: &mut App) {
     }
 }
 
+#[allow(dead_code)]
 fn render_logo(frame: &mut Frame, area: Rect) {
     let logo_width = logo::LOGO.iter().map(|l| l.len()).max().unwrap_or(0) as u16;
 
@@ -324,6 +327,7 @@ fn render_logo(frame: &mut Frame, area: Rect) {
 const INPUT_PLACEHOLDER: &str =
     "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
 
+#[allow(dead_code)]
 fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
     let inner_width = area.width.saturating_sub(2).max(1) as usize;
 
@@ -380,6 +384,7 @@ fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+#[allow(dead_code)]
 fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
     let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
@@ -398,6 +403,7 @@ fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, centered);
 }
 
+#[allow(dead_code)]
 fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
     let max_width = 88u16.min(area.width.saturating_sub(4));
     let centered = centered_horizontal(max_width, area);
@@ -1068,6 +1074,7 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
     frame.render_widget(paragraph, popup);
 }
 
+#[allow(dead_code)]
 fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let version = format!("v{}", VERSION);
 
@@ -1205,6 +1212,7 @@ fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Centre a block of `width` within the given `area` horizontally.
+#[allow(dead_code)]
 fn centered_horizontal(width: u16, area: Rect) -> Rect {
     let w = width.min(area.width);
     let x = area.x + (area.width.saturating_sub(w)) / 2;
@@ -1635,31 +1643,44 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
 
-            // Parse and color the [sid:step] prefix in the message if present
-            let msg = &entry.message;
-            if msg.starts_with('[') {
-                // Try to find the "]" that ends the [sid:step] prefix
-                if let Some(close_bracket) = msg.find("] ") {
-                    let prefix = &msg[..=close_bracket];
-                    // Verify it looks like [sid:step] format (contains a colon)
-                    if prefix.contains(':') {
-                        let rest = &msg[close_bracket + 1..];
-                        spans.push(Span::styled(
-                            prefix.to_string(),
-                            Style::default().fg(Color::Yellow),
-                        ));
-                        spans.push(Span::raw(rest.to_string()));
-                    } else {
-                        spans.push(Span::raw(msg.clone()));
-                    }
-                } else {
-                    spans.push(Span::raw(msg.clone()));
-                }
-            } else {
-                spans.push(Span::raw(msg.clone()));
-            }
-            Line::from(spans)
-        })
+                                                      // Parse and color the [sid:step] prefix in the message if present
+                                                      let msg = &entry.message;
+                                                      if msg.starts_with('[') {
+                                                          // Try to find the "]" that ends the [sid:step] prefix
+                                                          if let Some(close_bracket) = msg.find(']') {
+                                                              let prefix = &msg[..=close_bracket];
+                                                              // Verify it looks like [sid:step] format (contains a colon)
+                                                              if prefix.contains(':') {
+                                                                  let rest = &msg[close_bracket + 1..];
+                                                                  // Extract the sid from the prefix to look up display name
+                                                                  let sid_start = prefix.find('[').unwrap_or(0) + 1;
+                                                                  let sid_end = prefix.find(':').unwrap_or(prefix.len() - 1);
+                                                                  let sid = &prefix[sid_start..sid_end];
+                                                                  // Extract step number (everything after ':' up to ']')
+                                                                  let step_start = sid_end + 1;
+                                                                  let step = &prefix[step_start..close_bracket];
+                                                                  // Look up friendly display name if available
+                                                                  let display_sid = app
+                                                                      .sid_to_display_name
+                                                                      .get(sid)
+                                                                      .cloned()
+                                                                      .unwrap_or_else(|| sid.to_string());
+                                                                  let formatted_prefix = format!("[{}:{step}]", display_sid);
+                                                                  spans.push(Span::styled(
+                                                                      formatted_prefix,
+                                                                      Style::default().fg(Color::Yellow),
+                                                                  ));
+                                                                  spans.push(Span::raw(rest.to_string()));
+                                                              } else {
+                                                                  spans.push(Span::raw(msg.clone()));
+                                                              }
+                                                          } else {
+                                                              spans.push(Span::raw(msg.clone()));
+                                                          }
+                                                      } else {
+                                                          spans.push(Span::raw(msg.clone()));
+                                                      }
+                                                      Line::from(spans)        })
         .collect();
 
     // Cache plain-text content for text selection copy
@@ -2145,7 +2166,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// identical to the lead agent's chat window.
 fn messages_to_lines<'a>(
     messages: &[Message],
-    tool_step_map: &std::collections::HashMap<String, (String, u32)>,
+    tool_step_map: &std::collections::HashMap<String, (String, u32, u32)>,
     sid_to_display: &std::collections::HashMap<String, String>,
     cwd: &str,
 ) -> Vec<Line<'a>> {
@@ -2186,23 +2207,22 @@ fn messages_to_lines<'a>(
                         }
                     }
                 }
-                MessagePart::ToolCall {
-                    tool,
-                    call_id,
-                    state,
-                } => {
-                    let step_tag = if let Some((sid, s)) = tool_step_map.get(call_id) {
-                        // Look up display name from app
-                        let display = sid_to_display
-                            .get(sid)
-                            .cloned()
-                            .unwrap_or_else(|| sid.clone());
-                        format!("[{display}:{s}] ")
-                    } else {
-                        String::new()
-                    };
-                    let (indicator, ind_style, name_style) = match state.status {
-                        ToolCallStatus::Completed => (
+                                                                      MessagePart::ToolCall {
+                                                                          tool,
+                                                                          call_id,
+                                                                          state,
+                                                                      } => {
+                                                                          let step_tag = if let Some((sid, step, substep)) = tool_step_map.get(call_id) {
+                                                                              // Look up display name from app
+                                                                              let display = sid_to_display
+                                                                                  .get(sid)
+                                                                                  .cloned()
+                                                                                  .unwrap_or_else(|| sid.clone());
+                                                                              format!("[{display}:{step}.{substep}] ")
+                                                                          } else {
+                                                                              String::new()
+                                                                          };
+                                                                          let (indicator, ind_style, name_style) = match state.status {                        ToolCallStatus::Completed => (
                             "● ",
                             Style::default().fg(Color::Green),
                             Style::default()
@@ -2285,7 +2305,8 @@ fn messages_to_lines<'a>(
                     }
                     lines.push(Line::from(spans));
 
-                    if state.status == ToolCallStatus::Completed {
+                    if state.status == ToolCallStatus::Completed && tool != "edit" {
+                        // Skip result summary for edit tool (already shows inline diff)
                         if let Some(result) =
                             tool_result_summary(tool, &state.output, &state.input, cwd)
                         {
@@ -2508,6 +2529,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+W", "Delete previous word"),
     ("Ctrl+K", "Delete to end of line"),
     ("Alt+V", "Paste image from clipboard as attachment"),
+    ("Alt+L", "Toggle log panel visibility"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
     ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),

@@ -110,11 +110,11 @@ impl Tool for TodoWriteTool {
                 "action": {
                     "type": "string",
                     "description": "The action to perform",
-                "enum": ["add", "update", "remove", "clear", "complete"]
+                "enum": ["add", "update", "remove", "clear", "complete", "completed", "done"]
                 },
                 "id": {
                     "type": "string",
-                    "description": "TODO item ID (required for update/remove/complete)"
+                    "description": "TODO item ID (required for update/remove/complete/completed/done)"
                 },
                 "title": {
                     "type": "string",
@@ -151,7 +151,7 @@ impl Tool for TodoWriteTool {
             )
         })?;
 
-        let (summary, action_label) = match action {
+        let (summary, action_label, affected_id) = match action {
             "add" => {
                 let title = input["title"]
                     .as_str()
@@ -176,7 +176,11 @@ impl Tool for TodoWriteTool {
                     .create_todo(&id, &ctx.session_id, title, status, description)
                     .map_err(|e| anyhow::anyhow!("Failed to add todo: {e}"))?;
 
-                (format!("Added todo '{id}' with status '{status}'"), "add")
+                (
+                    format!("Added todo '{id}' with status '{status}'"),
+                    "add",
+                    None,
+                )
             }
             "update" => {
                 let id = input["id"]
@@ -210,9 +214,13 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Updated todo '{id}'"), "update")
+                (
+                    format!("Updated todo '{id}'"),
+                    "update",
+                    Some(id.to_string()),
+                )
             }
-            "complete" => {
+            "complete" | "completed" | "done" => {
                 // Mark a specific todo as done by id.
                 let id = input["id"]
                     .as_str()
@@ -226,7 +234,11 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Marked todo '{id}' as done"), "complete")
+                (
+                    format!("Marked todo '{id}' as done"),
+                    "complete",
+                    Some(id.to_string()),
+                )
             }
             "remove" => {
                 let id = input["id"]
@@ -241,7 +253,7 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Removed todo '{id}'"), "remove")
+                (format!("Removed todo '{id}'"), "remove", None)
             }
             "clear" => {
                 let count = storage
@@ -255,10 +267,11 @@ impl Tool for TodoWriteTool {
                         if count == 1 { "" } else { "s" }
                     ),
                     "clear",
+                    None,
                 )
             }
             _ => bail!(
-                "Invalid action '{action}'. Must be one of: add, update, remove, clear, complete"
+                "Invalid action '{action}'. Must be one of: add, update, remove, clear, complete, completed, done"
             ),
         };
 
@@ -266,6 +279,17 @@ impl Tool for TodoWriteTool {
         let todos = storage
             .get_todos(&ctx.session_id, None)
             .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?;
+
+        // Enrich summary with the todo's title when we have an affected id.
+        let summary = if let Some(ref id) = affected_id {
+            if let Some(todo) = todos.iter().find(|t| &t.id == id) {
+                format!("{summary} — \"{title}\"", title = todo.title)
+            } else {
+                summary
+            }
+        } else {
+            summary
+        };
 
         let mut output = format!("{summary}\n\n");
         output.push_str(&format_todo_list(&todos, "all"));

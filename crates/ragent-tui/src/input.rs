@@ -108,6 +108,8 @@ pub enum InputAction {
     CutToClipboard,
     /// Paste text from the clipboard at the cursor (Ctrl+V).
     PasteFromClipboard,
+    /// Toggle the log panel visibility (Alt+L).
+    ToggleLog,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -547,6 +549,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::DeleteToLineEnd)
+        }
+        KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleLog)
         }
         KeyCode::Char(c) => {
             // Typing a character replaces the active keyboard selection.

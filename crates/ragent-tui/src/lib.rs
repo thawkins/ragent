@@ -11,7 +11,9 @@ pub mod layout_active_agents;
 pub mod layout_teams;
 pub mod logo;
 pub mod tips;
+pub mod theme;
 pub mod tracing_layer;
+pub mod utils;
 pub mod widgets;
 
 pub use app::App;
@@ -111,6 +113,49 @@ pub async fn run_tui(
         show_log,
     );
     app.check_provider_health();
+
+    // Auto-initialize a session at startup if not resuming.
+    if resume_session_id.is_none() {
+        let dir = std::env::current_dir().unwrap_or_default();
+        match app.session_processor.session_manager.create_session(dir) {
+            Ok(session) => {
+                let session_id = session.id.clone();
+                app.session_id = Some(session_id.clone());
+                // Register the short_sid → agent_name mapping so tool step tags
+                // display "general:5" instead of "fbd5b8a9:5".
+                app.register_primary_session_mapping();
+
+                // Kick off the AGENTS.md acknowledgement exchange in the background
+                // so it appears before the user types anything (including /swarm, /team, etc.).
+                let proc = Arc::clone(&app.session_processor);
+                let mut init_agent = app.agent_info.clone();
+                // Inject the persisted model selection so the init call works even
+                // before the user sends their first message.
+                if !init_agent.model_pinned || init_agent.model.is_none() {
+                    if let Some(ref model_str) = app.selected_model {
+                        if let Some((p, m)) = model_str.split_once('/') {
+                            init_agent.model = Some(ragent_core::agent::ModelRef {
+                                provider_id: p.to_string(),
+                                model_id: m.to_string(),
+                            });
+                        }
+                    }
+                }
+                let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                tokio::spawn(async move {
+                    if let Err(e) = proc
+                        .run_init_exchange(&session_id, &init_agent, cancel)
+                        .await
+                    {
+                        tracing::warn!(error = %e, "Startup init exchange failed");
+                    }
+                });
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to auto-create session at startup");
+            }
+        }
+    }
 
     // Set up persistent input history (kept across sessions in the data dir).
     let history_path = dirs::data_dir()

@@ -180,6 +180,7 @@ async fn handle_insert(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
     Ok(ToolOutput {
         content: String::new(), // Empty on success; errors are returned as Err
         metadata: Some(json!({
+            "command": "insert",
             "path": path.display().to_string(),
             "insert_after_line": insert_line,
             "old_lines": 0,
@@ -238,6 +239,7 @@ async fn handle_delete(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
     Ok(ToolOutput {
         content: String::new(), // Empty on success; errors are returned as Err
         metadata: Some(json!({
+            "command": "delete",
             "path": path.display().to_string(),
             "start_line": start,
             "end_line": end_clamped,

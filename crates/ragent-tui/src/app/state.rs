@@ -963,9 +963,13 @@ pub struct App {
     pub pending_send_after_compact: Option<(String, Vec<std::path::PathBuf>)>,
     /// Whether the last agent run was halted by the user (ESC).
     pub agent_halted: bool,
-    /// Maps tool call IDs to their `(short_session_id, step_number)` for log/message correlation.
-    /// Step number comes from EventBus, which is the single source of truth.
-    pub tool_step_map: HashMap<String, (String, u32)>,
+    /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.
+    /// Step number comes from EventBus; sub_step is per-tool-call within a step.
+    pub tool_step_map: HashMap<String, (String, u32, u32)>,
+    /// Tracks the last seen step number for each session (to detect step changes).
+    pub last_step_per_session: HashMap<String, u32>,
+    /// Tracks the current sub-step counter for each session (resets when step changes).
+    pub substep_counter_per_session: HashMap<String, u32>,
     /// Maps short session IDs (`short_sid`) to display agent names.
     /// Display names are "ag[nnn]" (auto-allocated) or the actual agent name if available.
     pub sid_to_display_name: HashMap<String, String>,

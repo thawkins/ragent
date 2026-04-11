@@ -273,8 +273,7 @@ fn extract_heredoc_delimiter(line: &str) -> Option<String> {
 fn strip_heredoc_bodies(cmd: &str) -> String {
     let mut result = String::with_capacity(cmd.len());
     let mut iter = cmd.split('\n');
-    'outer: loop {
-        let Some(line) = iter.next() else { break };
+    'outer: while let Some(line) = iter.next() {
         if let Some(delimiter) = extract_heredoc_delimiter(line) {
             result.push_str(line);
             result.push('\n');
@@ -349,7 +348,7 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
                 let arg_start = abs_pos + token.len();
                 // Extract the argument (up to next whitespace or ; & | )
                 let arg = cmd[arg_start..]
-                    .split(|c: char| c == ';' || c == '&' || c == '|' || c == ')' || c == '\n')
+                    .split([';', '&', '|', ')', '\n'])
                     .next()
                     .unwrap_or("")
                     .trim();

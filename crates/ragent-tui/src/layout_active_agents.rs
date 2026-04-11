@@ -8,6 +8,8 @@ use chrono::Utc;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
+
+use crate::theme::colors;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 
@@ -89,7 +91,7 @@ fn build_task_rows<'a>(
             Span::styled("◦ ", Style::default().fg(dot_color)),
             Span::styled(
                 format!("{:<10} ", tid),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(colors::HINT),
             ),
             Span::styled(
                 format!("{:<32}", agent_label),
@@ -101,11 +103,11 @@ fn build_task_rows<'a>(
             ),
             Span::styled(
                 format!("{:>8} ", elapsed),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(colors::HINT),
             ),
             Span::styled(
                 format!("{:>7}", steps),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(colors::HINT),
             ),
         ];
         out.push(Line::from(spans));
@@ -157,41 +159,40 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── header ─────────────────────────────────────────────────────────────
-    lines.push(Line::from(vec![Span::styled(
-        format!(
-            "  {:<10} {:<32}{:<8} {:>8} {:>7}",
-            "id", "name", "type", "elapsed", "steps"
-        ),
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM),
-    )]));
-
-    // ── primary agent ───────────────────────────────────────────────────────
-    let mut primary_spans = vec![
-        Span::styled("● ", Style::default().fg(Color::Green)),
-        Span::styled(
-            format!("{:<10} ", "lead"),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            format!("{:<32}", primary_name),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{:<8} ", "primary"),
-            Style::default().fg(Color::Green),
-        ),
-        Span::styled(format!("{:>8} ", "-"), Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("{:>7}", primary_steps),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ];
-    if primary_is_custom {
+          // ── header ─────────────────────────────────────────────────────────────
+          lines.push(Line::from(vec![Span::styled(
+              format!(
+                  "  {:<10} {:<32}{:<8} {:>8} {:>7}",
+                  "id", "name", "type", "elapsed", "steps"
+              ),
+              Style::default()
+                  .fg(colors::HINT)
+                  .add_modifier(Modifier::DIM),
+          )]));
+    
+          // ── primary agent ───────────────────────────────────────────────────────
+          let mut primary_spans = vec![
+              Span::styled("● ", Style::default().fg(Color::Green)),
+              Span::styled(
+                  format!("{:<10} ", "lead"),
+                  Style::default().fg(colors::HINT),
+              ),
+              Span::styled(
+                  format!("{:<32}", primary_name),
+                  Style::default()
+                      .fg(Color::Green)
+                      .add_modifier(Modifier::BOLD),
+              ),
+              Span::styled(
+                  format!("{:<8} ", "primary"),
+                  Style::default().fg(Color::Green),
+              ),
+              Span::styled(format!("{:>8} ", "-"), Style::default().fg(colors::HINT)),
+              Span::styled(
+                  format!("{:>7}", primary_steps),
+                  Style::default().fg(colors::HINT),
+              ),
+          ];    if primary_is_custom {
         primary_spans.push(Span::styled(
             " [C]",
             Style::default()
@@ -223,10 +224,10 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
 
-    if total_lines > visible {
-        let mut sb_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
-        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_stateful_widget(scrollbar, area, &mut sb_state);
-    }
-}
+          if total_lines > visible {
+              let mut sb_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);
+              let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                  .style(Style::default().fg(colors::HINT));
+              frame.render_stateful_widget(scrollbar, area, &mut sb_state);
+          }
+      }

@@ -966,18 +966,10 @@ pub fn tool_result_summary(
             }
         }
         "str_replace_editor" => {
-            let cmd = out
-                .get("command")
-                .and_then(|v| v.as_str())
-                .unwrap_or("done");
-            match cmd {
-                "view" => Some(format!("{} read", pluralize(line_count, "line", "lines"))),
-                "create" => Some("file created".to_string()),
-                "str_replace" => Some("replaced".to_string()),
-                "insert" => Some("inserted".to_string()),
-                "delete" => Some("deleted".to_string()),
-                _ => Some(format!("{} done", cmd)),
-            }
+            // The tool call header already shows +N/-M diff for successful edits,
+            // so we don't need to duplicate that information here.
+            // Return None to suppress the summary line.
+            None
         }
         "calculator" => {
             let result = out.get("result").and_then(|v| v.as_str());
@@ -1376,7 +1368,7 @@ pub fn tool_result_summary(
 pub struct MessageWidget<'a> {
     message: &'a Message,
     cwd: &'a str,
-    tool_step_map: &'a std::collections::HashMap<String, (String, u32)>,
+    tool_step_map: &'a std::collections::HashMap<String, (String, u32, u32)>,
 }
 
 impl<'a> MessageWidget<'a> {
@@ -1386,7 +1378,7 @@ impl<'a> MessageWidget<'a> {
     ///
     /// * `message` - The message to render.
     /// * `cwd` - Current working directory, used to make file paths relative.
-    /// * `tool_step_map` - Mapping from tool call IDs to `(short_session_id, step_number)`.
+    /// * `tool_step_map` - Mapping from tool call IDs to `(short_session_id, step_number, sub_step)`.
     ///
     /// # Examples
     ///
@@ -1406,7 +1398,7 @@ impl<'a> MessageWidget<'a> {
     pub fn new(
         message: &'a Message,
         cwd: &'a str,
-        tool_step_map: &'a std::collections::HashMap<String, (String, u32)>,
+        tool_step_map: &'a std::collections::HashMap<String, (String, u32, u32)>,
     ) -> Self {
         Self {
             message,
@@ -1478,7 +1470,7 @@ impl<'a> MessageWidget<'a> {
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
-                        .map(|(sid, s)| format!("[{sid}:{s}] "))
+                        .map(|(sid, step, substep)| format!("[{sid}:{step}.{substep}] "))
                         .unwrap_or_default();
                     let (indicator, ind_style, name_style) = match state.status {
                         ToolCallStatus::Completed => (
@@ -1656,13 +1648,16 @@ impl<'a> MessageWidget<'a> {
                                     Style::default().fg(Color::DarkGray),
                                 )));
                             }
-                        } else if let Some(result) =
-                            tool_result_summary(tool, &state.output, &state.input, self.cwd)
-                        {
-                            lines.push(Line::from(Span::styled(
-                                format!("  └ {}", result),
-                                Style::default().fg(Color::DarkGray),
-                            )));
+                        } else if tool != "edit" {
+                            // Skip result summary for edit tool on success (already shows inline diff)
+                            if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::DarkGray),
+                                )));
+                            }
                         }
                     }
                     if state.status == ToolCallStatus::Error {

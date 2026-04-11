@@ -546,37 +546,52 @@ impl SessionProcessor {
                     request_id: Some(Uuid::new_v4().to_string()),
                 };
 
-                if let Ok(mut stream) = client.chat(init_request).await {
-                    while let Some(ev) = stream.next().await {
-                        match ev {
-                            StreamEvent::TextDelta { text } => {
-                                self.event_bus.publish(Event::TextDelta {
-                                    session_id: session_id.to_string(),
-                                    text: text.clone(),
-                                });
-                            }
-                            StreamEvent::Usage {
-                                input_tokens,
-                                output_tokens,
-                            } => {
-                                self.event_bus.publish(Event::TokenUsage {
-                                    session_id: session_id.to_string(),
+                match client.chat(init_request).await {
+                    Ok(mut stream) => {
+                        while let Some(ev) = stream.next().await {
+                            match ev {
+                                StreamEvent::TextDelta { text } => {
+                                    self.event_bus.publish(Event::TextDelta {
+                                        session_id: session_id.to_string(),
+                                        text: text.clone(),
+                                    });
+                                }
+                                StreamEvent::Usage {
                                     input_tokens,
                                     output_tokens,
-                                });
+                                } => {
+                                    self.event_bus.publish(Event::TokenUsage {
+                                        session_id: session_id.to_string(),
+                                        input_tokens,
+                                        output_tokens,
+                                    });
+                                }
+                                _ => {}
                             }
-                            _ => {}
                         }
+                        // Signal end of init message so the TUI separates it from
+                        // the actual response.
+                        self.event_bus.publish(Event::MessageEnd {
+                            session_id: session_id.to_string(),
+                            message_id: "init".to_string(),
+                            reason: FinishReason::Stop,
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            session_id = %session_id,
+                            error = %e,
+                            "AGENTS.md init exchange failed — skipping acknowledgement"
+                        );
+                        // Still set force_new_message via the "init" MessageEnd so
+                        // the main agent loop starts in a fresh message block.
+                        self.event_bus.publish(Event::MessageEnd {
+                            session_id: session_id.to_string(),
+                            message_id: "init".to_string(),
+                            reason: FinishReason::Stop,
+                        });
                     }
                 }
-
-                // Signal end of init message so the TUI separates it from
-                // the actual response.
-                self.event_bus.publish(Event::MessageEnd {
-                    session_id: session_id.to_string(),
-                    message_id: "init".to_string(),
-                    reason: FinishReason::Stop,
-                });
             }
         }
 
@@ -1206,6 +1221,205 @@ impl SessionProcessor {
         );
 
         Ok(assistant_msg)
+    }
+
+    /// Run the AGENTS.md acknowledgement exchange for a session at startup.
+    ///
+    /// Checks whether AGENTS.md exists in the session's working directory and,
+    /// if the session has no prior assistant messages, sends a lightweight
+    /// "please acknowledge" prompt to the model and streams the reply to the
+    /// TUI via [`Event::TextDelta`] events.  The acknowledgement text is then
+    /// saved to the session history so that subsequent calls to
+    /// [`process_user_message`] skip the init exchange (via the
+    /// `has_prior_exchange` guard).
+    ///
+    /// Errors are non-fatal: if the provider is not configured or the API call
+    /// fails, the function returns `Ok(())` and logs a warning.
+    pub async fn run_init_exchange(
+        &self,
+        session_id: &str,
+        agent: &AgentInfo,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<()> {
+        // Resolve working directory.
+        let working_dir = self.session_manager.get_session(session_id)?.map_or_else(
+            || std::env::current_dir().unwrap_or_default(),
+            |s| s.directory,
+        );
+
+        let agents_md_path = working_dir.join("AGENTS.md");
+        if !agents_md_path.is_file() {
+            return Ok(());
+        }
+
+        // Skip if an assistant message already exists (init already ran).
+        let already_done = self
+            .session_manager
+            .get_messages(session_id)
+            .map(|msgs| msgs.iter().any(|m| m.role == Role::Assistant))
+            .unwrap_or(false);
+        if already_done {
+            return Ok(());
+        }
+
+        // Resolve model / provider — bail silently if not configured yet.
+        let model_ref = match agent.model.as_ref() {
+            Some(m) => m,
+            None => {
+                tracing::debug!(
+                    session_id = %session_id,
+                    "run_init_exchange: no model configured, skipping"
+                );
+                return Ok(());
+            }
+        };
+        let provider = match self.provider_registry.get(&model_ref.provider_id) {
+            Some(p) => p,
+            None => {
+                tracing::debug!(
+                    session_id = %session_id,
+                    provider = %model_ref.provider_id,
+                    "run_init_exchange: provider not found, skipping"
+                );
+                return Ok(());
+            }
+        };
+        let api_key = match self.resolve_api_key(&model_ref.provider_id).await {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "run_init_exchange: API key not available, skipping"
+                );
+                return Ok(());
+            }
+        };
+
+        let client = match provider
+            .create_client(&api_key, None, &HashMap::new())
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(session_id=%session_id, error=%e, "run_init_exchange: client creation failed");
+                return Ok(());
+            }
+        };
+
+        // Build a minimal system prompt using the agent's configured prompt.
+        let (git_status, readme, agents_md, file_tree) =
+            crate::agent::collect_prompt_context(&working_dir).await;
+        let system_prompt = crate::agent::build_system_prompt_with_context(
+            agent,
+            &working_dir,
+            &file_tree,
+            None,
+            Some(&git_status),
+            Some(&readme),
+            Some(&agents_md),
+        );
+
+        let init_text = "AGENTS.md project guidelines have been loaded. \
+                         Please acknowledge them briefly.";
+        let init_messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text(init_text.to_string()),
+        }];
+        let init_request = ChatRequest {
+            model: model_ref.model_id.clone(),
+            messages: init_messages,
+            tools: Vec::new(),
+            temperature: agent.temperature,
+            top_p: agent.top_p,
+            max_tokens: Some(200),
+            system: Some(system_prompt),
+            options: agent.options.clone(),
+            session_id: Some(session_id.to_string()),
+            request_id: Some(Uuid::new_v4().to_string()),
+        };
+
+        let mut ack_text = String::new();
+
+        match client.chat(init_request).await {
+            Ok(mut stream) => {
+                while let Some(ev) = stream.next().await {
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match ev {
+                        StreamEvent::TextDelta { text } => {
+                            ack_text.push_str(&text);
+                            self.event_bus.publish(Event::TextDelta {
+                                session_id: session_id.to_string(),
+                                text,
+                            });
+                        }
+                        StreamEvent::Usage {
+                            input_tokens,
+                            output_tokens,
+                        } => {
+                            self.event_bus.publish(Event::TokenUsage {
+                                session_id: session_id.to_string(),
+                                input_tokens,
+                                output_tokens,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    error = %e,
+                    "AGENTS.md init exchange failed — skipping acknowledgement"
+                );
+                self.event_bus.publish(Event::MessageEnd {
+                    session_id: session_id.to_string(),
+                    message_id: "init".to_string(),
+                    reason: FinishReason::Stop,
+                });
+                return Ok(());
+            }
+        }
+
+        // Save both the user trigger and the assistant ack to DB so the
+        // conversation history is well-formed (alternating user/assistant).
+        // Without the user message, history starts with an orphaned Assistant
+        // turn which many LLM APIs reject or mishandle, causing the model to
+        // ignore tools or the system prompt on the follow-up turn.
+        if !ack_text.is_empty() {
+            let init_user_text = "AGENTS.md project guidelines have been loaded. \
+                                  Please acknowledge them briefly.";
+            let user_msg = Message::new(
+                session_id,
+                Role::User,
+                vec![MessagePart::Text {
+                    text: init_user_text.to_string(),
+                }],
+            );
+            let ack_msg = Message::new(
+                session_id,
+                Role::Assistant,
+                vec![MessagePart::Text { text: ack_text }],
+            );
+            let _ = self
+                .storage_op(move |s| {
+                    s.create_message(&user_msg)?;
+                    s.create_message(&ack_msg)?;
+                    Ok(())
+                })
+                .await;
+        }
+
+        self.event_bus.publish(Event::MessageEnd {
+            session_id: session_id.to_string(),
+            message_id: "init".to_string(),
+            reason: FinishReason::Stop,
+        });
+
+        Ok(())
     }
 
     async fn resolve_api_key(&self, provider_id: &str) -> Result<String> {
