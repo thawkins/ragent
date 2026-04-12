@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.0-alpha.33] - 2026-04-12
+
+### Fixed
+- **Security: RUSTSEC-2026-0097** — Upgraded `rand` from 0.8 to 0.9 to fix unsound advisory related to custom loggers using `rand::rng()`
+- **Ollama Cloud context window** — Now fetches actual context window size via `/api/show` API endpoint instead of using heuristic estimates; also detects vision capability from API response
+
+### Changed
+- Updated `rand` API calls: `thread_rng()` → `rng()`, `gen_range()` → `random_range()`, `rand::distributions::Alphanumeric` → `rand::distr::Alphanumeric`
+- Version bump to 0.1.0-alpha.33
+
 ## [0.1.0-alpha.31] - 2026-04-09
 
 ### Added

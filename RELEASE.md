@@ -1,6 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.31
+## Current Version: 0.1.0-alpha.33
+
+### Fixed
+- **Security: RUSTSEC-2026-0097** — Upgraded `rand` from 0.8 to 0.9 to fix unsound advisory
+- **Ollama Cloud context window** — Now fetches actual context window size via `/api/show` API endpoint; also detects vision capability
+
+### Changed
+- Updated `rand` API calls for 0.9 compatibility
+- Version bump to 0.1.0-alpha.33
+
+## Previous: 0.1.0-alpha.31
 
 ### Added
 - **SECPLAN.md** — Comprehensive security remediation plan consolidating findings from 5 existing security audit documents covering Critical (P0), High (P1), Medium (P2), and Low (P3) issues
