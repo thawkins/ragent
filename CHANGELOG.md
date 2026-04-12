@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.35] - 2026-04-12
+
+### Added
+- **pre-flight.sh** — Local CI check script that runs all GitHub Actions checks (fmt, check, clippy, tests, audit, deny) before pushing; supports `--quick` flag for fast checks
+
+### Fixed
+- Fixed multiple unused variable/import lint errors in test files (test_reconcile_spawning, test_tool_truncate, test_tool_output_standardization, test_blueprint_with_manager)
+- Fixed unused `mut` warnings in selectable_list.rs tests
+- Added `#![allow(missing_docs)]` to test modules to satisfy CI lint requirements
+
+### Changed
+- Version bump to 0.1.0-alpha.35
+
 ## [0.1.0-alpha.34] - 2026-04-12
 
 ### Fixed

@@ -1,6 +1,17 @@
 # Release
 
-## Current Version: 0.1.0-alpha.34
+## Current Version: 0.1.0-alpha.35
+
+### Added
+- **pre-flight.sh** — Local CI check script that runs all GitHub Actions checks before pushing; supports `--quick` flag
+
+### Fixed
+- Fixed lint errors in test files (unused variables, imports, mut warnings, missing docs)
+
+### Changed
+- Version bump to 0.1.0-alpha.35
+
+## Previous: 0.1.0-alpha.34
 
 ### Fixed
 - **Security: RUSTSEC-2026-0097** — Updated `rand` to 0.9.3 (0.9.2 was still affected)
