@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_selectable_list_navigation() {
-        let mut items = vec!["Item 1", "Item 2", "Item 3"];
+        let items = vec!["Item 1", "Item 2", "Item 3"];
         let mut list = SelectableList::new(items, |s| s.to_string());
 
         list.next();
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_selectable_list_prev() {
-        let mut items = vec!["Item 1", "Item 2", "Item 3"];
+        let items = vec!["Item 1", "Item 2", "Item 3"];
         let mut list = SelectableList::new(items, |s| s.to_string());
 
         list.prev();
