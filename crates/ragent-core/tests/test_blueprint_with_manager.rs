@@ -1,3 +1,6 @@
+//! Tests for blueprint execution with team manager.
+#![allow(missing_docs)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
