@@ -7,61 +7,63 @@ use ratatui::style::{Modifier, Style};
 
 /// Semantic status colors
 pub mod status {
-      use ratatui::style::Color;
-      
-      /// Status color for successful operations (green)
-      pub const SUCCESS: Color = Color::Green;
-      /// Status color for errors (red)
-      pub const ERROR: Color = Color::Red;
-      /// Status color for warnings (yellow)
-      pub const WARNING: Color = Color::Yellow;
-      /// Status color for informational messages (cyan)
-      pub const INFO: Color = Color::Cyan;}
+    use ratatui::style::Color;
+
+    /// Status color for successful operations (green)
+    pub const SUCCESS: Color = Color::Green;
+    /// Status color for errors (red)
+    pub const ERROR: Color = Color::Red;
+    /// Status color for warnings (yellow)
+    pub const WARNING: Color = Color::Yellow;
+    /// Status color for informational messages (cyan)
+    pub const INFO: Color = Color::Cyan;
+}
 
 /// Accessible grays (WCAG AA compliant)
 /// DarkGray was 2.9:1 contrast on Black, replaced with accessible values
 pub mod colors {
-      use ratatui::style::Color;
-      
-      /// Hint color (dimmed gray) for secondary information
-      pub const HINT: Color = Color::Rgb(170, 170, 170);  // Previously Color::DarkGray
-      /// Disabled color for inactive elements
-      pub const DISABLED: Color = Color::Rgb(140, 140, 140);
-      /// Primary text color (white)
-      pub const TEXT: Color = Color::White;
-      /// Background color (black)
-      pub const BACKGROUND: Color = Color::Black;
-      
-      /// Primary UI color (blue)
-      pub const PRIMARY: Color = Color::Blue;
-      /// Secondary UI color (cyan)
-      pub const SECONDARY: Color = Color::Cyan;
-      /// Muted color for less important elements
-      pub const MUTED: Color = Color::Rgb(170, 170, 170);
-      
-      /// Dialog info color (cyan)
-      pub const DIALOG_INFO: Color = Color::Cyan;
-      /// Dialog warning color (yellow)
-      pub const DIALOG_WARNING: Color = Color::Yellow;
-      /// Dialog danger color (red)
-      pub const DIALOG_DANGER: Color = Color::Red;
-      /// Dialog success color (green)
-      pub const DIALOG_SUCCESS: Color = Color::Green;
-      
-      /// Link color (cyan)
-      pub const LINK_COLOR: Color = Color::Cyan;
-      /// Link hover color (yellow)
-      pub const LINK_HOVER: Color = Color::Yellow;
-      
-      /// Selection highlight background color (blue)
-      pub const SELECTION_BG: Color = Color::Rgb(0, 100, 200);
-      /// Selection highlight foreground color (white)
-      pub const SELECTION_FG: Color = Color::White;
-      
-      /// Focus indicator color (yellow)
-      pub const FOCUS_COLOR: Color = Color::Yellow;
-      /// Focus border color (yellow)
-      pub const FOCUS_BORDER: Color = Color::Yellow;}
+    use ratatui::style::Color;
+
+    /// Hint color (dimmed gray) for secondary information
+    pub const HINT: Color = Color::Rgb(170, 170, 170); // Previously Color::DarkGray
+    /// Disabled color for inactive elements
+    pub const DISABLED: Color = Color::Rgb(140, 140, 140);
+    /// Primary text color (white)
+    pub const TEXT: Color = Color::White;
+    /// Background color (black)
+    pub const BACKGROUND: Color = Color::Black;
+
+    /// Primary UI color (blue)
+    pub const PRIMARY: Color = Color::Blue;
+    /// Secondary UI color (cyan)
+    pub const SECONDARY: Color = Color::Cyan;
+    /// Muted color for less important elements
+    pub const MUTED: Color = Color::Rgb(170, 170, 170);
+
+    /// Dialog info color (cyan)
+    pub const DIALOG_INFO: Color = Color::Cyan;
+    /// Dialog warning color (yellow)
+    pub const DIALOG_WARNING: Color = Color::Yellow;
+    /// Dialog danger color (red)
+    pub const DIALOG_DANGER: Color = Color::Red;
+    /// Dialog success color (green)
+    pub const DIALOG_SUCCESS: Color = Color::Green;
+
+    /// Link color (cyan)
+    pub const LINK_COLOR: Color = Color::Cyan;
+    /// Link hover color (yellow)
+    pub const LINK_HOVER: Color = Color::Yellow;
+
+    /// Selection highlight background color (blue)
+    pub const SELECTION_BG: Color = Color::Rgb(0, 100, 200);
+    /// Selection highlight foreground color (white)
+    pub const SELECTION_FG: Color = Color::White;
+
+    /// Focus indicator color (yellow)
+    pub const FOCUS_COLOR: Color = Color::Yellow;
+    /// Focus border color (yellow)
+    pub const FOCUS_BORDER: Color = Color::Yellow;
+}
 
 /// Typography system with semantic roles.
 

@@ -7,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Widget, Block, Borders, ListState},
+    widgets::{Block, Borders, List, ListItem, ListState, Widget},
 };
 
 /// A selectable list component for displaying items with navigation.
@@ -84,15 +84,16 @@ impl<'a, T> SelectableList<'a, T> {
     }
 }
 
-  /// Rendered selectable list that can be displayed
-  pub struct SelectableListRender<'a, T> {
-      list: &'a SelectableList<'a, T>,
-  }
-      impl<'a, T> SelectableListRender<'a, T> {
-          /// Create a new selectable list render
-          pub fn new(list: &'a SelectableList<'a, T>, _area: Rect) -> Self {
-              Self { list }
-          }    /// Get the list items for rendering
+/// Rendered selectable list that can be displayed
+pub struct SelectableListRender<'a, T> {
+    list: &'a SelectableList<'a, T>,
+}
+impl<'a, T> SelectableListRender<'a, T> {
+    /// Create a new selectable list render
+    pub fn new(list: &'a SelectableList<'a, T>, _area: Rect) -> Self {
+        Self { list }
+    }
+    /// Get the list items for rendering
     fn list_items(&self) -> Vec<ListItem<'a>> {
         self.list
             .items
@@ -100,7 +101,10 @@ impl<'a, T> SelectableList<'a, T> {
             .enumerate()
             .map(|(i, item)| {
                 let (prefix, style) = if i == self.list.selected {
-                    (self.list.selected_prefix, Style::default().fg(Color::Yellow))
+                    (
+                        self.list.selected_prefix,
+                        Style::default().fg(Color::Yellow),
+                    )
                 } else {
                     (self.list.unselected_prefix, Style::default())
                 };

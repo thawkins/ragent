@@ -728,9 +728,7 @@ pub async fn list_ollama_cloud_models(
                 .unwrap_or_else(|| estimate_context_window(&entry.details.parameter_size));
 
             // Check vision capability from /api/show
-            let has_vision = show_info
-                .as_ref()
-                .is_some_and(|info| info.has_vision());
+            let has_vision = show_info.as_ref().is_some_and(|info| info.has_vision());
 
             ModelInfo {
                 id: model_id,

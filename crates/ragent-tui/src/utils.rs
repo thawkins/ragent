@@ -2,7 +2,7 @@
 //!
 //! Provides common layout helper functions used across the UI components.
 
-  use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 /// Center a rectangle within the given area.
 ///
 /// Returns a Rect centered in the provided area with the specified

@@ -7,7 +7,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Widget, Paragraph},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 
 /// Button visual variants for different actions
@@ -107,15 +107,16 @@ impl<'a> Button<'a> {
     }
 }
 
-  /// Rendered button that can be displayed
-  pub struct ButtonRender<'a, 'b> {
-      button: &'b Button<'a>,
-  }
-      impl<'a, 'b> ButtonRender<'a, 'b> {
-          /// Create a new button render
-          pub fn new(button: &'b Button<'a>, _area: Rect) -> Self {
-              Self { button }
-          }    /// Get the content lines for this button
+/// Rendered button that can be displayed
+pub struct ButtonRender<'a, 'b> {
+    button: &'b Button<'a>,
+}
+impl<'a, 'b> ButtonRender<'a, 'b> {
+    /// Create a new button render
+    pub fn new(button: &'b Button<'a>, _area: Rect) -> Self {
+        Self { button }
+    }
+    /// Get the content lines for this button
     fn content(&self) -> Vec<Line<'a>> {
         let mut lines = Vec::new();
 
@@ -133,25 +134,26 @@ impl<'a> Button<'a> {
     }
 }
 
-    impl Widget for ButtonRender<'_, '_> {
-          fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer)
-          where
-              Self: Sized,
-          {          let content = self.content();
+impl Widget for ButtonRender<'_, '_> {
+    fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer)
+    where
+        Self: Sized,
+    {
+        let content = self.content();
 
-          // Create block with appropriate styling
-          let block = Block::default()
-              .borders(Borders::ALL)
-              .border_style(Style::default().fg(self.button.bg_color()));
+        // Create block with appropriate styling
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.button.bg_color()));
 
-          // Create paragraph with content
-          let paragraph = Paragraph::new(content)
-              .block(block)
-              .alignment(ratatui::layout::Alignment::Center);
+        // Create paragraph with content
+        let paragraph = Paragraph::new(content)
+            .block(block)
+            .alignment(ratatui::layout::Alignment::Center);
 
-          paragraph.render(area, buf);
-      }
-  }
+        paragraph.render(area, buf);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,8 +169,8 @@ mod tests {
 
     #[test]
     fn test_button_state() {
-        let button = Button::new("Click Me", ButtonVariant::Primary)
-            .with_state(ButtonState::Active);
+        let button =
+            Button::new("Click Me", ButtonVariant::Primary).with_state(ButtonState::Active);
         assert_eq!(button.state, ButtonState::Active);
     }
 

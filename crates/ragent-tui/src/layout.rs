@@ -23,8 +23,7 @@ use crate::layout_active_agents::render_active_agents_subpanel;
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
-    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep,
-    SelectionPane,
+    App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
 };
 use crate::logo;
 use crate::widgets::message_widget::{
@@ -1643,44 +1642,45 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
 
-                                                      // Parse and color the [sid:step] prefix in the message if present
-                                                      let msg = &entry.message;
-                                                      if msg.starts_with('[') {
-                                                          // Try to find the "]" that ends the [sid:step] prefix
-                                                          if let Some(close_bracket) = msg.find(']') {
-                                                              let prefix = &msg[..=close_bracket];
-                                                              // Verify it looks like [sid:step] format (contains a colon)
-                                                              if prefix.contains(':') {
-                                                                  let rest = &msg[close_bracket + 1..];
-                                                                  // Extract the sid from the prefix to look up display name
-                                                                  let sid_start = prefix.find('[').unwrap_or(0) + 1;
-                                                                  let sid_end = prefix.find(':').unwrap_or(prefix.len() - 1);
-                                                                  let sid = &prefix[sid_start..sid_end];
-                                                                  // Extract step number (everything after ':' up to ']')
-                                                                  let step_start = sid_end + 1;
-                                                                  let step = &prefix[step_start..close_bracket];
-                                                                  // Look up friendly display name if available
-                                                                  let display_sid = app
-                                                                      .sid_to_display_name
-                                                                      .get(sid)
-                                                                      .cloned()
-                                                                      .unwrap_or_else(|| sid.to_string());
-                                                                  let formatted_prefix = format!("[{}:{step}]", display_sid);
-                                                                  spans.push(Span::styled(
-                                                                      formatted_prefix,
-                                                                      Style::default().fg(Color::Yellow),
-                                                                  ));
-                                                                  spans.push(Span::raw(rest.to_string()));
-                                                              } else {
-                                                                  spans.push(Span::raw(msg.clone()));
-                                                              }
-                                                          } else {
-                                                              spans.push(Span::raw(msg.clone()));
-                                                          }
-                                                      } else {
-                                                          spans.push(Span::raw(msg.clone()));
-                                                      }
-                                                      Line::from(spans)        })
+            // Parse and color the [sid:step] prefix in the message if present
+            let msg = &entry.message;
+            if msg.starts_with('[') {
+                // Try to find the "]" that ends the [sid:step] prefix
+                if let Some(close_bracket) = msg.find(']') {
+                    let prefix = &msg[..=close_bracket];
+                    // Verify it looks like [sid:step] format (contains a colon)
+                    if prefix.contains(':') {
+                        let rest = &msg[close_bracket + 1..];
+                        // Extract the sid from the prefix to look up display name
+                        let sid_start = prefix.find('[').unwrap_or(0) + 1;
+                        let sid_end = prefix.find(':').unwrap_or(prefix.len() - 1);
+                        let sid = &prefix[sid_start..sid_end];
+                        // Extract step number (everything after ':' up to ']')
+                        let step_start = sid_end + 1;
+                        let step = &prefix[step_start..close_bracket];
+                        // Look up friendly display name if available
+                        let display_sid = app
+                            .sid_to_display_name
+                            .get(sid)
+                            .cloned()
+                            .unwrap_or_else(|| sid.to_string());
+                        let formatted_prefix = format!("[{}:{step}]", display_sid);
+                        spans.push(Span::styled(
+                            formatted_prefix,
+                            Style::default().fg(Color::Yellow),
+                        ));
+                        spans.push(Span::raw(rest.to_string()));
+                    } else {
+                        spans.push(Span::raw(msg.clone()));
+                    }
+                } else {
+                    spans.push(Span::raw(msg.clone()));
+                }
+            } else {
+                spans.push(Span::raw(msg.clone()));
+            }
+            Line::from(spans)
+        })
         .collect();
 
     // Cache plain-text content for text selection copy
@@ -2207,22 +2207,23 @@ fn messages_to_lines<'a>(
                         }
                     }
                 }
-                                                                      MessagePart::ToolCall {
-                                                                          tool,
-                                                                          call_id,
-                                                                          state,
-                                                                      } => {
-                                                                          let step_tag = if let Some((sid, step, substep)) = tool_step_map.get(call_id) {
-                                                                              // Look up display name from app
-                                                                              let display = sid_to_display
-                                                                                  .get(sid)
-                                                                                  .cloned()
-                                                                                  .unwrap_or_else(|| sid.clone());
-                                                                              format!("[{display}:{step}.{substep}] ")
-                                                                          } else {
-                                                                              String::new()
-                                                                          };
-                                                                          let (indicator, ind_style, name_style) = match state.status {                        ToolCallStatus::Completed => (
+                MessagePart::ToolCall {
+                    tool,
+                    call_id,
+                    state,
+                } => {
+                    let step_tag = if let Some((sid, step, substep)) = tool_step_map.get(call_id) {
+                        // Look up display name from app
+                        let display = sid_to_display
+                            .get(sid)
+                            .cloned()
+                            .unwrap_or_else(|| sid.clone());
+                        format!("[{display}:{step}.{substep}] ")
+                    } else {
+                        String::new()
+                    };
+                    let (indicator, ind_style, name_style) = match state.status {
+                        ToolCallStatus::Completed => (
                             "● ",
                             Style::default().fg(Color::Green),
                             Style::default()

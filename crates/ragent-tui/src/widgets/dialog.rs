@@ -121,19 +121,20 @@ pub enum DialogContent<'a> {
     Paragraph(Box<Paragraph<'a>>),
 }
 
-    impl<'a> Dialog {
-        /// Render the dialog with the given content
-        pub fn render<'b>(&'b self, _area: Rect, content: DialogContent<'a>) -> DialogRender<'a, 'b> {
-            DialogRender {
-                dialog: self,
-                content,
-            }
+impl<'a> Dialog {
+    /// Render the dialog with the given content
+    pub fn render<'b>(&'b self, _area: Rect, content: DialogContent<'a>) -> DialogRender<'a, 'b> {
+        DialogRender {
+            dialog: self,
+            content,
         }
-    }  /// A rendered dialog that can be displayed
-  pub struct DialogRender<'a, 'b> {
-      dialog: &'b Dialog,
-      content: DialogContent<'a>,
-  }
+    }
+}
+/// A rendered dialog that can be displayed
+pub struct DialogRender<'a, 'b> {
+    dialog: &'b Dialog,
+    content: DialogContent<'a>,
+}
 impl Widget for DialogRender<'_, '_> {
     fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer)
     where
