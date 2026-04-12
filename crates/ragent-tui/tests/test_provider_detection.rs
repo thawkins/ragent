@@ -40,9 +40,9 @@ fn test_detect_provider_no_panic_empty_storage() {
 fn test_detect_provider_preferred_from_db() {
     let storage = mem_storage();
 
-    // Store a provider key so detect_provider can find it via DB.
+    // Store a provider key via provider_auth so detect_provider can find it via DB.
     storage
-        .set_setting("provider_anthropic_key", "sk-test-12345")
+        .set_provider_auth("anthropic", "sk-test-12345")
         .expect("store key");
     storage
         .set_setting("preferred_provider", "anthropic")
@@ -85,12 +85,12 @@ fn test_detect_provider_preferred_unknown_id_ignored() {
 fn test_detect_provider_disabled_flag_skips_provider() {
     let storage = mem_storage();
 
-    // Store keys for both anthropic and openai.
+    // Store keys for both anthropic and openai via provider_auth (not settings).
     storage
-        .set_setting("provider_anthropic_key", "sk-ant-test")
+        .set_provider_auth("anthropic", "sk-ant-test")
         .expect("store key");
     storage
-        .set_setting("provider_openai_key", "sk-oai-test")
+        .set_provider_auth("openai", "sk-oai-test")
         .expect("store key");
 
     // Disable anthropic.
@@ -109,7 +109,7 @@ fn test_detect_provider_disabled_flag_any_value_disables() {
     let storage = mem_storage();
 
     storage
-        .set_setting("provider_anthropic_key", "sk-ant-test")
+        .set_provider_auth("anthropic", "sk-ant-test")
         .expect("store key");
     storage
         .set_setting("preferred_provider", "anthropic")
@@ -138,12 +138,12 @@ fn test_detect_provider_disabled_flag_any_value_disables() {
 fn test_detect_provider_db_keys_follow_provider_list_order() {
     let storage = mem_storage();
 
-    // Store keys for both — anthropic appears first in PROVIDER_LIST.
+    // Store keys for both via provider_auth — anthropic appears first in PROVIDER_LIST.
     storage
-        .set_setting("provider_anthropic_key", "sk-ant-test")
+        .set_provider_auth("anthropic", "sk-ant-test")
         .expect("store anthropic key");
     storage
-        .set_setting("provider_openai_key", "sk-oai-test")
+        .set_provider_auth("openai", "sk-oai-test")
         .expect("store openai key");
 
     let result = App::detect_provider(&storage);
