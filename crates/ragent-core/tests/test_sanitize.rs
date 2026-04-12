@@ -35,6 +35,7 @@ fn base64_url_encode(data: &[u8]) -> String {
 
 /// Build a fake numeric-suffixed token.
 #[allow(dead_code)]
+#[allow(dead_code)]
 fn fake_numeric_token(prefix: &str, len: usize) -> String {
     let suffix: String = (0..len).map(|i| (b'0' + (i % 10) as u8) as char).collect();
     format!("{prefix}{suffix}")
