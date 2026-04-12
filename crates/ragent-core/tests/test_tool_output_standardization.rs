@@ -493,7 +493,7 @@ async fn test_all_migrated_tools_have_metadata() {
     // Verify that migrated tools have metadata
     // This serves as a regression test
 
-    let ctx = make_ctx();
+    let _ctx = make_ctx();
 
     // List of tools that should have metadata
     let tools_with_metadata: Vec<&str> = vec![

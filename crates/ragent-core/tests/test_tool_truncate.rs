@@ -184,7 +184,7 @@ fn test_get_truncation_stats_single_line() {
 
 #[test]
 fn test_get_truncation_stats_max_lines_zero() {
-    let (shown, total, was_truncated) = get_truncation_stats("a\nb\nc", 0);
+    let (shown, total, _was_truncated) = get_truncation_stats("a\nb\nc", 0);
 
     assert_eq!(shown, 0, "Zero max lines means 0 shown");
     assert_eq!(total, 3, "Total is still 3");
@@ -204,7 +204,7 @@ fn test_truncate_content_trailing_newline() {
     let content = "line1\nline2\n"; // Trailing newline
     let result = truncate_content(content, 5);
     // The trailing newline creates an empty last line
-    let lines: Vec<&str> = result.lines().collect();
+    let _lines: Vec<&str> = result.lines().collect();
     // Just verify it doesn't panic and contains expected content
     assert!(result.contains("line1"));
     assert!(result.contains("line2"));
