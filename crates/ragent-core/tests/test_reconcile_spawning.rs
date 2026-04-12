@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+//! Tests for team reconcile spawning functionality.
+#![allow(missing_docs)]
+
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -18,7 +20,7 @@ async fn test_reconcile_spawning_members_updates_config() {
     let sid = "lead-session".to_string();
 
     // Create a team store and add spawning members (simulate blueprint run without manager)
-    let store = TeamStore::create(&name, &sid, &project, true).expect("create store");
+    let _store = TeamStore::create(&name, &sid, &project, true).expect("create store");
     let mut loaded = TeamStore::load_by_name(&name, &project).expect("load");
     let member = ragent_core::team::config::TeamMember::new("auto-1", "tm-001", "general");
     loaded.add_member(member).expect("add member");
