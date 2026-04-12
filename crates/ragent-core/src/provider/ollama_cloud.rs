@@ -66,6 +66,26 @@ impl OllamaCloudProvider {
 
         Ok(body.models)
     }
+
+    /// Fetches detailed model information via /api/show endpoint.
+    /// Returns context_length and vision capability if available.
+    async fn show_model(&self, api_key: &str, model_name: &str) -> Option<OllamaShowResponse> {
+        let url = format!("{}/api/show", self.base_url);
+        let response = reqwest::Client::new()
+            .post(&url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .json(&json!({ "model": model_name }))
+            .timeout(std::time::Duration::from_secs(5))
+            .send()
+            .await
+            .ok()?;
+
+        if !response.status().is_success() {
+            return None;
+        }
+
+        response.json().await.ok()
+    }
 }
 
 impl Default for OllamaCloudProvider {
@@ -95,6 +115,35 @@ struct OllamaModelDetails {
     #[serde(default)]
     #[allow(dead_code)]
     family: String,
+}
+
+/// Response from /api/show endpoint containing model details including context length.
+#[derive(Debug, Deserialize)]
+struct OllamaShowResponse {
+    #[serde(default)]
+    model_info: HashMap<String, Value>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+impl OllamaShowResponse {
+    /// Extracts the context length from model_info.
+    /// Looks for keys matching `<architecture>.context_length`.
+    fn context_length(&self) -> Option<usize> {
+        for (key, value) in &self.model_info {
+            if key.ends_with(".context_length") {
+                if let Some(len) = value.as_u64() {
+                    return Some(len as usize);
+                }
+            }
+        }
+        None
+    }
+
+    /// Checks if the model has vision capability.
+    fn has_vision(&self) -> bool {
+        self.capabilities.iter().any(|c| c == "vision")
+    }
 }
 
 fn estimate_context_window(parameter_size: &str) -> usize {
@@ -632,6 +681,7 @@ impl LlmClient for OllamaCloudClient {
 }
 
 /// Queries Ollama Cloud for available models.
+/// Fetches model details via /api/show to get accurate context window sizes.
 pub async fn list_ollama_cloud_models(
     api_key: &str,
     base_url: Option<&str>,
@@ -646,9 +696,23 @@ pub async fn list_ollama_cloud_models(
         .await
         .context("Could not discover Ollama Cloud models")?;
 
+    // Fetch detailed info for each model in parallel
+    let model_names: Vec<_> = entries
+        .iter()
+        .map(|entry| entry.model.clone().unwrap_or_else(|| entry.name.clone()))
+        .collect();
+
+    let show_futures: Vec<_> = model_names
+        .iter()
+        .map(|model_name| provider.show_model(api_key, model_name))
+        .collect();
+
+    let show_results = futures::future::join_all(show_futures).await;
+
     Ok(entries
         .into_iter()
-        .map(|entry| {
+        .zip(show_results)
+        .map(|(entry, show_info)| {
             let model_id = entry.model.clone().unwrap_or_else(|| entry.name.clone());
             let display_name = format_model_name(&entry.name, &entry.details);
             let display_name = if model_id == entry.name {
@@ -656,7 +720,17 @@ pub async fn list_ollama_cloud_models(
             } else {
                 format!("{display_name} ({model_id})")
             };
-            let ctx = estimate_context_window(&entry.details.parameter_size);
+
+            // Use context_length from /api/show if available, otherwise fall back to estimate
+            let ctx = show_info
+                .as_ref()
+                .and_then(|info| info.context_length())
+                .unwrap_or_else(|| estimate_context_window(&entry.details.parameter_size));
+
+            // Check vision capability from /api/show
+            let has_vision = show_info
+                .as_ref()
+                .is_some_and(|info| info.has_vision());
 
             ModelInfo {
                 id: model_id,
@@ -669,7 +743,7 @@ pub async fn list_ollama_cloud_models(
                 capabilities: Capabilities {
                     reasoning: false,
                     streaming: true,
-                    vision: false,
+                    vision: has_vision,
                     tool_use: true,
                 },
                 context_window: ctx,

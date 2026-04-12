@@ -82,7 +82,7 @@ static MACHINE_KEY: LazyLock<[u8; 32]> = LazyLock::new(|| {
 pub fn encrypt_key(key: &str) -> String {
     use rand::Rng;
     let mut nonce = [0u8; NONCE_LEN];
-    rand::thread_rng().fill(&mut nonce);
+    rand::rng().fill(&mut nonce);
 
     let keystream = generate_keystream(&nonce, key.len());
     let ciphertext: Vec<u8> = key

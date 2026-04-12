@@ -6108,8 +6108,9 @@ Type `/swarm help` for more info.\n";
                             ));
                     } else {
                         use rand::Rng;
-                        let token: String = rand::thread_rng()
-                            .sample_iter(&rand::distributions::Alphanumeric)
+                        use rand::distr::Alphanumeric;
+                        let token: String = rand::rng()
+                            .sample_iter(&Alphanumeric)
                             .take(40)
                             .map(char::from)
                             .collect();

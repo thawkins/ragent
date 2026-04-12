@@ -27,6 +27,6 @@ const TIPS: &[&str] = &[
 /// assert!(!tip.is_empty());
 /// ```
 pub fn random_tip() -> &'static str {
-    let idx = rand::thread_rng().gen_range(0..TIPS.len());
+    let idx = rand::rng().random_range(0..TIPS.len());
     TIPS[idx]
 }

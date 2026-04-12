@@ -175,7 +175,7 @@ html2text = "0.16"
 similar = "2"
 regex = "1"
 base64 = "0.22"
-rand = "0.8"
+rand = "0.9"
 
 # ── ripgrep library crates ───────────────────────────────────────────────
 grep-regex = "0.1"
