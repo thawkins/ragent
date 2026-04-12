@@ -61,6 +61,7 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tempfile = "3.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
+serial_test = "3.2"
 
 [[bench]]
 name = "bench_file_ops"

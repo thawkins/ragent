@@ -1,8 +1,10 @@
 //! Tests for the YOLO mode toggle and its effect on validation.
 
 use ragent_core::yolo;
+use serial_test::serial;
 
 #[test]
+#[serial]
 fn test_yolo_default_disabled() {
     // Reset to known state
     yolo::set_enabled(false);
@@ -10,6 +12,7 @@ fn test_yolo_default_disabled() {
 }
 
 #[test]
+#[serial]
 fn test_yolo_enable_disable() {
     yolo::set_enabled(true);
     assert!(yolo::is_enabled());
@@ -18,6 +21,7 @@ fn test_yolo_enable_disable() {
 }
 
 #[test]
+#[serial]
 fn test_yolo_toggle() {
     yolo::set_enabled(false);
     let state = yolo::toggle();
@@ -30,6 +34,7 @@ fn test_yolo_toggle() {
 }
 
 #[test]
+#[serial]
 fn test_yolo_toggle_idempotent_double() {
     yolo::set_enabled(false);
     yolo::toggle();
@@ -62,6 +67,7 @@ fn make_ctx() -> ToolContext {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_yolo_allows_denied_bash_pattern() {
     yolo::set_enabled(true);
 
@@ -86,6 +92,7 @@ async fn test_yolo_allows_denied_bash_pattern() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_yolo_off_rejects_denied_bash_pattern() {
     yolo::set_enabled(false);
 
@@ -106,6 +113,7 @@ async fn test_yolo_off_rejects_denied_bash_pattern() {
 // --- Integration: MCP config validation ---
 
 #[test]
+#[serial]
 fn test_yolo_allows_mcp_metacharacters() {
     use ragent_core::config::{McpServerConfig, McpTransport};
     use ragent_core::mcp::validate_mcp_config;
@@ -131,6 +139,7 @@ fn test_yolo_allows_mcp_metacharacters() {
 }
 
 #[test]
+#[serial]
 fn test_yolo_off_rejects_mcp_metacharacters() {
     use ragent_core::config::{McpServerConfig, McpTransport};
     use ragent_core::mcp::validate_mcp_config;
