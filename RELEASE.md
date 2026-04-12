@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.33
+## Current Version: 0.1.0-alpha.34
+
+### Fixed
+- **Security: RUSTSEC-2026-0097** — Updated `rand` to 0.9.3 (0.9.2 was still affected)
+
+### Changed
+- Version bump to 0.1.0-alpha.34
+
+## Previous: 0.1.0-alpha.33
 
 ### Fixed
 - **Security: RUSTSEC-2026-0097** — Upgraded `rand` from 0.8 to 0.9 to fix unsound advisory

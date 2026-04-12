@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.34] - 2026-04-12
+
+### Fixed
+- **Security: RUSTSEC-2026-0097** — Updated `rand` to 0.9.3 (0.9.2 was still affected)
+
+### Changed
+- Version bump to 0.1.0-alpha.34
+
 ## [0.1.0-alpha.33] - 2026-04-12
 
 ### Fixed
