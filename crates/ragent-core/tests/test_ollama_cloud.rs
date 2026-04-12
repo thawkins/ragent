@@ -1,3 +1,6 @@
+//! Tests for Ollama Cloud provider.
+#![allow(missing_docs)]
+
 use ragent_core::provider::ollama_cloud::list_ollama_cloud_models;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
