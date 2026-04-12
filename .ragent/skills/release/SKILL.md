@@ -22,10 +22,7 @@ Perform a release of the ragent project by following these steps **in order**:
 
 6. **Stage all modified files** with `git add -A`.
 
-7. **Commit** with the message: `Version: <new-version>` followed by any additional message the user provided via $ARGUMENTS. Include the Co-authored-by trailer:
-   ```
-   Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
-   ```
+7. **Commit** with the message: `Version: <new-version>` followed by any additional message the user provided via $ARGUMENTS.
 
 8. **Push** to the remote with `git push`.
 
