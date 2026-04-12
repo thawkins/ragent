@@ -694,8 +694,7 @@ fn test_context_cut_on_wrapped_unicode_input_removes_single_character() {
 #[test]
 fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
     let mut app = make_app();
-    app.home_input_area = Rect::new(20, 15, 40, 3);
-    app.input_area = Rect::default();
+    app.input_area = Rect::new(20, 15, 40, 3);
     app.input = "@src".to_string();
     app.input_cursor = app.input.chars().count();
     app.file_menu = Some(ragent_tui::app::FileMenuState {
@@ -710,7 +709,7 @@ fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
         current_dir: None,
     });
 
-    // Click inside file menu popup based on home_input_area geometry.
+    // Click inside file menu popup based on input_area geometry.
     // item_count=1 => height=4 (includes hint row), popup starts at y=11, first item row=12.
     app.handle_mouse_event(mouse_down(20, 12));
 
@@ -724,7 +723,7 @@ fn test_right_click_uses_home_input_geometry_for_file_menu_popup() {
 #[test]
 fn test_left_click_outside_file_menu_closes_popup() {
     let mut app = make_app();
-    app.home_input_area = Rect::new(20, 15, 40, 3);
+    app.input_area = Rect::new(20, 15, 40, 3);
     app.input = "@".to_string();
     app.input_cursor = 1;
     app.file_menu = Some(ragent_tui::app::FileMenuState {
