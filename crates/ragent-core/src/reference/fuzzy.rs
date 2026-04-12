@@ -212,7 +212,7 @@ mod tests {
         assert!(
             results
                 .iter()
-                .any(|m| m.path == PathBuf::from("src/lib.rs"))
+                .any(|m| m.path == *std::path::Path::new("src/lib.rs"))
         );
     }
 
@@ -223,7 +223,7 @@ mod tests {
         assert!(
             results
                 .iter()
-                .any(|m| m.path == PathBuf::from("src/reference/mod.rs"))
+                .any(|m| m.path == *std::path::Path::new("src/reference/mod.rs"))
         );
     }
 

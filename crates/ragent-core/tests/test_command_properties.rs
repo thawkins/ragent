@@ -129,7 +129,7 @@ async fn test_inject_command_producing_large_output() {
     )
     .await
     .unwrap();
-    assert!(result.contains("1"), "Output should be captured: {result}");
+    assert!(result.contains('1'), "Output should be captured: {result}");
     assert!(result.contains("Count:"), "Surrounding text preserved");
 }
 

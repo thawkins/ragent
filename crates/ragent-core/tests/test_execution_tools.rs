@@ -231,7 +231,7 @@ async fn test_calculator_complex_numbers() {
     assert!(result.is_ok());
     let output = result.unwrap();
     assert!(
-        output.content.contains("6") && output.content.contains("8"),
+        output.content.contains('6') && output.content.contains('8'),
         "Should contain complex number result: {}",
         output.content
     );

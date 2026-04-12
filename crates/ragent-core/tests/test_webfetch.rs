@@ -163,7 +163,7 @@ async fn test_webfetch_plain_text() {
     assert!(result.content.contains("Line 3"));
 
     let meta = result.metadata.unwrap();
-    assert_eq!(meta["status"], 200);
+    assert_eq!(meta["http_status"], 200);
     assert!(
         meta["content_type"]
             .as_str()
@@ -228,8 +228,8 @@ async fn test_webfetch_metadata() {
     let result = tool().execute(json!({ "url": url }), &ctx).await.unwrap();
 
     let meta = result.metadata.unwrap();
-    assert_eq!(meta["status"], 200);
-    assert!(meta["lines"].as_u64().unwrap() >= 1);
+    assert_eq!(meta["http_status"], 200);
+    assert!(meta["line_count"].as_u64().unwrap() >= 1);
     assert!(meta["url"].as_str().unwrap().starts_with("http://"));
 }
 

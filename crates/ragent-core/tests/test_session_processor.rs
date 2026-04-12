@@ -159,11 +159,11 @@ struct MockOllamaClient {
 
 #[async_trait::async_trait]
 impl Provider for MockOllamaProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "ollama"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Ollama"
     }
 

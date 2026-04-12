@@ -85,7 +85,7 @@ fn test_restore_creates_parent_dirs() {
     std::fs::create_dir_all(nested_path.parent().unwrap()).unwrap();
     std::fs::write(&nested_path, "deep content").unwrap();
 
-    let snapshot = take_snapshot("s1", "m1", &[nested_path.clone()]).unwrap();
+    let snapshot = take_snapshot("s1", "m1", std::slice::from_ref(&nested_path)).unwrap();
 
     // Remove the entire directory tree
     std::fs::remove_dir_all(&dir).unwrap();
@@ -111,7 +111,7 @@ fn test_snapshot_binary_content() {
     let binary_data: Vec<u8> = (0u8..=255).collect();
     std::fs::write(&file_path, &binary_data).unwrap();
 
-    let snapshot = take_snapshot("s1", "m1", &[file_path.clone()]).unwrap();
+    let snapshot = take_snapshot("s1", "m1", std::slice::from_ref(&file_path)).unwrap();
     assert_eq!(snapshot.files.get(&file_path).unwrap(), &binary_data);
 
     std::fs::write(&file_path, b"overwritten").unwrap();
@@ -133,11 +133,11 @@ fn test_multiple_snapshots_independent() {
 
     // State 1
     std::fs::write(&file_path, "version 1").unwrap();
-    let snap1 = take_snapshot("s1", "m1", &[file_path.clone()]).unwrap();
+    let snap1 = take_snapshot("s1", "m1", std::slice::from_ref(&file_path)).unwrap();
 
     // State 2
     std::fs::write(&file_path, "version 2").unwrap();
-    let snap2 = take_snapshot("s1", "m2", &[file_path.clone()]).unwrap();
+    let snap2 = take_snapshot("s1", "m2", std::slice::from_ref(&file_path)).unwrap();
 
     // State 3
     std::fs::write(&file_path, "version 3").unwrap();
@@ -184,7 +184,7 @@ fn test_snapshot_empty_file() {
     let file_path = dir.join("empty.txt");
     std::fs::write(&file_path, "").unwrap();
 
-    let snapshot = take_snapshot("s1", "m1", &[file_path.clone()]).unwrap();
+    let snapshot = take_snapshot("s1", "m1", std::slice::from_ref(&file_path)).unwrap();
     assert_eq!(snapshot.files.get(&file_path).unwrap(), b"");
 
     std::fs::write(&file_path, "not empty anymore").unwrap();

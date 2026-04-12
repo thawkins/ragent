@@ -476,8 +476,10 @@ fn test_build_system_prompt_skills_order_after_agents_md() {
 #[test]
 fn test_resolve_agent_with_skills_config() {
     let mut config = Config::default();
-    let mut agent_config = ragent_core::config::AgentConfig::default();
-    agent_config.skills = vec!["deploy".to_string(), "review".to_string()];
+    let agent_config = ragent_core::config::AgentConfig {
+        skills: vec!["deploy".to_string(), "review".to_string()],
+        ..Default::default()
+    };
     config.agent.insert("general".to_string(), agent_config);
 
     let agent = resolve_agent("general", &config).unwrap();

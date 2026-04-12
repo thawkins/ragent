@@ -8514,7 +8514,7 @@ Type `/swarm help` for more info.\n";
     /// # use ragent_tui::App;
     /// # use ragent_tui::app::LogLevel;
     /// # fn example(app: &mut App) {
-    /// app.push_log_no_agent(LogLevel::Info, "Session started".to_string());
+    /// app.push_log(LogLevel::Info, "Session started".to_string(), None);
     /// # }
     /// ```
     pub fn push_log(&mut self, level: LogLevel, message: String, agent_id: Option<String>) {

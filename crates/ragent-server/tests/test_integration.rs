@@ -169,7 +169,9 @@ async fn test_rate_limiter_resets_after_window() {
     {
         let mut lim = rate_limiter.lock().await;
         // 100 requests but the window started 61 seconds ago → should reset.
-        let old = std::time::Instant::now() - std::time::Duration::from_secs(61);
+        let old = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(61))
+            .unwrap();
         lim.insert("s1".to_string(), (100, old));
     }
 

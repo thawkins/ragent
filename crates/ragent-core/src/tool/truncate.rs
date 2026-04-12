@@ -43,7 +43,7 @@
 /// // Content exceeds limit - truncated with marker
 /// let content = "a\nb\nc\nd\ne";
 /// let result = truncate_content(content, 3);
-/// assert!(result.contains("a"));
+/// assert!(result.contains('a'));
 /// assert!(result.contains("... (3 lines omitted) ..."));
 /// ```
 pub fn truncate_content(content: impl AsRef<str>, max_lines: usize) -> String {
@@ -227,8 +227,8 @@ mod tests {
         let content = "a\nb\nc\nd\ne";
         let result = truncate_content(content, 3);
 
-        assert!(result.contains("a"));
-        assert!(result.contains("b"));
+        assert!(result.contains('a'));
+        assert!(result.contains('b'));
         // c, d, e should be omitted
         assert!(!result.contains("\nc\n"));
         assert!(!result.contains("\nd\n"));
@@ -240,8 +240,8 @@ mod tests {
         let content = "a\nb\nc\nd";
         let result = truncate_content(content, 3);
 
-        assert!(result.contains("a"));
-        assert!(result.contains("b"));
+        assert!(result.contains('a'));
+        assert!(result.contains('b'));
         assert!(result.contains("... (2 lines omitted) ..."));
     }
 
@@ -295,10 +295,10 @@ mod tests {
 
         // Should fall back to simple truncate with max_lines=5
         // Simple truncate shows first 4 lines + marker
-        assert!(result.contains("a"));
-        assert!(result.contains("b"));
-        assert!(result.contains("c"));
-        assert!(result.contains("d"));
+        assert!(result.contains('a'));
+        assert!(result.contains('b'));
+        assert!(result.contains('c'));
+        assert!(result.contains('d'));
         assert!(result.contains("... (3 lines omitted) ..."));
     }
 

@@ -58,13 +58,14 @@ fn test_plan_enter_schema_has_task() {
     let schema = tool.parameters_schema();
     let props = schema["properties"].as_object().unwrap();
     assert!(props.contains_key("task"));
-    let required = schema["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert!(required.contains(&"task"));
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .any(|v| v == "task")
+    );
 }
 
 #[test]
@@ -75,13 +76,14 @@ fn test_plan_enter_schema_has_context() {
     let props = schema["properties"].as_object().unwrap();
     assert!(props.contains_key("context"));
     // context is optional — not in required
-    let required = schema["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert!(!required.contains(&"context"));
+    assert!(
+        !schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .any(|v| v == "context")
+    );
 }
 
 // ── Error condition tests ────────────────────────────────────────

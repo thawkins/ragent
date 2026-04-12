@@ -22,13 +22,11 @@ async fn test_reconcile_against_existing_team_dir() {
 
     // Pick the most recent team directory (if any)
     let mut latest = None;
-    for entry in std::fs::read_dir(&team_dir).unwrap() {
-        if let Ok(e) = entry {
-            let p = e.path();
-            if p.is_dir() {
-                latest = Some(p);
-                break;
-            }
+    for e in std::fs::read_dir(&team_dir).unwrap().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            latest = Some(p);
+            break;
         }
     }
     let team_dir = match latest {

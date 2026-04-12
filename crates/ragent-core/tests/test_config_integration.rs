@@ -82,7 +82,7 @@ fn test_config_merge_instructions_append() {
 
 #[test]
 fn test_config_merge_experimental_flags() {
-    let base: Config = serde_json::from_str(r#"{}"#).unwrap();
+    let base: Config = serde_json::from_str(r"{}").unwrap();
     assert!(!base.experimental.open_telemetry);
 
     let overlay: Config =
@@ -97,7 +97,7 @@ fn test_config_experimental_flag_sticky() {
     let base: Config =
         serde_json::from_str(r#"{"experimental": {"open_telemetry": true}}"#).unwrap();
 
-    let overlay: Config = serde_json::from_str(r#"{}"#).unwrap();
+    let overlay: Config = serde_json::from_str(r"{}").unwrap();
     let merged = Config::merge(base, overlay);
     // Once set to true in base, stays true even if overlay doesn't set it
     assert!(merged.experimental.open_telemetry);
@@ -288,7 +288,7 @@ fn test_config_merge_skill_dirs_append() {
 
 #[test]
 fn test_config_skill_dirs_default_empty() {
-    let config: Config = serde_json::from_str(r#"{}"#).unwrap();
+    let config: Config = serde_json::from_str(r"{}").unwrap();
     assert!(config.skill_dirs.is_empty());
 }
 

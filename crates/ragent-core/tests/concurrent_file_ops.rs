@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use std::path::PathBuf;
-use tempfile;
 
 #[tokio::test]
 async fn test_concurrent_reader_reads_files() -> Result<()> {

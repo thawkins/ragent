@@ -126,7 +126,7 @@ fn test_decrypt_invalid_v2_data() {
 #[test]
 fn test_decrypt_v2_too_short() {
     // Valid base64 but shorter than NONCE_LEN
-    let short = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &[1, 2, 3]);
+    let short = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [1, 2, 3]);
     let result = decrypt_key(&format!("v2:{short}"));
     assert_eq!(result, "", "Payload shorter than nonce should return empty");
 }

@@ -15,11 +15,10 @@ use ragent_core::team::mailbox::{
 
 /// Helper: create a temp team dir and return its path.
 fn tmp_team_dir(name: &str) -> tempfile::TempDir {
-    let dir = tempfile::Builder::new()
+    tempfile::Builder::new()
         .prefix(&format!("ragent-t6-{name}-"))
         .tempdir()
-        .expect("create temp dir");
-    dir
+        .expect("create temp dir")
 }
 
 // ── T6 basic: register / signal / deregister ────────────────────────────────
@@ -146,7 +145,7 @@ async fn test_notify_latency_benchmark() {
                 "lead",
                 agent_id.as_str(),
                 MessageType::Message,
-                &format!("msg-{msg_idx}"),
+                format!("msg-{msg_idx}"),
             ))
             .unwrap();
         }

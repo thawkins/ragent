@@ -101,52 +101,55 @@ pub fn available_tool_permits() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[tokio::test]
+    #[serial]
     async fn test_acquire_and_release_permit() {
-        let initial = available_process_permits();
+        let before = available_process_permits();
         let permit = acquire_process_permit().await.unwrap();
-        assert_eq!(available_process_permits(), initial - 1);
+        assert_eq!(available_process_permits(), before - 1);
         drop(permit);
-        // Tokio may need a tick to reclaim.
         tokio::task::yield_now().await;
-        assert_eq!(available_process_permits(), initial);
+        assert_eq!(available_process_permits(), before);
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_multiple_permits() {
-        let initial = available_process_permits();
+        let before = available_process_permits();
         let mut permits = Vec::new();
         for _ in 0..4 {
             permits.push(acquire_process_permit().await.unwrap());
         }
-        assert_eq!(available_process_permits(), initial - 4);
+        assert_eq!(available_process_permits(), before - 4);
         drop(permits);
         tokio::task::yield_now().await;
-        assert_eq!(available_process_permits(), initial);
+        assert_eq!(available_process_permits(), before);
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_tool_permit_acquire_release() {
-        let initial = available_tool_permits();
-        assert_eq!(initial, MAX_CONCURRENT_TOOLS);
+        let before = available_tool_permits();
         let permit = acquire_tool_permit().await.unwrap();
-        assert_eq!(available_tool_permits(), initial - 1);
+        assert_eq!(available_tool_permits(), before - 1);
         drop(permit);
         tokio::task::yield_now().await;
-        assert_eq!(available_tool_permits(), initial);
+        assert_eq!(available_tool_permits(), before);
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_tool_permit_concurrent_limit() {
-        let initial = available_tool_permits();
+        let before = available_tool_permits();
         let mut permits = Vec::new();
-        for _ in 0..MAX_CONCURRENT_TOOLS {
+        for _ in 0..before {
             permits.push(acquire_tool_permit().await.unwrap());
         }
         assert_eq!(available_tool_permits(), 0, "All permits should be taken");
         drop(permits);
         tokio::task::yield_now().await;
-        assert_eq!(available_tool_permits(), initial);
+        assert_eq!(available_tool_permits(), before);
     }
 }

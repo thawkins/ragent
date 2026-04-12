@@ -1539,6 +1539,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::used_underscore_binding)]
     fn test_with_custom_url() {
         let provider = CopilotProvider::with_url("https://proxy.example.com/");
         assert_eq!(provider._base_url, "https://proxy.example.com");
@@ -1548,8 +1549,8 @@ mod tests {
     fn test_models_are_free() {
         let provider = CopilotProvider::new();
         for m in provider.default_models() {
-            assert_eq!(m.cost.input, 0.0);
-            assert_eq!(m.cost.output, 0.0);
+            assert!(m.cost.input.abs() < f64::EPSILON);
+            assert!(m.cost.output.abs() < f64::EPSILON);
         }
     }
 

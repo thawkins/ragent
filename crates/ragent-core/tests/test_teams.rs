@@ -187,8 +187,8 @@ fn test_task_claim_concurrent() {
         .map(|h| h.join().expect("thread"))
         .collect();
 
-    let claims: Vec<_> = results.into_iter().filter_map(|(opt, _)| opt).collect();
-    assert_eq!(claims.len(), 1, "exactly one thread should claim the task");
+    let claim_count = results.into_iter().filter_map(|(opt, _)| opt).count();
+    assert_eq!(claim_count, 1, "exactly one thread should claim the task");
 }
 
 #[test]
@@ -353,12 +353,10 @@ fn test_team_config_member_lookup() {
     assert!(config.member_by_name("frontend").is_some());
     assert!(config.member_by_name("backend").is_none());
 
-    let active: Vec<_> = config.active_members().collect();
-    assert_eq!(active.len(), 1);
+    assert_eq!(config.active_members().count(), 1);
 
     config.members[0].status = MemberStatus::Stopped;
-    let active_after: Vec<_> = config.active_members().collect();
-    assert!(active_after.is_empty());
+    assert!(config.active_members().next().is_none());
 }
 
 #[test]

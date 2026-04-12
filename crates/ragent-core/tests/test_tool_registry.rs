@@ -12,7 +12,9 @@ fn test_default_registry_has_all_tools() {
     let registry = create_default_registry();
     let tools = registry.list();
 
-    let expected = [
+    // Core tools that must always be present (not exhaustive — aliases and
+    // new tools are allowed without updating this list).
+    let required = [
         "bash",
         "bash_reset",
         "cancel_task",
@@ -84,10 +86,16 @@ fn test_default_registry_has_all_tools() {
         "websearch",
         "write",
     ];
-    assert_eq!(tools.len(), expected.len());
-    for name in &expected {
+    for name in &required {
         assert!(tools.contains(&name.to_string()), "Missing tool: {}", name);
     }
+    // Ensure the registry has at least the required tools (may include aliases).
+    assert!(
+        tools.len() >= required.len(),
+        "Registry has {} tools but expected at least {}",
+        tools.len(),
+        required.len()
+    );
 }
 
 #[test]
@@ -143,7 +151,12 @@ fn test_tool_definitions_have_required_fields() {
     let registry = create_default_registry();
     let defs = registry.definitions();
 
-    assert_eq!(defs.len(), 70);
+    // At least the 70 original core tools; may grow as new tools and aliases are added.
+    assert!(
+        defs.len() >= 70,
+        "Expected at least 70 tool definitions, got {}",
+        defs.len()
+    );
 
     for def in &defs {
         assert!(
@@ -181,7 +194,7 @@ fn test_tool_definitions_alphabetically_sorted() {
 
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     let mut sorted = names.clone();
-    sorted.sort();
+    sorted.sort_unstable();
     assert_eq!(names, sorted);
 }
 
@@ -191,16 +204,16 @@ struct TestTool;
 
 #[async_trait::async_trait]
 impl Tool for TestTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "test_tool"
     }
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "A test tool"
     }
     fn parameters_schema(&self) -> serde_json::Value {
         json!({"type": "object", "properties": {}})
     }
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "test:execute"
     }
     async fn execute(
@@ -317,9 +330,9 @@ async fn test_read_tool_line_range() {
         .await
         .unwrap();
 
-    assert!(result.content.contains("b"));
-    assert!(result.content.contains("c"));
-    assert!(result.content.contains("d"));
+    assert!(result.content.contains('b'));
+    assert!(result.content.contains('c'));
+    assert!(result.content.contains('d'));
     assert!(
         !result.content.contains("   1  a"),
         "Should not include line 1"

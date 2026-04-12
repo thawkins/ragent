@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use ragent_core::{
-    agent::{self, AgentInfo},
+    agent,
     event::{Event, EventBus},
     permission::PermissionChecker,
     provider,
@@ -230,8 +230,10 @@ fn test_cycleable_agents_excludes_hidden() {
     let app = make_app(bus);
 
     let all_agents = agent::create_builtin_agents();
-    let hidden: Vec<&AgentInfo> = all_agents.iter().filter(|a| a.hidden).collect();
-    assert!(!hidden.is_empty(), "should have hidden agents");
+    assert!(
+        all_agents.iter().any(|a| a.hidden),
+        "should have hidden agents"
+    );
 
     for agent in &app.cycleable_agents {
         assert!(

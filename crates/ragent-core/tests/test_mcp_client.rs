@@ -377,7 +377,7 @@ fn test_validate_stdio_missing_command() {
 fn test_validate_stdio_empty_command() {
     let config = McpServerConfig {
         type_: McpTransport::Stdio,
-        command: Some("".to_string()),
+        command: Some(String::new()),
         ..Default::default()
     };
     let err = validate_mcp_config("test-srv", &config).unwrap_err();

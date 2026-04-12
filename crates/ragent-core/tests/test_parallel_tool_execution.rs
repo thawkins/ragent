@@ -43,11 +43,11 @@ impl ConcurrencyTestTool {
 
 #[async_trait::async_trait]
 impl Tool for ConcurrencyTestTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "concurrency_test"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Test tool for tracking concurrent executions"
     }
 
@@ -64,7 +64,7 @@ impl Tool for ConcurrencyTestTool {
         })
     }
 
-    fn permission_category(&self) -> &str {
+    fn permission_category(&self) -> &'static str {
         "test"
     }
 

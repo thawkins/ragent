@@ -88,7 +88,7 @@ fn test_policy_consensus_prefix_limited_to_64_chars() {
     .unwrap();
     assert!(res.contains("consensus"));
     // Should choose the first agent that matches the consensus prefix.
-    assert!(res.contains("A"));
+    assert!(res.contains('A'));
 }
 
 #[test]
@@ -99,9 +99,9 @@ fn test_policy_consensus_not_met() {
     )
     .unwrap();
     assert!(res.contains("[no consensus]"));
-    assert!(res.contains("X"));
-    assert!(res.contains("Y"));
-    assert!(res.contains("Z"));
+    assert!(res.contains('X'));
+    assert!(res.contains('Y'));
+    assert!(res.contains('Z'));
 }
 
 #[test]

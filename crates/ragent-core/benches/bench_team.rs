@@ -33,7 +33,7 @@ fn bench_mailbox_drain(c: &mut Criterion) {
             "sender",
             "agent-drain",
             MessageType::Message,
-            &format!("message {i}"),
+            format!("message {i}"),
         );
         mailbox.push(msg).expect("push");
     }
@@ -57,7 +57,7 @@ fn bench_mailbox_read_all(c: &mut Criterion) {
             "sender",
             "agent-read",
             MessageType::Message,
-            &format!("message {i}"),
+            format!("message {i}"),
         );
         mailbox.push(msg).expect("push");
     }

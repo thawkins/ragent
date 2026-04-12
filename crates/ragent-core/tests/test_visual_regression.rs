@@ -44,8 +44,11 @@ fn test_pattern_b_visual_format() {
     let content = format_simple_summary("Wrote 42 bytes to file.txt");
 
     // Should be a single line
-    let lines: Vec<&str> = content.lines().collect();
-    assert_eq!(lines.len(), 1, "Pattern B should be single line");
+    assert_eq!(
+        content.lines().count(),
+        1,
+        "Pattern B should be single line"
+    );
 
     // Should not have separator
     assert!(
@@ -128,12 +131,12 @@ fn test_bytes_visual_format() {
 
     // KB should have decimal
     let kb = format_bytes(1536);
-    assert!(kb.contains("."), "KB should have decimal: {}", kb);
+    assert!(kb.contains('.'), "KB should have decimal: {}", kb);
     assert!(kb.contains("KB"), "KB should have unit: {}", kb);
 
     // MB should have decimal
     let mb = format_bytes(1024 * 1024 + 512 * 1024);
-    assert!(mb.contains("."), "MB should have decimal: {}", mb);
+    assert!(mb.contains('.'), "MB should have decimal: {}", mb);
     assert!(mb.contains("MB"), "MB should have unit: {}", mb);
 }
 
@@ -260,7 +263,7 @@ fn test_no_trailing_whitespace() {
     // Summary lines shouldn't have trailing whitespace
     let summary = format_simple_summary("Test summary");
     assert!(!summary.ends_with(' '), "Should not have trailing space");
-    assert!(!summary.ends_with("\t"), "Should not have trailing tab");
+    assert!(!summary.ends_with('\t'), "Should not have trailing tab");
 }
 
 #[test]

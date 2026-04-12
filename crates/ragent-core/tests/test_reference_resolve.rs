@@ -2,7 +2,6 @@
 
 //! External tests for `ragent_core::reference::resolve`.
 
-use docx_rust;
 use ragent_core::reference::parse::parse_refs;
 use ragent_core::reference::resolve::resolve_all_refs;
 use std::fs;

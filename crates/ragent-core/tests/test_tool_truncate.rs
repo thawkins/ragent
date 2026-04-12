@@ -48,8 +48,8 @@ fn test_truncate_content_with_truncation() {
     let result = truncate_content(content, 3); // Show 2 lines + marker
 
     // With max_lines=3, we show max_lines-1 = 2 lines, then marker
-    assert!(result.contains("a"), "Should contain first line");
-    assert!(result.contains("b"), "Should contain second line");
+    assert!(result.contains('a'), "Should contain first line");
+    assert!(result.contains('b'), "Should contain second line");
     // Lines c, d, e are omitted (5 total - 2 shown = 3 omitted)
     assert!(
         result.contains("lines omitted"),
@@ -121,13 +121,13 @@ fn test_truncate_content_head_tail_with_truncation() {
     let content = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10";
     let result = truncate_content_head_tail(content, 6, 2, 2);
 
-    assert!(result.contains("1"), "Should contain first head line");
-    assert!(result.contains("2"), "Should contain second head line");
+    assert!(result.contains('1'), "Should contain first head line");
+    assert!(result.contains('2'), "Should contain second head line");
     assert!(
         result.contains("omitted"),
         "Should have marker for middle lines"
     );
-    assert!(result.contains("9"), "Should contain first tail line");
+    assert!(result.contains('9'), "Should contain first tail line");
     assert!(result.contains("10"), "Should contain second tail line");
 }
 
@@ -234,8 +234,8 @@ fn test_head_tail_edge_cases() {
     let content = "a\nb\nc\nd";
     let result = truncate_content_head_tail(content, 3, 2, 2);
     // When head + tail > max, we adjust
-    assert!(result.contains("a"));
-    assert!(result.contains("d"));
+    assert!(result.contains('a'));
+    assert!(result.contains('d'));
 }
 
 // =============================================================================

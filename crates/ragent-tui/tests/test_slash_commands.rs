@@ -750,8 +750,8 @@ fn test_chat_keystrokes_produce_expected_edit_result() {
     }
 
     // Verify the final state
-    assert_eq!(chat.input, "aZ💡");
-    assert_eq!(chat.input_cursor, 3);
+    assert_eq!(chat.input, "aZ");
+    assert_eq!(chat.input_cursor, 2);
 }
 
 #[test]

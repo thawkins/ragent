@@ -156,14 +156,14 @@ fn test_openskills_project_overrides_personal() {
 
 #[test]
 fn test_parse_anthropic_format_with_license() {
-    let content = r#"---
+    let content = r"---
 name: pdf-reader
 description: Read and extract text from PDF files
 license: MIT
 ---
 
 Extract text from the provided PDF file.
-"#;
+";
     let skill = parse_skill_md(
         content,
         &PathBuf::from("/project/.agent/skills/pdf-reader/SKILL.md"),
@@ -279,13 +279,13 @@ Build an MCP server that wraps the given API.
 fn test_parse_anthropic_format_minimal() {
     // The Anthropic spec requires name and description, but ragent only requires
     // the frontmatter block. This tests that an Anthropic-minimal skill works.
-    let content = r#"---
+    let content = r"---
 name: simple
 description: A simple skill
 ---
 
 Do the thing.
-"#;
+";
     let skill = parse_skill_md(
         content,
         &PathBuf::from("/project/.agent/skills/simple/SKILL.md"),

@@ -152,7 +152,7 @@ async fn test_sandbox_allows_pipeline_with_allowed_first_cmd() {
         .await
         .unwrap();
     assert!(
-        result.contains("3"),
+        result.contains('3'),
         "Pipeline with allowed first command should work: {result}"
     );
 }

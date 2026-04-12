@@ -91,13 +91,14 @@ fn test_websearch_schema_has_query() {
     let schema = tool.parameters_schema();
     let props = schema["properties"].as_object().unwrap();
     assert!(props.contains_key("query"));
-    let required = schema["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert!(required.contains(&"query"));
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .any(|v| v == "query")
+    );
 }
 
 #[test]
@@ -233,7 +234,7 @@ async fn test_websearch_mock_success() {
     // We test the Tavily response parsing via a direct HTTP call to our mock
     let client = reqwest::Client::new();
     let resp = client
-        .post(&format!("{}", addr))
+        .post(format!("{}", addr))
         .json(&json!({"query": "rust", "max_results": 5}))
         .send()
         .await
@@ -257,7 +258,7 @@ async fn test_websearch_mock_empty_results() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(&format!("{}", addr))
+        .post(format!("{}", addr))
         .json(&json!({"query": "xyznonexistent", "max_results": 5}))
         .send()
         .await
@@ -275,7 +276,7 @@ async fn test_websearch_mock_auth_error() {
 
     let client = reqwest::Client::new();
     let resp = client
-        .post(&format!("{}", addr))
+        .post(format!("{}", addr))
         .json(&json!({"query": "test"}))
         .send()
         .await

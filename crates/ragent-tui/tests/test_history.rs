@@ -344,7 +344,11 @@ async fn test_flush_history_if_due_saves_after_deadline() {
 
     // Simulate dirty state with an already-expired deadline.
     app.history_dirty = true;
-    app.history_save_deadline = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    app.history_save_deadline = Some(
+        std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap(),
+    );
 
     app.flush_history_if_due();
 
@@ -388,7 +392,11 @@ async fn test_flush_history_if_due_skips_before_deadline() {
 async fn test_flush_history_if_due_no_path_set() {
     let mut app = make_app();
     app.history_dirty = true;
-    app.history_save_deadline = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    app.history_save_deadline = Some(
+        std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(1))
+            .unwrap(),
+    );
 
     // Should not panic even though dirty + deadline expired but no path set.
     app.flush_history_if_due();

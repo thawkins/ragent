@@ -371,7 +371,7 @@ async fn test_xlsx_with_range() {
 
     // The range A1:B2 should cover the first 2 rows and 2 columns
     assert!(
-        result.content.contains("A"),
+        result.content.contains('A'),
         "Range should include A1 content"
     );
 
@@ -379,6 +379,7 @@ async fn test_xlsx_with_range() {
 }
 
 #[tokio::test]
+#[allow(clippy::approx_constant)]
 async fn test_xlsx_typed_cells() {
     let dir = test_dir("xlsx_types");
     let ctx = make_ctx(dir.clone());

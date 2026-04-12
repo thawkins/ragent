@@ -246,7 +246,7 @@ fn test_parse_scope_preserved() {
 
 #[test]
 fn test_parse_hooks_converted_to_json() {
-    let content = r#"---
+    let content = r"---
 description: with hooks
 hooks:
   pre:
@@ -255,7 +255,7 @@ hooks:
     command: echo done
 ---
 Body
-"#;
+";
     let skill = parse(content, "hooks-test").expect("should parse hooks");
     assert!(skill.hooks.is_some());
     let hooks = skill.hooks.as_ref().expect("hooks should exist");

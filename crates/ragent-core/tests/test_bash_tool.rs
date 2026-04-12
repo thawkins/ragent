@@ -3,6 +3,7 @@
 use ragent_core::event::EventBus;
 use ragent_core::tool::{Tool, ToolContext};
 use serde_json::json;
+use serial_test::serial;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ fn bash_tool() -> ragent_core::tool::bash::BashTool {
 // ── Denied destructive patterns ──────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_rm_rf_root() {
     let tool = bash_tool();
     let result = tool
@@ -44,6 +46,7 @@ async fn test_bash_rejects_rm_rf_root() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_mkfs() {
     let tool = bash_tool();
     let result = tool
@@ -53,6 +56,7 @@ async fn test_bash_rejects_mkfs() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_dd_if() {
     let tool = bash_tool();
     let result = tool
@@ -65,6 +69,7 @@ async fn test_bash_rejects_dd_if() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_fork_bomb() {
     let tool = bash_tool();
     let result = tool
@@ -74,6 +79,7 @@ async fn test_bash_rejects_fork_bomb() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_chmod_777_root() {
     let tool = bash_tool();
     let result = tool
@@ -83,6 +89,7 @@ async fn test_bash_rejects_chmod_777_root() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_shadow_exfil() {
     let tool = bash_tool();
     // ".bash_history" is a denied pattern (literal substring match)
@@ -93,6 +100,7 @@ async fn test_bash_rejects_shadow_exfil() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_ssh_key_theft() {
     let tool = bash_tool();
     let result = tool
@@ -105,6 +113,7 @@ async fn test_bash_rejects_ssh_key_theft() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_insmod() {
     let tool = bash_tool();
     let result = tool
@@ -116,6 +125,7 @@ async fn test_bash_rejects_insmod() {
 // ── Obfuscation rejection ────────────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_base64_to_shell() {
     let tool = bash_tool();
     let result = tool
@@ -130,6 +140,7 @@ async fn test_bash_rejects_base64_to_shell() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_python_exec() {
     let tool = bash_tool();
     let result = tool
@@ -142,6 +153,7 @@ async fn test_bash_rejects_python_exec() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_hex_escape() {
     let tool = bash_tool();
     let result = tool
@@ -151,6 +163,7 @@ async fn test_bash_rejects_hex_escape() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_rejects_eval_substitution() {
     let tool = bash_tool();
     let result = tool
@@ -162,6 +175,7 @@ async fn test_bash_rejects_eval_substitution() {
 // ── Safe commands are NOT blocked ────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_echo() {
     let tool = bash_tool();
     let result = tool
@@ -173,6 +187,7 @@ async fn test_bash_allows_echo() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_ls() {
     let tool = bash_tool();
     let result = tool
@@ -184,6 +199,7 @@ async fn test_bash_allows_ls() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_git_status() {
     let tool = bash_tool();
     let result = tool
@@ -248,6 +264,7 @@ fn test_bash_safe_command_whitelist_recognizes_allowed_commands() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_rm_with_safe_path() {
     // "rm" without "rm -rf /" pattern should be fine
     let tool = bash_tool();
@@ -265,6 +282,7 @@ async fn test_bash_allows_rm_with_safe_path() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_base64_without_pipe_to_shell() {
     // base64 alone (not piped to bash/sh) should be fine
     let tool = bash_tool();
@@ -278,6 +296,7 @@ async fn test_bash_allows_base64_without_pipe_to_shell() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_python_without_exec() {
     let tool = bash_tool();
     let result = tool
@@ -298,6 +317,7 @@ async fn test_bash_allows_python_without_exec() {
 // look like the banned `nc` command to a naive scanner.
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_heredoc_with_nc_in_body() {
     let tool = bash_tool();
     // The body "a\nb\nc\nd\ne" contains backslash-n-c which must NOT
@@ -321,6 +341,7 @@ async fn test_bash_allows_heredoc_with_nc_in_body() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_still_rejects_nc_in_heredoc_command_line() {
     let tool = bash_tool();
     // If `nc` appears in the command part (not the heredoc body), it should still be rejected.
@@ -337,6 +358,7 @@ async fn test_bash_still_rejects_nc_in_heredoc_command_line() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_missing_command_param() {
     let tool = bash_tool();
     let result = tool.execute(json!({}), &make_ctx()).await;
@@ -351,6 +373,7 @@ async fn test_bash_missing_command_param() {
 // ── Timeout ──────────────────────────────────────────────────────
 
 #[tokio::test]
+#[serial]
 async fn test_bash_timeout() {
     let tool = bash_tool();
     let result = tool
@@ -370,6 +393,7 @@ async fn test_bash_timeout() {
 // trigger the banned-command check (e.g. "opencode" contains "nc").
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_ls_path_containing_banned_substring() {
     let tool = bash_tool();
     // "opencode" contains "nc" — must NOT be rejected
@@ -386,6 +410,7 @@ async fn test_bash_allows_ls_path_containing_banned_substring() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_still_rejects_standalone_nc() {
     let tool = bash_tool();
     // Standalone `nc` must still be rejected
@@ -396,6 +421,7 @@ async fn test_bash_still_rejects_standalone_nc() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_bash_allows_path_containing_wget_substring() {
     let tool = bash_tool();
     // "download-wget-results" contains "wget" — must NOT be rejected

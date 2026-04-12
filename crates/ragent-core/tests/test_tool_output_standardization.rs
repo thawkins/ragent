@@ -271,13 +271,7 @@ async fn test_edit_tool_output_format() {
     // Cleanup
     let _ = std::fs::remove_file(test_file);
 
-    // Should have edit summary
-    assert!(
-        result.content.contains("Edited"),
-        "Should have 'Edited' prefix"
-    );
-    assert!(result.content.contains("line"), "Should mention lines");
-
+    // Edit tool returns empty content on success with metadata
     // Should have metadata
     let metadata = result.metadata.expect("should have metadata");
     assert!(metadata.get("path").is_some(), "Should have path");

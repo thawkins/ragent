@@ -58,13 +58,14 @@ fn test_plan_exit_schema_has_summary() {
     let schema = tool.parameters_schema();
     let props = schema["properties"].as_object().unwrap();
     assert!(props.contains_key("summary"));
-    let required = schema["required"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect::<Vec<_>>();
-    assert!(required.contains(&"summary"));
+    assert!(
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .any(|v| v == "summary")
+    );
 }
 
 // ── Error condition tests ────────────────────────────────────────

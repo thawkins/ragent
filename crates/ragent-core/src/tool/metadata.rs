@@ -267,7 +267,7 @@ mod tests {
         let obj = metadata.unwrap().as_object().unwrap().clone();
         assert_eq!(obj.get("exit_code").unwrap().as_i64().unwrap(), 0);
         assert_eq!(obj.get("duration_ms").unwrap().as_u64().unwrap(), 150);
-        assert_eq!(obj.get("timed_out").unwrap().as_bool().unwrap(), false);
+        assert!(!obj.get("timed_out").unwrap().as_bool().unwrap());
     }
 
     #[test]
@@ -293,7 +293,7 @@ mod tests {
         let obj = metadata.unwrap().as_object().unwrap().clone();
         assert_eq!(obj.get("line_count").unwrap().as_u64().unwrap(), 100);
         assert_eq!(obj.get("total_lines").unwrap().as_u64().unwrap(), 500);
-        assert_eq!(obj.get("summarized").unwrap().as_bool().unwrap(), true);
+        assert!(obj.get("summarized").unwrap().as_bool().unwrap());
     }
 
     #[test]

@@ -12,7 +12,7 @@ fn test_snapshot_roundtrip() {
     let mut f = std::fs::File::create(&file_path).unwrap();
     f.write_all(b"hello snapshot").unwrap();
 
-    let snapshot = take_snapshot("session1", "msg1", &[file_path.clone()]).unwrap();
+    let snapshot = take_snapshot("session1", "msg1", std::slice::from_ref(&file_path)).unwrap();
     assert_eq!(snapshot.files.len(), 1);
     assert_eq!(snapshot.files.get(&file_path).unwrap(), b"hello snapshot");
 

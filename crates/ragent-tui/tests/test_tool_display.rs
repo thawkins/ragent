@@ -171,7 +171,7 @@ fn test_result_summary_bash_success() {
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
     // Bash shows lines and exit code, not duration directly
-    assert!(summary.contains("5"), "Should show line count: {}", summary);
+    assert!(summary.contains('5'), "Should show line count: {}", summary);
     assert!(
         summary.contains("exit 0"),
         "Should show exit code: {}",
@@ -228,8 +228,8 @@ fn test_result_summary_grep_tool() {
     let result = tool_result_summary("grep", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(summary.contains("5"), "Should show match count");
-    assert!(summary.contains("3"), "Should show file count");
+    assert!(summary.contains('5'), "Should show match count");
+    assert!(summary.contains('3'), "Should show file count");
 }
 
 #[test]
@@ -270,8 +270,8 @@ fn test_result_summary_multiedit_tool() {
     let result = tool_result_summary("multiedit", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(summary.contains("5"), "Should show edit count: {}", summary);
-    assert!(summary.contains("3"), "Should show file count: {}", summary);
+    assert!(summary.contains('5'), "Should show edit count: {}", summary);
+    assert!(summary.contains('3'), "Should show file count: {}", summary);
 }
 
 #[test]
@@ -285,8 +285,8 @@ fn test_result_summary_edit_tool() {
     let result = tool_result_summary("edit", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(summary.contains("5"), "Should show old lines");
-    assert!(summary.contains("3"), "Should show new lines");
+    assert!(summary.contains('5'), "Should show old lines");
+    assert!(summary.contains('3'), "Should show new lines");
 }
 
 #[test]
