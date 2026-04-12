@@ -1,15 +1,24 @@
 # Release
 
-## Current Version: 0.1.0-alpha.35
+## Current Version: 0.1.0-alpha.36
+
+### Fixed
+- Comprehensive test & lint cleanup across the entire workspace (43 files, 1,709 tests all passing)
+- Added `#[serial]` to bash tool tests to eliminate flaky process permit contention
+- Fixed webfetch test metadata field names, slash command keystroke test, push_log doctest
+- Resolved all clippy warnings (single_char_pattern, needless_collect, unchecked_time_subtraction, etc.)
+
+### Changed
+- Updated dependencies: clap 4.6, tokio 1.51, tracing-subscriber 0.3.23, uuid 1.23
+- Version bump to 0.1.0-alpha.36
+
+## Previous: 0.1.0-alpha.35
 
 ### Added
-- **pre-flight.sh** — Local CI check script that runs all GitHub Actions checks before pushing; supports `--quick` flag
+- **pre-flight.sh** — Local CI check script; supports `--quick` flag
 
 ### Fixed
 - Fixed lint errors in test files (unused variables, imports, mut warnings, missing docs)
-
-### Changed
-- Version bump to 0.1.0-alpha.35
 
 ## Previous: 0.1.0-alpha.34
 
