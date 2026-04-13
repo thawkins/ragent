@@ -437,7 +437,7 @@ impl LlmClient for OllamaCloudClient {
         }
 
         let response = tokio::time::timeout(
-            std::time::Duration::from_secs(180),
+            std::time::Duration::from_secs(300),
             self.http
                 .post(&url)
                 .header("content-type", "application/json")
@@ -446,7 +446,7 @@ impl LlmClient for OllamaCloudClient {
                 .send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Ollama Cloud: initial response timed out after 180s"))?
+        .map_err(|_| anyhow::anyhow!("Ollama Cloud: initial response timed out after 300s"))?
         .context("Failed to connect to Ollama Cloud")?;
 
         if !response.status().is_success() {
@@ -477,7 +477,7 @@ impl LlmClient for OllamaCloudClient {
 
             while !stream_done {
                 let chunk_result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(180),
+                    std::time::Duration::from_secs(300),
                     stream.next(),
                 )
                 .await
@@ -486,7 +486,7 @@ impl LlmClient for OllamaCloudClient {
                     Ok(None) => break,
                     Err(_) => {
                         yield StreamEvent::Error {
-                            message: "Ollama Cloud: stream stalled — no data received for 180s".to_string(),
+                            message: "Ollama Cloud: stream stalled — no data received for 300s".to_string(),
                         };
                         break;
                     }
