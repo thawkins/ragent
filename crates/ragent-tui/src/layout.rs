@@ -1755,8 +1755,19 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 ));
             }
             if app.code_index_busy {
+                let pct_label = if let Some(ref idx) = app.code_index {
+                    let (done, total) = idx.reindex_progress();
+                    if total > 0 {
+                        let pct = (done as f64 / total as f64 * 100.0).min(100.0);
+                        format!(" ⟳indexing {pct:.0}%")
+                    } else {
+                        " ⟳indexing".to_string()
+                    }
+                } else {
+                    " ⟳indexing".to_string()
+                };
                 row2_left.push(Span::styled(
-                    " ⟳indexing",
+                    pct_label,
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                 ));
             }

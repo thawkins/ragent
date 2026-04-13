@@ -64,6 +64,7 @@ use anyhow::{Context, Result};
 use parser::ParserRegistry;
 use search::{FtsIndex, FtsSymbol, SearchResult};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use store::IndexStore;
@@ -85,6 +86,10 @@ pub struct CodeIndex {
     parsers: ParserRegistry,
     project_root: PathBuf,
     config: CodeIndexConfig,
+    /// Total files to process in the current reindex (0 when idle).
+    reindex_total: AtomicU32,
+    /// Files processed so far in the current reindex.
+    reindex_done: AtomicU32,
 }
 
 impl CodeIndex {
@@ -106,6 +111,8 @@ impl CodeIndex {
             parsers,
             project_root: config.project_root.clone(),
             config: config.clone(),
+            reindex_total: AtomicU32::new(0),
+            reindex_done: AtomicU32::new(0),
         })
     }
 
@@ -122,6 +129,8 @@ impl CodeIndex {
             parsers,
             project_root: config.project_root.clone(),
             config: config.clone(),
+            reindex_total: AtomicU32::new(0),
+            reindex_done: AtomicU32::new(0),
         })
     }
 
@@ -261,6 +270,16 @@ impl CodeIndex {
         }
 
         Some(stats)
+    }
+
+    /// Returns `(done, total)` for the current reindex operation.
+    ///
+    /// Both are 0 when no reindex is running.  Lock-free (atomic reads).
+    pub fn reindex_progress(&self) -> (u32, u32) {
+        (
+            self.reindex_done.load(Ordering::Relaxed),
+            self.reindex_total.load(Ordering::Relaxed),
+        )
     }
 
     /// Ensure FTS index is in sync with the SQLite store.
@@ -438,6 +457,9 @@ impl CodeIndex {
         const YIELD_MS: u64 = 5;
 
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
+        self.reindex_total.store(changed.len() as u32, Ordering::Relaxed);
+        self.reindex_done.store(0, Ordering::Relaxed);
+
         for (i, sf) in changed.iter().enumerate() {
             let abs_path = self.project_root.join(&sf.path);
             let content = match std::fs::read(&abs_path) {
@@ -485,6 +507,8 @@ impl CodeIndex {
             if (i + 1) % CHUNK_SIZE == 0 {
                 std::thread::sleep(Duration::from_millis(YIELD_MS));
             }
+
+            self.reindex_done.store((i + 1) as u32, Ordering::Relaxed);
         }
 
         // Remove deleted files from FTS.
@@ -502,6 +526,10 @@ impl CodeIndex {
 
         result.elapsed_ms = start.elapsed().as_millis() as u64;
         debug!("{result}");
+
+        // Clear progress counters.
+        self.reindex_total.store(0, Ordering::Relaxed);
+        self.reindex_done.store(0, Ordering::Relaxed);
 
         Ok(result)
     }
