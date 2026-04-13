@@ -1,16 +1,15 @@
 //! TUI layout and rendering.
 //!
 //! Builds the main layout with a 2-line status bar at the top, messages in the
-//! middle, and an input area at the bottom. On first launch the home screen
-//! shows a centered logo, prompt, tips, and provider status.
+//! middle, and an input area at the bottom.
 //!
-//! The status bar is now organized into 2 lines for better readability:
+//! The status bar is organized into 2 lines for better readability:
 //! - Line 1: Session, agent, working directory, git branch, and status message
-//! - Line 2: Provider, token usage, active tasks, LSP status, and log indicator
+//! - Line 2: Provider, token usage, active tasks, LSP status, code index, and log indicator
 
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Flex, Layout, Position, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -25,7 +24,6 @@ use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
 };
-use crate::logo;
 use crate::widgets::message_widget::{
     capitalize_tool_name, read_line_range, tool_inline_diff, tool_input_summary,
     tool_result_summary,
@@ -46,11 +44,7 @@ fn shorten_middle(s: &str, max_chars: usize) -> String {
     format!("{left}…{right}")
 }
 
-/// The version string shown on the home screen.
-#[allow(dead_code)]
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// Render the full TUI, dispatching to the Home or Chat screen.
+/// Render the full TUI chat screen.
 ///
 /// # Examples
 ///
@@ -63,7 +57,6 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// # }
 /// ```
 pub fn render(frame: &mut Frame, app: &mut App) {
-    // Always render chat screen - home screen has been removed
     render_chat(frame, app);
     // History picker overlay — rendered on top of everything.
     if app.history_picker.is_some() {
@@ -182,282 +175,6 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Home screen
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn render_home(frame: &mut Frame, app: &mut App) {
-    let area = frame.area();
-    app.message_area = Rect::default();
-    app.log_area = Rect::default();
-    app.input_area = Rect::default();
-    app.active_agents_area = Rect::default();
-    app.teams_area = Rect::default();
-    app.output_view_area = Rect::default();
-    app.agents_button_area = Rect::default();
-    app.teams_button_area = Rect::default();
-    app.agents_close_button_area = Rect::default();
-    app.teams_close_button_area = Rect::default();
-    app.show_agents_window = false;
-    app.show_teams_window = false;
-    if app
-        .text_selection
-        .as_ref()
-        .is_some_and(|s| s.pane == SelectionPane::Input)
-    {
-        app.text_selection = None;
-    }
-
-    // Compute input height based on wrapped text length
-    let max_width = 88u16.min(area.width.saturating_sub(4));
-    let inner_width = max_width.saturating_sub(2).max(1) as usize; // inside borders
-    let input_height = input_widget_height(&app.input, inner_width);
-
-    // Vertical layout: flex-grow top | logo | gap | prompt | provider | tip | flex-grow bottom | status bar (2 lines)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),               // top spacer
-            Constraint::Length(4),            // logo (4 lines)
-            Constraint::Length(1),            // gap
-            Constraint::Length(input_height), // prompt input (dynamic)
-            Constraint::Length(2),            // provider status
-            Constraint::Length(2),            // tip
-            Constraint::Min(1),               // bottom spacer
-            Constraint::Length(2),            // status bar (2 lines)
-        ])
-        .flex(Flex::Center)
-        .split(area);
-
-    // Logo — centered
-    render_logo(frame, chunks[1]);
-
-    // Prompt — centered input
-    let home_input_area = centered_horizontal(max_width, chunks[3]);
-    render_home_input(frame, app, home_input_area);
-    apply_selection_highlight(frame, app, SelectionPane::Input, home_input_area);
-
-    // Slash menu dropdown (above the input, if active)
-    if app.slash_menu.is_some() {
-        render_slash_menu(frame, app, home_input_area);
-    }
-
-    // File menu dropdown (above the input, if active)
-    if app.file_menu.is_some() {
-        render_file_menu(frame, app, home_input_area);
-    }
-
-    // Provider status
-    render_provider_status(frame, app, chunks[4]);
-
-    // Tip — centered below prompt
-    render_tip(frame, app, chunks[5]);
-
-    // Bottom status bar
-    render_home_status_bar(frame, app, chunks[7]);
-
-    // Provider setup dialog overlay (if active)
-    if app.provider_setup.is_some() {
-        render_provider_setup_dialog(frame, app);
-    }
-
-    // LSP discover dialog overlay
-    if app.lsp_discover.is_some() {
-        render_lsp_discover_dialog(frame, app);
-    }
-
-    // LSP edit dialog overlay
-    if app.lsp_edit.is_some() {
-        render_lsp_edit_dialog(frame, app);
-    }
-
-    // MCP discover dialog overlay
-    if app.mcp_discover.is_some() {
-        render_mcp_discover_dialog(frame, app);
-    }
-
-    // Force-cleanup confirmation modal overlay
-    if app.pending_forcecleanup.is_some() {
-        render_force_cleanup_dialog(frame, app);
-    }
-
-    // Shortcuts help panel overlay
-    if app.show_shortcuts {
-        render_shortcuts_panel(frame);
-    }
-
-    // Context menu overlay
-    if app.context_menu.is_some() {
-        render_context_menu(frame, app);
-    }
-
-    // Plan approval dialog overlay
-    if app.plan_approval_pending.is_some() {
-        render_plan_approval_dialog(frame, app);
-    }
-}
-
-#[allow(dead_code)]
-fn render_logo(frame: &mut Frame, area: Rect) {
-    let logo_width = logo::LOGO.iter().map(|l| l.len()).max().unwrap_or(0) as u16;
-
-    // Centre the logo horizontally
-    let centered = centered_horizontal(logo_width, area);
-
-    let lines: Vec<Line<'_>> = logo::LOGO
-        .iter()
-        .map(|line| {
-            Line::from(Span::styled(
-                *line,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ))
-        })
-        .collect();
-
-    let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
-    frame.render_widget(paragraph, centered);
-}
-
-const INPUT_PLACEHOLDER: &str =
-    "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
-
-#[allow(dead_code)]
-fn render_home_input(frame: &mut Frame, app: &App, area: Rect) {
-    let inner_width = area.width.saturating_sub(2).max(1) as usize;
-
-    // Show staged attachments in the block title when present.
-    let title = if app.pending_attachments.is_empty() {
-        " Ask anything… ".to_string()
-    } else {
-        let names: Vec<String> = app
-            .pending_attachments
-            .iter()
-            .filter_map(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| format!("📎{s}"))
-            })
-            .collect();
-        format!(" Ask anything…  {} ", names.join("  "))
-    };
-    let title_style = if app.pending_attachments.is_empty() {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
-        .title(Span::styled(title, title_style));
-
-    if app.input.is_empty() {
-        // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
-        let ghost = Line::from(vec![
-            Span::raw("> "),
-            Span::styled(INPUT_PLACEHOLDER, Style::default().fg(Color::DarkGray)),
-        ]);
-        let paragraph = Paragraph::new(ghost).block(block);
-        frame.render_widget(paragraph, area);
-        // Cursor sits right after the "> " prefix.
-        frame.set_cursor_position((area.x + 1 + 2, area.y + 1));
-    } else {
-        let kb_sel = app.kb_selection_char_range();
-        let wrapped_lines = input_lines_with_kb_selection(&app.input, inner_width, kb_sel);
-        let paragraph = Paragraph::new(wrapped_lines).block(block);
-        frame.render_widget(paragraph, area);
-
-        // Position cursor accounting for wrapped lines
-        let (cursor_line, cursor_col) =
-            input_cursor_display_pos(&app.input, app.input_cursor, inner_width);
-        let cursor_x = area.x + 1 + cursor_col as u16;
-        let cursor_y = area.y + 1 + cursor_line as u16;
-        frame.set_cursor_position((cursor_x, cursor_y));
-    }
-}
-
-#[allow(dead_code)]
-fn render_tip(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 88u16.min(area.width.saturating_sub(4));
-    let centered = centered_horizontal(max_width, area);
-
-    let tip_line = Line::from(vec![
-        Span::styled(
-            "● Tip  ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(app.tip, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    let paragraph = Paragraph::new(tip_line).alignment(Alignment::Left);
-    frame.render_widget(paragraph, centered);
-}
-
-#[allow(dead_code)]
-fn render_provider_status(frame: &mut Frame, app: &App, area: Rect) {
-    let max_width = 88u16.min(area.width.saturating_sub(4));
-    let centered = centered_horizontal(max_width, area);
-
-    let mut lines: Vec<Line<'_>> = Vec::new();
-
-    if let Some(ref prov) = app.configured_provider {
-        let source_label = match prov.source {
-            crate::app::ProviderSource::EnvVar => " (env)",
-            crate::app::ProviderSource::Database => " (saved)",
-            crate::app::ProviderSource::AutoDiscovered => " (auto)",
-        };
-
-        // Health indicator: green dot, red cross, or yellow dot while checking
-        let (health_icon, health_color) = match app.provider_health_status() {
-            Some(true) => ("● ", Color::Green),
-            Some(false) => ("✗ ", Color::Red),
-            None => ("● ", Color::Yellow),
-        };
-
-        let mut spans = vec![
-            Span::styled(health_icon, Style::default().fg(health_color)),
-            Span::styled(&prov.name, Style::default().fg(Color::Green)),
-            Span::styled(source_label, Style::default().fg(Color::DarkGray)),
-        ];
-
-        if let Some(label) = app.provider_model_label() {
-            let model_id = label.split(" / ").nth(1).unwrap_or(&label);
-            spans.push(Span::styled(
-                format!("  model: {}", model_id),
-                Style::default().fg(Color::Cyan),
-            ));
-        }
-
-        spans.push(Span::styled(
-            "  — use /provider to change",
-            Style::default().fg(Color::DarkGray),
-        ));
-
-        lines.push(Line::from(spans));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled(
-                "⚠ No provider configured",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "  — use /provider to set up",
-                Style::default().fg(Color::Yellow),
-            ),
-        ]));
-    }
-
-    let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
-    frame.render_widget(paragraph, centered);
 }
 
 fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
@@ -1074,162 +791,7 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
 }
 
 #[allow(dead_code)]
-fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let version = format!("v{}", VERSION);
 
-    // Split area into 2 lines
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Length(1)])
-        .split(area);
-
-    // Row 1: Context info (agent, path, git branch, status)
-    let mut row1_left: Vec<Span<'_>> = vec![
-        Span::styled(" agent: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            app.agent_name.clone(),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" │ {} ", app.cwd),
-            Style::default().fg(Color::White),
-        ),
-    ];
-
-    if let Some(ref branch) = app.git_branch {
-        row1_left.push(Span::styled(
-            format!("│ ⎇ {} ", branch),
-            Style::default().fg(Color::Green),
-        ));
-    }
-
-    // Status indicator on the right
-    let mut row1_right: Vec<Span<'_>> = vec![Span::styled(
-        format!("ragent {} ", version),
-        Style::default().fg(Color::DarkGray),
-    )];
-
-    if !app.status.is_empty() && app.status != "Ready" {
-        row1_right.insert(
-            0,
-            Span::styled(
-                format!("{} │ ", app.status),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        );
-    }
-
-    let left_len: usize = row1_left.iter().map(|s| s.content.len()).sum();
-    let right_len: usize = row1_right.iter().map(|s| s.content.len()).sum();
-    let gap = rows[0]
-        .width
-        .saturating_sub(left_len as u16 + right_len as u16);
-    let gap_span = Span::raw(" ".repeat(gap as usize));
-
-    row1_left.push(gap_span);
-    row1_left.extend(row1_right);
-
-    let line1 = Line::from(row1_left);
-    frame.render_widget(Paragraph::new(line1), rows[0]);
-
-    // Row 2: Resources and state (provider, tokens, log, tasks)
-    let mut row2_left: Vec<Span<'_>> = Vec::new();
-
-    // Provider info
-    if let Some(label) = app.provider_model_label() {
-        let (icon, health_color) = match app.provider_health_status() {
-            Some(true) => ("●", Color::Green),
-            Some(false) => ("✗", Color::Red),
-            None => ("●", Color::Yellow),
-        };
-        row2_left.push(Span::styled(
-            format!("{} ", icon),
-            Style::default()
-                .fg(health_color)
-                .add_modifier(Modifier::BOLD),
-        ));
-        row2_left.push(Span::styled(
-            format!("{} ", label),
-            Style::default().fg(Color::White),
-        ));
-    }
-
-    // Token usage
-    row2_left.push(Span::styled(
-        format!("│ tokens: {}/{} ", app.token_usage.0, app.token_usage.1),
-        Style::default().fg(Color::Cyan),
-    ));
-
-    // Log indicator
-    if app.show_log {
-        row2_left.push(Span::styled(
-            "│ log: on ",
-            Style::default().fg(Color::Yellow),
-        ));
-    }
-
-    // Active tasks
-    if !app.active_tasks.is_empty() {
-        let running = app
-            .active_tasks
-            .iter()
-            .filter(|t| t.status == ragent_core::task::TaskStatus::Running)
-            .count();
-        row2_left.push(Span::styled(
-            format!("│ tasks: {}/{} ", running, app.active_tasks.len()),
-            Style::default().fg(Color::Magenta),
-        ));
-    }
-
-    // Code index indicator
-    if let Some(ref idx) = app.code_index {
-        if let Ok(stats) = idx.status() {
-            let label = if stats.files_indexed > 0 {
-                format!("│ 📇 {} files/{} syms ", stats.files_indexed, stats.total_symbols)
-            } else {
-                "│ 📇 indexing… ".to_string()
-            };
-            row2_left.push(Span::styled(
-                label,
-                Style::default().fg(Color::Cyan),
-            ));
-        }
-    }
-    let session_display = app
-        .session_id
-        .as_deref()
-        .map(|s| &s[..8.min(s.len())])
-        .unwrap_or("none");
-    let row2_right: Vec<Span<'_>> = vec![Span::styled(
-        format!("session: {} ", session_display),
-        Style::default().fg(Color::DarkGray),
-    )];
-
-    let left_len2: usize = row2_left.iter().map(|s| s.content.len()).sum();
-    let right_len2: usize = row2_right.iter().map(|s| s.content.len()).sum();
-    let gap2 = rows[1]
-        .width
-        .saturating_sub(left_len2 as u16 + right_len2 as u16);
-    let gap_span2 = Span::raw(" ".repeat(gap2 as usize));
-
-    row2_left.push(gap_span2);
-    row2_left.extend(row2_right);
-
-    let line2 = Line::from(row2_left);
-    frame.render_widget(Paragraph::new(line2), rows[1]);
-}
-
-/// Centre a block of `width` within the given `area` horizontally.
-#[allow(dead_code)]
-fn centered_horizontal(width: u16, area: Rect) -> Rect {
-    let w = width.min(area.width);
-    let x = area.x + (area.width.saturating_sub(w)) / 2;
-    Rect::new(x, area.y, w, area.height)
-}
 
 /// Split `text` into fixed-width character-wrapped lines.
 ///
@@ -1428,19 +990,14 @@ fn input_lines_with_kb_selection(
         .collect()
 }
 
+const INPUT_PLACEHOLDER: &str =
+    "Type @ to mention files, / for commands, ? for shortcuts, Alt+V to paste image";
+
 // ---------------------------------------------------------------------------
-// Chat screen (existing three-panel layout)
+// Chat screen
 // ---------------------------------------------------------------------------
 
 fn render_chat(frame: &mut Frame, app: &mut App) {
-    // Clear any stale home screen selection
-    if app
-        .text_selection
-        .as_ref()
-        .is_some_and(|s| s.pane == SelectionPane::Input)
-    {
-        // Selection in input area is fine - no need to clear
-    }
     // Compute chat input height based on wrapped text
     let chat_area = frame.area();
     let button_col_w = 18u16;

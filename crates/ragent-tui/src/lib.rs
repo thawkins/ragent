@@ -9,7 +9,6 @@ pub mod input;
 pub mod layout;
 pub mod layout_active_agents;
 pub mod layout_teams;
-pub mod logo;
 pub mod theme;
 pub mod tips;
 pub mod tracing_layer;

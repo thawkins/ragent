@@ -7256,8 +7256,6 @@ Type `/swarm help` for more info.\n";
                         self.status = "⚠ No model selected — use /model to choose".to_string();
                         return;
                     }
-                    // Transition from Home to Chat on first message
-
                     // Create session if needed
                     if self.session_id.is_none() {
                         let dir = std::env::current_dir().unwrap_or_default();
