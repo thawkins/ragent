@@ -187,16 +187,72 @@ pub async fn run_tui(
         // Populate the initial server snapshot in app.
         app.lsp_servers = mgr.servers().to_vec();
     }
-    app.set_lsp_manager(lsp_manager.clone());
-    // Also wire into the session processor so LSP tools can access the manager.
-    let _ = session_processor.lsp_manager.set(lsp_manager);
-
-    if let Some(ref sid) = resume_session_id {
-        if let Err(e) = app.load_session(sid) {
-            tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
-        }
-    }
-
+          app.set_lsp_manager(lsp_manager.clone());
+          // Also wire into the session processor so LSP tools can access the manager.
+          let _ = session_processor.lsp_manager.set(lsp_manager);
+      
+                // ── Code index startup ────────────────────────────────────────────────────
+                // Initialize code index if enabled in config and project has source files.
+                let _code_index: Option<Arc<ragent_code::CodeIndex>> = {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    match ragent_core::config::Config::load() {
+                        Ok(config) => {
+                            if config.code_index.enabled {
+                                let index_config = ragent_code::types::CodeIndexConfig {
+                                    enabled: true,
+                                    project_root: cwd.clone(),
+                                    index_dir: cwd.join(".ragent/codeindex"),
+                                    scan_config: ragent_code::types::ScanConfig::default(),
+                                };
+                                match ragent_code::CodeIndex::open(&index_config) {
+                                    Ok(idx) => {
+                                        let arc_idx = Arc::new(idx);
+                                        // Kick off initial index in background so we don't block the TUI
+                                        {
+                                            let bg = arc_idx.clone();
+                                            std::thread::spawn(move || {
+                                                match bg.status() {
+                                                    Ok(stats) if stats.files_indexed == 0 => {
+                                                        tracing::info!("Code index is empty, performing initial full reindex in background...");
+                                                        if let Err(e) = bg.full_reindex() {
+                                                            tracing::warn!(error = %e, "Background code index reindex failed");
+                                                        } else {
+                                                            tracing::info!("Background initial code index complete");
+                                                        }
+                                                    }
+                                                    _ => {
+                                                        tracing::debug!("Code index already populated, skipping initial reindex");
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        app.set_code_index(Some(arc_idx.clone()));
+                                        let _ = session_processor.code_index.set(arc_idx.clone());
+                                        tracing::info!("Code index initialized at {:?}", index_config.index_dir);
+                                        Some(arc_idx)
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(error = %e, "Failed to initialize code index");
+                                        None
+                                    }
+                                }
+                            } else {
+                                tracing::debug!("Code index is disabled in config");
+                                None
+                            }
+                        }
+                        Err(e) => {
+                      tracing::warn!(error = %e, "Failed to load config for code index check");
+                      None
+                  }
+              }
+          };
+      
+          if let Some(ref sid) = resume_session_id {
+              if let Err(e) = app.load_session(sid) {
+                  tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
+              }
+          }
     while app.is_running {
         // Drain ALL pending bus events before rendering so the screen
         // always reflects the latest state.

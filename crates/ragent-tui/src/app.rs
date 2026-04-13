@@ -481,14 +481,14 @@ impl App {
             prompt_start_time: None,
             tool_time_ms: 0,
             llm_time_ms: 0,
-            plan_approval_pending: None,
-            role_mode: None,
-            webapi_server: None,
-            webapi_addr: "127.0.0.1:3000".to_string(),
-            webapi_token: None,
-            needs_redraw: true,
-        };
-        // Log any warnings from custom agent loading into the log panel
+                          plan_approval_pending: None,
+                          role_mode: None,
+                          webapi_server: None,
+                          webapi_addr: "127.0.0.1:3000".to_string(),
+                          webapi_token: None,
+                          needs_redraw: true,
+                          code_index: None,
+                      };        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -1478,6 +1478,15 @@ impl App {
     /// and uses it for `/lsp` command operations.
     pub fn set_lsp_manager(&mut self, manager: SharedLspManager) {
         self.lsp_manager = Some(manager);
+    }
+
+    /// Set the code index reference.
+    ///
+    /// Called from `run_tui()` after the code index has been initialized
+    /// (if enabled in config). The app keeps the reference alive and uses it
+    /// for `/codeindex show` to display real-time statistics.
+    pub fn set_code_index(&mut self, code_index: Option<Arc<ragent_code::CodeIndex>>) {
+        self.code_index = code_index;
     }
 
     /// Register the primary session's short_sid → agent_name mapping.
@@ -6241,12 +6250,62 @@ Type `/swarm help` for more info.\n";
                         self.status = "codeindex: off".to_string();
                     }
                     "show" | "status" | "" => {
-                        self.append_assistant_text(
-                            "## Code Index Status\n\n\
-                             Use the `codeindex_status` tool from the agent to see detailed stats, \
-                             or run `/codeindex help` for available sub-commands.",
-                        );
-                        self.status = "codeindex".to_string();
+                        // Check if we have an active code index with real stats
+                        if let Some(ref idx) = self.code_index {
+                            match idx.status() {
+                                Ok(stats) => {
+                                    let mut output = String::from("## Code Index Status\n\n");
+                                    output.push_str(&format!("**Files indexed:** {}\n", stats.files_indexed));
+                                    output.push_str(&format!("**Total symbols:** {}\n", stats.total_symbols));
+                                    output.push_str(&format!(
+                                        "**Total size:** {:.1} KB\n",
+                                        stats.total_bytes as f64 / 1024.0
+                                    ));
+
+                                    if !stats.languages.is_empty() {
+                                        output.push_str("**Languages:** ");
+                                        let langs: Vec<String> = stats
+                                            .languages
+                                            .iter()
+                                            .map(|(lang, count)| format!("{lang} ({count})"))
+                                            .collect();
+                                        output.push_str(&langs.join(", "));
+                                        output.push('\n');
+                                    }
+
+                                    if let Some(ts) = &stats.last_full_index {
+                                        output.push_str(&format!("**Last full index:** {ts}\n"));
+                                    }
+                                    if let Some(ts) = &stats.last_incremental_update {
+                                        output.push_str(&format!("**Last incremental:** {ts}\n"));
+                                    }
+                                    output.push_str(&format!(
+                                        "**Index size:** {:.1} KB\n",
+                                        stats.index_size_bytes as f64 / 1024.0
+                                    ));
+                                    self.append_assistant_text(&output);
+                                    self.status = format!(
+                                        "codeindex: {} files, {} symbols",
+                                        stats.files_indexed, stats.total_symbols
+                                    );
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "## Code Index Status\n\n⚠️ Error reading index stats: {e}"
+                                    ));
+                                    self.status = "codeindex: error".to_string();
+                                }
+                            }
+                        } else {
+                            // No active code index
+                            self.append_assistant_text(
+                                "## Code Index Status\n\n\
+                                 Code index is not available. It may be disabled or not yet initialised.\n\n\
+                                 Use `/codeindex on` to enable indexing, \
+                                 or run `/codeindex help` for available sub-commands.",
+                            );
+                            self.status = "codeindex: not available".to_string();
+                        }
                     }
                     "reindex" => {
                         self.append_assistant_text(

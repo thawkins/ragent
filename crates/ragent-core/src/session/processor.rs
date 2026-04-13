@@ -169,6 +169,9 @@ pub struct SessionProcessor {
     /// Optional MCP client for dynamic MCP tool registration.
     /// Set once after startup via [`SessionProcessor::set_mcp_client`].
     pub mcp_client: std::sync::OnceLock<Arc<tokio::sync::RwLock<crate::mcp::McpClient>>>,
+    /// Optional code index for codebase search and symbol lookup.
+    /// Uses `OnceLock` so it can be set after the processor is constructed.
+    pub code_index: std::sync::OnceLock<Arc<ragent_code::CodeIndex>>,
 }
 
 impl SessionProcessor {
@@ -972,8 +975,7 @@ impl SessionProcessor {
                         .get()
                         .cloned()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                    code_index: None,
-                };
+                                          code_index: self.code_index.get().cloned(),                };
 
                 let tc_clone = tc.clone();
                 let registry = self.tool_registry.clone();

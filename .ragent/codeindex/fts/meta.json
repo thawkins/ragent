@@ -1,0 +1,387 @@
+{
+  "index_settings": {
+    "docstore_compression": "lz4",
+    "docstore_blocksize": 16384
+  },
+  "segments": [
+    {
+      "segment_id": "f1ae9827-e984-4ab0-93e4-605984d87503",
+      "max_doc": 121,
+      "deletes": null
+    },
+    {
+      "segment_id": "bb9d64df-ce32-4efb-932a-af9c3efd35f5",
+      "max_doc": 120,
+      "deletes": null
+    },
+    {
+      "segment_id": "d1545976-2fd9-4c92-ac0e-d064a871b8b1",
+      "max_doc": 103,
+      "deletes": null
+    },
+    {
+      "segment_id": "7f8c463b-6f93-4122-9150-33d3ee3ec44e",
+      "max_doc": 64,
+      "deletes": null
+    },
+    {
+      "segment_id": "5163378c-5fd1-4ead-93fe-a2723fffed6a",
+      "max_doc": 61,
+      "deletes": null
+    },
+    {
+      "segment_id": "a7de21a0-b0fb-44fe-8cce-afb1489c260d",
+      "max_doc": 58,
+      "deletes": null
+    },
+    {
+      "segment_id": "e865da3d-9671-4a7f-bf06-b0f70ab9dbbf",
+      "max_doc": 49,
+      "deletes": null
+    },
+    {
+      "segment_id": "062a2a9a-2f3a-4538-96e4-20f6a720f9ef",
+      "max_doc": 45,
+      "deletes": null
+    },
+    {
+      "segment_id": "fd983a07-1bc7-44fe-8e35-08141cb1ab15",
+      "max_doc": 42,
+      "deletes": null
+    },
+    {
+      "segment_id": "ac6926c9-6869-4846-af55-0ef3d11f5ee0",
+      "max_doc": 40,
+      "deletes": null
+    },
+    {
+      "segment_id": "4515838c-763c-47fe-8a2a-f4dcce6f0839",
+      "max_doc": 40,
+      "deletes": null
+    },
+    {
+      "segment_id": "917e760e-6a6e-43a7-afcd-ee6fc84a4459",
+      "max_doc": 38,
+      "deletes": null
+    },
+    {
+      "segment_id": "abfa65b3-21fe-4f28-bd49-e7a71a86d98d",
+      "max_doc": 38,
+      "deletes": null
+    },
+    {
+      "segment_id": "2b719b19-a24f-48c3-983d-3ece31f4ec40",
+      "max_doc": 38,
+      "deletes": null
+    },
+    {
+      "segment_id": "e0d9a375-109f-45cd-b302-36ac38decb4f",
+      "max_doc": 36,
+      "deletes": null
+    },
+    {
+      "segment_id": "288d0c4f-1b12-4c0d-9e9d-f7b937614974",
+      "max_doc": 36,
+      "deletes": null
+    },
+    {
+      "segment_id": "44305e54-fcbc-42cb-b8c2-aa1ad45a9351",
+      "max_doc": 33,
+      "deletes": null
+    },
+    {
+      "segment_id": "ab1eb1a9-312a-42b9-8896-83984647eee7",
+      "max_doc": 32,
+      "deletes": null
+    },
+    {
+      "segment_id": "259b6260-63c4-4eb0-a909-d54a4b6de4af",
+      "max_doc": 29,
+      "deletes": null
+    },
+    {
+      "segment_id": "65476357-2b57-47c2-bac6-eb1e9d37139b",
+      "max_doc": 29,
+      "deletes": null
+    },
+    {
+      "segment_id": "3b269f8e-43b9-45a0-b006-ca5bbe5221ab",
+      "max_doc": 28,
+      "deletes": null
+    },
+    {
+      "segment_id": "00d22749-159b-409a-95b2-a163fa4e9776",
+      "max_doc": 26,
+      "deletes": null
+    },
+    {
+      "segment_id": "f6010218-0bf0-4ceb-87fd-982cb16b9996",
+      "max_doc": 22,
+      "deletes": null
+    },
+    {
+      "segment_id": "8eb7c15c-fbb8-4138-80b9-d9ca9a140848",
+      "max_doc": 19,
+      "deletes": null
+    },
+    {
+      "segment_id": "32cd7aef-6c8e-4896-8292-1180204f4eb7",
+      "max_doc": 18,
+      "deletes": null
+    },
+    {
+      "segment_id": "aeb9e51a-e76e-4e9c-8940-28e79125a24d",
+      "max_doc": 17,
+      "deletes": null
+    },
+    {
+      "segment_id": "9b301497-6695-42ba-afe2-2e2580b3baa1",
+      "max_doc": 16,
+      "deletes": null
+    },
+    {
+      "segment_id": "70d8d7e6-2ab4-461a-9040-a149b2a31781",
+      "max_doc": 15,
+      "deletes": null
+    },
+    {
+      "segment_id": "28355b6b-e96c-4467-a90d-33ef20d6bea4",
+      "max_doc": 14,
+      "deletes": null
+    },
+    {
+      "segment_id": "f4d55e49-7d71-438e-97e4-37716ae0cf77",
+      "max_doc": 12,
+      "deletes": null
+    },
+    {
+      "segment_id": "93177bea-7bbf-493f-82ed-46e2db382ec2",
+      "max_doc": 11,
+      "deletes": null
+    },
+    {
+      "segment_id": "98354347-f3a9-4203-afb9-f5d69e46bfe5",
+      "max_doc": 10,
+      "deletes": null
+    },
+    {
+      "segment_id": "35354626-be9c-49b6-b981-34d8a1d572b3",
+      "max_doc": 10,
+      "deletes": null
+    },
+    {
+      "segment_id": "5af8cec8-62bc-4ab8-a789-397b82eca1c4",
+      "max_doc": 9,
+      "deletes": null
+    },
+    {
+      "segment_id": "4f7c5a3e-f124-4719-b4ba-f511207899ec",
+      "max_doc": 9,
+      "deletes": null
+    },
+    {
+      "segment_id": "7f03cb93-dad7-42f9-aeb2-f28015a670fb",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "7b8ef796-97b2-4e27-8ed7-3f899313719d",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "1d4772c7-db97-4552-a3f7-70ca652b95f8",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "56fcd691-4949-488b-ac01-fcb2a4103988",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "877dbc3f-f2c2-4e12-a164-b6d904c33b9f",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "759a96f0-ea8f-4a7b-932c-e209489d350c",
+      "max_doc": 8,
+      "deletes": null
+    },
+    {
+      "segment_id": "97fa8ab1-3cf3-479b-a312-68b926fa7e10",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "afca70c3-af7b-4c29-a3ac-1fbf3e257c63",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "38df9a75-0663-4fe9-94e7-c596330d2325",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "a506ee92-0587-476e-a2d5-3af9f356901b",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "d1e92ef8-41d6-4e96-b4d3-16c90402c92b",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "fa51de09-bd5b-43ca-8886-d44fbc8a50c5",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "a75d208e-ab39-41af-8028-6befa5042a61",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "13a6dce7-fb00-4339-a95a-801c96635cf1",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "2be3376c-b2ea-4158-9ada-8c4a81029a4b",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "06edd1b5-57fd-4fb4-a521-c8a40c2df3ca",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "a909ed48-ce8c-4d6a-b9c7-ecd13bb9e6ca",
+      "max_doc": 7,
+      "deletes": null
+    },
+    {
+      "segment_id": "1652142c-35d1-4b92-aa8c-ba0c51b78f9e",
+      "max_doc": 3,
+      "deletes": null
+    }
+  ],
+  "schema": [
+    {
+      "name": "name",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "qualified_name",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "signature",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "doc_comment",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "body_snippet",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "position",
+          "fieldnorms": true,
+          "tokenizer": "default"
+        },
+        "stored": false,
+        "fast": false
+      }
+    },
+    {
+      "name": "kind",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "basic",
+          "fieldnorms": true,
+          "tokenizer": "raw"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "file_path",
+      "type": "text",
+      "options": {
+        "indexing": {
+          "record": "basic",
+          "fieldnorms": true,
+          "tokenizer": "raw"
+        },
+        "stored": true,
+        "fast": false
+      }
+    },
+    {
+      "name": "start_line",
+      "type": "i64",
+      "options": {
+        "indexed": true,
+        "fieldnorms": false,
+        "fast": false,
+        "stored": true
+      }
+    },
+    {
+      "name": "end_line",
+      "type": "i64",
+      "options": {
+        "indexed": true,
+        "fieldnorms": false,
+        "fast": false,
+        "stored": true
+      }
+    }
+  ],
+  "opstamp": 1522
+}

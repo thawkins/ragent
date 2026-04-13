@@ -932,6 +932,8 @@ pub struct App {
     pub lsp_servers: Vec<LspServer>,
     /// Handle to the running LSP manager (kept alive for the lifetime of the TUI).
     pub lsp_manager: Option<SharedLspManager>,
+    /// Optional code index for codebase search and symbol lookup.
+    pub code_index: Option<Arc<ragent_code::CodeIndex>>,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.

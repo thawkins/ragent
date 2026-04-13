@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 ragent-core = { workspace = true }
+ragent-code = { path = "../ragent-code" }
 ragent-server = { path = "../ragent-server" }
 dirs = { workspace = true }
 tokio = { workspace = true }

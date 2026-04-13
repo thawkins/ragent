@@ -3645,6 +3645,7 @@ dependencies = [
  "lru 0.12.5",
  "prompt_opt",
  "pulldown-cmark",
+ "ragent-code",
  "ragent-core",
  "ragent-server",
  "rand 0.9.3",
