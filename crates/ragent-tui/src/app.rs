@@ -382,6 +382,7 @@ impl App {
             token_usage: (0, 0),
             llm_request_stats: Vec::new(),
             last_input_tokens: 0,
+            stream_bytes: 0,
             quota_percent: None,
             current_screen: ScreenMode::Chat,
             tip: tips::random_tip(),
@@ -792,6 +793,7 @@ impl App {
         self.input_cursor = 0;
         self.file_menu = None;
         self.status = "processing...".to_string();
+        self.stream_bytes = 0;
 
         let has_refs = !ragent_core::reference::parse::parse_refs(&text).is_empty();
         if has_refs {
@@ -8000,6 +8002,7 @@ Type `/swarm help` for more info.\n";
                 ref text,
             } => {
                 if self.is_current_session(session_id) {
+                    self.stream_bytes += text.len() as u64;
                     self.append_assistant_text(text);
                 }
             }
@@ -8008,6 +8011,7 @@ Type `/swarm help` for more info.\n";
                 ref text,
             } => {
                 if self.is_current_session(session_id) {
+                    self.stream_bytes += text.len() as u64;
                     self.append_reasoning_text(text);
                 }
             }

@@ -820,6 +820,8 @@ pub struct App {
     pub llm_request_stats: Vec<LlmRequestStat>,
     /// Input token count from the most recent LLM request (used for context-window % display).
     pub last_input_tokens: u64,
+    /// Bytes received from the current LLM streaming response (reset per request).
+    pub stream_bytes: u64,
     /// Latest quota usage percentage from provider rate-limit headers (0.0–100.0).
     /// `None` if the provider has not returned rate-limit information yet.
     pub quota_percent: Option<f32>,

@@ -1702,6 +1702,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                   Style::default().fg(fg).add_modifier(Modifier::BOLD),
               ));
           }
+
+          // Stream bytes received counter
+          if app.stream_bytes > 0 {
+              let bytes_text = if app.stream_bytes >= 1_048_576 {
+                  format!("↓ {:.1}M", app.stream_bytes as f64 / 1_048_576.0)
+              } else if app.stream_bytes >= 1024 {
+                  format!("↓ {:.1}K", app.stream_bytes as f64 / 1024.0)
+              } else {
+                  format!("↓ {}B", app.stream_bytes)
+              };
+              row2_left.push(Span::styled(
+                  format!("[{}] ", bytes_text),
+                  Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+              ));
+          }
+
     // Active tasks
     if !app.active_tasks.is_empty() {
         let running = app
