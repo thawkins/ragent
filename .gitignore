@@ -24,3 +24,6 @@ target/temp/
 
 # Key files
 *.key
+
+# Code index data
+.ragent/
