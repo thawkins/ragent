@@ -1549,6 +1549,10 @@ impl App {
     /// index locks are currently held (e.g. during a background reindex),
     /// the cached stats are kept until the next successful poll.
     ///
+    /// Also checks `reindex_progress()` (lock-free atomics) to detect
+    /// active indexing even when locks aren't currently held (e.g. during
+    /// the parse phase between chunks).
+    ///
     /// Polls every 1s while indexing is active, every 5s otherwise.
     pub fn refresh_code_index_stats(&mut self) {
         let interval = if self.code_index_busy {
@@ -1560,10 +1564,15 @@ impl App {
             return;
         }
         if let Some(ref idx) = self.code_index {
+            // Check progress atomics (lock-free) to detect active reindex
+            // even when locks are momentarily free between chunks.
+            let (_done, total) = idx.reindex_progress();
+            let reindex_active = total > 0;
+
             if let Some(stats) = idx.try_status() {
                 self.code_index_stats_cache = Some(stats);
                 self.code_index_stats_last_refresh = std::time::Instant::now();
-                if self.code_index_busy {
+                if self.code_index_busy && !reindex_active {
                     self.code_index_busy = false;
                     self.needs_redraw = true;
                 }
@@ -1573,6 +1582,11 @@ impl App {
                     self.code_index_busy = true;
                     self.needs_redraw = true;
                 }
+            }
+            // If reindex counters indicate active work, keep busy flag set.
+            if reindex_active && !self.code_index_busy {
+                self.code_index_busy = true;
+                self.needs_redraw = true;
             }
         } else {
             self.code_index_stats_cache = None;

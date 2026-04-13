@@ -436,6 +436,12 @@ impl CodeIndex {
             store.get_stale_files(&scanned)?
         };
 
+        // Set progress counters early so the TUI can show the percentage
+        // even while apply_diff holds the store lock.
+        let changed_count = (diff.to_add.len() + diff.to_update.len()) as u32;
+        self.reindex_total.store(changed_count, Ordering::Relaxed);
+        self.reindex_done.store(0, Ordering::Relaxed);
+
         let mut result = IndexResult {
             files_added: diff.to_add.len(),
             files_updated: diff.to_update.len(),
@@ -461,8 +467,6 @@ impl CodeIndex {
         const YIELD_MS: u64 = 5;
 
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
-        self.reindex_total.store(changed.len() as u32, Ordering::Relaxed);
-        self.reindex_done.store(0, Ordering::Relaxed);
 
         for chunk in changed.chunks(CHUNK_SIZE) {
             // Phase 1: Parse all files in this chunk with NO locks held.
