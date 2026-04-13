@@ -2369,10 +2369,13 @@ impl App {
             let plan = ragent_core::provider::copilot::cached_copilot_plan()
                 .unwrap_or_else(|| "Copilot".to_string());
             (ctx_label(&plan), false)
-        } else if provider_id == "ollama" {
-            (ctx_label("local"), false)
-        } else if provider_id == "ollama_cloud" {
-            (ctx_label("cloud"), false)
+        } else if provider_id == "ollama" || provider_id == "ollama_cloud" {
+            let label = ctx_label("");
+            if label.is_empty() {
+                (if provider_id == "ollama" { "local" } else { "ollama" }.to_string(), false)
+            } else {
+                (label, false)
+            }
         } else {
             let label = ctx_label("");
             if label.is_empty() {
