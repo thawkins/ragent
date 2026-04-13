@@ -169,7 +169,14 @@ impl IndexStore {
                 entry.line_count as i64,
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        // last_insert_rowid() returns 0 on UPDATE (no insert happened),
+        // so always query for the actual id by path.
+        let file_id: i64 = self.conn.query_row(
+            "SELECT id FROM indexed_files WHERE path = ?1",
+            [&entry.path],
+            |row| row.get(0),
+        )?;
+        Ok(file_id)
     }
 
     /// Get a file entry by its relative path.

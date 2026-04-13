@@ -306,6 +306,14 @@ fn test_watch_session_start_stop() {
     let mut session = ragent_code::start_watching(Arc::clone(&index), config).unwrap();
     assert!(!session.is_stopped());
 
+    // The initial reindex runs in a background thread; wait for it.
+    for _ in 0..50 {
+        if index.status().map_or(false, |s| s.files_indexed > 0) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
     // The initial reindex should have happened.
     let idx = &*index;
     let st = idx.status().unwrap();
