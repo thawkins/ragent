@@ -701,19 +701,6 @@ impl SessionProcessor {
 
             debug!("Agent loop step {}/{}", step, max_steps);
 
-            let request = ChatRequest {
-                model: model_ref.model_id.clone(),
-                messages: chat_messages.clone(),
-                tools: tool_definitions.clone(),
-                temperature: agent.temperature,
-                top_p: agent.top_p,
-                max_tokens: None,
-                system: Some(system_prompt.clone()),
-                options: agent.options.clone(),
-                session_id: Some(session_id.to_string()),
-                request_id: Some(Uuid::new_v4().to_string()),
-            };
-
             // Log which tools are being sent with this request
             if !tool_definitions.is_empty() {
                 let tool_names: Vec<String> =
@@ -724,30 +711,9 @@ impl SessionProcessor {
                 });
             }
 
-            // Call LLM
+            // Call LLM with retry on transient failures (connection errors, stream stalls)
+            const MAX_LLM_RETRIES: u32 = 2;
             let llm_request_start = std::time::Instant::now();
-            let mut stream = match client.chat(request).await {
-                Ok(s) => s,
-                Err(e) => {
-                    // Full details logged at debug level; the AgentError event
-                    // carries the message to the TUI log panel.
-                    debug!("LLM call failed: {}", redact_secrets(&e.to_string()));
-                    self.event_bus.publish(Event::AgentError {
-                        session_id: session_id.to_string(),
-                        error: e.to_string(),
-                    });
-                    let error_msg = e.to_string();
-                    crate::hooks::fire_hooks(
-                        &session_config.hooks,
-                        crate::hooks::HookTrigger::OnError,
-                        &working_dir,
-                        &[("RAGENT_ERROR", &error_msg)],
-                    );
-                    bail!("LLM call failed: {e}");
-                }
-            };
-
-            // Process stream events
             let mut text_buffer = String::new();
             let mut reasoning_buffer = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
@@ -755,8 +721,72 @@ impl SessionProcessor {
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
 
-            while let Some(event) = stream.next().await {
-                match event {
+            'retry: for attempt in 0..=MAX_LLM_RETRIES {
+                if attempt > 0 {
+                    // Reset buffers for retry
+                    text_buffer.clear();
+                    reasoning_buffer.clear();
+                    tool_calls.clear();
+                    _finish_reason = FinishReason::Stop;
+                    last_input_tokens = 0;
+                    last_output_tokens = 0;
+
+                    let wait_secs = attempt as u64 * 2;
+                    self.event_bus.publish(Event::AgentError {
+                        session_id: session_id.to_string(),
+                        error: format!(
+                            "Retrying LLM request (attempt {}/{}), waiting {}s...",
+                            attempt + 1,
+                            MAX_LLM_RETRIES + 1,
+                            wait_secs
+                        ),
+                    });
+                    tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+                }
+
+                // Build request (fresh for each attempt)
+                let attempt_request = ChatRequest {
+                    model: model_ref.model_id.clone(),
+                    messages: chat_messages.clone(),
+                    tools: tool_definitions.clone(),
+                    temperature: agent.temperature,
+                    top_p: agent.top_p,
+                    max_tokens: None,
+                    system: Some(system_prompt.clone()),
+                    options: agent.options.clone(),
+                    session_id: Some(session_id.to_string()),
+                    request_id: Some(Uuid::new_v4().to_string()),
+                };
+
+                let mut stream = match client.chat(attempt_request).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        debug!("LLM call failed (attempt {}): {}", attempt + 1, redact_secrets(&e.to_string()));
+                        if attempt < MAX_LLM_RETRIES {
+                            self.event_bus.publish(Event::AgentError {
+                                session_id: session_id.to_string(),
+                                error: format!("{} — will retry", e),
+                            });
+                            continue 'retry;
+                        }
+                        self.event_bus.publish(Event::AgentError {
+                            session_id: session_id.to_string(),
+                            error: e.to_string(),
+                        });
+                        let error_msg = e.to_string();
+                        crate::hooks::fire_hooks(
+                            &session_config.hooks,
+                            crate::hooks::HookTrigger::OnError,
+                            &working_dir,
+                            &[("RAGENT_ERROR", &error_msg)],
+                        );
+                        bail!("LLM call failed after {} attempts: {e}", MAX_LLM_RETRIES + 1);
+                    }
+                };
+
+                let mut had_stall = false;
+                while let Some(event) = stream.next().await {
+                    match event {
                     StreamEvent::TextDelta { text } => {
                         self.event_bus.publish(Event::TextDelta {
                             session_id: session_id.to_string(),
@@ -791,8 +821,6 @@ impl SessionProcessor {
                         }
                     }
                     StreamEvent::ToolCallEnd { id } => {
-                        // Publish args as soon as they finish streaming so the TUI
-                        // can display the command/path while other tools still stream.
                         if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
                             self.event_bus.publish(Event::ToolCallArgs {
                                 session_id: session_id.to_string(),
@@ -815,17 +843,24 @@ impl SessionProcessor {
                         });
                     }
                     StreamEvent::Error { message } => {
-                        debug!("Stream error: {}", redact_secrets(&message));
-                        self.event_bus.publish(Event::AgentError {
-                            session_id: session_id.to_string(),
-                            error: message,
-                        });
+                        debug!("Stream error (attempt {}): {}", attempt + 1, redact_secrets(&message));
+                        if message.contains("stall") && attempt < MAX_LLM_RETRIES {
+                            self.event_bus.publish(Event::AgentError {
+                                session_id: session_id.to_string(),
+                                error: format!("{} — will retry", message),
+                            });
+                            had_stall = true;
+                        } else {
+                            self.event_bus.publish(Event::AgentError {
+                                session_id: session_id.to_string(),
+                                error: message,
+                            });
+                        }
                     }
                     StreamEvent::RateLimit {
                         requests_used_pct,
                         tokens_used_pct,
                     } => {
-                        // Use requests % preferentially; fall back to tokens %.
                         let percent = requests_used_pct.or(tokens_used_pct);
                         if let Some(pct) = percent {
                             self.event_bus.publish(Event::QuotaUpdate {
@@ -837,7 +872,13 @@ impl SessionProcessor {
                     StreamEvent::Finish { reason } => {
                         _finish_reason = reason;
                     }
+                    }
                 }
+
+                if had_stall {
+                    continue 'retry;
+                }
+                break;
             }
 
             // Collect parts from this turn

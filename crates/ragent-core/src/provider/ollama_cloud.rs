@@ -232,13 +232,15 @@ impl Provider for OllamaCloudProvider {
                 .unwrap_or(&self.base_url)
                 .trim_end_matches('/')
                 .to_string(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .tcp_keepalive(std::time::Duration::from_secs(30))
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         };
         Ok(Box::new(client))
     }
-}
-
-struct OllamaCloudClient {
+}struct OllamaCloudClient {
     api_key: String,
     base_url: String,
     http: reqwest::Client,

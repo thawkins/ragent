@@ -218,7 +218,11 @@ impl Provider for OllamaProvider {
                 Some(api_key.to_string())
             },
             base_url: url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .tcp_keepalive(std::time::Duration::from_secs(30))
+                .connect_timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         };
         Ok(Box::new(client))
     }
