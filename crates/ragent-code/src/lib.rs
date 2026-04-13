@@ -65,7 +65,7 @@ use parser::ParserRegistry;
 use search::{FtsIndex, FtsSymbol, SearchResult};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use store::IndexStore;
 use tracing::{debug, warn};
 use tree_cache::TreeCache;
@@ -407,8 +407,14 @@ impl CodeIndex {
         }
 
         // Parse and store symbols for new/updated files.
+        // Process in chunks with brief yields between them so that other
+        // threads (e.g. the TUI event loop) can acquire the store/FTS locks
+        // without starving.
+        const CHUNK_SIZE: usize = 10;
+        const YIELD_MS: u64 = 5;
+
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
-        for sf in &changed {
+        for (i, sf) in changed.iter().enumerate() {
             let abs_path = self.project_root.join(&sf.path);
             let content = match std::fs::read(&abs_path) {
                 Ok(c) => c,
@@ -421,6 +427,7 @@ impl CodeIndex {
             let rel_path = sf.path.to_string_lossy().to_string();
 
             if let Some(ref lang) = sf.language {
+                // Parse outside of any lock — this is the CPU-heavy part.
                 if let Some(parsed) = self.parsers.parse(lang, &content) {
                     match parsed {
                         Ok(parsed) => {
@@ -448,6 +455,11 @@ impl CodeIndex {
                         }
                     }
                 }
+            }
+
+            // Yield after every chunk to avoid starving other threads.
+            if (i + 1) % CHUNK_SIZE == 0 {
+                std::thread::sleep(Duration::from_millis(YIELD_MS));
             }
         }
 
