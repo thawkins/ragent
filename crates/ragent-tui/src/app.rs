@@ -494,6 +494,7 @@ impl App {
                           code_index_stats_cache: None,
                           code_index_stats_last_refresh: std::time::Instant::now(),
                           code_index_busy: false,
+                          code_index_watch_session: None,
                       };        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -6282,20 +6283,78 @@ Type `/swarm help` for more info.\n";
                     "on" | "enable" => {
                         self.code_index_enabled = true;
                         if self.code_index.is_some() {
-                            self.append_assistant_text(
-                                "✅ **Code index** is already active and enabled.",
-                            );
+                            // Already active — just ensure watcher is running
+                            if self.code_index_watch_session.is_none() {
+                                if let Some(ref idx) = self.code_index {
+                                    match ragent_code::start_watching(
+                                        idx.clone(),
+                                        ragent_code::worker::WorkerConfig::default(),
+                                    ) {
+                                        Ok(session) => {
+                                            self.code_index_watch_session = Some(session);
+                                            self.append_assistant_text(
+                                                "✅ **Code index** is already active. File watcher started.",
+                                            );
+                                        }
+                                        Err(e) => {
+                                            self.append_assistant_text(&format!(
+                                                "✅ **Code index** is already active.\n\n⚠️ Could not start file watcher: {e}",
+                                            ));
+                                        }
+                                    }
+                                }
+                            } else {
+                                self.append_assistant_text(
+                                    "✅ **Code index** is already active and enabled.",
+                                );
+                            }
                         } else {
-                            self.append_assistant_text(
-                                "ℹ️ **Code index:** enabled. The index will be initialised on the next session start.\n\n\
-                                 Restart ragent for the change to take effect.",
-                            );
+                            // Create and initialize the code index
+                            let cwd = std::env::current_dir().unwrap_or_default();
+                            let index_config = ragent_code::types::CodeIndexConfig {
+                                enabled: true,
+                                project_root: cwd.clone(),
+                                index_dir: cwd.join(".ragent/codeindex"),
+                                scan_config: ragent_code::types::ScanConfig::default(),
+                            };
+                            match ragent_code::CodeIndex::open(&index_config) {
+                                Ok(idx) => {
+                                    let arc_idx = Arc::new(idx);
+                                    // Start watching — this performs an initial full reindex
+                                    // to catch any changes made while the index was disabled.
+                                    match ragent_code::start_watching(
+                                        arc_idx.clone(),
+                                        ragent_code::worker::WorkerConfig::default(),
+                                    ) {
+                                        Ok(session) => {
+                                            self.code_index_watch_session = Some(session);
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, "Failed to start file watcher on codeindex enable");
+                                        }
+                                    }
+                                    self.set_code_index(Some(arc_idx));
+                                    self.append_assistant_text(
+                                        "✅ **Code index:** enabled and activated. Background reindex in progress.",
+                                    );
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "❌ **Code index:** could not open index: {e}",
+                                    ));
+                                }
+                            }
                         }
                         self.status = "codeindex: on".to_string();
                     }
                     "off" | "disable" => {
                         self.code_index_enabled = false;
                         let was_active = self.code_index.is_some();
+                        // Stop the file watcher + background worker first
+                        if let Some(ref mut session) = self.code_index_watch_session {
+                            session.stop();
+                        }
+                        self.code_index_watch_session = None;
                         self.code_index = None;
                         self.code_index_stats_cache = None;
                         if was_active {

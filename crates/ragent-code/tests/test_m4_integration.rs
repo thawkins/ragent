@@ -9,7 +9,7 @@ use ragent_code::worker::{IndexWorker, WorkerConfig};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -141,7 +141,7 @@ fn test_watcher_ignores_git_dir() {
 #[test]
 fn test_worker_indexes_changed_file() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
     let (tx, rx) = mpsc::channel();
 
     let config = WorkerConfig {
@@ -166,7 +166,7 @@ fn test_worker_indexes_changed_file() {
     );
 
     // Verify the file was actually indexed.
-    let idx = index.lock().unwrap();
+    let idx = &*index;
     let results = idx.search(&SearchQuery::new("sample_function")).unwrap();
     assert!(
         !results.is_empty(),
@@ -180,11 +180,11 @@ fn test_worker_indexes_changed_file() {
 #[test]
 fn test_worker_handles_delete() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
 
     // First, index the file directly.
     {
-        let idx = index.lock().unwrap();
+        let idx = &*index;
         idx.full_reindex().unwrap();
     }
 
@@ -215,7 +215,7 @@ fn test_worker_handles_delete() {
 #[test]
 fn test_worker_dedup_events() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
     let (tx, rx) = mpsc::channel();
 
     let config = WorkerConfig {
@@ -248,7 +248,7 @@ fn test_worker_dedup_events() {
 #[test]
 fn test_worker_stop_is_graceful() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
     let (_tx, rx) = mpsc::channel();
 
     let mut handle = IndexWorker::start(index, rx, WorkerConfig::default());
@@ -261,7 +261,7 @@ fn test_worker_stop_is_graceful() {
 #[test]
 fn test_worker_manual_full_reindex() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
     let (_tx, rx) = mpsc::channel();
 
     let config = WorkerConfig {
@@ -283,7 +283,7 @@ fn test_worker_manual_full_reindex() {
     );
 
     // Verify the index has data.
-    let idx = index.lock().unwrap();
+    let idx = &*index;
     let st = idx.status().unwrap();
     assert!(st.files_indexed > 0, "should have indexed files");
 
@@ -296,7 +296,7 @@ fn test_worker_manual_full_reindex() {
 #[test]
 fn test_watch_session_start_stop() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
 
     let config = WorkerConfig {
         debounce_ms: 100,
@@ -307,7 +307,7 @@ fn test_watch_session_start_stop() {
     assert!(!session.is_stopped());
 
     // The initial reindex should have happened.
-    let idx = index.lock().unwrap();
+    let idx = &*index;
     let st = idx.status().unwrap();
     assert!(
         st.files_indexed > 0,
@@ -322,7 +322,7 @@ fn test_watch_session_start_stop() {
 #[test]
 fn test_watch_session_picks_up_new_file() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
 
     let config = WorkerConfig {
         debounce_ms: 100,
@@ -342,7 +342,7 @@ fn test_watch_session_picks_up_new_file() {
     std::thread::sleep(Duration::from_secs(2));
 
     // The new function should be findable.
-    let idx = index.lock().unwrap();
+    let idx = &*index;
     let results = idx.search(&SearchQuery::new("brand_new")).unwrap();
     // Note: this depends on watcher + worker pipeline working end-to-end.
     // On some CI systems FS events may be slow, so we allow this to be empty
@@ -394,11 +394,11 @@ fn test_remove_file_clears_cache() {
 #[test]
 fn test_rename_event_via_worker() {
     let dir = create_project();
-    let index = Arc::new(Mutex::new(open_index(&dir)));
+    let index = Arc::new(open_index(&dir));
 
     // First index the original file.
     {
-        let idx = index.lock().unwrap();
+        let idx = &*index;
         idx.full_reindex().unwrap();
     }
 

@@ -655,21 +655,18 @@ impl WatchSession {
 
 /// Start watching a project directory for changes and automatically re-index.
 ///
-/// The `CodeIndex` must be wrapped in `Arc<Mutex<>>` since the background
-/// worker needs shared ownership.
+/// The `CodeIndex` is wrapped in `Arc` since the background worker needs
+/// shared ownership. `CodeIndex` has internal mutexes for thread safety.
 ///
 /// Returns a [`WatchSession`] that must be kept alive for watching to continue.
 /// Dropping it stops the watcher and worker.
 ///
 /// On start, performs an initial diff scan and queues changed files.
 pub fn start_watching(
-    index: std::sync::Arc<Mutex<CodeIndex>>,
+    index: std::sync::Arc<CodeIndex>,
     config: worker::WorkerConfig,
 ) -> Result<WatchSession> {
-    let project_root = {
-        let idx = index.lock().unwrap();
-        idx.project_root.clone()
-    };
+    let project_root = index.project_root.clone();
 
     let (tx, rx) = std::sync::mpsc::channel();
 
@@ -678,14 +675,15 @@ pub fn start_watching(
 
     let worker_handle = worker::IndexWorker::start(std::sync::Arc::clone(&index), rx, config);
 
-    // Perform initial diff scan to catch changes that happened while not watching.
-    {
-        let idx = index.lock().unwrap();
-        match idx.full_reindex() {
+    // Perform initial diff scan in background to avoid blocking the caller.
+    let bg = std::sync::Arc::clone(&index);
+    std::thread::Builder::new()
+        .name("codeindex-init-reindex".into())
+        .spawn(move || match bg.full_reindex() {
             Ok(result) => debug!("initial reindex on watch start: {result}"),
             Err(e) => warn!("initial reindex failed: {e}"),
-        }
-    }
+        })
+        .ok();
 
     Ok(WatchSession {
         worker_handle,

@@ -226,29 +226,27 @@ pub async fn run_tui(
                     match ragent_code::CodeIndex::open(&index_config) {
                         Ok(idx) => {
                             let arc_idx = Arc::new(idx);
-                            {
-                                let bg = arc_idx.clone();
-                                std::thread::spawn(move || {
-                                    match bg.status() {
-                                        Ok(stats) if stats.files_indexed == 0 => {
-                                            tracing::info!("Code index is empty, performing initial full reindex in background...");
-                                            if let Err(e) = bg.full_reindex() {
-                                                tracing::warn!(error = %e, "Background code index reindex failed");
-                                            } else {
-                                                tracing::info!("Background initial code index complete");
-                                            }
+                            // Start the file watcher + background worker.
+                            // start_watching() performs an initial full_reindex() and then
+                            // watches for filesystem changes to keep the index up to date.
+                            match ragent_code::start_watching(
+                                arc_idx.clone(),
+                                ragent_code::worker::WorkerConfig::default(),
+                            ) {
+                                Ok(session) => {
+                                    app.code_index_watch_session = Some(session);
+                                    tracing::info!("Code index watcher started");
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Failed to start code index watcher, falling back to one-shot reindex");
+                                    // Fall back to one-shot background reindex without watcher
+                                    let bg = arc_idx.clone();
+                                    std::thread::spawn(move || {
+                                        if let Err(e) = bg.full_reindex() {
+                                            tracing::warn!(error = %e, "Background code index reindex failed");
                                         }
-                                        Ok(_) => {
-                                            tracing::debug!("Code index already populated, checking FTS sync...");
-                                            if let Err(e) = bg.ensure_fts_sync() {
-                                                tracing::warn!(error = %e, "FTS sync check failed");
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e, "Failed to check code index status");
-                                        }
-                                    }
-                                });
+                                    });
+                                }
                             }
                             app.set_code_index(Some(arc_idx.clone()));
                             let _ = session_processor.code_index.set(arc_idx.clone());

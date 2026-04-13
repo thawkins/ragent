@@ -942,6 +942,8 @@ pub struct App {
     pub code_index_stats_last_refresh: std::time::Instant,
     /// True when the background indexer holds the store/FTS locks.
     pub code_index_busy: bool,
+    /// Active file watcher + background worker session for the code index.
+    pub code_index_watch_session: Option<ragent_code::WatchSession>,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.

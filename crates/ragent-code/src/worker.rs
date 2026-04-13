@@ -9,7 +9,7 @@ use crate::watcher::WatchEvent;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, trace, warn};
 
@@ -147,7 +147,7 @@ pub struct IndexWorker;
 impl IndexWorker {
     /// Start the background worker. Returns a handle for control and stats.
     pub fn start(
-        index: Arc<Mutex<CodeIndex>>,
+        index: Arc<CodeIndex>,
         event_rx: mpsc::Receiver<WatchEvent>,
         config: WorkerConfig,
     ) -> IndexWorkerHandle {
@@ -214,7 +214,7 @@ impl Drop for IndexWorkerHandle {
 
 /// Main worker loop — runs on a dedicated thread.
 fn worker_loop(
-    index: Arc<Mutex<CodeIndex>>,
+    index: Arc<CodeIndex>,
     event_rx: mpsc::Receiver<WatchEvent>,
     manual_rx: mpsc::Receiver<ManualCommand>,
     config: WorkerConfig,
@@ -246,21 +246,19 @@ fn worker_loop(
                 ManualCommand::FullReindex => {
                     info!("manual full reindex requested");
                     stats.is_busy.store(true, Ordering::Relaxed);
-                    if let Ok(idx) = index.lock() {
-                        match idx.full_reindex() {
-                            Ok(result) => {
-                                info!("full reindex complete: {result}");
-                                stats.files_indexed.fetch_add(
-                                    (result.files_added + result.files_updated) as u64,
-                                    Ordering::Relaxed,
-                                );
-                                stats
-                                    .files_removed
-                                    .fetch_add(result.files_removed as u64, Ordering::Relaxed);
-                                stats.batches_processed.fetch_add(1, Ordering::Relaxed);
-                            }
-                            Err(e) => warn!("full reindex failed: {e}"),
+                    match index.full_reindex() {
+                        Ok(result) => {
+                            info!("full reindex complete: {result}");
+                            stats.files_indexed.fetch_add(
+                                (result.files_added + result.files_updated) as u64,
+                                Ordering::Relaxed,
+                            );
+                            stats
+                                .files_removed
+                                .fetch_add(result.files_removed as u64, Ordering::Relaxed);
+                            stats.batches_processed.fetch_add(1, Ordering::Relaxed);
                         }
+                        Err(e) => warn!("full reindex failed: {e}"),
                     }
                     stats.is_busy.store(false, Ordering::Relaxed);
                     batch.clear();
@@ -282,9 +280,7 @@ fn worker_loop(
                             "event queue exceeded max_queue_size, clearing batch and triggering full reindex"
                         );
                         batch.clear();
-                        if let Ok(idx) = index.lock() {
-                            let _ = idx.full_reindex();
-                        }
+                        let _ = index.full_reindex();
                         last_event_time = None;
                     }
                 }
@@ -326,7 +322,7 @@ fn worker_loop(
 
 /// Process the current batch of events.
 fn process_batch(
-    index: &Arc<Mutex<CodeIndex>>,
+    index: &Arc<CodeIndex>,
     batch: &mut EventBatch,
     config: &WorkerConfig,
     stats: &SharedStats,
@@ -345,16 +341,8 @@ fn process_batch(
             break;
         }
 
-        let idx = match index.lock() {
-            Ok(idx) => idx,
-            Err(e) => {
-                warn!("cannot lock index: {e}");
-                break;
-            }
-        };
-
         let paths: Vec<&std::path::Path> = chunk.iter().map(|p| p.as_path()).collect();
-        match idx.index_files(&paths) {
+        match index.index_files(&paths) {
             Ok(result) => {
                 debug!(
                     "indexed batch of {} files: {} symbols",
@@ -375,14 +363,7 @@ fn process_batch(
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        let idx = match index.lock() {
-            Ok(idx) => idx,
-            Err(e) => {
-                warn!("cannot lock index: {e}");
-                break;
-            }
-        };
-        if let Err(e) = idx.remove_file(path) {
+        if let Err(e) = index.remove_file(path) {
             warn!("remove file failed: {e}");
         } else {
             stats.files_removed.fetch_add(1, Ordering::Relaxed);
@@ -400,13 +381,13 @@ mod tests {
     use crate::types::CodeIndexConfig;
     use std::sync::mpsc as std_mpsc;
 
-    fn make_test_index(dir: &std::path::Path) -> Arc<Mutex<CodeIndex>> {
+    fn make_test_index(dir: &std::path::Path) -> Arc<CodeIndex> {
         let cfg = CodeIndexConfig {
             enabled: true,
             project_root: dir.to_path_buf(),
             ..Default::default()
         };
-        Arc::new(Mutex::new(CodeIndex::open_in_memory(&cfg).unwrap()))
+        Arc::new(CodeIndex::open_in_memory(&cfg).unwrap())
     }
 
     #[test]
