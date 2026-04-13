@@ -1745,15 +1745,22 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         if enabled {
             if let Some(ref stats) = app.code_index_stats_cache {
                 let label = if stats.files_indexed > 0 {
-                    format!("{} files/{} syms ", stats.files_indexed, stats.total_symbols)
+                    format!("{} files/{} syms", stats.files_indexed, stats.total_symbols)
                 } else {
-                    "indexing… ".to_string()
+                    "empty".to_string()
                 };
                 row2_left.push(Span::styled(
                     label,
                     Style::default().fg(Color::Cyan),
                 ));
             }
+            if app.code_index_busy {
+                row2_left.push(Span::styled(
+                    " ⟳indexing",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ));
+            }
+            row2_left.push(Span::raw(" "));
         }
     }
 

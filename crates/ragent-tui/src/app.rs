@@ -493,6 +493,7 @@ impl App {
                               .unwrap_or(false),
                           code_index_stats_cache: None,
                           code_index_stats_last_refresh: std::time::Instant::now(),
+                          code_index_busy: false,
                       };        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -1494,25 +1495,41 @@ impl App {
         self.code_index = code_index;
     }
 
-    /// Refresh the cached code index stats if the cache is stale (>5s old).
+    /// Refresh the cached code index stats if the cache is stale.
     ///
     /// Uses `try_status()` so this never blocks the UI thread.  If the
     /// index locks are currently held (e.g. during a background reindex),
     /// the cached stats are kept until the next successful poll.
+    ///
+    /// Polls every 1s while indexing is active, every 5s otherwise.
     pub fn refresh_code_index_stats(&mut self) {
-        const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
-        if self.code_index_stats_last_refresh.elapsed() < REFRESH_INTERVAL {
+        let interval = if self.code_index_busy {
+            std::time::Duration::from_secs(1)
+        } else {
+            std::time::Duration::from_secs(5)
+        };
+        if self.code_index_stats_last_refresh.elapsed() < interval {
             return;
         }
         if let Some(ref idx) = self.code_index {
             if let Some(stats) = idx.try_status() {
                 self.code_index_stats_cache = Some(stats);
                 self.code_index_stats_last_refresh = std::time::Instant::now();
+                if self.code_index_busy {
+                    self.code_index_busy = false;
+                    self.needs_redraw = true;
+                }
+            } else {
+                // Locks busy — indexing in progress
+                if !self.code_index_busy {
+                    self.code_index_busy = true;
+                    self.needs_redraw = true;
+                }
             }
-            // else: locks busy — keep stale cache, retry next loop iteration
         } else {
             self.code_index_stats_cache = None;
             self.code_index_stats_last_refresh = std::time::Instant::now();
+            self.code_index_busy = false;
         }
     }
 
