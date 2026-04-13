@@ -491,6 +491,8 @@ impl App {
                           code_index_enabled: ragent_core::config::Config::load()
                               .map(|c| c.code_index.enabled)
                               .unwrap_or(false),
+                          code_index_stats_cache: None,
+                          code_index_stats_last_refresh: std::time::Instant::now(),
                       };        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -1490,6 +1492,25 @@ impl App {
     /// for `/codeindex show` to display real-time statistics.
     pub fn set_code_index(&mut self, code_index: Option<Arc<ragent_code::CodeIndex>>) {
         self.code_index = code_index;
+    }
+
+    /// Refresh the cached code index stats if the cache is stale (>5s old).
+    ///
+    /// Called from the render loop to avoid querying SQLite/FTS every frame.
+    pub fn refresh_code_index_stats(&mut self) {
+        const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+        if self.code_index_stats_last_refresh.elapsed() < REFRESH_INTERVAL {
+            return;
+        }
+        self.code_index_stats_last_refresh = std::time::Instant::now();
+        if let Some(ref idx) = self.code_index {
+            match idx.status() {
+                Ok(stats) => self.code_index_stats_cache = Some(stats),
+                Err(e) => tracing::warn!(error = %e, "Failed to refresh code index stats"),
+            }
+        } else {
+            self.code_index_stats_cache = None;
+        }
     }
 
     /// Register the primary session's short_sid → agent_name mapping.

@@ -154,6 +154,13 @@ impl FtsIndex {
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         self.reader.reload()?;
         let searcher = self.reader.searcher();
+        let total_docs = searcher.num_docs();
+        tracing::debug!(
+            query = %query,
+            limit = limit,
+            docs_in_index = total_docs,
+            "FTS search starting"
+        );
 
         let mut parser = QueryParser::for_index(
             &self.index,
@@ -171,12 +178,12 @@ impl FtsIndex {
         parser.set_field_boost(self.fields.doc_comment, 2.0);
         parser.set_field_boost(self.fields.body_snippet, 1.0);
 
-        let query = parser
+        let parsed_query = parser
             .parse_query(query)
             .with_context(|| "cannot parse FTS query")?;
 
         let top_docs = searcher
-            .search(&query, &TopDocs::with_limit(limit))
+            .search(&parsed_query, &TopDocs::with_limit(limit))
             .context("FTS search failed")?;
 
         let mut results = Vec::with_capacity(top_docs.len());
@@ -194,6 +201,11 @@ impl FtsIndex {
                 doc_snippet: self.get_text(&doc, self.fields.doc_comment),
             });
         }
+        tracing::debug!(
+            query = %query,
+            results = results.len(),
+            "FTS search complete"
+        );
         Ok(results)
     }
 
@@ -574,5 +586,58 @@ mod tests {
         let fts2 = FtsIndex::open(&fts_path).unwrap();
         let results = fts2.search("parse_config", 10).unwrap();
         assert!(!results.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+
+    /// Mimic how full_reindex adds symbols: remove_file + add_symbols per file
+    #[test]
+    fn test_incremental_add_many_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let fts_path = dir.path().join("fts");
+        let fts = FtsIndex::open(&fts_path).unwrap();
+
+        // Simulate 50 files, each with a few symbols
+        for i in 0..50 {
+            let file_path = format!("src/file_{i}.rs");
+            fts.remove_file(&file_path).unwrap();
+            let name = format!("func_{i}");
+            let qname = format!("crate::mod_{i}::func_{i}");
+            let syms = vec![FtsSymbol {
+                name: &name,
+                qualified_name: Some(&qname),
+                kind: "function",
+                file_path: &file_path,
+                signature: Some("fn func() -> bool"),
+                doc_comment: Some("A test function."),
+                body_snippet: Some("let x = 42; return true;"),
+                start_line: 10,
+                end_line: 20,
+            }];
+            fts.add_symbols(&syms).unwrap();
+        }
+
+        let count = fts.doc_count().unwrap();
+        eprintln!("doc_count after 50 files: {count}");
+        assert_eq!(count, 50, "should have 50 docs");
+
+        let results = fts.search("func_25", 10).unwrap();
+        eprintln!("search for func_25: {} results", results.len());
+        assert!(!results.is_empty(), "should find func_25");
+        assert_eq!(results[0].symbol_name, "func_25");
+
+        // Now drop and reopen to test persistence
+        drop(fts);
+        let fts2 = FtsIndex::open(&fts_path).unwrap();
+        let count2 = fts2.doc_count().unwrap();
+        eprintln!("doc_count after reopen: {count2}");
+        assert_eq!(count2, 50, "should still have 50 docs after reopen");
+
+        let results2 = fts2.search("func_25", 10).unwrap();
+        eprintln!("search after reopen: {} results", results2.len());
+        assert!(!results2.is_empty(), "should find func_25 after reopen");
     }
 }

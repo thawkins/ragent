@@ -238,8 +238,14 @@ pub async fn run_tui(
                                                 tracing::info!("Background initial code index complete");
                                             }
                                         }
-                                        _ => {
-                                            tracing::debug!("Code index already populated, skipping initial reindex");
+                                        Ok(_) => {
+                                            tracing::debug!("Code index already populated, checking FTS sync...");
+                                            if let Err(e) = bg.ensure_fts_sync() {
+                                                tracing::warn!(error = %e, "FTS sync check failed");
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(error = %e, "Failed to check code index status");
                                         }
                                     }
                                 });
@@ -332,6 +338,9 @@ pub async fn run_tui(
 
         // Flush dirty history to disk (non-blocking, debounced).
         app.flush_history_if_due();
+
+        // Refresh cached code index stats periodically (every 5s, not every frame).
+        app.refresh_code_index_stats();
 
         // Only draw when UI dirty or periodic refresh
         if app.needs_redraw {

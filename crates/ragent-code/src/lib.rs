@@ -125,6 +125,12 @@ impl CodeIndex {
         })
     }
 
+    /// Access the FTS index directly (for testing only).
+    #[doc(hidden)]
+    pub fn fts_for_test(&self) -> std::sync::MutexGuard<'_, FtsIndex> {
+        self.fts.lock().unwrap()
+    }
+
     // ── Query Methods ───────────────────────────────────────────────────
 
     /// Search the index using full-text search combined with structured filters.
@@ -136,7 +142,16 @@ impl CodeIndex {
         };
 
         let fts = self.fts.lock().unwrap();
+        debug!(
+            query = %query.query,
+            kind = ?query.kind,
+            language = ?query.language,
+            file_pattern = ?query.file_pattern,
+            limit = limit,
+            "CodeIndex search"
+        );
         let mut results = fts.search(&query.query, limit * 2)?;
+        debug!(raw_results = results.len(), "CodeIndex FTS results before filtering");
 
         // Apply post-FTS filters.
         if let Some(ref kind) = query.kind {
@@ -222,6 +237,53 @@ impl CodeIndex {
         }
 
         Ok(stats)
+    }
+
+    /// Ensure FTS index is in sync with the SQLite store.
+    ///
+    /// Detects when the FTS index is empty or significantly diverged from
+    /// SQLite (e.g., after schema recreation, corruption, or accumulated
+    /// duplicates from multiple reindexes) and rebuilds it from SQLite data.
+    pub fn ensure_fts_sync(&self) -> Result<()> {
+        let store = self.store.lock().unwrap();
+        let sqlite_symbols = store.symbol_count()?;
+        drop(store);
+
+        let fts = self.fts.lock().unwrap();
+        let fts_docs = fts.doc_count().unwrap_or(0);
+        drop(fts);
+
+        if sqlite_symbols == 0 {
+            debug!("FTS sync: SQLite has no symbols, nothing to sync");
+            return Ok(());
+        }
+
+        if fts_docs == 0 {
+            debug!(
+                sqlite_symbols = sqlite_symbols,
+                "FTS empty but SQLite has symbols; rebuilding FTS"
+            );
+            return self.rebuild_fts();
+        }
+
+        // Detect significant divergence (accumulated duplicates or missing docs).
+        let ratio = fts_docs as f64 / sqlite_symbols as f64;
+        if ratio > 2.0 || ratio < 0.5 {
+            debug!(
+                fts_docs = fts_docs,
+                sqlite_symbols = sqlite_symbols,
+                ratio = format!("{ratio:.1}"),
+                "FTS/SQLite divergence detected; rebuilding FTS"
+            );
+            return self.rebuild_fts();
+        }
+
+        debug!(
+            fts_docs = fts_docs,
+            sqlite_symbols = sqlite_symbols,
+            "FTS in sync with SQLite"
+        );
+        Ok(())
     }
 
     // ── Mutation Methods ────────────────────────────────────────────────
@@ -397,24 +459,9 @@ impl CodeIndex {
             }
         }
 
-        // After incremental update, check if FTS is out of sync with SQLite.
-        // This can happen if the FTS index was lost/corrupted while SQLite
-        // was intact (so get_stale_files reports no changes).
-        {
-            let store = self.store.lock().unwrap();
-            let sqlite_symbols = store.symbol_count()?;
-            drop(store);
-
-            let fts = self.fts.lock().unwrap();
-            let fts_docs = fts.doc_count().unwrap_or(0);
-            drop(fts);
-
-            if sqlite_symbols > 0 && fts_docs == 0 {
-                debug!("FTS empty but SQLite has {sqlite_symbols} symbols; rebuilding FTS");
-                if let Err(e) = self.rebuild_fts() {
-                    warn!("FTS rebuild failed: {e}");
-                }
-            }
+        // After incremental update, ensure FTS is in sync with SQLite.
+        if let Err(e) = self.ensure_fts_sync() {
+            warn!("FTS sync check failed after reindex: {e}");
         }
 
         result.elapsed_ms = start.elapsed().as_millis() as u64;

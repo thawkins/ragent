@@ -936,6 +936,10 @@ pub struct App {
     pub code_index: Option<Arc<ragent_code::CodeIndex>>,
     /// Whether code indexing is enabled in configuration.
     pub code_index_enabled: bool,
+    /// Cached code index stats for the status bar (refreshed every few seconds).
+    pub code_index_stats_cache: Option<ragent_code::types::IndexStats>,
+    /// When the cached stats were last refreshed.
+    pub code_index_stats_last_refresh: std::time::Instant,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.
