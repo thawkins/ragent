@@ -425,7 +425,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 };
                 let end = (start + visible).min(models.len());
 
-                for (i, (_mid, mname)) in models.iter().enumerate().skip(start).take(end - start) {
+                for (i, (_mid, mname, _ctx)) in models.iter().enumerate().skip(start).take(end - start) {
                     let (indicator, style) = if i == *selected {
                         (
                             "▸ ",
@@ -1667,28 +1667,41 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::Cyan),
     ));
 
-    // Usage quota indicator
-    {
-        let (usage_text, is_unknown) = app.usage_display();
-        let fg = if is_unknown {
-            Color::White
-        } else if let Some(q) = app.quota_percent {
-            if q >= 95.0 {
-                Color::Red
-            } else if q >= 80.0 {
-                Color::Yellow
-            } else {
-                Color::Green
-            }
-        } else {
-            Color::Green
-        };
-        row2_left.push(Span::styled(
-            format!("[{}] ", usage_text),
-            Style::default().fg(fg).add_modifier(Modifier::BOLD),
-        ));
-    }
-
+          // Usage quota indicator
+          {
+              let (usage_text, is_unknown) = app.usage_display();
+              // Extract percentage from text (e.g., "ctx: 45%" or "Pro quota: 85.5%")
+              let pct_in_text = usage_text
+                  .split_whitespace()
+                  .last()
+                  .and_then(|s| s.trim_end_matches('%').parse::<f32>().ok());
+              let fg = if is_unknown {
+                  Color::White
+              } else if let Some(q) = app.quota_percent {
+                  if q >= 95.0 {
+                      Color::Red
+                  } else if q >= 80.0 {
+                      Color::Yellow
+                  } else {
+                      Color::Green
+                  }
+              } else if let Some(p) = pct_in_text {
+                  // Color based on context window percentage
+                  if p >= 95.0 {
+                      Color::Red
+                  } else if p >= 80.0 {
+                      Color::Yellow
+                  } else {
+                      Color::Green
+                  }
+              } else {
+                  Color::Green
+              };
+              row2_left.push(Span::styled(
+                  format!("[{}] ", usage_text),
+                  Style::default().fg(fg).add_modifier(Modifier::BOLD),
+              ));
+          }
     // Active tasks
     if !app.active_tasks.is_empty() {
         let running = app

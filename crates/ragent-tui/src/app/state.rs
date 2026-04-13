@@ -308,8 +308,8 @@ pub enum ProviderSetupStep {
         provider_id: String,
         /// Human-readable provider display name.
         provider_name: String,
-        /// Available models as `(model_id, display_name)` pairs.
-        models: Vec<(String, String)>,
+        /// Available models as `(model_id, display_name, context_window)` tuples.
+        models: Vec<(String, String, usize)>,
         /// Index of the highlighted model.
         selected: usize,
     },
@@ -844,6 +844,10 @@ pub struct App {
     pub provider_registry: Arc<ProviderRegistry>,
     /// Currently selected model in `"provider/model"` format, if any.
     pub selected_model: Option<String>,
+    /// Context window size (tokens) for the currently selected model.
+    /// Set during model selection; used when `resolve_model()` cannot find the model
+    /// (e.g. dynamically discovered ollama/ollama_cloud models).
+    pub selected_model_ctx_window: Option<usize>,
     /// Session processor for sending messages to the LLM.
     pub session_processor: Arc<SessionProcessor>,
     /// Resolved agent configuration.

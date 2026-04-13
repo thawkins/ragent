@@ -1055,12 +1055,17 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
             KeyCode::Enter => {
-                let model_name = if let Some((mid, mname)) = models.get(selected) {
+                let model_name = if let Some((mid, mname, ctx_window)) = models.get(selected) {
                     let model_value = format!("{}/{}", provider_id, mid);
                     let _ = app.storage.set_setting("selected_model", &model_value);
                     // Persist the user's explicit provider choice so it survives restarts.
                     let _ = app.storage.set_setting("preferred_provider", &provider_id);
+                    // Persist the context window so the status bar can show usage %.
+                    let _ = app
+                        .storage
+                        .set_setting("selected_model_ctx_window", &ctx_window.to_string());
                     app.selected_model = Some(model_value);
+                    app.selected_model_ctx_window = Some(*ctx_window);
                     // Ensure the UI reflects the provider the user just chose.
                     app.configured_provider = Some(ConfiguredProvider {
                         id: provider_id.clone(),
@@ -1162,7 +1167,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 if is_active {
                     app.configured_provider = None;
                     app.selected_model = None;
+                    app.selected_model_ctx_window = None;
                     let _ = app.storage.delete_setting("selected_model");
+                    let _ = app.storage.delete_setting("selected_model_ctx_window");
                     app.provider_health
                         .store(0, std::sync::atomic::Ordering::Relaxed);
                 }

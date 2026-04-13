@@ -359,6 +359,11 @@ impl App {
 
         // Load persisted model selection
         let selected_model = storage.get_setting("selected_model").ok().flatten();
+        let selected_model_ctx_window = storage
+            .get_setting("selected_model_ctx_window")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok());
 
         let mut app = Self {
             messages: Vec::new(),
@@ -387,6 +392,7 @@ impl App {
             configured_provider,
             provider_registry,
             selected_model,
+            selected_model_ctx_window,
             session_processor,
             agent_info,
             cycleable_agents,
@@ -605,10 +611,14 @@ impl App {
     fn selected_model_context_window(&self) -> Option<usize> {
         let model = self.selected_model.as_deref()?;
         let (provider_id, model_id) = model.split_once('/')?;
+        // Try the static registry first (works for providers with hardcoded default_models).
         self.provider_registry
             .resolve_model(provider_id, model_id)
             .map(|m| m.context_window)
             .filter(|w| *w > 0)
+            // Fall back to the cached context window stored during model selection
+            // (required for dynamically discovered models like ollama/ollama_cloud).
+            .or(self.selected_model_ctx_window.filter(|w| *w > 0))
     }
 
     fn ollama_cloud_api_key(&self) -> Option<String> {
@@ -1957,7 +1967,7 @@ impl App {
     /// }
     /// # }
     /// ```
-    pub fn models_for_provider(&self, provider_id: &str) -> Vec<(String, String)> {
+    pub fn models_for_provider(&self, provider_id: &str) -> Vec<(String, String, usize)> {
         if provider_id == "ollama" {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let result = tokio::task::block_in_place(|| {
@@ -1965,7 +1975,10 @@ impl App {
                 });
                 if let Ok(models) = result {
                     if !models.is_empty() {
-                        return models.into_iter().map(|m| (m.id, m.name)).collect();
+                        return models
+                            .into_iter()
+                            .map(|m| (m.id, m.name, m.context_window))
+                            .collect();
                     }
                 }
             }
@@ -1983,7 +1996,10 @@ impl App {
                     if let Ok(models) = result
                         && !models.is_empty()
                     {
-                        return models.into_iter().map(|m| (m.id, m.name)).collect();
+                        return models
+                            .into_iter()
+                            .map(|m| (m.id, m.name, m.context_window))
+                            .collect();
                     }
                 }
             }
@@ -2009,7 +2025,10 @@ impl App {
                     });
                     if let Ok(models) = result {
                         if !models.is_empty() {
-                            return models.into_iter().map(|m| (m.id, m.name)).collect();
+                            return models
+                                .into_iter()
+                                .map(|m| (m.id, m.name, m.context_window))
+                                .collect();
                         }
                     }
                 }
@@ -2020,7 +2039,7 @@ impl App {
             .map(|p| {
                 p.default_models()
                     .into_iter()
-                    .map(|m| (m.id, m.name))
+                    .map(|m| (m.id, m.name, m.context_window))
                     .collect()
             })
             .unwrap_or_default()
@@ -2326,32 +2345,41 @@ impl App {
         }
 
         // Compute context-window usage % from last request's input token count.
-        let context_pct: Option<f32> = self.selected_model_context_window().map(|context_window| {
-            (self.last_input_tokens as f32 / context_window as f32 * 100.0).min(100.0)
+        let ctx_window = self.selected_model_context_window();
+        let context_pct: Option<f32> = ctx_window.map(|cw| {
+            (self.last_input_tokens as f32 / cw as f32 * 100.0).min(100.0)
         });
+
+        // Format context usage as "prefix ctx: usedK/totalK pct%"
+        let ctx_label = |prefix: &str| -> String {
+            match (ctx_window, context_pct) {
+                (Some(cw), Some(p)) => {
+                    let used = self.last_input_tokens;
+                    if prefix.is_empty() {
+                        format!("ctx: {}K/{}K {:.0}%", used / 1000, cw / 1000, p)
+                    } else {
+                        format!("{} ctx: {}K/{}K {:.0}%", prefix, used / 1000, cw / 1000, p)
+                    }
+                }
+                _ => prefix.to_string(),
+            }
+        };
 
         if provider_id == "copilot" {
             let plan = ragent_core::provider::copilot::cached_copilot_plan()
                 .unwrap_or_else(|| "Copilot".to_string());
-            let text = match context_pct {
-                Some(p) => format!("{} ctx: {:.0}%", plan, p),
-                None => plan,
-            };
-            (text, false)
+            (ctx_label(&plan), false)
         } else if provider_id == "ollama" {
-            match context_pct {
-                Some(p) => (format!("local ctx: {:.0}%", p), false),
-                None => ("local".to_string(), false),
-            }
+            (ctx_label("local"), false)
         } else if provider_id == "ollama_cloud" {
-            match context_pct {
-                Some(p) => (format!("cloud ctx: {:.0}%", p), false),
-                None => ("cloud".to_string(), false),
-            }
-        } else if let Some(p) = context_pct {
-            (format!("ctx: {:.0}%", p), false)
+            (ctx_label("cloud"), false)
         } else {
-            ("unknown".to_string(), true)
+            let label = ctx_label("");
+            if label.is_empty() {
+                ("unknown".to_string(), true)
+            } else {
+                (label, false)
+            }
         }
     }
 
@@ -3386,6 +3414,12 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             self.configured_provider = Self::detect_provider(&self.storage);
                             self.selected_model =
                                 self.storage.get_setting("selected_model").ok().flatten();
+                            self.selected_model_ctx_window = self
+                                .storage
+                                .get_setting("selected_model_ctx_window")
+                                .ok()
+                                .flatten()
+                                .and_then(|s| s.parse::<usize>().ok());
                             report.push_str("✓ Config reloaded (ragent.json)\n");
                             self.push_log_no_agent(
                                 LogLevel::Info,
