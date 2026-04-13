@@ -34,6 +34,7 @@ fn test_state(token: &str) -> AppState {
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
     });
 
     AppState {

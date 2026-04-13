@@ -125,6 +125,7 @@ async fn test_max_5_parallel_tools() {
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
     };
 
     // Note: This test is simplified and won't actually call process_message

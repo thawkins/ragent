@@ -49,6 +49,7 @@ async fn test_reconcile_spawning_members_updates_config() {
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
     });
 
     // Create TeamManager and set it into the processor OnceLock

@@ -8659,7 +8659,7 @@ Type `/swarm help` for more info.\n";
 
     /// Helper: push log with no agent_id (for backwards compatibility during transition).
     #[allow(dead_code)]
-    fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
+    pub fn push_log_no_agent(&mut self, level: LogLevel, message: String) {
         self.push_log(level, message, None);
     }
 

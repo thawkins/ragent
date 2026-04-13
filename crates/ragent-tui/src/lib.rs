@@ -111,9 +111,17 @@ pub async fn run_tui(
         agent,
         show_log,
     );
-    app.check_provider_health();
 
-    // Auto-initialize a session at startup if not resuming.
+    // ── Render the very first frame so the user sees the TUI immediately ──
+    app.status = "starting up…".to_string();
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    // ── Provider health check ─────────────────────────────────────────────
+    app.check_provider_health();
+    app.push_log_no_agent(app::LogLevel::Info, "Provider health check started".into());
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    // ── Auto-initialize a session at startup if not resuming ──────────────
     if resume_session_id.is_none() {
         let dir = std::env::current_dir().unwrap_or_default();
         match app.session_processor.session_manager.create_session(dir) {
@@ -123,6 +131,13 @@ pub async fn run_tui(
                 // Register the short_sid → agent_name mapping so tool step tags
                 // display "general:5" instead of "fbd5b8a9:5".
                 app.register_primary_session_mapping();
+
+                app.push_log_no_agent(
+                    app::LogLevel::Info,
+                    format!("Session created: {}", &session_id[..8]),
+                );
+                app.status = "session created".to_string();
+                terminal.draw(|frame| layout::render(frame, &mut app))?;
 
                 // Kick off the AGENTS.md acknowledgement exchange in the background
                 // so it appears before the user types anything (including /swarm, /team, etc.).
@@ -156,7 +171,7 @@ pub async fn run_tui(
         }
     }
 
-    // Set up persistent input history (kept across sessions in the data dir).
+    // ── Input history ─────────────────────────────────────────────────────
     let history_path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("ragent")
@@ -165,13 +180,18 @@ pub async fn run_tui(
     if let Err(e) = app.load_history() {
         tracing::warn!("Failed to load input history: {}", e);
     }
+    app.push_log_no_agent(app::LogLevel::Info, "Input history loaded".into());
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
     let mut bus_rx = event_bus.subscribe();
 
-    // ── LSP startup ───────────────────────────────────────────────────────────
+    // ── LSP startup ───────────────────────────────────────────────────────
     // Create the LspManager, start configured servers, and wire events into
     // the app. This runs asynchronously; status changes propagate via events.
+    app.status = "starting LSP…".to_string();
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+
     let lsp_manager: SharedLspManager = {
         let cwd = std::env::current_dir().unwrap_or_default();
         let mgr = LspManager::new(cwd, event_bus.clone());
@@ -181,77 +201,110 @@ pub async fn run_tui(
         let mut mgr = lsp_manager.write().await;
         let lsp_configs = Config::load().map(|c| c.lsp).unwrap_or_default();
         if !lsp_configs.is_empty() {
+            app.push_log_no_agent(
+                app::LogLevel::Info,
+                format!("Connecting {} LSP server(s)…", lsp_configs.len()),
+            );
+            terminal.draw(|frame| layout::render(frame, &mut app))?;
             mgr.connect_all(lsp_configs).await;
         }
         // Populate the initial server snapshot in app.
         app.lsp_servers = mgr.servers().to_vec();
     }
-          app.set_lsp_manager(lsp_manager.clone());
-          // Also wire into the session processor so LSP tools can access the manager.
-          let _ = session_processor.lsp_manager.set(lsp_manager);
-      
-                // ── Code index startup ────────────────────────────────────────────────────
-                // Initialize code index if enabled in config and project has source files.
-                let _code_index: Option<Arc<ragent_code::CodeIndex>> = {
-                    let cwd = std::env::current_dir().unwrap_or_default();
-                    match ragent_core::config::Config::load() {
-                        Ok(config) => {
-                            if config.code_index.enabled {
-                                let index_config = ragent_code::types::CodeIndexConfig {
-                                    enabled: true,
-                                    project_root: cwd.clone(),
-                                    index_dir: cwd.join(".ragent/codeindex"),
-                                    scan_config: ragent_code::types::ScanConfig::default(),
-                                };
-                                match ragent_code::CodeIndex::open(&index_config) {
-                                    Ok(idx) => {
-                                        let arc_idx = Arc::new(idx);
-                                        // Kick off initial index in background so we don't block the TUI
-                                        {
-                                            let bg = arc_idx.clone();
-                                            std::thread::spawn(move || {
-                                                match bg.status() {
-                                                    Ok(stats) if stats.files_indexed == 0 => {
-                                                        tracing::info!("Code index is empty, performing initial full reindex in background...");
-                                                        if let Err(e) = bg.full_reindex() {
-                                                            tracing::warn!(error = %e, "Background code index reindex failed");
-                                                        } else {
-                                                            tracing::info!("Background initial code index complete");
-                                                        }
-                                                    }
-                                                    _ => {
-                                                        tracing::debug!("Code index already populated, skipping initial reindex");
-                                                    }
-                                                }
-                                            });
+    app.set_lsp_manager(lsp_manager.clone());
+    // Also wire into the session processor so LSP tools can access the manager.
+    let _ = session_processor.lsp_manager.set(lsp_manager);
+
+    let lsp_count = app.lsp_servers.len();
+    if lsp_count > 0 {
+        app.push_log_no_agent(
+            app::LogLevel::Info,
+            format!("{lsp_count} LSP server(s) connected"),
+        );
+    }
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    // ── Code index startup ────────────────────────────────────────────────
+    // Initialize code index if enabled in config and project has source files.
+    app.status = "starting code index…".to_string();
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    let _code_index: Option<Arc<ragent_code::CodeIndex>> = {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        match ragent_core::config::Config::load() {
+            Ok(config) => {
+                if config.code_index.enabled {
+                    let index_config = ragent_code::types::CodeIndexConfig {
+                        enabled: true,
+                        project_root: cwd.clone(),
+                        index_dir: cwd.join(".ragent/codeindex"),
+                        scan_config: ragent_code::types::ScanConfig::default(),
+                    };
+                    match ragent_code::CodeIndex::open(&index_config) {
+                        Ok(idx) => {
+                            let arc_idx = Arc::new(idx);
+                            // Kick off initial index in background so we don't block the TUI
+                            {
+                                let bg = arc_idx.clone();
+                                std::thread::spawn(move || {
+                                    match bg.status() {
+                                        Ok(stats) if stats.files_indexed == 0 => {
+                                            tracing::info!("Code index is empty, performing initial full reindex in background...");
+                                            if let Err(e) = bg.full_reindex() {
+                                                tracing::warn!(error = %e, "Background code index reindex failed");
+                                            } else {
+                                                tracing::info!("Background initial code index complete");
+                                            }
                                         }
-                                        app.set_code_index(Some(arc_idx.clone()));
-                                        let _ = session_processor.code_index.set(arc_idx.clone());
-                                        tracing::info!("Code index initialized at {:?}", index_config.index_dir);
-                                        Some(arc_idx)
+                                        _ => {
+                                            tracing::debug!("Code index already populated, skipping initial reindex");
+                                        }
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(error = %e, "Failed to initialize code index");
-                                        None
-                                    }
-                                }
-                            } else {
-                                tracing::debug!("Code index is disabled in config");
-                                None
+                                });
                             }
+                            app.set_code_index(Some(arc_idx.clone()));
+                            let _ = session_processor.code_index.set(arc_idx.clone());
+                            app.push_log_no_agent(
+                                app::LogLevel::Info,
+                                format!("Code index opened at {}", index_config.index_dir.display()),
+                            );
+                            tracing::info!("Code index initialized at {:?}", index_config.index_dir);
+                            Some(arc_idx)
                         }
                         Err(e) => {
-                      tracing::warn!(error = %e, "Failed to load config for code index check");
-                      None
-                  }
-              }
-          };
-      
-          if let Some(ref sid) = resume_session_id {
-              if let Err(e) = app.load_session(sid) {
-                  tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
-              }
-          }
+                            tracing::warn!(error = %e, "Failed to initialize code index");
+                            None
+                        }
+                    }
+                } else {
+                    app.push_log_no_agent(
+                        app::LogLevel::Info,
+                        "Code index: disabled in config".into(),
+                    );
+                    tracing::debug!("Code index is disabled in config");
+                    None
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "Failed to load config for code index check");
+                None
+            }
+        }
+    };
+
+    // ── Session resume ────────────────────────────────────────────────────
+    if let Some(ref sid) = resume_session_id {
+        app.status = "resuming session…".to_string();
+        terminal.draw(|frame| layout::render(frame, &mut app))?;
+        if let Err(e) = app.load_session(sid) {
+            tracing::error!(error = %e, session_id = %sid, "Failed to resume session");
+        }
+    }
+
+    // ── Startup complete ──────────────────────────────────────────────────
+    app.status = "ready".to_string();
+    app.push_log_no_agent(app::LogLevel::Info, "Startup complete".into());
+    terminal.draw(|frame| layout::render(frame, &mut app))?;
     while app.is_running {
         // Drain ALL pending bus events before rendering so the screen
         // always reflects the latest state.
