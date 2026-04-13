@@ -592,6 +592,43 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
 
         // ═══════════════════════════════════════════════════════════════════
+        // 📇 CODE INDEX
+        // ═══════════════════════════════════════════════════════════════════
+        "codeindex_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            let kind = get_str(&["kind"]);
+            let lang = get_str(&["language"]);
+            let mut label = format!("📇 \"{}\"", trunc50(&query));
+            if let Some(k) = kind {
+                label.push_str(&format!(" kind:{}", k));
+            }
+            if let Some(l) = lang {
+                label.push_str(&format!(" lang:{}", l));
+            }
+            label
+        }
+        "codeindex_symbols" => {
+            let name = get_str(&["name"]);
+            let kind = get_str(&["kind"]);
+            let file = get_str(&["file_path"]);
+            let mut parts = Vec::new();
+            if let Some(n) = name {
+                parts.push(format!("name:{}", trunc50(&n)));
+            }
+            if let Some(k) = kind {
+                parts.push(format!("kind:{}", k));
+            }
+            if let Some(f) = file {
+                parts.push(format!("file:{}", make_relative_path(&f, cwd)));
+            }
+            if parts.is_empty() {
+                "📇 all symbols".to_string()
+            } else {
+                format!("📇 {}", parts.join(" "))
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
         // 📄 DOCUMENT (Office/PDF)
         // ═══════���═══════════════════════════════════════════════════════════
         "office_read" | "pdf_read" | "libreoffice_read" => {
@@ -1270,6 +1307,29 @@ pub fn tool_result_summary(
             Some(format!(
                 "{} found",
                 pluralize(count, "diagnostic", "diagnostics")
+            ))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📇 CODE INDEX
+        // ═══════════════════════════════════════════════════════════════════
+        "codeindex_search" => {
+            let total = out
+                .get("total_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(total, "result", "results")
+            ))
+        }
+        "codeindex_symbols" => {
+            let total = out
+                .get("total_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(total, "symbol", "symbols")
             ))
         }
         // ═══════════════════════════════════════════════════════════════════
