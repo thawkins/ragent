@@ -239,6 +239,30 @@ impl CodeIndex {
         Ok(stats)
     }
 
+    /// Non-blocking variant of [`status()`].
+    ///
+    /// Returns `None` if the store or FTS lock is currently held (e.g. by
+    /// a background reindex).  This is intended for UI status-bar polling
+    /// so it never stalls the render loop.
+    pub fn try_status(&self) -> Option<IndexStats> {
+        let store = match self.store.try_lock() {
+            Ok(s) => s,
+            Err(_) => return None,
+        };
+        let mut stats = store.get_stats().ok()?;
+        drop(store);
+
+        if let Ok(fts) = self.fts.try_lock() {
+            stats.fts_doc_count = fts.doc_count().unwrap_or(0);
+        }
+
+        if self.config.index_dir.exists() {
+            stats.index_size_bytes = dir_size(&self.config.index_dir);
+        }
+
+        Some(stats)
+    }
+
     /// Ensure FTS index is in sync with the SQLite store.
     ///
     /// Detects when the FTS index is empty or significantly diverged from

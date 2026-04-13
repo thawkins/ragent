@@ -1496,20 +1496,23 @@ impl App {
 
     /// Refresh the cached code index stats if the cache is stale (>5s old).
     ///
-    /// Called from the render loop to avoid querying SQLite/FTS every frame.
+    /// Uses `try_status()` so this never blocks the UI thread.  If the
+    /// index locks are currently held (e.g. during a background reindex),
+    /// the cached stats are kept until the next successful poll.
     pub fn refresh_code_index_stats(&mut self) {
         const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
         if self.code_index_stats_last_refresh.elapsed() < REFRESH_INTERVAL {
             return;
         }
-        self.code_index_stats_last_refresh = std::time::Instant::now();
         if let Some(ref idx) = self.code_index {
-            match idx.status() {
-                Ok(stats) => self.code_index_stats_cache = Some(stats),
-                Err(e) => tracing::warn!(error = %e, "Failed to refresh code index stats"),
+            if let Some(stats) = idx.try_status() {
+                self.code_index_stats_cache = Some(stats);
+                self.code_index_stats_last_refresh = std::time::Instant::now();
             }
+            // else: locks busy — keep stale cache, retry next loop iteration
         } else {
             self.code_index_stats_cache = None;
+            self.code_index_stats_last_refresh = std::time::Instant::now();
         }
     }
 
