@@ -1185,7 +1185,20 @@ fn render_home_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // Session ID on the right
+    // Code index indicator
+    if let Some(ref idx) = app.code_index {
+        if let Ok(stats) = idx.status() {
+            let label = if stats.files_indexed > 0 {
+                format!("│ 📇 {} files/{} syms ", stats.files_indexed, stats.total_symbols)
+            } else {
+                "│ 📇 indexing… ".to_string()
+            };
+            row2_left.push(Span::styled(
+                label,
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+    }
     let session_display = app
         .session_id
         .as_deref()
@@ -2152,6 +2165,21 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             row2_left.push(Span::styled(
                 format!("│ {} LSP {}/{} ", icon, connected, total),
                 Style::default().fg(color),
+            ));
+        }
+    }
+
+    // Code index indicator
+    if let Some(ref idx) = app.code_index {
+        if let Ok(stats) = idx.status() {
+            let label = if stats.files_indexed > 0 {
+                format!("│ 📇 {} files/{} syms ", stats.files_indexed, stats.total_symbols)
+            } else {
+                "│ 📇 indexing… ".to_string()
+            };
+            row2_left.push(Span::styled(
+                label,
+                Style::default().fg(Color::Cyan),
             ));
         }
     }
