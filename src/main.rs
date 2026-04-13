@@ -332,6 +332,7 @@ async fn main() -> Result<()> {
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
