@@ -6910,7 +6910,7 @@ Type `/swarm help` for more info.\n";
                 {
                     let row = event
                         .row
-                        .saturating_sub(self.active_agents_area.y.saturating_add(1));
+                        .saturating_sub(self.active_agents_area.y);
                     let absolute_row =
                         row.saturating_add(self.active_agents_scroll_offset) as usize;
                     if absolute_row == 1 {
@@ -6935,7 +6935,7 @@ Type `/swarm help` for more info.\n";
                 if self.teams_area.contains((event.column, event.row).into()) {
                     let row = event
                         .row
-                        .saturating_sub(self.teams_area.y.saturating_add(1));
+                        .saturating_sub(self.teams_area.y);
                     let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
                     if absolute_row == 1 {
                         // Lead row clicked — unfocus any teammate
