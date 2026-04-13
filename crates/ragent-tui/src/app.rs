@@ -488,6 +488,9 @@ impl App {
                           webapi_token: None,
                           needs_redraw: true,
                           code_index: None,
+                          code_index_enabled: ragent_core::config::Config::load()
+                              .map(|c| c.code_index.enabled)
+                              .unwrap_or(false),
                       };        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -6236,6 +6239,7 @@ Type `/swarm help` for more info.\n";
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
                     "on" | "enable" => {
+                        self.code_index_enabled = true;
                         self.append_assistant_text(
                             "ℹ️ **Code index:** enabling is handled by the session processor at startup. \
                              The code index will be active on the next session if the project root contains source files.",
@@ -6243,6 +6247,7 @@ Type `/swarm help` for more info.\n";
                         self.status = "codeindex: on".to_string();
                     }
                     "off" | "disable" => {
+                        self.code_index_enabled = false;
                         self.append_assistant_text(
                             "ℹ️ **Code index:** disabling removes the index from the tool context. \
                              Tools will return \"not available\" and suggest fallback tools.",
@@ -6250,11 +6255,16 @@ Type `/swarm help` for more info.\n";
                         self.status = "codeindex: off".to_string();
                     }
                     "show" | "status" | "" => {
+                        let config_enabled = self.code_index_enabled;
                         // Check if we have an active code index with real stats
                         if let Some(ref idx) = self.code_index {
                             match idx.status() {
                                 Ok(stats) => {
                                     let mut output = String::from("## Code Index Status\n\n");
+                                    output.push_str(&format!(
+                                        "**Enabled:** {}\n",
+                                        if config_enabled { "✓ yes" } else { "✗ no" }
+                                    ));
                                     output.push_str(&format!("**Files indexed:** {}\n", stats.files_indexed));
                                     output.push_str(&format!("**Total symbols:** {}\n", stats.total_symbols));
                                     output.push_str(&format!(
@@ -6298,13 +6308,16 @@ Type `/swarm help` for more info.\n";
                             }
                         } else {
                             // No active code index
-                            self.append_assistant_text(
+                            let state = if config_enabled { "enabled" } else { "disabled" };
+                            self.append_assistant_text(&format!(
                                 "## Code Index Status\n\n\
-                                 Code index is not available. It may be disabled or not yet initialised.\n\n\
+                                 **Enabled:** {}\n\n\
+                                 Code index is not currently active. It may not yet be initialised.\n\n\
                                  Use `/codeindex on` to enable indexing, \
                                  or run `/codeindex help` for available sub-commands.",
-                            );
-                            self.status = "codeindex: not available".to_string();
+                                if config_enabled { "✓ yes" } else { "✗ no" }
+                            ));
+                            self.status = format!("codeindex: {state}").to_string();
                         }
                     }
                     "reindex" => {

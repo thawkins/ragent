@@ -934,6 +934,8 @@ pub struct App {
     pub lsp_manager: Option<SharedLspManager>,
     /// Optional code index for codebase search and symbol lookup.
     pub code_index: Option<Arc<ragent_code::CodeIndex>>,
+    /// Whether code indexing is enabled in configuration.
+    pub code_index_enabled: bool,
     /// Active LSP discovery dialog, if any.
     pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.

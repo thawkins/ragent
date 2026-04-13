@@ -1727,17 +1727,35 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     // Code index indicator
-    if let Some(ref idx) = app.code_index {
-        if let Ok(stats) = idx.status() {
-            let label = if stats.files_indexed > 0 {
-                format!("│ 📇 {} files/{} syms ", stats.files_indexed, stats.total_symbols)
-            } else {
-                "│ 📇 indexing… ".to_string()
-            };
-            row2_left.push(Span::styled(
-                label,
-                Style::default().fg(Color::Cyan),
-            ));
+    {
+        let enabled = app.code_index_enabled;
+        let (tick, tick_color) = if enabled {
+            ("✓", Color::Green)
+        } else {
+            ("✗", Color::Red)
+        };
+        row2_left.push(Span::styled(
+            "│ Codeindex: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        row2_left.push(Span::styled(
+            format!("{tick} "),
+            Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
+        ));
+        if enabled {
+            if let Some(ref idx) = app.code_index {
+                if let Ok(stats) = idx.status() {
+                    let label = if stats.files_indexed > 0 {
+                        format!("{} files/{} syms ", stats.files_indexed, stats.total_symbols)
+                    } else {
+                        "indexing… ".to_string()
+                    };
+                    row2_left.push(Span::styled(
+                        label,
+                        Style::default().fg(Color::Cyan),
+                    ));
+                }
+            }
         }
     }
 
