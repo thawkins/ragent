@@ -621,6 +621,41 @@ impl App {
             .or(self.selected_model_ctx_window.filter(|w| *w > 0))
     }
 
+    /// Backfill `selected_model_ctx_window` by querying the provider's model list.
+    ///
+    /// Called once at startup when the persisted cache is empty. This ensures
+    /// models selected before the caching feature was added still get context
+    /// window information displayed in the status bar.
+    pub fn backfill_model_ctx_window(&mut self) {
+        // Skip if already cached or no model selected.
+        if self.selected_model_ctx_window.is_some() {
+            return;
+        }
+        let model = match self.selected_model.as_deref() {
+            Some(m) => m.to_string(),
+            None => return,
+        };
+        let Some((provider_id, model_id)) = model.split_once('/') else {
+            return;
+        };
+
+        // Query the provider for its full model list.
+        let models = self.models_for_provider(provider_id);
+        if let Some((_, _, ctx)) = models.iter().find(|(id, _, _)| id == model_id) {
+            if *ctx > 0 {
+                self.selected_model_ctx_window = Some(*ctx);
+                let _ = self
+                    .storage
+                    .set_setting("selected_model_ctx_window", &ctx.to_string());
+                tracing::info!(
+                    model = %model,
+                    context_window = ctx,
+                    "Backfilled context window for selected model"
+                );
+            }
+        }
+    }
+
     fn ollama_cloud_api_key(&self) -> Option<String> {
         self.storage
             .get_provider_auth("ollama_cloud")

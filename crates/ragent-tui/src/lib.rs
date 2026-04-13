@@ -282,6 +282,9 @@ pub async fn run_tui(
         }
     }
 
+    // -- Backfill context window cache for models selected before this feature --
+    app.backfill_model_ctx_window();
+
     // -- Startup complete --
     app.append_assistant_text("\n\n✅ **Ready**");
     app.status = "ready".to_string();
