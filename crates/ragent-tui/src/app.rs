@@ -9525,7 +9525,8 @@ Type `/swarm help` for more info.\n";
             .sum()
     }
 
-    fn append_assistant_text(&mut self, text: &str) {
+    /// Append markdown text to the chat panel as an assistant message.
+    pub fn append_assistant_text(&mut self, text: &str) {
         let rendered = self.render_markdown_to_ascii(text);
         if !self.force_new_message {
             if let Some(last) = self.messages.last_mut()

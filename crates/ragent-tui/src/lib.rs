@@ -112,39 +112,37 @@ pub async fn run_tui(
         show_log,
     );
 
-    // ── Render the very first frame so the user sees the TUI immediately ──
+    // -- Render the very first frame so the user sees the TUI immediately --
     app.status = "starting up…".to_string();
+    app.force_new_message = true;
+    app.append_assistant_text("⚙️ **Starting up…**");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // ── Provider health check ─────────────────────────────────────────────
+    // -- Provider health check --
     app.check_provider_health();
-    app.push_log_no_agent(app::LogLevel::Info, "Provider health check started".into());
+    app.append_assistant_text("\n✔ Provider health check");
+    app.status = "checking provider…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // ── Auto-initialize a session at startup if not resuming ──────────────
+    // -- Auto-initialize a session at startup if not resuming --
     if resume_session_id.is_none() {
         let dir = std::env::current_dir().unwrap_or_default();
         match app.session_processor.session_manager.create_session(dir) {
             Ok(session) => {
                 let session_id = session.id.clone();
                 app.session_id = Some(session_id.clone());
-                // Register the short_sid → agent_name mapping so tool step tags
-                // display "general:5" instead of "fbd5b8a9:5".
                 app.register_primary_session_mapping();
 
-                app.push_log_no_agent(
-                    app::LogLevel::Info,
-                    format!("Session created: {}", &session_id[..8]),
-                );
+                app.append_assistant_text(&format!(
+                    "\n✔ Session created: `{}`",
+                    &session_id[..8]
+                ));
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
 
                 // Kick off the AGENTS.md acknowledgement exchange in the background
-                // so it appears before the user types anything (including /swarm, /team, etc.).
                 let proc = Arc::clone(&app.session_processor);
                 let mut init_agent = app.agent_info.clone();
-                // Inject the persisted model selection so the init call works even
-                // before the user sends their first message.
                 if !init_agent.model_pinned || init_agent.model.is_none() {
                     if let Some(ref model_str) = app.selected_model {
                         if let Some((p, m)) = model_str.split_once('/') {
@@ -171,7 +169,7 @@ pub async fn run_tui(
         }
     }
 
-    // ── Input history ─────────────────────────────────────────────────────
+    // -- Input history --
     let history_path = dirs::data_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("ragent")
@@ -180,15 +178,13 @@ pub async fn run_tui(
     if let Err(e) = app.load_history() {
         tracing::warn!("Failed to load input history: {}", e);
     }
-    app.push_log_no_agent(app::LogLevel::Info, "Input history loaded".into());
+    app.append_assistant_text("\n✔ Input history loaded");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
     let mut bus_rx = event_bus.subscribe();
 
-    // ── LSP startup ───────────────────────────────────────────────────────
-    // Create the LspManager, start configured servers, and wire events into
-    // the app. This runs asynchronously; status changes propagate via events.
+    // -- LSP startup --
     app.status = "starting LSP…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -201,31 +197,18 @@ pub async fn run_tui(
         let mut mgr = lsp_manager.write().await;
         let lsp_configs = Config::load().map(|c| c.lsp).unwrap_or_default();
         if !lsp_configs.is_empty() {
-            app.push_log_no_agent(
-                app::LogLevel::Info,
-                format!("Connecting {} LSP server(s)…", lsp_configs.len()),
-            );
-            terminal.draw(|frame| layout::render(frame, &mut app))?;
             mgr.connect_all(lsp_configs).await;
         }
-        // Populate the initial server snapshot in app.
         app.lsp_servers = mgr.servers().to_vec();
     }
     app.set_lsp_manager(lsp_manager.clone());
-    // Also wire into the session processor so LSP tools can access the manager.
     let _ = session_processor.lsp_manager.set(lsp_manager);
 
     let lsp_count = app.lsp_servers.len();
-    if lsp_count > 0 {
-        app.push_log_no_agent(
-            app::LogLevel::Info,
-            format!("{lsp_count} LSP server(s) connected"),
-        );
-    }
+    app.append_assistant_text(&format!("\n✔ LSP: {lsp_count} server(s)"));
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // ── Code index startup ────────────────────────────────────────────────
-    // Initialize code index if enabled in config and project has source files.
+    // -- Code index startup --
     app.status = "starting code index…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -243,7 +226,6 @@ pub async fn run_tui(
                     match ragent_code::CodeIndex::open(&index_config) {
                         Ok(idx) => {
                             let arc_idx = Arc::new(idx);
-                            // Kick off initial index in background so we don't block the TUI
                             {
                                 let bg = arc_idx.clone();
                                 std::thread::spawn(move || {
@@ -264,23 +246,18 @@ pub async fn run_tui(
                             }
                             app.set_code_index(Some(arc_idx.clone()));
                             let _ = session_processor.code_index.set(arc_idx.clone());
-                            app.push_log_no_agent(
-                                app::LogLevel::Info,
-                                format!("Code index opened at {}", index_config.index_dir.display()),
-                            );
+                            app.append_assistant_text("\n✔ Code index: enabled");
                             tracing::info!("Code index initialized at {:?}", index_config.index_dir);
                             Some(arc_idx)
                         }
                         Err(e) => {
+                            app.append_assistant_text("\n✘ Code index: failed to open");
                             tracing::warn!(error = %e, "Failed to initialize code index");
                             None
                         }
                     }
                 } else {
-                    app.push_log_no_agent(
-                        app::LogLevel::Info,
-                        "Code index: disabled in config".into(),
-                    );
+                    app.append_assistant_text("\n✔ Code index: disabled");
                     tracing::debug!("Code index is disabled in config");
                     None
                 }
@@ -292,7 +269,7 @@ pub async fn run_tui(
         }
     };
 
-    // ── Session resume ────────────────────────────────────────────────────
+    // -- Session resume --
     if let Some(ref sid) = resume_session_id {
         app.status = "resuming session…".to_string();
         terminal.draw(|frame| layout::render(frame, &mut app))?;
@@ -301,9 +278,11 @@ pub async fn run_tui(
         }
     }
 
-    // ── Startup complete ──────────────────────────────────────────────────
+    // -- Startup complete --
+    app.append_assistant_text("\n\n✅ **Ready**");
     app.status = "ready".to_string();
-    app.push_log_no_agent(app::LogLevel::Info, "Startup complete".into());
+    // Ensure the init exchange response starts a new message bubble
+    app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
     while app.is_running {
         // Drain ALL pending bus events before rendering so the screen
