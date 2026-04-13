@@ -6261,18 +6261,33 @@ Type `/swarm help` for more info.\n";
                 match sub {
                     "on" | "enable" => {
                         self.code_index_enabled = true;
-                        self.append_assistant_text(
-                            "ℹ️ **Code index:** enabling is handled by the session processor at startup. \
-                             The code index will be active on the next session if the project root contains source files.",
-                        );
+                        if self.code_index.is_some() {
+                            self.append_assistant_text(
+                                "✅ **Code index** is already active and enabled.",
+                            );
+                        } else {
+                            self.append_assistant_text(
+                                "ℹ️ **Code index:** enabled. The index will be initialised on the next session start.\n\n\
+                                 Restart ragent for the change to take effect.",
+                            );
+                        }
                         self.status = "codeindex: on".to_string();
                     }
                     "off" | "disable" => {
                         self.code_index_enabled = false;
-                        self.append_assistant_text(
-                            "ℹ️ **Code index:** disabling removes the index from the tool context. \
-                             Tools will return \"not available\" and suggest fallback tools.",
-                        );
+                        let was_active = self.code_index.is_some();
+                        self.code_index = None;
+                        self.code_index_stats_cache = None;
+                        if was_active {
+                            self.append_assistant_text(
+                                "⛔ **Code index:** disabled and deactivated. Codeindex tools will no longer be available.\n\n\
+                                 Use `/codeindex on` and restart to re-enable.",
+                            );
+                        } else {
+                            self.append_assistant_text(
+                                "ℹ️ **Code index:** disabled. It was not currently active.",
+                            );
+                        }
                         self.status = "codeindex: off".to_string();
                     }
                     "show" | "status" | "" => {
@@ -6356,10 +6371,38 @@ Type `/swarm help` for more info.\n";
                         }
                     }
                     "reindex" => {
-                        self.append_assistant_text(
-                            "\u{2139}\u{fe0f} **Code index:** to trigger a full re-index, use the `codeindex_reindex` tool from the agent.",
-                        );
-                        self.status = "codeindex: reindex".to_string();
+                        if let Some(idx) = self.code_index.clone() {
+                            self.append_assistant_text(
+                                "🔄 **Re-indexing codebase...** scanning files and extracting symbols.",
+                            );
+                            match idx.full_reindex() {
+                                Ok(result) => {
+                                    self.append_assistant_text(&format!(
+                                        "✅ Re-index complete: +{} ~{} -{} files, {} symbols in {}ms.",
+                                        result.files_added,
+                                        result.files_updated,
+                                        result.files_removed,
+                                        result.symbols_extracted,
+                                        result.elapsed_ms,
+                                    ));
+                                    self.status = format!(
+                                        "codeindex: reindexed {} files",
+                                        result.files_added + result.files_updated
+                                    );
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "❌ Re-index failed: {e}"
+                                    ));
+                                    self.status = "codeindex: reindex failed".to_string();
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "⚠️ Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                            self.status = "codeindex: not active".to_string();
+                        }
                     }
                     "rebuild" => {
                         if let Some(idx) = self.code_index.clone() {
