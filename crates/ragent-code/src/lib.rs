@@ -450,73 +450,97 @@ impl CodeIndex {
         }
 
         // Parse and store symbols for new/updated files.
-        // Process in chunks with brief yields between them so that other
-        // threads (e.g. the TUI event loop) can acquire the store/FTS locks
-        // without starving.
-        const CHUNK_SIZE: usize = 10;
+        // Process in chunks: parse all files in each chunk outside locks
+        // (CPU-heavy), then batch-write to SQLite in a single transaction
+        // and FTS in a single commit per chunk. This reduces:
+        //   - SQLite disk syncs from N to N/CHUNK_SIZE
+        //   - FTS commits from 2N to N/CHUNK_SIZE
+        //   - Lock acquisitions from 2N to 2*(N/CHUNK_SIZE)
+        // Brief yields between chunks let the TUI event loop acquire locks.
+        const CHUNK_SIZE: usize = 20;
         const YIELD_MS: u64 = 5;
 
         let changed: Vec<&ScannedFile> = diff.to_add.iter().chain(diff.to_update.iter()).collect();
         self.reindex_total.store(changed.len() as u32, Ordering::Relaxed);
         self.reindex_done.store(0, Ordering::Relaxed);
 
-        for (i, sf) in changed.iter().enumerate() {
-            let abs_path = self.project_root.join(&sf.path);
-            let content = match std::fs::read(&abs_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    warn!("cannot read {}: {e}", abs_path.display());
-                    continue;
-                }
-            };
+        for chunk in changed.chunks(CHUNK_SIZE) {
+            // Phase 1: Parse all files in this chunk with NO locks held.
+            let mut parsed_results: Vec<(String, parser::ParsedFile)> = Vec::new();
+            for sf in chunk {
+                let abs_path = self.project_root.join(&sf.path);
+                let content = match std::fs::read(&abs_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!("cannot read {}: {e}", abs_path.display());
+                        continue;
+                    }
+                };
 
-            let rel_path = sf.path.to_string_lossy().to_string();
+                let rel_path = sf.path.to_string_lossy().to_string();
 
-            if let Some(ref lang) = sf.language {
-                // Parse outside of any lock — this is the CPU-heavy part.
-                if let Some(parsed) = self.parsers.parse(lang, &content) {
-                    match parsed {
-                        Ok(parsed) => {
-                            let store = self.store.lock().unwrap();
-                            if let Some(file_id) = store.get_file_id(&rel_path)? {
-                                let count = store.upsert_symbols(file_id, &parsed.symbols)?;
-                                store.upsert_imports(file_id, &parsed.imports)?;
-                                store.upsert_refs(file_id, &parsed.references)?;
-                                result.symbols_extracted += count;
+                if let Some(ref lang) = sf.language {
+                    if let Some(parsed) = self.parsers.parse(lang, &content) {
+                        match parsed {
+                            Ok(parsed) => {
+                                parsed_results.push((rel_path, parsed));
                             }
-                            drop(store);
-
-                            // Update FTS index.
-                            let fts = self.fts.lock().unwrap();
-                            fts.remove_file(&rel_path)?;
-                            let fts_syms: Vec<FtsSymbol<'_>> = parsed
-                                .symbols
-                                .iter()
-                                .map(|s| symbol_to_fts(s, &rel_path))
-                                .collect();
-                            fts.add_symbols(&fts_syms)?;
-                        }
-                        Err(e) => {
-                            warn!("parse error for {rel_path}: {e}");
+                            Err(e) => {
+                                warn!("parse error for {rel_path}: {e}");
+                            }
                         }
                     }
                 }
             }
 
-            // Yield after every chunk to avoid starving other threads.
-            if (i + 1) % CHUNK_SIZE == 0 {
-                std::thread::sleep(Duration::from_millis(YIELD_MS));
+            // Phase 2: Batch-write to SQLite in a single transaction.
+            if !parsed_results.is_empty() {
+                let store = self.store.lock().unwrap();
+                store.begin_transaction()?;
+                for (rel_path, parsed) in &parsed_results {
+                    if let Some(file_id) = store.get_file_id(rel_path)? {
+                        let count = store.upsert_symbols(file_id, &parsed.symbols)?;
+                        store.upsert_imports(file_id, &parsed.imports)?;
+                        store.upsert_refs(file_id, &parsed.references)?;
+                        result.symbols_extracted += count;
+                    }
+                }
+                store.commit_transaction()?;
+                drop(store);
             }
 
-            self.reindex_done.store((i + 1) as u32, Ordering::Relaxed);
+            // Phase 3: Batch-update FTS with a single writer and commit.
+            if !parsed_results.is_empty() {
+                let fts = self.fts.lock().unwrap();
+                let remove_paths: Vec<&str> =
+                    parsed_results.iter().map(|(p, _)| p.as_str()).collect();
+                let fts_syms: Vec<FtsSymbol<'_>> = parsed_results
+                    .iter()
+                    .flat_map(|(rel_path, parsed)| {
+                        parsed
+                            .symbols
+                            .iter()
+                            .map(move |s| symbol_to_fts(s, rel_path))
+                    })
+                    .collect();
+                fts.batch_update(&remove_paths, &fts_syms)?;
+                drop(fts);
+            }
+
+            // Update progress counter.
+            let done_so_far = self.reindex_done.load(Ordering::Relaxed)
+                + chunk.len() as u32;
+            self.reindex_done.store(done_so_far, Ordering::Relaxed);
+
+            // Yield between chunks so the TUI event loop can acquire locks.
+            std::thread::sleep(Duration::from_millis(YIELD_MS));
         }
 
-        // Remove deleted files from FTS.
-        {
+        // Remove deleted files from FTS in a single batch.
+        if !diff.to_remove.is_empty() {
             let fts = self.fts.lock().unwrap();
-            for path in &diff.to_remove {
-                fts.remove_file(path)?;
-            }
+            let remove_paths: Vec<&str> = diff.to_remove.iter().map(|s| s.as_str()).collect();
+            fts.batch_update(&remove_paths, &[])?;
         }
 
         // After incremental update, ensure FTS is in sync with SQLite.

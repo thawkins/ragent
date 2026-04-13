@@ -369,6 +369,23 @@ impl IndexStore {
 
     // ── Symbol CRUD ─────────────────────────────────────────────────────────
 
+    /// Begin an explicit transaction.
+    ///
+    /// All subsequent `upsert_symbols`, `upsert_imports`, and `upsert_refs`
+    /// calls will run within this transaction until `commit_transaction()`.
+    /// This avoids per-statement auto-commit, dramatically reducing disk I/O
+    /// when indexing many files in a batch.
+    pub fn begin_transaction(&self) -> Result<()> {
+        self.conn.execute_batch("BEGIN")?;
+        Ok(())
+    }
+
+    /// Commit an explicit transaction started by `begin_transaction()`.
+    pub fn commit_transaction(&self) -> Result<()> {
+        self.conn.execute_batch("COMMIT")?;
+        Ok(())
+    }
+
     /// Insert symbols for a file, replacing any existing symbols for that file.
     ///
     /// The `file_id` field on each `Symbol` must be set correctly before calling.

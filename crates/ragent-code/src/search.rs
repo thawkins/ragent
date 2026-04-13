@@ -139,6 +139,43 @@ impl FtsIndex {
         Ok(())
     }
 
+    /// Batch-update the FTS index: remove old entries for the given files,
+    /// then add new symbols, using a single writer and commit.
+    ///
+    /// Much faster than calling `remove_file()` + `add_symbols()` per file
+    /// because it avoids per-file writer allocation and commit overhead.
+    pub fn batch_update(
+        &self,
+        remove_paths: &[&str],
+        symbols: &[FtsSymbol<'_>],
+    ) -> Result<()> {
+        let mut writer = self.writer()?;
+
+        for path in remove_paths {
+            let term = tantivy::Term::from_field_text(self.fields.file_path, path);
+            writer.delete_term(term);
+        }
+
+        for sym in symbols {
+            let mut doc = TantivyDocument::default();
+            doc.add_text(self.fields.name, sym.name);
+            doc.add_text(self.fields.qualified_name, sym.qualified_name.unwrap_or(""));
+            doc.add_text(self.fields.kind, sym.kind);
+            doc.add_text(self.fields.file_path, sym.file_path);
+            doc.add_text(self.fields.signature, sym.signature.unwrap_or(""));
+            doc.add_text(self.fields.doc_comment, sym.doc_comment.unwrap_or(""));
+            let snippet = sym.body_snippet.unwrap_or("");
+            let truncated = &snippet[..snippet.len().min(BODY_SNIPPET_LEN)];
+            doc.add_text(self.fields.body_snippet, truncated);
+            doc.add_i64(self.fields.start_line, sym.start_line as i64);
+            doc.add_i64(self.fields.end_line, sym.end_line as i64);
+            writer.add_document(doc)?;
+        }
+
+        writer.commit()?;
+        Ok(())
+    }
+
     /// Delete all documents from the FTS index.
     pub fn clear(&self) -> Result<()> {
         let mut writer = self.writer()?;
