@@ -610,3 +610,91 @@ fn test_limit_filter() {
 
     assert_eq!(limited.len(), 3, "limit filter should cap results at 3");
 }
+
+#[test]
+fn test_references_extracted_from_function_bodies() {
+    use ragent_code::types::FileEntry;
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    fs::create_dir_all(root.join("src")).unwrap();
+
+    // Source with method calls inside function bodies.
+    let source = r#"
+pub struct App {
+    name: String,
+}
+
+impl App {
+    pub fn new() -> Self {
+        App { name: String::new() }
+    }
+
+    pub fn greet(&self) -> String {
+        format!("Hello, {}", self.name)
+    }
+
+    pub fn run(&self) {
+        let msg = self.greet();
+        println!("{}", msg);
+        helper();
+    }
+}
+
+fn helper() {
+    let app = App::new();
+    app.greet();
+}
+"#;
+    fs::write(root.join("src/main.rs"), source).unwrap();
+
+    let store = IndexStore::open_in_memory().unwrap();
+    let registry = ParserRegistry::new();
+
+    let entry = FileEntry {
+        path: "src/main.rs".to_string(),
+        content_hash: "test".to_string(),
+        byte_size: source.len() as u64,
+        language: Some("rust".to_string()),
+        last_indexed: chrono::Utc::now(),
+        mtime_ns: 0,
+        line_count: source.lines().count() as u64,
+    };
+    let file_id = store.upsert_file(&entry).unwrap();
+
+    if let Some(Ok(parsed)) = registry.parse("rust", source.as_bytes()) {
+        let mut symbols = parsed.symbols;
+        for sym in &mut symbols {
+            sym.file_id = file_id;
+        }
+        store.upsert_symbols(file_id, &symbols).unwrap();
+        store.upsert_refs(file_id, &parsed.references).unwrap();
+    }
+
+    // "greet" is called inside run() and helper() — should have references
+    let greet_refs = store.find_references("greet").unwrap();
+    assert!(
+        greet_refs.len() >= 2,
+        "expected at least 2 references to 'greet' (in run() and helper()), got {}. \
+         Refs: {:?}",
+        greet_refs.len(),
+        greet_refs
+            .iter()
+            .map(|r| format!("{}:L{} ({})", r.file_path, r.line, r.kind))
+            .collect::<Vec<_>>()
+    );
+
+    // "helper" is called inside run() — should have at least 1 reference
+    let helper_refs = store.find_references("helper").unwrap();
+    assert!(
+        !helper_refs.is_empty(),
+        "expected references to 'helper' from run(), got 0"
+    );
+
+    // "App" is used as a type — should have type references
+    let app_refs = store.find_references("App").unwrap();
+    assert!(
+        !app_refs.is_empty(),
+        "expected type references to 'App', got 0"
+    );
+}

@@ -102,14 +102,32 @@ fn extract_node(
     match node.kind() {
         "function_item" | "function_signature_item" => {
             extract_function(ctx, node, parent_id, scope, method_context);
+            // Recurse into the function body to capture references (calls,
+            // field accesses, type refs) inside function/method bodies.
+            if let Some(body) = node.child_by_field_name("body") {
+                let cursor = &mut body.walk();
+                for child in body.children(cursor) {
+                    extract_node(ctx, child, parent_id, scope, method_context);
+                }
+            }
         }
         "struct_item" => extract_struct(ctx, node, parent_id, scope),
         "enum_item" => extract_enum(ctx, node, parent_id, scope),
         "trait_item" => extract_trait(ctx, node, parent_id, scope),
         "impl_item" => extract_impl(ctx, node, parent_id, scope),
-        "const_item" => extract_const_or_static(ctx, node, parent_id, scope, SymbolKind::Constant),
+        "const_item" => {
+            extract_const_or_static(ctx, node, parent_id, scope, SymbolKind::Constant);
+            // Recurse into initializer value for references.
+            if let Some(val) = node.child_by_field_name("value") {
+                extract_node(ctx, val, parent_id, scope, method_context);
+            }
+        }
         "static_item" => {
             extract_const_or_static(ctx, node, parent_id, scope, SymbolKind::Static);
+            // Recurse into initializer value for references.
+            if let Some(val) = node.child_by_field_name("value") {
+                extract_node(ctx, val, parent_id, scope, method_context);
+            }
         }
         "mod_item" => extract_module(ctx, node, parent_id, scope),
         "type_item" => extract_type_alias(ctx, node, parent_id, scope),

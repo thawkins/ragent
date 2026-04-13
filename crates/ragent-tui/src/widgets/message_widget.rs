@@ -627,6 +627,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 format!("📇 {}", parts.join(" "))
             }
         }
+        "codeindex_references" => {
+            let symbol = get_str(&["symbol"]).unwrap_or_default();
+            format!("📇 refs: {}", trunc50(&symbol))
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // 📄 DOCUMENT (Office/PDF)
@@ -1330,6 +1334,16 @@ pub fn tool_result_summary(
             Some(format!(
                 "{} found",
                 pluralize(total, "symbol", "symbols")
+            ))
+        }
+        "codeindex_references" => {
+            let total = out
+                .get("total_results")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(total, "reference", "references")
             ))
         }
         // ═══════════════════════════════════════════════════════════════════
