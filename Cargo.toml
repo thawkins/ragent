@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.36"
+version = "0.1.0-alpha.37"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -31,6 +31,7 @@ similar_names = "allow"
 cast_possible_truncation = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
 # Doc style — enforced by review rather than lint
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"

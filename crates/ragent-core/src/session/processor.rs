@@ -94,6 +94,27 @@ async fn build_lsp_guidance_section(lsp_manager: &crate::lsp::SharedLspManager) 
     section
 }
 
+/// Build a system-prompt section describing the codebase index tools.
+///
+/// Injected when a code index is available so the model knows to prefer
+/// codeindex tools over grep/glob for symbol lookups.
+fn build_codeindex_guidance_section() -> String {
+    "\n## Code Intelligence — Codebase Index Tools\n\n\
+     A **codebase index** is active for this project. It provides fast, structured \
+     search across all indexed source files — symbols, references, dependencies, \
+     and documentation.\n\n\
+     **PREFER** codeindex tools over `grep`/`glob` for:\n\
+     - Finding functions, structs, enums, traits by name → `codeindex_search`\n\
+     - Listing symbols in a file or matching a filter → `codeindex_symbols`\n\
+     - Finding all references to a symbol → `codeindex_references`\n\
+     - Understanding file dependencies → `codeindex_dependencies`\n\
+     - Checking index health → `codeindex_status`\n\
+     - Refreshing the index after bulk changes → `codeindex_reindex`\n\n\
+     **Fallback:** Use `grep` or `glob` for pattern matching across file contents, \
+     or when searching for text that isn't a code symbol.\n\n"
+        .to_string()
+}
+
 /// Build a concise system-prompt section listing every registered tool by name and description.
 ///
 /// Injected into every session's system prompt so the model always knows the exact tool names
@@ -429,6 +450,12 @@ impl SessionProcessor {
             let lsp_guidance = build_lsp_guidance_section(lsp).await;
             system_prompt.push_str(&lsp_guidance);
         }
+
+        // Inject codebase index guidance. The codeindex tools are always
+        // registered but return a graceful "not available" when the index is
+        // disabled. Including guidance unconditionally keeps the model aware
+        // of these tools so it can leverage them when active.
+        system_prompt.push_str(&build_codeindex_guidance_section());
 
         if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
             system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
@@ -945,6 +972,7 @@ impl SessionProcessor {
                         .get()
                         .cloned()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                    code_index: None,
                 };
 
                 let tc_clone = tc.clone();

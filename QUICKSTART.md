@@ -808,6 +808,11 @@ Type `/` in the input to open an autocomplete menu:
 | `/system <prompt>` | Override system prompt |
 | `/opt help` | Show prompt optimization method table |
 | `/opt <method> <prompt>` | Optimize prompt with named method |
+| `/codeindex on` | Enable codebase indexing |
+| `/codeindex off` | Disable codebase indexing |
+| `/codeindex show` | Show index status and statistics |
+| `/codeindex reindex` | Trigger a full re-index |
+| `/codeindex help` | Show code index help |
 
 ### Key Bindings
 

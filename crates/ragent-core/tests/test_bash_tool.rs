@@ -18,6 +18,7 @@ fn make_ctx() -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 

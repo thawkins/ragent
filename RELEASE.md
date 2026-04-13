@@ -1,6 +1,19 @@
 # Release
 
-## Current Version: 0.1.0-alpha.36
+## Current Version: 0.1.0-alpha.37
+
+### Added
+- **Code index multi-language support** — 7 languages: Rust, Python, TypeScript/JavaScript (TS/TSX/JS/JSX), Go, C/C++, Java via tree-sitter parsers
+- **Code index benchmarks** — Criterion-based performance benchmarks for parse, store, search, and full index operations
+- **Code index config persistence** — `code_index` section in `ragent.json` for enabled state, file size limits, and exclude patterns
+
+### Fixed
+- Fixed `test_registry_total_tool_count` assertion (105 tools)
+
+### Changed
+- Version bump to 0.1.0-alpha.37
+
+## Previous: 0.1.0-alpha.36
 
 ### Fixed
 - Comprehensive test & lint cleanup across the entire workspace (43 files, 1,709 tests all passing)

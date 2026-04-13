@@ -25,6 +25,7 @@ fn make_tool_ctx(working_dir: PathBuf, session_id: &str) -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 

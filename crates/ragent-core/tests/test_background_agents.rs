@@ -118,7 +118,7 @@ fn test_registry_has_list_tasks() {
 #[test]
 fn test_registry_total_tool_count() {
     let registry = create_default_registry();
-    assert_eq!(registry.list().len(), 99);
+    assert_eq!(registry.list().len(), 105);
 }
 
 // ── cancel_task tool ───────────────────────────────────────────
@@ -134,6 +134,7 @@ fn make_ctx() -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 

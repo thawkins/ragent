@@ -23,6 +23,18 @@ pub mod bash_reset;
 pub mod calculator;
 /// Task cancellation tool.
 pub mod cancel_task;
+/// Codebase index dependency graph tool.
+pub mod codeindex_dependencies;
+/// Codebase index re-index trigger tool.
+pub mod codeindex_reindex;
+/// Codebase index reference lookup tool.
+pub mod codeindex_references;
+/// Codebase index full-text search tool.
+pub mod codeindex_search;
+/// Codebase index status tool.
+pub mod codeindex_status;
+/// Codebase index symbol query tool.
+pub mod codeindex_symbols;
 /// File copy tool.
 pub mod copy_file;
 /// File creation tool.
@@ -254,6 +266,7 @@ impl Default for ToolOutput {
 ///     active_model: None,
 ///     team_context: None,
 ///     team_manager: None,
+///     code_index: None,
 /// };
 /// assert_eq!(ctx.session_id, "session-1");
 /// ```
@@ -281,6 +294,9 @@ pub struct ToolContext {
     /// Optional team manager for spawning teammate sessions (M3+).
     /// `None` until `TeamManager` is wired into the session processor.
     pub team_manager: Option<Arc<dyn TeamManagerInterface>>,
+    /// Optional code index for codebase search and symbol lookup.
+    /// `None` when code indexing is disabled or not yet initialised.
+    pub code_index: Option<Arc<ragent_code::CodeIndex>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -525,6 +541,13 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(calculator::CalculatorTool));
     registry.register(Arc::new(get_env::GetEnvTool));
     registry.register(Arc::new(http_request::HttpRequestTool));
+    // Codebase index tools (graceful no-op when code index is disabled)
+    registry.register(Arc::new(codeindex_search::CodeIndexSearchTool));
+    registry.register(Arc::new(codeindex_symbols::CodeIndexSymbolsTool));
+    registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
+    registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
+    registry.register(Arc::new(codeindex_status::CodeIndexStatusTool));
+    registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::ViewFileTool));
     registry.register(Arc::new(aliases::ReadFileTool));

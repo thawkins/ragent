@@ -4319,6 +4319,7 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         active_model: active_model_clone,
                                                         team_context: None,
                                                         team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                                        code_index: None,
                                                     };
                                                     let _ = tool.execute(input, &ctx).await;
                                                 }
@@ -6221,6 +6222,65 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             },
+
+            "codeindex" => {
+                let sub = args.split_whitespace().next().unwrap_or("");
+                match sub {
+                    "on" | "enable" => {
+                        self.append_assistant_text(
+                            "ℹ️ **Code index:** enabling is handled by the session processor at startup. \
+                             The code index will be active on the next session if the project root contains source files.",
+                        );
+                        self.status = "codeindex: on".to_string();
+                    }
+                    "off" | "disable" => {
+                        self.append_assistant_text(
+                            "ℹ️ **Code index:** disabling removes the index from the tool context. \
+                             Tools will return \"not available\" and suggest fallback tools.",
+                        );
+                        self.status = "codeindex: off".to_string();
+                    }
+                    "show" | "status" | "" => {
+                        self.append_assistant_text(
+                            "## Code Index Status\n\n\
+                             Use the `codeindex_status` tool from the agent to see detailed stats, \
+                             or run `/codeindex help` for available sub-commands.",
+                        );
+                        self.status = "codeindex".to_string();
+                    }
+                    "reindex" => {
+                        self.append_assistant_text(
+                            "ℹ️ **Code index:** to trigger a full re-index, use the `codeindex_reindex` tool from the agent.",
+                        );
+                        self.status = "codeindex: reindex".to_string();
+                    }
+                    "help" => {
+                        self.append_assistant_text(
+                            "## /codeindex — Codebase Index Management\n\n\
+                             | Sub-command | Description |\n\
+                             |-------------|-------------|\n\
+                             | `/codeindex on` | Enable codebase indexing |\n\
+                             | `/codeindex off` | Disable codebase indexing |\n\
+                             | `/codeindex show` | Show index status and statistics |\n\
+                             | `/codeindex reindex` | Trigger a full re-index |\n\
+                             | `/codeindex help` | Show this help |\n\n\
+                             When enabled, the agent has access to these tools:\n\
+                             - `codeindex_search` — Full-text search for symbols and docs\n\
+                             - `codeindex_symbols` — Structured symbol query\n\
+                             - `codeindex_references` — Find all references to a symbol\n\
+                             - `codeindex_dependencies` — File dependency graph\n\
+                             - `codeindex_status` — Index statistics\n\
+                             - `codeindex_reindex` — Trigger full re-index",
+                        );
+                        self.status = "codeindex: help".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "Usage: `/codeindex on|off|show|reindex|help`",
+                        );
+                    }
+                }
+            }
 
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();

@@ -539,6 +539,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
+    SlashCommandDef {
+        trigger: "codeindex",
+        description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+    },
 ];
 
 /// A single entry in the slash-command autocomplete menu.

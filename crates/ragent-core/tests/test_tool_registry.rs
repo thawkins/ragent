@@ -286,6 +286,7 @@ async fn test_read_tool_execute() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool
@@ -320,6 +321,7 @@ async fn test_read_tool_line_range() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool
@@ -361,6 +363,7 @@ async fn test_read_tool_rejects_inverted_line_range() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool
@@ -399,6 +402,7 @@ async fn test_read_tool_missing_file() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool.execute(json!({"path": "nonexistent.txt"}), &ctx).await;
@@ -453,6 +457,7 @@ async fn test_read_tool_large_file_section_map() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     // Read without line range → should get summary, not the whole file
@@ -506,6 +511,7 @@ async fn test_read_tool_large_file_with_range_returns_full() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     // Read WITH a line range → should return those exact lines, no summary
@@ -552,6 +558,7 @@ async fn test_read_tool_small_file_no_summary() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool
@@ -588,6 +595,7 @@ async fn test_write_tool_execute() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool
@@ -629,6 +637,7 @@ async fn test_list_tool_execute() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool.execute(json!({"path": "."}), &ctx).await.unwrap();
@@ -663,6 +672,7 @@ async fn test_glob_tool_execute() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = tool

@@ -52,6 +52,48 @@ pub struct Config {
     /// User-defined bash command allowlist and denylist additions.
     #[serde(default)]
     pub bash: BashConfig,
+    /// Code index configuration (codebase indexing & search).
+    #[serde(default)]
+    pub code_index: CodeIndexConfig,
+}
+
+/// Persistent configuration for the code-index subsystem.
+///
+/// Runtime-derived fields like `project_root` and `index_dir` are
+/// resolved at startup, not stored in the config file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeIndexConfig {
+    /// Whether code indexing is enabled.
+    #[serde(default = "default_code_index_enabled")]
+    pub enabled: bool,
+    /// Maximum file size in bytes to index (default: 1 MB).
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: u64,
+    /// Additional directory names to exclude from scanning.
+    #[serde(default)]
+    pub extra_exclude_dirs: Vec<String>,
+    /// Additional glob patterns to exclude from scanning.
+    #[serde(default)]
+    pub extra_exclude_patterns: Vec<String>,
+}
+
+const fn default_code_index_enabled() -> bool {
+    true
+}
+
+const fn default_max_file_size() -> u64 {
+    1_048_576 // 1 MB
+}
+
+impl Default for CodeIndexConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_code_index_enabled(),
+            max_file_size: default_max_file_size(),
+            extra_exclude_dirs: Vec::new(),
+            extra_exclude_patterns: Vec::new(),
+        }
+    }
 }
 
 fn default_agent_name() -> String {

@@ -39,6 +39,11 @@ It is reimplemented in Rust as a learninh exercise for the author.
 - **Prompt optimization** — `/opt <method> <prompt>` transforms any prompt into structured
   frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, VARI, Q*, O1-STYLE, Meta Prompting) and
   platform adapters (OpenAI, Claude, Microsoft/Azure); also available via `POST /opt`
+- **Code index** — automatic codebase indexing with tree-sitter parsing, full-text
+  search via Tantivy, incremental updates via file watcher, and LLM-accessible tools
+  (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`,
+  `codeindex_status`); supports Rust, Python, TypeScript/JavaScript, Go, C/C++, and Java;
+  enable/disable via `/codeindex on|off`
 
 ## Installation
 
@@ -208,11 +213,12 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace with three crates:
+The project is a Cargo workspace with four crates:
 
 | Crate | Purpose |
 |-------|---------|
 | `ragent-core` | Types, storage, config, providers, tools, agents, sessions, event bus |
+| `ragent-code` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-server` | Axum HTTP routes, SSE streaming |
 | `ragent-tui` | Ratatui terminal interface |
 
@@ -242,11 +248,12 @@ User Input
 
 ## Performance
 
-`ragent-core` includes Criterion benchmarks for the orchestrator, tools, snapshots, and team mailbox. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md) for full instructions.
+`ragent-core` includes Criterion benchmarks for the orchestrator, tools, snapshots, and team mailbox. `ragent-code` includes benchmarks for parser throughput, store upsert, search, and full indexing. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md) for full instructions.
 
 ```bash
 # Run all benchmarks
 cargo bench -p ragent-core
+cargo bench -p ragent-code
 ```
 
 Key optimisations in the current release:

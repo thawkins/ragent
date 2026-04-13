@@ -26,6 +26,7 @@ fn make_ctx_with_storage(storage: Arc<Storage>) -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 
@@ -40,6 +41,7 @@ fn make_ctx_no_storage() -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 

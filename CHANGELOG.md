@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.0-alpha.37] - 2026-04-13
+
+### Added
+- **Code index — multi-language support** (Milestone 6) — Added tree-sitter parsers for Python, TypeScript/JavaScript (TS/TSX/JS/JSX), Go, C/C++, and Java alongside the existing Rust parser, bringing the total to 7 supported languages; each parser extracts functions, classes/structs, interfaces, enums, imports, type aliases, constants, and more
+- **Code index benchmarks** — Criterion-based benchmarks (`cargo bench -p ragent-code`) covering per-language parse throughput, store upsert, FTS search latency, and full 7-file indexing
+- **Code index config persistence** — `code_index` section in `ragent.json` for persisting `enabled`, `max_file_size`, `extra_exclude_dirs`, and `extra_exclude_patterns`
+
+### Fixed
+- Fixed `test_registry_total_tool_count` assertion to match actual registered tool count (105)
+
+### Changed
+- Version bump to 0.1.0-alpha.37
+
 ## [0.1.0-alpha.36] - 2026-04-12
 
 ### Fixed

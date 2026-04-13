@@ -17,6 +17,7 @@ fn make_ctx() -> ToolContext {
         lsp_manager: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
         active_model: None,
     }
 }

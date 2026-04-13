@@ -23,6 +23,7 @@ fn test_ctx() -> (ToolContext, Arc<EventBus>) {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
     (ctx, bus)
 }

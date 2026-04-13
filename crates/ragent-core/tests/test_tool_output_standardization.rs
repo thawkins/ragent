@@ -20,6 +20,7 @@ fn make_ctx() -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 
@@ -300,6 +301,7 @@ async fn test_multiedit_tool_output_format() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let result = MultiEditTool

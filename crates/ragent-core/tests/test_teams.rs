@@ -67,6 +67,7 @@ fn make_tool_ctx(
         active_model: None,
         team_context,
         team_manager: None,
+        code_index: None,
     }
 }
 
@@ -788,6 +789,7 @@ async fn test_new_task_blocked_when_user_recently_requested_team() {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     };
 
     let out = new_task

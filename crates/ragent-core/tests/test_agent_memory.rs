@@ -178,6 +178,7 @@ async fn test_memory_write_and_read() {
             is_lead: false,
         })),
         team_manager: None,
+        code_index: None,
     };
 
     // Write to memory.
@@ -261,6 +262,7 @@ async fn test_memory_read_disabled() {
             is_lead: false,
         })),
         team_manager: None,
+        code_index: None,
     };
 
     let tool = TeamMemoryReadTool;

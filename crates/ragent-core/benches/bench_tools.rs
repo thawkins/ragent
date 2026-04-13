@@ -26,6 +26,7 @@ fn make_ctx(dir: &std::path::Path) -> ToolContext {
         active_model: None,
         team_context: None,
         team_manager: None,
+        code_index: None,
     }
 }
 

@@ -60,6 +60,7 @@ fn make_tool_ctx(working_dir: PathBuf, session_id: &str, with_manager: bool) -> 
         active_model: None,
         team_context: None,
         team_manager: manager,
+        code_index: None,
     }
 }
 
