@@ -82,10 +82,11 @@ The system is **fully embedded** — every component compiles into the ragent bi
 | **File Scanner** | `ragent-code::scanner` | Walk directory trees, respect `.gitignore`, compute content hashes |
 | **File Watcher** | `ragent-code::watcher` | Real-time filesystem change detection via `notify` crate |
 | **Parser** | `ragent-code::parser` | Tree-sitter AST parsing with per-language grammar support |
-| **Symbol Extractor** | `ragent-code::extractor` | Convert ASTs into structured symbol records with relationships |
+| **Symbol Extractor** | `ragent-code::parser::*` | Per-language AST walkers extract symbols, imports, and references inline |
 | **Index Store** | `ragent-code::store` | SQLite persistence for files, symbols, imports, references |
 | **Search Engine** | `ragent-code::search` | Tantivy full-text index + structured SQLite queries |
-| **Background Worker** | `ragent-code::worker` | Async indexing pipeline with debouncing and batching |
+| **Tree Cache** | `ragent-code::tree_cache` | LRU cache of tree-sitter parse trees for incremental re-parsing |
+| **Background Worker** | `ragent-code::worker` | Async indexing worker with debounce, dedup, and batching |
 | **Tool Interface** | `ragent-core::tool::codeindex_*` | Agent-facing tools registered in the ToolRegistry |
 
 ---
@@ -98,31 +99,30 @@ The existing `ragent-code` workspace crate (currently an empty stub) becomes the
 crates/ragent-code/
 ├── Cargo.toml
 ├── src/
-│   ├── lib.rs              # Public API surface
-│   ├── scanner.rs          # File discovery & hashing
-│   ├── watcher.rs          # Filesystem change detection
-│   ├── parser/
-│   │   ├── mod.rs          # Parser trait + dispatcher
-│   │   ├── rust.rs         # Rust tree-sitter queries
-│   │   ├── python.rs       # Python tree-sitter queries
-│   │   ├── typescript.rs   # TypeScript/JavaScript queries
-│   │   ├── go.rs           # Go tree-sitter queries
-│   │   ├── c_cpp.rs        # C/C++ tree-sitter queries
-│   │   └── java.rs         # Java tree-sitter queries
-│   ├── extractor.rs        # Symbol extraction from AST nodes
-│   ├── store.rs            # SQLite index schema & operations
-│   ├── search.rs           # Tantivy FTS + structured queries
-│   ├── worker.rs           # Background indexing pipeline
-│   └── types.rs            # Shared types (Symbol, SymbolKind, FileEntry, etc.)
+│   ├── lib.rs              # Public API: CodeIndex struct, full_reindex(), search, status
+│   ├── scanner.rs          # File discovery, content hashing, language detection
+│   ├── watcher.rs          # Filesystem change detection via notify crate
+│   ├── worker.rs           # Background indexing worker with debounce and batching
+│   ├── store.rs            # SQLite index schema, CRUD operations, transaction control
+│   ├── search.rs           # Tantivy FTS index: add, remove, batch_update, search
+│   ├── tree_cache.rs       # LRU tree cache for incremental tree-sitter parsing
+│   ├── types.rs            # Shared types (Symbol, SymbolKind, FileEntry, etc.)
+│   └── parser/
+│       ├── mod.rs          # LanguageParser trait, ParserRegistry dispatcher, ParsedFile
+│       ├── rust.rs         # Rust: functions, structs, enums, traits, impls, use, refs
+│       ├── python.rs       # Python: functions, classes, imports, decorators
+│       ├── typescript.rs   # TypeScript/JavaScript: functions, classes, interfaces, imports
+│       ├── go.rs           # Go: functions, structs, interfaces, imports, methods
+│       ├── c_cpp.rs        # C/C++: functions, structs, enums, classes, includes
+│       └── java.rs         # Java: classes, interfaces, enums, methods, imports
 ├── tests/
-│   ├── test_scanner.rs
-│   ├── test_parser.rs
-│   ├── test_extractor.rs
-│   ├── test_store.rs
-│   ├── test_search.rs
-│   └── test_worker.rs
+│   ├── test_codeindex.rs               # Core CodeIndex integration tests
+│   ├── test_parse_store_integration.rs # Parse → store pipeline tests
+│   ├── test_scan_store_integration.rs  # Scan → store pipeline tests
+│   ├── test_m4_integration.rs          # Watcher + worker integration tests
+│   └── test_fts_diag.rs               # FTS diagnostic tests
 └── benches/
-    └── bench_indexing.rs
+    └── bench_file_ops.rs
 ```
 
 ---
@@ -363,41 +363,57 @@ For each file in project:
 
 ### 6.2 Indexing Pipeline
 
+The `full_reindex()` method processes changed files in a **3-phase chunked pipeline** to minimize lock contention and I/O overhead:
+
 ```
 File Change Detected
         │
         ▼
   ┌─────────────┐
-  │  Read File   │  (async, respects process semaphore)
+  │ Scan & Diff  │  Compute stale files (hash comparison)
+  │ apply_diff() │  Update file entries in SQLite (single transaction)
   └──────┬──────┘
          │
          ▼
-  ┌─────────────┐
-  │ Parse AST    │  (tree-sitter, incremental if old tree available)
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │ Extract      │  (symbols, imports, references)
-  │ Symbols      │
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │ Update Store │  (SQLite transaction: delete old + insert new)
-  └──────┬──────┘
-         │
-         ▼
-  ┌─────────────┐
-  │ Update FTS   │  (tantivy index writer commit)
-  └─────────────┘
+  ┌─────────────────────────────────────────────────┐
+  │  For each chunk of 20 files:                     │
+  │                                                  │
+  │  Phase 1: PARSE (no locks held)                  │
+  │  ┌─────────────┐                                 │
+  │  │ Read files   │  Read from disk                 │
+  │  │ Parse ASTs   │  tree-sitter (CPU-heavy)        │
+  │  │ Extract syms │  Symbols, imports, references   │
+  │  └──────┬──────┘                                 │
+  │         │                                        │
+  │  Phase 2: STORE (store lock, single transaction) │
+  │  ┌─────────────┐                                 │
+  │  │ BEGIN        │  One SQLite transaction          │
+  │  │ upsert_*()   │  All symbols/imports/refs        │
+  │  │ COMMIT       │  Single disk sync per chunk      │
+  │  └──────┬──────┘                                 │
+  │         │                                        │
+  │  Phase 3: FTS (fts lock, single commit)          │
+  │  ┌─────────────┐                                 │
+  │  │ batch_update │  Remove old + add new symbols    │
+  │  │ writer.commit│  Single tantivy commit           │
+  │  └──────┬──────┘                                 │
+  │         │                                        │
+  │  ┌──────┴──────┐                                 │
+  │  │ 5ms yield   │  Let TUI event loop acquire locks│
+  │  └─────────────┘                                 │
+  └─────────────────────────────────────────────────┘
 ```
+
+This architecture ensures that the CPU-heavy parsing work happens entirely outside any lock, and the I/O-heavy store/FTS writes are batched into single transactions per chunk.
 
 ### 6.3 Batching & Debouncing
 
 - File watcher events are debounced with a **500ms** quiet period
 - Changes are batched into groups of up to **50 files** per transaction
-- A full re-index processes files in batches of **100** with a yield between batches to avoid starving other tasks
+- A full re-index processes files in **chunks of 20** with a 5ms yield between chunks to avoid starving the TUI event loop
+- Each chunk uses a **single SQLite transaction** (BEGIN/COMMIT) for all upsert operations, reducing disk syncs from ~12,000 to ~20 for a 400-file project
+- Each chunk uses a **single tantivy writer + commit** via `batch_update()`, reducing FTS commits from ~800 to ~20
+- Lock acquisitions are reduced from 2×N (per file) to 2×(N/chunk_size) per chunk
 - The background worker respects the existing `MAX_CONCURRENT_TOOLS` semaphore
 
 ### 6.4 Tree-sitter Incremental Parsing
@@ -761,7 +777,7 @@ The code index is controlled by the user via a unified `/codeindex` slash comman
 
 #### `/codeindex on`
 
-Enables the code index for the current project. Persists the setting in the ragent config (`codeindex.enabled = true`). If the index does not yet exist, triggers an initial full index in the background. If the index already exists, starts the file watcher for incremental updates.
+Enables the code index for the current project. Persists the setting in the ragent config (`codeindex.enabled = true`). If the index does not yet exist, triggers an initial full index in the background. If the index is already active, reports that it is already enabled. Note: if the index was previously disabled, a restart may be required to fully re-initialize the `CodeIndex` instance.
 
 ```
 /codeindex on
@@ -771,17 +787,21 @@ Enables the code index for the current project. Persists the setting in the rage
   Starting initial index... (use /codeindex show to monitor progress)
 ```
 
+If already enabled:
+```
+Code index is already active — 247 files, 4821 symbols indexed
+```
+
 #### `/codeindex off`
 
-Disables the code index for the current project. Persists the setting in the ragent config (`codeindex.enabled = false`). Stops the file watcher and background worker immediately. The index files on disk are preserved (not deleted) so re-enabling is fast.
+Disables the code index for the current project. Persists the setting in the ragent config (`codeindex.enabled = false`). Drops the `CodeIndex` reference and clears the stats cache immediately, releasing all memory and file handles. The index files on disk are preserved (not deleted) so re-enabling is fast.
 
 ```
 /codeindex off
 ```
 ```
 ✓ Code index disabled
-  Watcher stopped. Index preserved at .ragent/codeindex/ (2.4 MB)
-  Re-enable with /codeindex on
+  Index preserved on disk. Re-enable with /codeindex on (restart required)
 ```
 
 #### `/codeindex show`
@@ -834,14 +854,18 @@ No index has been created. Enable with /codeindex on
 
 #### `/codeindex reindex`
 
-Triggers a full reindex of the project. Useful after large refactors, branch switches, or if the index appears stale. Runs in the background — progress is shown in the status bar.
+Triggers a full reindex of the project. Runs synchronously via `full_reindex()`, scanning for changed files and processing them through the 3-phase chunked pipeline. Progress is displayed in the status bar with a `⟳indexing N%` indicator.
 
 ```
 /codeindex reindex
 ```
 ```
-⟳ Full reindex started in background...
-  Use /codeindex show to monitor progress
+✓ Reindex complete: 247 files, 4821 symbols in 3.2s
+```
+
+If the reindex encounters an error:
+```
+✗ Reindex failed: <error message>
 ```
 
 #### `/codeindex clear`
@@ -935,12 +959,45 @@ pub struct ToolContext {
 
 The TUI manages the `CodeIndex` lifecycle:
 1. On session start with a project directory → check if codeindex is enabled (DB setting → config → default)
-2. If enabled: create `CodeIndex`, start background watcher + worker
-3. Show index status in the status bar (file count, indexing progress)
-4. Handle `/codeindex` slash commands (on/off/show/reindex/clear/help)
-5. On `/codeindex off`: stop watcher, release resources, update DB setting
-6. On `/codeindex on`: create index if needed, start watcher, update DB setting
-7. On session end / app quit → flush pending writes, stop watcher
+2. If enabled: create `CodeIndex`, spawn background thread for `full_reindex()`
+3. Show index status in the status bar (file count, symbol count, indexing indicator)
+4. Handle `/codeindex` slash commands (on/off/show/reindex/rebuild/help)
+5. On `/codeindex off`: drop `CodeIndex` reference, clear stats cache, update DB setting
+6. On `/codeindex on`: report status (restart required to re-initialize), update DB setting
+7. On session end / app quit → `CodeIndex` is dropped, releasing all resources
+
+#### Status Bar Display
+
+The status bar shows codeindex information in the format:
+
+```
+ 📚 247 files │ 4821 syms │ ⟳indexing 42%
+```
+
+- **File/symbol counts** are refreshed every 5s using non-blocking `try_status()` (see §12.5)
+- **`⟳indexing N%`** appears in yellow during active indexing, using lock-free atomic progress counters
+- During active indexing, the poll interval drops to 1s for responsive progress updates
+- When indexing completes, the indicator disappears and polling returns to the 5s interval
+
+#### Non-blocking UI Polling
+
+The TUI event loop polls `CodeIndex` status using `try_status()` which uses `try_lock()` on internal mutexes. If the background reindex thread holds the locks, the poll returns `None` and the UI keeps its cached stats — **never blocking the render loop**. This prevents the UI freeze that would occur with a standard `Mutex::lock()` when the background thread is actively writing.
+
+```rust
+// In refresh_code_index_stats():
+match idx.try_status() {
+    Some(stats) => { /* update cache, reset timer */ }
+    None        => { /* keep stale cache, mark as busy */ }
+}
+```
+
+#### Progress Tracking
+
+Indexing progress is tracked via two `AtomicU32` counters on the `CodeIndex` struct:
+- `reindex_total`: Set to the number of changed files at the start of `full_reindex()`
+- `reindex_done`: Incremented after each chunk completes
+
+The `reindex_progress() -> (u32, u32)` method reads both atomics without any lock, providing a responsive progress percentage even while the store/FTS locks are held.
 
 ### 12.3 With Existing Tools
 
@@ -976,17 +1033,99 @@ The `enabled` field in `ragent.json` provides the **global default**. Per-projec
 
 ---
 
-## 13. Performance Targets
+## 13. Performance Architecture
+
+### 13.1 Targets
 
 | Metric | Target | Notes |
 |--------|--------|-------|
-| Initial full index (1000 files) | < 10 seconds | Parallel file reading + batched inserts |
+| Initial full index (1000 files) | < 10 seconds | 3-phase chunked pipeline with batched writes |
 | Incremental re-index (1 file) | < 50 ms | Single parse + single transaction |
 | Symbol search by name | < 10 ms | SQLite indexed query |
 | Full-text search | < 100 ms | Tantivy query |
 | File watcher latency | < 1 second | Debounce window + batch processing |
 | Memory usage (idle) | < 50 MB | LRU tree cache + tantivy reader |
 | Index size (1000 files) | < 10 MB | SQLite + tantivy combined |
+
+### 13.2 Concurrency Model
+
+`CodeIndex` uses internal `Mutex<IndexStore>` and `Mutex<FtsIndex>` for thread safety. The background reindex runs on a plain `std::thread` (not a tokio task) to avoid blocking the async runtime.
+
+```
+┌────────────────────┐     ┌─────────────────────┐
+│   TUI Event Loop   │     │  Background Thread   │
+│   (tokio runtime)  │     │  (std::thread)       │
+│                    │     │                      │
+│  try_status()  ────┼──X──┼── full_reindex()     │
+│  (try_lock,        │     │  (holds locks during  │
+│   never blocks)    │     │   Phase 2 & 3 only)  │
+│                    │     │                      │
+│  reindex_progress()┼─────┼── AtomicU32 counters │
+│  (lock-free read)  │     │  (lock-free write)   │
+└────────────────────┘     └─────────────────────┘
+```
+
+Key design decisions:
+- **`try_lock()` for UI**: The TUI never calls `Mutex::lock()` on store/FTS. Instead, `try_status()` uses `try_lock()` and returns `None` if the lock is held, keeping the UI responsive.
+- **Atomic progress counters**: `reindex_total` and `reindex_done` are `AtomicU32` — the TUI reads them without any lock for real-time progress display.
+- **Adaptive polling**: The TUI polls status every 5s when idle, every 1s during active indexing, and forces a redraw on busy-state transitions.
+- **5ms yield between chunks**: After each chunk of 20 files, the background thread sleeps for 5ms, giving the TUI event loop a window to acquire locks if needed.
+
+### 13.3 Batch Optimization Details
+
+The `full_reindex()` method implements three key batching optimizations:
+
+#### SQLite Transaction Batching
+
+Without batching, each `upsert_symbols()`, `upsert_imports()`, and `upsert_refs()` call auto-commits as a separate SQLite transaction. For 400 files × ~30 symbols per file = ~12,000 individual disk syncs.
+
+With batching, `begin_transaction()` and `commit_transaction()` wrap all upsert operations for an entire chunk (20 files) in a single transaction:
+
+```rust
+store.begin_transaction()?;
+for (rel_path, parsed) in &parsed_results {
+    store.upsert_symbols(file_id, &parsed.symbols)?;
+    store.upsert_imports(file_id, &parsed.imports)?;
+    store.upsert_refs(file_id, &parsed.references)?;
+}
+store.commit_transaction()?;
+```
+
+**Impact**: ~12,000 disk syncs → ~20 (one per chunk). **~99.8% reduction in SQLite I/O.**
+
+#### FTS Commit Batching
+
+Without batching, each file requires two tantivy operations: `remove_file()` (creates writer, commits) and `add_symbols()` (creates writer, commits). For 400 files = 800 writer allocations and commits.
+
+The `batch_update()` method combines all remove + add operations into a single writer and commit:
+
+```rust
+fts.batch_update(&remove_paths, &fts_syms)?;
+```
+
+**Impact**: ~800 tantivy commits → ~20 (one per chunk). **~97.5% reduction in FTS overhead.**
+
+#### Lock Hold Duration Reduction
+
+Without batching, each file acquires both the store lock and the FTS lock:
+- Store lock held ~4-6ms per file (inserts + disk sync)
+- FTS lock held ~1.5-2.5ms per file (writer allocation + commit)
+- Total lock time: ~2.4-4.4 seconds for 400 files
+
+With batching, parsing (the most expensive CPU work) happens outside all locks. Locks are only held during the write phases:
+- Store lock held for one transaction per chunk (~10-15ms for 20 files)
+- FTS lock held for one commit per chunk (~5-10ms for 20 files)
+- Total lock time: ~300-500ms for 400 files
+
+**Impact**: ~90% reduction in total lock contention time.
+
+### 13.4 FTS Sync Recovery
+
+After a full reindex, `ensure_fts_sync()` verifies the FTS document count matches the SQLite symbol count. If divergence exceeds a 2:1 or 1:2 ratio, the FTS index is automatically rebuilt from SQLite data via `rebuild_fts()`. This handles crash recovery and accumulated drift.
+
+### 13.5 Cached Status Queries
+
+To avoid per-frame database queries, `IndexStats` are cached with a 5-second TTL. The cache is updated by `refresh_code_index_stats()` in the TUI event loop using `try_status()`. When a refresh attempt is skipped (lock busy), the timer is not reset — ensuring the next poll retries promptly.
 
 ---
 
@@ -997,7 +1136,7 @@ The `enabled` field in `ragent.json` provides the **global default**. Per-projec
 - **Binary detection**: Binary files are skipped via extension list + content sniffing (NUL byte check in first 8 KB)
 - **No code execution**: Tree-sitter parsing is purely syntactic — no macros expanded, no code evaluated
 - **Credential safety**: The index does not store file contents verbatim (only signatures, doc comments, and body hashes). The FTS index stores snippets, so `.ragent/codeindex/` should be in `.gitignore`
-- **Concurrency**: Uses existing ragent semaphore system to avoid starving other tools
+- **Concurrency**: Uses non-blocking `try_lock()` for UI thread, batched writes with brief yields between chunks, and lock-free atomic counters for progress tracking — designed to never starve the TUI event loop
 
 ---
 
@@ -1050,6 +1189,12 @@ These are explicitly out of scope for the initial implementation but inform arch
 4. **Multi-project indexing**: Index multiple related repositories (e.g., monorepo workspaces) with shared symbol namespaces.
 
 5. **MCP exposure**: Expose the code index as an MCP server so external tools (Cursor, VS Code) can query it.
+
+6. **Incremental tree-sitter re-parsing**: The `tree_cache` stores parsed trees, but they are not currently passed back to `parser.parse(source, Some(&old_tree))` for incremental re-parsing. Implementing this could improve re-parse time by 10-20% for frequently-edited files.
+
+7. **Adaptive chunk sizing**: Dynamically adjust `CHUNK_SIZE` and `YIELD_MS` based on actual lock contention (e.g., measuring how often `try_status()` returns `None`). This would optimize the trade-off between throughput and UI responsiveness.
+
+8. **Parallel parsing within chunks**: Currently, files within a chunk are parsed sequentially. Since parsing is CPU-bound and lock-free, it could be parallelized with `rayon` for multi-core speedup during the parse phase.
 
 ---
 
