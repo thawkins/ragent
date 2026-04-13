@@ -544,6 +544,14 @@ impl IndexStore {
         Ok(count as u64)
     }
 
+    /// Count total symbol references in the index.
+    pub fn reference_count(&self) -> Result<u64> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM symbol_refs", [], |r| r.get(0))?;
+        Ok(count as u64)
+    }
+
     // ── Import CRUD ─────────────────────────────────────────────────────────
 
     /// Insert imports for a file, replacing any existing imports for that file.
@@ -650,16 +658,19 @@ impl IndexStore {
     /// Find all references to a symbol by name.
     pub fn find_references(&self, symbol_name: &str) -> Result<Vec<SymbolRef>> {
         let mut stmt = self.conn.prepare(
-            "SELECT symbol_name, file_id, line, col, kind
-             FROM symbol_refs
-             WHERE symbol_name = ?1
-             ORDER BY file_id, line",
+            "SELECT r.symbol_name, r.file_id, r.line, r.col, r.kind,
+                    COALESCE(f.path, '') as file_path
+             FROM symbol_refs r
+             LEFT JOIN indexed_files f ON f.id = r.file_id
+             WHERE r.symbol_name = ?1
+             ORDER BY f.path, r.line",
         )?;
 
         let rows = stmt.query_map([symbol_name], |row| {
             Ok(SymbolRef {
                 symbol_name: row.get(0)?,
                 file_id: row.get(1)?,
+                file_path: row.get(5)?,
                 line: row.get::<_, i64>(2)? as u32,
                 col: row.get::<_, i64>(3)? as u32,
                 kind: row.get(4)?,
@@ -730,6 +741,7 @@ impl IndexStore {
         let files_indexed = self.file_count()?;
         let total_symbols = self.symbol_count()?;
         let total_bytes = self.total_bytes()?;
+        let total_references = self.reference_count()?;
         let languages = self.language_counts()?;
 
         Ok(crate::types::IndexStats {
@@ -740,6 +752,8 @@ impl IndexStore {
             last_full_index: None,
             last_incremental_update: None,
             index_size_bytes: 0,
+            fts_doc_count: 0, // set by CodeIndex::status()
+            total_references,
         })
     }
 }
@@ -1149,6 +1163,7 @@ mod tests {
             SymbolRef {
                 symbol_name: "Config".to_string(),
                 file_id,
+                file_path: String::new(),
                 line: 10,
                 col: 5,
                 kind: "type_ref".to_string(),
@@ -1156,6 +1171,7 @@ mod tests {
             SymbolRef {
                 symbol_name: "Config".to_string(),
                 file_id,
+                file_path: String::new(),
                 line: 20,
                 col: 8,
                 kind: "call".to_string(),

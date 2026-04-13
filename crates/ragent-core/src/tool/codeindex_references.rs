@@ -77,14 +77,19 @@ impl Tool for CodeIndexReferencesTool {
             });
         }
 
-        // Group by file_id for readable output.
+        // Group by file path for readable output.
         let mut output = String::new();
-        let mut current_file: Option<i64> = None;
+        let mut current_path: Option<String> = None;
 
         for r in &refs {
-            if current_file != Some(r.file_id) {
-                current_file = Some(r.file_id);
-                output.push_str(&format!("\n── file_id:{} ──\n", r.file_id));
+            let display_path = if r.file_path.is_empty() {
+                format!("file_id:{}", r.file_id)
+            } else {
+                r.file_path.clone()
+            };
+            if current_path.as_deref() != Some(&display_path) {
+                current_path = Some(display_path.clone());
+                output.push_str(&format!("\n── {} ──\n", display_path));
             }
             output.push_str(&format!(
                 "  L{}:{} — {} ({})\n",

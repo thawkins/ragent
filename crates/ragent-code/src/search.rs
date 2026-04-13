@@ -139,6 +139,14 @@ impl FtsIndex {
         Ok(())
     }
 
+    /// Delete all documents from the FTS index.
+    pub fn clear(&self) -> Result<()> {
+        let mut writer = self.writer()?;
+        writer.delete_all_documents()?;
+        writer.commit()?;
+        Ok(())
+    }
+
     /// Search the FTS index with the given query string.
     ///
     /// Fields are boosted: name 10×, qualified_name 5×, signature 3×,
@@ -247,7 +255,33 @@ impl FtsIndex {
         let dir = tantivy::directory::MmapDirectory::open(path)
             .with_context(|| format!("cannot open tantivy dir: {}", path.display()))?;
         match Index::open(dir) {
-            Ok(idx) => Ok(idx),
+            Ok(idx) => {
+                // Validate that the on-disk schema matches our expected schema.
+                // If field count differs, the index was created by a different code version;
+                // delete and recreate to avoid silent field-ID mismatches.
+                let disk_schema = idx.schema();
+                let expected_field_count = schema.fields().count();
+                let actual_field_count = disk_schema.fields().count();
+                if actual_field_count != expected_field_count {
+                    tracing::warn!(
+                        "FTS schema mismatch: expected {} fields, found {}; recreating index",
+                        expected_field_count,
+                        actual_field_count,
+                    );
+                    drop(idx);
+                    // Clear the directory and recreate.
+                    for entry in std::fs::read_dir(path)?.flatten() {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
+                    let dir2 = tantivy::directory::MmapDirectory::open(path)
+                        .with_context(|| {
+                            format!("cannot reopen tantivy dir: {}", path.display())
+                        })?;
+                    return Index::create(dir2, schema.clone(), Default::default())
+                        .context("cannot create tantivy index");
+                }
+                Ok(idx)
+            }
             Err(_) => {
                 let dir2 = tantivy::directory::MmapDirectory::open(path)
                     .with_context(|| format!("cannot reopen tantivy dir: {}", path.display()))?;
@@ -264,16 +298,46 @@ impl FtsIndex {
             .try_into()
             .context("cannot build index reader")?;
 
+        // Use the index's own schema for field lookups to ensure field IDs
+        // match what's on disk, even if field insertion order differed.
+        let idx_schema = index.schema();
         let fields = FtsFields {
-            name: schema.get_field("name").unwrap(),
-            qualified_name: schema.get_field("qualified_name").unwrap(),
-            kind: schema.get_field("kind").unwrap(),
-            file_path: schema.get_field("file_path").unwrap(),
-            signature: schema.get_field("signature").unwrap(),
-            doc_comment: schema.get_field("doc_comment").unwrap(),
-            body_snippet: schema.get_field("body_snippet").unwrap(),
-            start_line: schema.get_field("start_line").unwrap(),
-            end_line: schema.get_field("end_line").unwrap(),
+            name: idx_schema
+                .get_field("name")
+                .or_else(|_| schema.get_field("name"))
+                .unwrap(),
+            qualified_name: idx_schema
+                .get_field("qualified_name")
+                .or_else(|_| schema.get_field("qualified_name"))
+                .unwrap(),
+            kind: idx_schema
+                .get_field("kind")
+                .or_else(|_| schema.get_field("kind"))
+                .unwrap(),
+            file_path: idx_schema
+                .get_field("file_path")
+                .or_else(|_| schema.get_field("file_path"))
+                .unwrap(),
+            signature: idx_schema
+                .get_field("signature")
+                .or_else(|_| schema.get_field("signature"))
+                .unwrap(),
+            doc_comment: idx_schema
+                .get_field("doc_comment")
+                .or_else(|_| schema.get_field("doc_comment"))
+                .unwrap(),
+            body_snippet: idx_schema
+                .get_field("body_snippet")
+                .or_else(|_| schema.get_field("body_snippet"))
+                .unwrap(),
+            start_line: idx_schema
+                .get_field("start_line")
+                .or_else(|_| schema.get_field("start_line"))
+                .unwrap(),
+            end_line: idx_schema
+                .get_field("end_line")
+                .or_else(|_| schema.get_field("end_line"))
+                .unwrap(),
         };
 
         Ok(Self {

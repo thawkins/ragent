@@ -6263,14 +6263,28 @@ Type `/swarm help` for more info.\n";
                                     let mut output = String::from("## Code Index Status\n\n");
                                     output.push_str(&format!(
                                         "**Enabled:** {}\n",
-                                        if config_enabled { "✓ yes" } else { "✗ no" }
+                                        if config_enabled { "\u{2713} yes" } else { "\u{2717} no" }
                                     ));
                                     output.push_str(&format!("**Files indexed:** {}\n", stats.files_indexed));
                                     output.push_str(&format!("**Total symbols:** {}\n", stats.total_symbols));
+                                    output.push_str(&format!("**FTS documents:** {}\n", stats.fts_doc_count));
+                                    output.push_str(&format!("**References:** {}\n", stats.total_references));
                                     output.push_str(&format!(
                                         "**Total size:** {:.1} KB\n",
                                         stats.total_bytes as f64 / 1024.0
                                     ));
+
+                                    // FTS sync warning
+                                    if stats.total_symbols > 0 && stats.fts_doc_count == 0 {
+                                        output.push_str("\n\u{26a0}\u{fe0f} **FTS index is empty** — search will not work. Use `/codeindex rebuild` to fix.\n");
+                                    } else if stats.fts_doc_count > 0
+                                        && (stats.fts_doc_count as f64 / stats.total_symbols.max(1) as f64) < 0.5
+                                    {
+                                        output.push_str(&format!(
+                                            "\n\u{26a0}\u{fe0f} **FTS index may be out of sync** ({} FTS docs vs {} symbols). Use `/codeindex rebuild` to fix.\n",
+                                            stats.fts_doc_count, stats.total_symbols
+                                        ));
+                                    }
 
                                     if !stats.languages.is_empty() {
                                         output.push_str("**Languages:** ");
@@ -6295,13 +6309,13 @@ Type `/swarm help` for more info.\n";
                                     ));
                                     self.append_assistant_text(&output);
                                     self.status = format!(
-                                        "codeindex: {} files, {} symbols",
-                                        stats.files_indexed, stats.total_symbols
+                                        "codeindex: {} files, {} symbols, {} FTS docs",
+                                        stats.files_indexed, stats.total_symbols, stats.fts_doc_count
                                     );
                                 }
                                 Err(e) => {
                                     self.append_assistant_text(&format!(
-                                        "## Code Index Status\n\n⚠️ Error reading index stats: {e}"
+                                        "## Code Index Status\n\n\u{26a0}\u{fe0f} Error reading index stats: {e}"
                                     ));
                                     self.status = "codeindex: error".to_string();
                                 }
@@ -6315,40 +6329,68 @@ Type `/swarm help` for more info.\n";
                                  Code index is not currently active. It may not yet be initialised.\n\n\
                                  Use `/codeindex on` to enable indexing, \
                                  or run `/codeindex help` for available sub-commands.",
-                                if config_enabled { "✓ yes" } else { "✗ no" }
+                                if config_enabled { "\u{2713} yes" } else { "\u{2717} no" }
                             ));
                             self.status = format!("codeindex: {state}").to_string();
                         }
                     }
                     "reindex" => {
                         self.append_assistant_text(
-                            "ℹ️ **Code index:** to trigger a full re-index, use the `codeindex_reindex` tool from the agent.",
+                            "\u{2139}\u{fe0f} **Code index:** to trigger a full re-index, use the `codeindex_reindex` tool from the agent.",
                         );
                         self.status = "codeindex: reindex".to_string();
                     }
+                    "rebuild" => {
+                        if let Some(idx) = self.code_index.clone() {
+                            self.append_assistant_text(
+                                "\u{1f504} **Rebuilding FTS index** from SQLite data...",
+                            );
+                            match idx.rebuild_fts() {
+                                Ok(()) => {
+                                    let fts_count = idx.status().map(|s| s.fts_doc_count).unwrap_or(0);
+                                    self.append_assistant_text(&format!(
+                                        "\u{2705} FTS rebuild complete: {} documents indexed.",
+                                        fts_count,
+                                    ));
+                                    self.status = format!("codeindex: FTS rebuilt ({fts_count} docs)");
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "\u{274c} FTS rebuild failed: {e}"
+                                    ));
+                                    self.status = "codeindex: rebuild failed".to_string();
+                                }
+                            }
+                        } else {
+                            self.append_assistant_text(
+                                "\u{26a0}\u{fe0f} Code index is not active. Enable it first with `/codeindex on`.",
+                            );
+                        }
+                    }
                     "help" => {
                         self.append_assistant_text(
-                            "## /codeindex — Codebase Index Management\n\n\
+                            "## /codeindex \u{2014} Codebase Index Management\n\n\
                              | Sub-command | Description |\n\
                              |-------------|-------------|\n\
                              | `/codeindex on` | Enable codebase indexing |\n\
                              | `/codeindex off` | Disable codebase indexing |\n\
                              | `/codeindex show` | Show index status and statistics |\n\
                              | `/codeindex reindex` | Trigger a full re-index |\n\
+                             | `/codeindex rebuild` | Rebuild FTS index from SQLite |\n\
                              | `/codeindex help` | Show this help |\n\n\
                              When enabled, the agent has access to these tools:\n\
-                             - `codeindex_search` — Full-text search for symbols and docs\n\
-                             - `codeindex_symbols` — Structured symbol query\n\
-                             - `codeindex_references` — Find all references to a symbol\n\
-                             - `codeindex_dependencies` — File dependency graph\n\
-                             - `codeindex_status` — Index statistics\n\
-                             - `codeindex_reindex` — Trigger full re-index",
+                             - `codeindex_search` \u{2014} Full-text search for symbols and docs\n\
+                             - `codeindex_symbols` \u{2014} Structured symbol query\n\
+                             - `codeindex_references` \u{2014} Find all references to a symbol\n\
+                             - `codeindex_dependencies` \u{2014} File dependency graph\n\
+                             - `codeindex_status` \u{2014} Index statistics\n\
+                             - `codeindex_reindex` \u{2014} Trigger full re-index",
                         );
                         self.status = "codeindex: help".to_string();
                     }
                     _ => {
                         self.append_assistant_text(
-                            "Usage: `/codeindex on|off|show|reindex|help`",
+                            "Usage: `/codeindex on|off|show|reindex|rebuild|help`",
                         );
                     }
                 }

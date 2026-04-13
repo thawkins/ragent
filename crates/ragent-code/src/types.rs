@@ -234,6 +234,9 @@ pub struct SymbolRef {
     pub symbol_name: String,
     /// Foreign key to the file containing the reference.
     pub file_id: i64,
+    /// Resolved file path (populated by find_references, empty during parsing).
+    #[serde(default)]
+    pub file_path: String,
     /// Line number of the reference.
     pub line: u32,
     /// Column of the reference.
@@ -261,12 +264,18 @@ pub struct IndexStats {
     pub last_incremental_update: Option<DateTime<Utc>>,
     /// Size of the index database on disk in bytes.
     pub index_size_bytes: u64,
+    /// Number of documents in the FTS (tantivy) index.
+    pub fts_doc_count: u64,
+    /// Total number of symbol references stored.
+    pub total_references: u64,
 }
 
 impl fmt::Display for IndexStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Files indexed: {}", self.files_indexed)?;
         writeln!(f, "Total symbols: {}", self.total_symbols)?;
+        writeln!(f, "FTS documents: {}", self.fts_doc_count)?;
+        writeln!(f, "References:    {}", self.total_references)?;
         writeln!(
             f,
             "Total size:    {:.1} KB",

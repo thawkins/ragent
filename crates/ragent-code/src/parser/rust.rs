@@ -115,12 +115,122 @@ fn extract_node(
         "type_item" => extract_type_alias(ctx, node, parent_id, scope),
         "macro_definition" => extract_macro(ctx, node, parent_id, scope),
         "use_declaration" => extract_use(ctx, node),
+        // Reference extraction — capture calls, type refs, field accesses.
+        "call_expression" => {
+            extract_call_reference(ctx, node);
+            let cursor = &mut node.walk();
+            for child in node.children(cursor) {
+                extract_node(ctx, child, parent_id, scope, method_context);
+            }
+        }
+        "field_expression" => {
+            extract_field_reference(ctx, node);
+            let cursor = &mut node.walk();
+            for child in node.children(cursor) {
+                extract_node(ctx, child, parent_id, scope, method_context);
+            }
+        }
+        "type_identifier" => {
+            let name = ctx.node_text(node);
+            if !name.is_empty() {
+                ctx.references.push(SymbolRef {
+                    symbol_name: name.to_string(),
+                    file_id: 0,
+                    file_path: String::new(),
+                    line: node.start_position().row as u32 + 1,
+                    col: node.start_position().column as u32,
+                    kind: "type".to_string(),
+                });
+            }
+            // type_identifier is a leaf — no children to recurse.
+        }
+        "macro_invocation" => {
+            if let Some(name_node) = node.child_by_field_name("macro") {
+                let name = ctx.node_text(name_node);
+                if !name.is_empty() {
+                    ctx.references.push(SymbolRef {
+                        symbol_name: name.to_string(),
+                        file_id: 0,
+                        file_path: String::new(),
+                        line: name_node.start_position().row as u32 + 1,
+                        col: name_node.start_position().column as u32,
+                        kind: "call".to_string(),
+                    });
+                }
+            }
+            let cursor = &mut node.walk();
+            for child in node.children(cursor) {
+                extract_node(ctx, child, parent_id, scope, method_context);
+            }
+        }
         _ => {
             // Recurse into children for container nodes.
             let cursor = &mut node.walk();
             for child in node.children(cursor) {
                 extract_node(ctx, child, parent_id, scope, method_context);
             }
+        }
+    }
+}
+
+/// Extract a function/method call reference from a call_expression node.
+fn extract_call_reference(ctx: &mut ExtractionContext, node: Node) {
+    // call_expression has a "function" field that is the callee.
+    if let Some(func_node) = node.child_by_field_name("function") {
+        let name = match func_node.kind() {
+            "identifier" => ctx.node_text(func_node).to_string(),
+            "scoped_identifier" => {
+                // e.g. Foo::bar — extract the last segment
+                if let Some(name_node) = func_node.child_by_field_name("name") {
+                    ctx.node_text(name_node).to_string()
+                } else {
+                    ctx.node_text(func_node).to_string()
+                }
+            }
+            "field_expression" => {
+                // e.g. obj.method() — extract the field name
+                if let Some(field_node) = func_node.child_by_field_name("field") {
+                    ctx.node_text(field_node).to_string()
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        };
+
+        if !name.is_empty() {
+            ctx.references.push(SymbolRef {
+                symbol_name: name,
+                file_id: 0,
+                file_path: String::new(),
+                line: func_node.start_position().row as u32 + 1,
+                col: func_node.start_position().column as u32,
+                kind: "call".to_string(),
+            });
+        }
+    }
+}
+
+/// Extract a field access reference from a field_expression node.
+fn extract_field_reference(ctx: &mut ExtractionContext, node: Node) {
+    if let Some(field_node) = node.child_by_field_name("field") {
+        // Skip if the parent is a call_expression (already captured as a call reference).
+        if node
+            .parent()
+            .is_some_and(|p| p.kind() == "call_expression")
+        {
+            return;
+        }
+        let name = ctx.node_text(field_node);
+        if !name.is_empty() {
+            ctx.references.push(SymbolRef {
+                symbol_name: name.to_string(),
+                file_id: 0,
+                file_path: String::new(),
+                line: field_node.start_position().row as u32 + 1,
+                col: field_node.start_position().column as u32,
+                kind: "field_access".to_string(),
+            });
         }
     }
 }

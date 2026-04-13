@@ -211,6 +211,11 @@ impl CodeIndex {
         let store = self.store.lock().unwrap();
         let mut stats = store.get_stats()?;
 
+        // FTS doc count from tantivy.
+        let fts = self.fts.lock().unwrap();
+        stats.fts_doc_count = fts.doc_count().unwrap_or(0);
+        drop(fts);
+
         // Calculate on-disk index size if using a real directory.
         if self.config.index_dir.exists() {
             stats.index_size_bytes = dir_size(&self.config.index_dir);
@@ -392,10 +397,62 @@ impl CodeIndex {
             }
         }
 
+        // After incremental update, check if FTS is out of sync with SQLite.
+        // This can happen if the FTS index was lost/corrupted while SQLite
+        // was intact (so get_stale_files reports no changes).
+        {
+            let store = self.store.lock().unwrap();
+            let sqlite_symbols = store.symbol_count()?;
+            drop(store);
+
+            let fts = self.fts.lock().unwrap();
+            let fts_docs = fts.doc_count().unwrap_or(0);
+            drop(fts);
+
+            if sqlite_symbols > 0 && fts_docs == 0 {
+                debug!("FTS empty but SQLite has {sqlite_symbols} symbols; rebuilding FTS");
+                if let Err(e) = self.rebuild_fts() {
+                    warn!("FTS rebuild failed: {e}");
+                }
+            }
+        }
+
         result.elapsed_ms = start.elapsed().as_millis() as u64;
         debug!("{result}");
 
         Ok(result)
+    }
+
+    /// Rebuild the FTS index from SQLite symbol data.
+    ///
+    /// Clears all FTS documents and re-populates from the SQLite symbol store.
+    /// Use this to recover from FTS/SQLite mismatches.
+    pub fn rebuild_fts(&self) -> Result<()> {
+        let fts = self.fts.lock().unwrap();
+        fts.clear()?;
+
+        let store = self.store.lock().unwrap();
+        let files = store.list_files()?;
+
+        for file in &files {
+            if let Some(file_id) = store.get_file_id(&file.path)? {
+                let symbols = store.get_file_symbols(file_id)?;
+                if !symbols.is_empty() {
+                    let fts_syms: Vec<FtsSymbol<'_>> = symbols
+                        .iter()
+                        .map(|s| symbol_to_fts(s, &file.path))
+                        .collect();
+                    fts.add_symbols(&fts_syms)?;
+                }
+            }
+        }
+
+        debug!(
+            "FTS rebuilt: {} docs from {} files",
+            fts.doc_count().unwrap_or(0),
+            files.len()
+        );
+        Ok(())
     }
 
     /// Remove a file from the index.
