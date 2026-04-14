@@ -427,12 +427,13 @@ impl LlmClient for OllamaClient {
             req_builder = req_builder.header("Authorization", format!("Bearer {key}"));
         }
 
+        let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
         let response = tokio::time::timeout(
-            std::time::Duration::from_secs(300),
+            std::time::Duration::from_secs(timeout_secs),
             req_builder.json(&body).send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Ollama: initial response timed out after 300s"))?
+        .map_err(|_| anyhow::anyhow!("Ollama: initial response timed out after {timeout_secs}s"))?
         .context("Failed to connect to Ollama server — is it running?")?;
 
         if !response.status().is_success() {
@@ -462,7 +463,7 @@ impl LlmClient for OllamaClient {
 
             while !stream_done {
                 let chunk_result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(300),
+                    std::time::Duration::from_secs(timeout_secs),
                     stream.next(),
                 )
                 .await
@@ -471,7 +472,7 @@ impl LlmClient for OllamaClient {
                     Ok(None) => break,
                     Err(_) => {
                         yield StreamEvent::Error {
-                            message: "Ollama: stream stalled — no data received for 300s".to_string(),
+                            message: format!("Ollama: stream stalled — no data received for {timeout_secs}s"),
                         };
                         break;
                     }

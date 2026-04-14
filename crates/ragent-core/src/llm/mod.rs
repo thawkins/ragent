@@ -109,6 +109,10 @@ pub struct ChatRequest {
     /// Unique request ID for this specific API call (for provider-side request tracking).
     #[serde(skip)]
     pub request_id: Option<String>,
+    /// Stream timeout in seconds — how long to wait for data before considering
+    /// the stream stalled.  Set from `StreamConfig.timeout_secs`.
+    #[serde(skip)]
+    pub stream_timeout_secs: Option<u64>,
 }
 
 /// A single message in a chat conversation.

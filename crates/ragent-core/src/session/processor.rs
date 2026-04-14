@@ -172,6 +172,8 @@ pub struct SessionProcessor {
     /// Optional code index for codebase search and symbol lookup.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub code_index: std::sync::OnceLock<Arc<ragent_code::CodeIndex>>,
+    /// LLM stream configuration (timeouts, retries, backoff).
+    pub stream_config: crate::config::StreamConfig,
 }
 
 impl SessionProcessor {
@@ -574,6 +576,7 @@ impl SessionProcessor {
                     options: agent.options.clone(),
                     session_id: Some(session_id.to_string()),
                     request_id: Some(Uuid::new_v4().to_string()),
+                    stream_timeout_secs: None,
                 };
 
                 match client.chat(init_request).await {
@@ -712,7 +715,8 @@ impl SessionProcessor {
             }
 
             // Call LLM with retry on transient failures (connection errors, stream stalls)
-            const MAX_LLM_RETRIES: u32 = 2;
+            let max_retries = self.stream_config.max_retries;
+            let backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
             let mut text_buffer = String::new();
             let mut reasoning_buffer = String::new();
@@ -721,7 +725,7 @@ impl SessionProcessor {
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
 
-            'retry: for attempt in 0..=MAX_LLM_RETRIES {
+            'retry: for attempt in 0..=max_retries {
                 if attempt > 0 {
                     // Reset buffers for retry
                     text_buffer.clear();
@@ -731,13 +735,13 @@ impl SessionProcessor {
                     last_input_tokens = 0;
                     last_output_tokens = 0;
 
-                    let wait_secs = attempt as u64 * 2;
+                    let wait_secs = attempt as u64 * backoff_secs;
                     self.event_bus.publish(Event::AgentError {
                         session_id: session_id.to_string(),
                         error: format!(
                             "Retrying LLM request (attempt {}/{}), waiting {}s...",
                             attempt + 1,
-                            MAX_LLM_RETRIES + 1,
+                            max_retries + 1,
                             wait_secs
                         ),
                     });
@@ -756,13 +760,14 @@ impl SessionProcessor {
                     options: agent.options.clone(),
                     session_id: Some(session_id.to_string()),
                     request_id: Some(Uuid::new_v4().to_string()),
+                    stream_timeout_secs: Some(self.stream_config.timeout_secs),
                 };
 
                 let mut stream = match client.chat(attempt_request).await {
                     Ok(s) => s,
                     Err(e) => {
                         debug!("LLM call failed (attempt {}): {}", attempt + 1, redact_secrets(&e.to_string()));
-                        if attempt < MAX_LLM_RETRIES {
+                        if attempt < max_retries {
                             self.event_bus.publish(Event::AgentError {
                                 session_id: session_id.to_string(),
                                 error: format!("{} — will retry", e),
@@ -780,7 +785,7 @@ impl SessionProcessor {
                             &working_dir,
                             &[("RAGENT_ERROR", &error_msg)],
                         );
-                        bail!("LLM call failed after {} attempts: {e}", MAX_LLM_RETRIES + 1);
+                        bail!("LLM call failed after {} attempts: {e}", max_retries + 1);
                     }
                 };
 
@@ -844,7 +849,7 @@ impl SessionProcessor {
                     }
                     StreamEvent::Error { message } => {
                         debug!("Stream error (attempt {}): {}", attempt + 1, redact_secrets(&message));
-                        if message.contains("stall") && attempt < MAX_LLM_RETRIES {
+                        if message.contains("stall") && attempt < max_retries {
                             self.event_bus.publish(Event::AgentError {
                                 session_id: session_id.to_string(),
                                 error: format!("{} — will retry", message),
@@ -1408,6 +1413,7 @@ impl SessionProcessor {
             options: agent.options.clone(),
             session_id: Some(session_id.to_string()),
             request_id: Some(Uuid::new_v4().to_string()),
+            stream_timeout_secs: None,
         };
 
         let mut ack_text = String::new();

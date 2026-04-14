@@ -780,6 +780,7 @@ impl Completer for ServerCompleter {
             options: Default::default(),
             session_id: None,
             request_id: None,
+            stream_timeout_secs: None,
         };
 
         let mut stream = client.chat(request).await.context("starting LLM stream")?;

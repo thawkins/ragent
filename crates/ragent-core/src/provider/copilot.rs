@@ -458,8 +458,9 @@ impl LlmClient for CopilotClient {
         tracing::info!(url = %url, model = %request.model, "copilot chat request");
         let body = self.build_request_body(&request, &request.tools);
 
+        let timeout_secs = request.stream_timeout_secs.unwrap_or(600);
         let response = tokio::time::timeout(
-            std::time::Duration::from_secs(90),
+            std::time::Duration::from_secs(timeout_secs),
             self.http
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.token))
@@ -477,7 +478,7 @@ impl LlmClient for CopilotClient {
                 .send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("HTTP 408: Copilot API request timed out after 90s"))?
+        .map_err(|_| anyhow::anyhow!("HTTP 408: Copilot API request timed out after {timeout_secs}s"))?
         .context("Failed to connect to GitHub Copilot API")?;
 
         if !response.status().is_success() {
@@ -1697,6 +1698,7 @@ mod tests {
             options,
             session_id: None,
             request_id: None,
+            stream_timeout_secs: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1726,6 +1728,7 @@ mod tests {
             options,
             session_id: None,
             request_id: None,
+            stream_timeout_secs: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1756,6 +1759,7 @@ mod tests {
             options,
             session_id: None,
             request_id: None,
+            stream_timeout_secs: None,
         };
 
         let body = client.build_request_body(&req, &[]);

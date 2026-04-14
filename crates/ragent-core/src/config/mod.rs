@@ -55,6 +55,57 @@ pub struct Config {
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,
+    /// LLM streaming configuration (timeouts, retries).
+    #[serde(default)]
+    pub stream: StreamConfig,
+}
+
+/// Configuration for LLM streaming behaviour (timeouts, retries).
+///
+/// Override in `ragent.json`:
+/// ```json
+/// {
+///   "stream": {
+///     "timeout_secs": 600,
+///     "max_retries": 4,
+///     "retry_backoff_secs": 2
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamConfig {
+    /// Seconds of silence before a stream is considered stalled (default: 600).
+    #[serde(default = "default_stream_timeout_secs")]
+    pub timeout_secs: u64,
+    /// Maximum number of retry attempts after a stall or connection failure (default: 4).
+    #[serde(default = "default_stream_max_retries")]
+    pub max_retries: u32,
+    /// Backoff multiplier per retry attempt in seconds (default: 2).
+    /// Attempt N waits `N * retry_backoff_secs` seconds before retrying.
+    #[serde(default = "default_stream_retry_backoff_secs")]
+    pub retry_backoff_secs: u64,
+}
+
+const fn default_stream_timeout_secs() -> u64 {
+    600
+}
+
+const fn default_stream_max_retries() -> u32 {
+    4
+}
+
+const fn default_stream_retry_backoff_secs() -> u64 {
+    2
+}
+
+impl Default for StreamConfig {
+    fn default() -> Self {
+        Self {
+            timeout_secs: default_stream_timeout_secs(),
+            max_retries: default_stream_max_retries(),
+            retry_backoff_secs: default_stream_retry_backoff_secs(),
+        }
+    }
 }
 
 /// Persistent configuration for the code-index subsystem.

@@ -317,6 +317,7 @@ async fn main() -> Result<()> {
     }
 
     let max_background_agents = config.experimental.max_background_agents;
+    let stream_config = config.stream.clone();
 
     let config = Arc::new(tokio::sync::RwLock::new(config));
 
@@ -333,6 +334,7 @@ async fn main() -> Result<()> {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        stream_config,
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
