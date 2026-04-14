@@ -338,13 +338,92 @@ impl Storage {
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
 
-            CREATE INDEX IF NOT EXISTS idx_todos_session
-                ON todos(session_id, status);
-            ",
-        )?;
+                          CREATE INDEX IF NOT EXISTS idx_todos_session
+                              ON todos(session_id, status);
+            
+                          -- Journal system tables (Milestone 2)
+                          CREATE TABLE IF NOT EXISTS journal_entries (
+                              id TEXT PRIMARY KEY,
+                              title TEXT NOT NULL,
+                              content TEXT NOT NULL,
+                              project TEXT NOT NULL DEFAULT '',
+                              session_id TEXT NOT NULL DEFAULT '',
+                              timestamp TEXT NOT NULL,
+                              created_at TEXT NOT NULL
+                          );
+            
+                          CREATE TABLE IF NOT EXISTS journal_tags (
+                              entry_id TEXT NOT NULL,
+                              tag TEXT NOT NULL,
+                              PRIMARY KEY (entry_id, tag),
+                              FOREIGN KEY (entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE
+                          );
+            
+                          CREATE INDEX IF NOT EXISTS idx_journal_tags_tag
+                              ON journal_tags(tag);
+            
+                          CREATE INDEX IF NOT EXISTS idx_journal_entries_project
+                              ON journal_entries(project, timestamp DESC);
+            
+                          CREATE INDEX IF NOT EXISTS idx_journal_entries_session
+                              ON journal_entries(session_id, timestamp DESC);
+            
+                                                      CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts
+                                                          USING fts5(title, content, content=journal_entries, content_rowid=rowid);
+                          
+                                                      -- Structured memory store tables (Milestone 3)
+                                                      CREATE TABLE IF NOT EXISTS memories (
+                                                          id INTEGER PRIMARY KEY,
+                                                          content TEXT NOT NULL,
+                                                          category TEXT NOT NULL CHECK(category IN ('fact','pattern','preference','insight','error','workflow')),
+                                                          source TEXT NOT NULL DEFAULT '',
+                                                          confidence REAL NOT NULL DEFAULT 0.5,
+                                                          project TEXT NOT NULL DEFAULT '',
+                                                          session_id TEXT NOT NULL DEFAULT '',
+                                                          created_at TEXT NOT NULL,
+                                                          updated_at TEXT NOT NULL,
+                                                          access_count INTEGER NOT NULL DEFAULT 0,
+                                                          last_accessed TEXT
+                                                      );
+                          
+                                                      CREATE TABLE IF NOT EXISTS memory_tags (
+                                                          memory_id INTEGER NOT NULL,
+                                                          tag TEXT NOT NULL,
+                                                          PRIMARY KEY (memory_id, tag),
+                                                          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+                                                      );
+                          
+                                                      CREATE INDEX IF NOT EXISTS idx_memory_tags_tag
+                                                          ON memory_tags(tag);
+                          
+                                                      CREATE INDEX IF NOT EXISTS idx_memories_category
+                                                          ON memories(category, confidence DESC);
+                          
+                                                      CREATE INDEX IF NOT EXISTS idx_memories_project
+                                                          ON memories(project, updated_at DESC);
+                          
+                                                      CREATE INDEX IF NOT EXISTS idx_memories_confidence
+                                                          ON memories(confidence DESC, updated_at DESC);
+                          
+                                                                                                              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                                                                                                                  USING fts5(content, content=memories, content_rowid=rowid);
+                                                      
+                                                    ",        )?;
+
+        // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
+        for (table, col) in &[("memories", "embedding"), ("journal_entries", "embedding")] {
+            let has_col: bool = conn
+                .prepare(&format!("SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'", table, col))?
+                .query_row([], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+                > 0;
+            if !has_col {
+                conn.execute_batch(&format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col))?;
+            }
+        }
+
         Ok(())
     }
-
     // ── Session CRUD ──────────────────────────────────────────────
 
     /// Inserts a new session row with the given `id` and `directory`.
@@ -1025,8 +1104,948 @@ impl Storage {
         Ok(changed)
     }
 
-    /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.
+    // ── Journal CRUD ────────────────────────────────────────────────
+
+    /// Inserts a new journal entry and its tags, and updates the FTS index.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails (e.g., duplicate id).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::storage::Storage;
+    ///
+    /// let storage = Storage::open_in_memory().unwrap();
+    /// storage.create_journal_entry(
+    ///     "entry-1", "Bug fix", "Fixed off-by-one in parser",
+    ///     "my-project", "sess-1", &["bug".to_string()]
+    /// ).unwrap();
+    /// let entry = storage.get_journal_entry("entry-1").unwrap().unwrap();
+    /// assert_eq!(entry.title, "Bug fix");
+    /// ```
+    pub fn create_journal_entry(
+        &self,
+        id: &str,
+        title: &str,
+        content: &str,
+        project: &str,
+        session_id: &str,
+        tags: &[String],
+    ) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let timestamp = now.clone();
+
+        conn.execute(
+                    "INSERT INTO journal_entries (id, title, content, project, session_id, timestamp, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![id, title, content, project, session_id, timestamp, now],
+                )?;
+
+        for tag in tags {
+            conn.execute(
+                "INSERT OR IGNORE INTO journal_tags (entry_id, tag) VALUES (?1, ?2)",
+                params![id, tag],
+            )?;
+        }
+
+        // Update FTS index.
+        conn.execute(
+            "INSERT INTO journal_fts(rowid, title, content)
+                             SELECT rowid, title, content FROM journal_entries WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves a single journal entry by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_journal_entry(&self, id: &str) -> Result<Option<JournalEntryRow>> {
+        let conn = lock_conn!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT id, title, content, project, session_id, timestamp, created_at
+                         FROM journal_entries WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(JournalEntryRow {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        content: row.get(2)?,
+                        project: row.get(3)?,
+                        session_id: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Retrieves tags for a journal entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_journal_tags(&self, entry_id: &str) -> Result<Vec<String>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT tag FROM journal_tags WHERE entry_id = ?1 ORDER BY tag")?;
+        let tags: Vec<String> = stmt
+            .query_map(params![entry_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tags)
+    }
+
+    /// Searches journal entries using FTS5 full-text search, optionally
+    /// filtered by tags.
+    ///
+    /// Returns entries ordered by FTS rank (most relevant first).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn search_journal_entries(
+        &self,
+        query: &str,
+        tags: Option<&[String]>,
+        limit: usize,
+    ) -> Result<Vec<JournalEntryRow>> {
+        let conn = lock_conn!(self)?;
+
+        // Sanitise the FTS query: wrap each term in quotes to prevent injection.
+        let safe_query: String = query
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|term| format!("\"{}\"", term.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if safe_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let entries = if let Some(tags) = tags {
+            if tags.is_empty() {
+                self.list_journal_entries(limit)?
+            } else {
+                // Search with tag filter: join entries that have ALL specified tags.
+                let tag_placeholders: Vec<String> =
+                    (1..=tags.len()).map(|i| format!("?{i}")).collect();
+                let tag_filter = tag_placeholders.join(", ");
+                let sql = format!(
+                            "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
+                             FROM journal_entries e
+                             INNER JOIN journal_fts f ON f.rowid = e.rowid
+                             WHERE journal_fts MATCH ?{}
+                             AND e.id IN (
+                                 SELECT entry_id FROM journal_tags WHERE tag IN ({})
+                                 GROUP BY entry_id HAVING COUNT(DISTINCT tag) = {}
+                             )
+                             ORDER BY f.rank
+                             LIMIT ?{}",
+                            tags.len() + 1,
+                            tag_filter,
+                            tags.len(),
+                            tags.len() + 2,
+                        );
+
+                let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                }
+                params_vec.push(Box::new(safe_query));
+                params_vec.push(Box::new(limit as i64));
+
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    params_vec.iter().map(|p| p.as_ref()).collect();
+
+                let mut stmt = conn.prepare(&sql)?;
+                let rows: Vec<JournalEntryRow> = stmt
+                    .query_map(param_refs.as_slice(), |row| {
+                        Ok(JournalEntryRow {
+                            id: row.get(0)?,
+                            title: row.get(1)?,
+                            content: row.get(2)?,
+                            project: row.get(3)?,
+                            session_id: row.get(4)?,
+                            timestamp: row.get(5)?,
+                            created_at: row.get(6)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            }
+        } else {
+            // Search without tag filter.
+            let sql =
+                        "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
+                         FROM journal_entries e
+                         INNER JOIN journal_fts f ON f.rowid = e.rowid
+                         WHERE journal_fts MATCH ?1
+                         ORDER BY f.rank
+                         LIMIT ?2";
+            let mut stmt = conn.prepare(sql)?;
+            let rows: Vec<JournalEntryRow> = stmt
+                .query_map(params![safe_query, limit as i64], |row| {
+                    Ok(JournalEntryRow {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        content: row.get(2)?,
+                        project: row.get(3)?,
+                        session_id: row.get(4)?,
+                        timestamp: row.get(5)?,
+                        created_at: row.get(6)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+
+        Ok(entries)
+    }
+
+    /// Lists recent journal entries, ordered by timestamp descending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_journal_entries(&self, limit: usize) -> Result<Vec<JournalEntryRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, title, content, project, session_id, timestamp, created_at
+                     FROM journal_entries ORDER BY timestamp DESC LIMIT ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![limit as i64], |row| {
+                Ok(JournalEntryRow {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    project: row.get(3)?,
+                    session_id: row.get(4)?,
+                    timestamp: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Lists journal entries filtered by tag, ordered by timestamp descending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_journal_entries_by_tag(
+        &self,
+        tag: &str,
+        limit: usize,
+    ) -> Result<Vec<JournalEntryRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
+                     FROM journal_entries e
+                     INNER JOIN journal_tags t ON t.entry_id = e.id
+                     WHERE t.tag = ?1
+                     ORDER BY e.timestamp DESC
+                     LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![tag, limit as i64], |row| {
+                Ok(JournalEntryRow {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    content: row.get(2)?,
+                    project: row.get(3)?,
+                    session_id: row.get(4)?,
+                    timestamp: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Deletes a journal entry by ID (cascades to tags and FTS).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_journal_entry(&self, id: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+
+        // Remove from FTS first.
+        conn.execute(
+                    "DELETE FROM journal_fts WHERE rowid = (SELECT rowid FROM journal_entries WHERE id = ?1)",
+                    params![id],
+                )?;
+
+        // Tags are removed by ON DELETE CASCADE.
+        let affected = conn.execute("DELETE FROM journal_entries WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
+    /// Counts the total number of journal entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn count_journal_entries(&self) -> Result<u64> {
+        let conn = lock_conn!(self)?;
+        let count: u64 =
+            conn.query_row("SELECT COUNT(*) FROM journal_entries", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    // ── Structured Memory CRUD ──────────────────────────────────────
+
+    /// Inserts a new structured memory with category, tags, and confidence.
+    ///
+    /// Returns the auto-generated row ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails (e.g., invalid category).
+    pub fn create_memory(
+        &self,
+        content: &str,
+        category: &str,
+        source: &str,
+        confidence: f64,
+        project: &str,
+        session_id: &str,
+        tags: &[String],
+    ) -> Result<i64> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "INSERT INTO memories (content, category, source, confidence, project, session_id, created_at, updated_at, access_count, last_accessed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, 0, ?7)",
+            params![content, category, source, confidence, project, session_id, now],
+        )?;
+
+        let id = conn.last_insert_rowid();
+
+        for tag in tags {
+            conn.execute(
+                "INSERT OR IGNORE INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
+                params![id, tag],
+            )?;
+        }
+
+        // Update FTS index.
+        conn.execute(
+            "INSERT INTO memories_fts(rowid, content)
+             SELECT rowid, content FROM memories WHERE id = ?1",
+            params![id],
+        )?;
+
+        Ok(id)
+    }
+
+    /// Retrieves a single structured memory by ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_memory(&self, id: i64) -> Result<Option<MemoryRow>> {
+        let conn = lock_conn!(self)?;
+        let row = conn
+            .query_row(
+                "SELECT id, content, category, source, confidence, project, session_id,
+                        created_at, updated_at, access_count, last_accessed
+                 FROM memories WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(MemoryRow {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        category: row.get(2)?,
+                        source: row.get(3)?,
+                        confidence: row.get(4)?,
+                        project: row.get(5)?,
+                        session_id: row.get(6)?,
+                        created_at: row.get(7)?,
+                        updated_at: row.get(8)?,
+                        access_count: row.get(9)?,
+                        last_accessed: row.get(10)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Retrieves tags for a structured memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_memory_tags(&self, memory_id: i64) -> Result<Vec<String>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT tag FROM memory_tags WHERE memory_id = ?1 ORDER BY tag")?;
+        let tags: Vec<String> = stmt
+            .query_map(params![memory_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tags)
+    }
+
+    /// Searches structured memories using FTS5 full-text search, optionally
+    /// filtered by categories, tags, and minimum confidence.
+    ///
+    /// Returns entries ordered by FTS rank (most relevant first).
+    /// Increments `access_count` and updates `last_accessed` for returned results.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn search_memories(
+        &self,
+        query: &str,
+        categories: Option<&[String]>,
+        tags: Option<&[String]>,
+        limit: usize,
+        min_confidence: f64,
+    ) -> Result<Vec<MemoryRow>> {
+        let conn = lock_conn!(self)?;
+
+        // Sanitise the FTS query.
+        let safe_query: String = query
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|term| format!("\"{}\"", term.replace('"', "")))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if safe_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build category filter clause.
+        let category_clause = if let Some(cats) = categories {
+            if cats.is_empty() {
+                String::new()
+            } else {
+                let placeholders: Vec<String> = (1..=cats.len()).map(|i| format!("?{i}")).collect();
+                format!(" AND e.category IN ({})", placeholders.join(", "))
+            }
+        } else {
+            String::new()
+        };
+
+        // Compute parameter offset for FTS query param.
+        let fts_param_idx = categories.map_or(1, |c| c.len() + 1);
+        let limit_param_idx = fts_param_idx + 1;
+
+        // Build tag filter clause (entries that have ALL specified tags).
+        let tag_clause = if let Some(tags) = tags {
+            if tags.is_empty() {
+                String::new()
+            } else {
+                let tag_placeholders: Vec<String> = (1..=tags.len())
+                    .map(|i| format!("?{}", limit_param_idx + i))
+                    .collect();
+                let tag_count = tags.len();
+                format!(
+                    " AND e.id IN (\
+                     SELECT memory_id FROM memory_tags WHERE tag IN ({}) \
+                     GROUP BY memory_id HAVING COUNT(DISTINCT tag) = {})",
+                    tag_placeholders.join(", "),
+                    tag_count
+                )
+            }
+        } else {
+            String::new()
+        };
+
+        let sql = format!(
+            "SELECT e.id, e.content, e.category, e.source, e.confidence,
+                    e.project, e.session_id, e.created_at, e.updated_at,
+                    e.access_count, e.last_accessed
+             FROM memories e
+             INNER JOIN memories_fts f ON f.rowid = e.rowid
+             WHERE memories_fts MATCH ?{fts_param_idx}
+               AND e.confidence >= ?{limit_param_idx}
+               {category_clause}
+               {tag_clause}
+             ORDER BY f.rank
+             LIMIT ?{}",
+            limit_param_idx + tags.map_or(0, |t| t.len()) + 1
+        );
+
+        // Build parameter list.
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        if let Some(cats) = categories {
+            if !cats.is_empty() {
+                for cat in cats {
+                    params_vec.push(Box::new(cat.clone()));
+                }
+            }
+        }
+        params_vec.push(Box::new(safe_query));
+        params_vec.push(Box::new(min_confidence));
+        if let Some(tags) = tags {
+            if !tags.is_empty() {
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                }
+            }
+        }
+        params_vec.push(Box::new(limit as i64));
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows: Vec<MemoryRow> = stmt
+            .query_map(param_refs.as_slice(), |row| {
+                Ok(MemoryRow {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    category: row.get(2)?,
+                    source: row.get(3)?,
+                    confidence: row.get(4)?,
+                    project: row.get(5)?,
+                    session_id: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    access_count: row.get(9)?,
+                    last_accessed: row.get(10)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Increment access count for returned results.
+        for row in &rows {
+            let now = Utc::now().to_rfc3339();
+            let _ = conn.execute(
+                "UPDATE memories SET access_count = access_count + 1, last_accessed = ?1 WHERE id = ?2",
+                params![now, row.id],
+            );
+        }
+
+        Ok(rows)
+    }
+
+    /// Lists recent structured memories for a project, ordered by recency
+    /// and confidence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_memories(&self, project: &str, limit: usize) -> Result<Vec<MemoryRow>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content, category, source, confidence, project, session_id,
+                    created_at, updated_at, access_count, last_accessed
+             FROM memories
+             WHERE project = ?1
+             ORDER BY updated_at DESC, confidence DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![project, limit as i64], |row| {
+                Ok(MemoryRow {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    category: row.get(2)?,
+                    source: row.get(3)?,
+                    confidence: row.get(4)?,
+                    project: row.get(5)?,
+                    session_id: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    access_count: row.get(9)?,
+                    last_accessed: row.get(10)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Deletes a structured memory by ID (cascades to tags and FTS).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_memory(&self, id: i64) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+
+        conn.execute(
+            "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
+            params![id],
+        )?;
+
+        let affected = conn.execute("DELETE FROM memories WHERE id = ?1", params![id])?;
+        Ok(affected > 0)
+    }
+
+    /// Deletes structured memories matching filter criteria.
+    ///
+    /// At least one filter criterion must be provided (safety).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no criteria are provided or the delete fails.
+    pub fn delete_memories_by_filter(
+        &self,
+        older_than_days: Option<u32>,
+        max_confidence: Option<f64>,
+        category: Option<&str>,
+        tags: Option<&[String]>,
+    ) -> Result<usize> {
+        if older_than_days.is_none()
+            && max_confidence.is_none()
+            && category.is_none()
+            && tags.is_none_or(|t| t.is_empty())
+        {
+            anyhow::bail!("At least one filter criterion is required to delete memories");
+        }
+
+        let conn = lock_conn!(self)?;
+        let cutoff = older_than_days.map(|days| {
+            let dt = Utc::now() - chrono::Duration::days(days as i64);
+            dt.to_rfc3339()
+        });
+
+        // Build a subquery to find IDs to delete.
+        let mut conditions = Vec::new();
+        let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let mut param_idx = 1;
+
+        if let Some(ref cutoff) = cutoff {
+            conditions.push(format!("updated_at < ?{param_idx}"));
+            params_vec.push(Box::new(cutoff.clone()));
+            param_idx += 1;
+        }
+        if let Some(max_conf) = max_confidence {
+            conditions.push(format!("confidence <= ?{param_idx}"));
+            params_vec.push(Box::new(max_conf));
+            param_idx += 1;
+        }
+        if let Some(cat) = category {
+            conditions.push(format!("category = ?{param_idx}"));
+            params_vec.push(Box::new(cat.to_string()));
+            param_idx += 1;
+        }
+        if let Some(tags) = tags {
+            if !tags.is_empty() {
+                let placeholders: Vec<String> = (0..tags.len())
+                    .map(|i| format!("?{}", param_idx + i))
+                    .collect();
+                conditions.push(format!(
+                    "id IN (SELECT memory_id FROM memory_tags WHERE tag IN ({}) GROUP BY memory_id)",
+                    placeholders.join(", ")
+                ));
+                for tag in tags {
+                    params_vec.push(Box::new(tag.clone()));
+                }
+            }
+        }
+
+        let where_clause = conditions.join(" AND ");
+        let sql = format!("SELECT id FROM memories WHERE {where_clause}");
+
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
+
+        let mut stmt = conn.prepare(&sql)?;
+        let ids: Vec<i64> = stmt
+            .query_map(param_refs.as_slice(), |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        let count = ids.len();
+        for id in &ids {
+            let _ = conn.execute(
+                "DELETE FROM memories_fts WHERE rowid = (SELECT rowid FROM memories WHERE id = ?1)",
+                params![id],
+            );
+            let _ = conn.execute("DELETE FROM memories WHERE id = ?1", params![id]);
+        }
+
+        Ok(count)
+    }
+
+    /// Updates the confidence score of a memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn update_memory_confidence(&self, id: i64, confidence: f64) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE memories SET confidence = ?1, updated_at = ?2 WHERE id = ?3",
+            params![confidence, now, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Increments the access count and updates last_accessed for a memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn increment_memory_access(&self, id: i64) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE memories SET access_count = access_count + 1, last_accessed = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Counts the total number of structured memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn count_memories(&self) -> Result<u64> {
+        let conn = lock_conn!(self)?;
+        let count: u64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// Updates the content of a memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+            pub fn update_memory_content(&self, id: i64, content: &str) -> Result<bool> {
+                let conn = lock_conn!(self)?;
+                let now = Utc::now().to_rfc3339();
+                let affected = conn.execute(
+                    "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![content, now, id],
+                )?;
+                // For content-synced FTS5 tables, the index is automatically updated
+                // when the underlying content table is modified. No manual FTS update needed.
+                Ok(affected > 0)
+            }    /// Sets the tags for a memory, replacing any existing tags.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails.
+    pub fn set_memory_tags(&self, memory_id: i64, tags: &[String]) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "DELETE FROM memory_tags WHERE memory_id = ?1",
+            params![memory_id],
+        )?;
+        for tag in tags {
+            conn.execute(
+                "INSERT INTO memory_tags (memory_id, tag) VALUES (?1, ?2)",
+                params![memory_id, tag],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Delete memories using a [`ForgetFilter`](crate::memory::store::ForgetFilter).
+    ///
+    /// Handles both the `Id` variant (single delete) and `Filter` variant
+    /// (criteria-based delete).
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - The filter specifying which memories to delete.
+    /// * `session_id` - Session ID for auditing (unused in core delete, but required for API consistency).
+    ///
+    /// # Returns
+    ///
+    /// Number of deleted memories.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_memories(
+        &self,
+        filter: crate::memory::store::ForgetFilter,
+        _session_id: &str,
+    ) -> Result<usize> {
+        match filter {
+            crate::memory::store::ForgetFilter::Id(id) => {
+                let deleted = self.delete_memory(id)?;
+                Ok(if deleted { 1 } else { 0 })
+            }
+            crate::memory::store::ForgetFilter::Filter {
+                older_than_days,
+                max_confidence,
+                category,
+                tags,
+            } => self.delete_memories_by_filter(
+                older_than_days,
+                max_confidence,
+                category.as_deref(),
+                tags.as_deref(),
+            ),
+        }
+    }
+    // ── Embedding storage and search ─────────────────────────────────
+
+    /// Stores an embedding vector for a structured memory.
+    ///
+    /// The embedding is serialised as a little-endian f32 blob and stored in
+    /// the `embedding` BLOB column of the `memories` table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails (e.g., memory not found).
+    pub fn store_memory_embedding(&self, id: i64, embedding_blob: &[u8]) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let affected = conn.execute(
+            "UPDATE memories SET embedding = ?1 WHERE id = ?2",
+            params![embedding_blob, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Stores an embedding vector for a journal entry.
+    ///
+    /// The embedding is serialised as a little-endian f32 blob and stored in
+    /// the `embedding` BLOB column of the `journal_entries` table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the update fails (e.g., entry not found).
+    pub fn store_journal_embedding(&self, id: &str, embedding_blob: &[u8]) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let affected = conn.execute(
+            "UPDATE journal_entries SET embedding = ?1 WHERE id = ?2",
+            params![embedding_blob, id],
+        )?;
+        Ok(affected > 0)
+    }
+
+    /// Returns all memory embeddings that are not NULL.
+    ///
+    /// Each result contains the row ID and the raw embedding blob.
+    /// Used for brute-force cosine similarity search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_memory_embeddings(&self) -> Result<Vec<(i64, Vec<u8>)>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
+        let rows: Vec<(i64, Vec<u8>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Returns all journal entry embeddings that are not NULL.
+    ///
+    /// Each result contains the entry ID and the raw embedding blob.
+    /// Used for brute-force cosine similarity search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_journal_embeddings(&self) -> Result<Vec<(String, Vec<u8>)>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT id, embedding FROM journal_entries WHERE embedding IS NOT NULL")?;
+        let rows: Vec<(String, Vec<u8>)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Search structured memories by cosine similarity against a query embedding.
+    ///
+    /// Loads all stored memory embeddings and computes brute-force cosine
+    /// similarity. Returns results ranked by similarity (highest first).
+    ///
+    /// This approach is acceptable for up to ~10K memories. For larger datasets,
+    /// consider using `sqlite-vec` for ANN search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn search_memories_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        dimensions: usize,
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<crate::memory::embedding::SimilarityResult>> {
+        let embeddings = self.list_memory_embeddings()?;
+        let mut results: Vec<crate::memory::embedding::SimilarityResult> = Vec::new();
+
+        for (row_id, blob) in &embeddings {
+            if let Ok(stored) = crate::memory::embedding::deserialise_embedding(blob, dimensions) {
+                let score = crate::memory::embedding::cosine_similarity(query_embedding, &stored);
+                if score >= min_similarity {
+                    results.push(crate::memory::embedding::SimilarityResult {
+                        row_id: *row_id,
+                        score,
+                    });
+                }
+            }
+        }
+
+        // Sort by similarity descending.
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    /// Search journal entries by cosine similarity against a query embedding.
+    ///
+    /// Loads all stored journal embeddings and computes brute-force cosine
+    /// similarity. Returns results ranked by similarity (highest first).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn search_journal_by_embedding(
+        &self,
+        query_embedding: &[f32],
+        dimensions: usize,
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<crate::memory::embedding::SimilarityResult>> {
+        let embeddings = self.list_journal_embeddings()?;
+        let mut results: Vec<crate::memory::embedding::SimilarityResult> = Vec::new();
+
+        for (_entry_id, blob) in &embeddings {
+            if let Ok(stored) = crate::memory::embedding::deserialise_embedding(blob, dimensions) {
+                let score = crate::memory::embedding::cosine_similarity(query_embedding, &stored);
+                if score >= min_similarity {
+                    results.push(crate::memory::embedding::SimilarityResult {
+                        row_id: 0, // Journal uses string IDs, store rowid separately
+                        score,
+                    });
+                }
+            }
+        }
+
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(limit);
+        Ok(results)
+    }
+
+    /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.    ///
     /// All `rusqlite` operations are synchronous. Call this from async code to
     /// avoid stalling the async executor during writes. The closure receives a
     /// reference to the storage and returns any `Result<T>`.
@@ -1103,4 +2122,50 @@ pub struct TodoRow {
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
+}
+
+/// Row representation of a journal entry.
+#[derive(Debug, Clone)]
+pub struct JournalEntryRow {
+    /// Unique entry identifier (UUID v4).
+    pub id: String,
+    /// Short title describing the entry.
+    pub title: String,
+    /// Full content of the journal entry.
+    pub content: String,
+    /// Project this entry belongs to.
+    pub project: String,
+    /// Session that created this entry.
+    pub session_id: String,
+    /// ISO-8601 timestamp of the observation/event.
+    pub timestamp: String,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+}
+
+/// Row representation of a structured memory.
+#[derive(Debug, Clone)]
+pub struct MemoryRow {
+    /// Auto-generated row ID.
+    pub id: i64,
+    /// The memory content.
+    pub content: String,
+    /// Category: fact, pattern, preference, insight, error, workflow.
+    pub category: String,
+    /// Source of the memory (e.g., tool name, auto-extract).
+    pub source: String,
+    /// Confidence score (0.0–1.0).
+    pub confidence: f64,
+    /// Project this memory belongs to.
+    pub project: String,
+    /// Session that created this memory.
+    pub session_id: String,
+    /// ISO-8601 creation timestamp.
+    pub created_at: String,
+    /// ISO-8601 last-updated timestamp.
+    pub updated_at: String,
+    /// Number of times this memory has been accessed in search results.
+    pub access_count: i64,
+    /// ISO-8601 timestamp of last access.
+    pub last_accessed: Option<String>,
 }
