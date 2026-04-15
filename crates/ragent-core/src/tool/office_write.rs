@@ -595,6 +595,51 @@ fn truncate_json_for_error(v: &Value) -> String {
     }
 }
 
+/// Flatten an array of content elements (structured or plain) into newline-joined text.
+///
+/// Handles: plain strings, `{type:"paragraph",text:"..."}`, `{type:"heading",text:"..."}`,
+/// `{type:"bullet_list",items:[...]}`, `{type:"ordered_list",items:[...]}`, etc.
+fn flatten_pptx_elements(arr: &[Value]) -> String {
+    let mut lines = Vec::new();
+    for item in arr {
+        if let Some(s) = item.as_str() {
+            lines.push(s.to_owned());
+            continue;
+        }
+        let elem_type = item["type"].as_str().unwrap_or("paragraph");
+        match elem_type {
+            "heading" => {
+                let text = item["text"]
+                    .as_str()
+                    .or_else(|| item["heading"].as_str())
+                    .unwrap_or("");
+                if !text.is_empty() {
+                    lines.push(text.to_owned());
+                }
+            }
+            "bullet_list" | "ordered_list" | "numbered_list" => {
+                if let Some(items) = item["items"].as_array() {
+                    for li in items {
+                        let text = li
+                            .as_str()
+                            .unwrap_or_else(|| li["text"].as_str().unwrap_or(""));
+                        if !text.is_empty() {
+                            lines.push(format!("• {text}"));
+                        }
+                    }
+                }
+            }
+            _ => {
+                let text = item["text"].as_str().unwrap_or("");
+                if !text.is_empty() {
+                    lines.push(text.to_owned());
+                }
+            }
+        }
+    }
+    lines.join("\n")
+}
+
 /// Writes a `PowerPoint` presentation from structured JSON content.
 ///
 /// Expected content format:
@@ -665,11 +710,7 @@ fn write_pptx(path: &Path, content: &Value) -> Result<()> {
         let body: &str = if let Some(s) = body_val.as_str() {
             s
         } else if let Some(arr) = body_val.as_array() {
-            body_owned = arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
+            body_owned = flatten_pptx_elements(arr);
             &body_owned
         } else {
             ""
@@ -802,7 +843,18 @@ fn generate_presentation_rels_xml(slide_count: usize) -> String {
 
 fn generate_slide_xml(title: &str, body: &str) -> String {
     let title_escaped = xml_escape(title);
-    let body_escaped = xml_escape(body);
+    // Split body into separate paragraphs for each line
+    let body_paragraphs: String = if body.is_empty() {
+        "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>".to_string()
+    } else {
+        body.lines()
+            .map(|line| {
+                let escaped = xml_escape(line);
+                format!("<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>{escaped}</a:t></a:r></a:p>")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -818,7 +870,9 @@ fn generate_slide_xml(title: &str, body: &str) -> String {
 <p:sp>
 <p:nvSpPr><p:cNvPr id="3" name="Content 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr>
 <p:spPr/>
-<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>{body_escaped}</a:t></a:r></a:p></p:txBody>
+<p:txBody><a:bodyPr/><a:lstStyle/>
+{body_paragraphs}
+</p:txBody>
 </p:sp>
 </p:spTree>
 </p:cSld>
