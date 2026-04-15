@@ -841,20 +841,32 @@ fn generate_presentation_rels_xml(slide_count: usize) -> String {
     rels
 }
 
+/// Normalize body text: replace literal `\n` escape sequences with real newlines,
+/// and strip markdown bold markers for plain-text rendering.
+fn normalize_body_text(body: &str) -> String {
+    let s = body.replace("\\n", "\n");
+    // Strip markdown bold markers
+    s.replace("**", "")
+}
+
 fn generate_slide_xml(title: &str, body: &str) -> String {
     let title_escaped = xml_escape(title);
+    let normalized = normalize_body_text(body);
     // Split body into separate paragraphs for each line
-    let body_paragraphs: String = if body.is_empty() {
+    let body_paragraphs: String = if normalized.trim().is_empty() {
         "<a:p><a:endParaRPr lang=\"en-US\"/></a:p>".to_string()
     } else {
-        body.lines()
+        normalized
+            .lines()
             .map(|line| {
                 let escaped = xml_escape(line);
-                format!("<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\"/><a:t>{escaped}</a:t></a:r></a:p>")
+                format!("<a:p><a:r><a:rPr lang=\"en-US\" dirty=\"0\" sz=\"1800\"/><a:t>{escaped}</a:t></a:r></a:p>")
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
+    // Explicit geometry (EMU) so body renders even without layout placeholders.
+    // Slide = 9144000 x 6858000 EMU (10" x 7.5" at 914400 EMU/inch).
     format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -864,13 +876,13 @@ fn generate_slide_xml(title: &str, body: &str) -> String {
 <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
 <p:sp>
 <p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
-<p:spPr/>
+<p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr>
 <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" dirty="0"/><a:t>{title_escaped}</a:t></a:r></a:p></p:txBody>
 </p:sp>
 <p:sp>
 <p:nvSpPr><p:cNvPr id="3" name="Content 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr>
-<p:spPr/>
-<p:txBody><a:bodyPr/><a:lstStyle/>
+<p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="4525963"/></a:xfrm></p:spPr>
+<p:txBody><a:bodyPr wrap="square" rtlCol="0"><a:normAutofit/></a:bodyPr><a:lstStyle/>
 {body_paragraphs}
 </p:txBody>
 </p:sp>
@@ -929,11 +941,21 @@ const fn generate_slide_master_xml() -> &'static str {
 
 const fn generate_slide_layout_xml() -> &'static str {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="titleOnly">
-<p:cSld name="Title Only">
+<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="obj">
+<p:cSld name="Title, Content">
 <p:spTree>
 <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
 <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+<p:sp>
+<p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+<p:spPr><a:xfrm><a:off x="457200" y="274638"/><a:ext cx="8229600" cy="1143000"/></a:xfrm></p:spPr>
+<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>
+</p:sp>
+<p:sp>
+<p:nvSpPr><p:cNvPr id="3" name="Content 2"/><p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr><p:ph idx="1"/></p:nvPr></p:nvSpPr>
+<p:spPr><a:xfrm><a:off x="457200" y="1600200"/><a:ext cx="8229600" cy="4525963"/></a:xfrm></p:spPr>
+<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>
+</p:sp>
 </p:spTree>
 </p:cSld>
 </p:sldLayout>"#

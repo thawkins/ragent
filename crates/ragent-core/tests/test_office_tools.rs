@@ -588,6 +588,59 @@ async fn test_pptx_info() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+#[tokio::test]
+async fn test_pptx_multiline_body_with_escaped_newlines() {
+    let dir = test_dir("pptx_multiline");
+    let ctx = make_ctx(dir.clone());
+    let registry = create_default_registry();
+
+    let write_tool = registry.get("office_write").unwrap();
+    // LLMs commonly send literal \n sequences and markdown bold
+    let result = write_tool
+        .execute(
+            json!({
+                "path": "multiline.pptx",
+                "content": {
+                    "slides": [
+                        {
+                            "title": "ragent",
+                            "body": "**An AI Coding Agent**\\nBuilt in Rust\\n\\nv0.1.0"
+                        },
+                        {
+                            "title": "Features",
+                            "body": "1. Code Index\\n2. SWARM Mode\\n3. Memory System"
+                        }
+                    ]
+                }
+            }),
+            &ctx,
+        )
+        .await
+        .unwrap();
+
+    assert!(result.content.contains("Wrote"));
+
+    let read_tool = registry.get("office_read").unwrap();
+    let result = read_tool
+        .execute(json!({"path": "multiline.pptx", "format": "text"}), &ctx)
+        .await
+        .unwrap();
+
+    // Body lines should be present (markdown ** stripped, \n split into lines)
+    assert!(
+        result.content.contains("An AI Coding Agent"),
+        "Should contain body text without markdown, got: {}",
+        &result.content[..result.content.len().min(500)]
+    );
+    assert!(
+        result.content.contains("Built in Rust"),
+        "Should contain second line from \\n split, got: {}",
+        &result.content[..result.content.len().min(500)]
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // ── Error handling ──────────────────────────────────────────────
 
 #[tokio::test]
