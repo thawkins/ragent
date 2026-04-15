@@ -106,7 +106,7 @@ impl Tool for OfficeWriteTool {
                     "description": "Optional document title (docx only)"
                 },
                 "content": {
-                    "description": "Document content. For docx: either an array of paragraph/heading/list objects, or an object with a 'paragraphs' or 'content' array. Each item: {type:'paragraph'|'heading'|'bullet_list'|'code_block', text:'...', level:1-6, items:[...], style:'Normal'|'Heading1'|...}. For xlsx: {sheets:[{name,rows}]}. For pptx: {slides:[{title,content:[...]}]}."
+                    "description": "Document content. For docx: either an array of paragraph/heading/list objects, or an object with a 'paragraphs' or 'content' array. Each item: {type:'paragraph'|'heading'|'bullet_list'|'code_block', text:'...', level:1-6, items:[...], style:'Normal'|'Heading1'|...}. For xlsx: {sheets:[{name,rows}]}. For pptx: either {slides:[{title,body,notes},...]} or a direct array of slide objects [{title,body,notes},...]."
                 }
             },
             "required": ["path", "content"]
@@ -542,9 +542,17 @@ fn write_xlsx(path: &Path, content: &Value) -> Result<()> {
 fn write_pptx(path: &Path, content: &Value) -> Result<()> {
     use std::io::Write;
 
-    let slides = content["slides"]
-        .as_array()
-        .context("Missing 'slides' array in pptx content")?;
+    // Accept either {"slides": [...]} or a bare array of slide objects
+    let slides = if let Some(arr) = content.as_array() {
+        arr.clone()
+    } else if let Some(arr) = content["slides"].as_array() {
+        arr.clone()
+    } else {
+        bail!(
+            "Invalid pptx content: expected {{\"slides\": [...]}} or a direct array of slide objects. \
+             Each slide: {{\"title\": \"...\", \"body\": \"...\", \"notes\": \"...\"}}"
+        );
+    };
 
     let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
@@ -574,7 +582,26 @@ fn write_pptx(path: &Path, content: &Value) -> Result<()> {
     for (i, slide_def) in slides.iter().enumerate() {
         let slide_num = i + 1;
         let title = slide_def["title"].as_str().unwrap_or("");
-        let body = slide_def["body"].as_str().unwrap_or("");
+        // Accept "body" or "content" as the slide body text.
+        // If the value is an array of strings, join them with newlines.
+        let body_val = if !slide_def["body"].is_null() {
+            &slide_def["body"]
+        } else {
+            &slide_def["content"]
+        };
+        let body_owned: String;
+        let body: &str = if let Some(s) = body_val.as_str() {
+            s
+        } else if let Some(arr) = body_val.as_array() {
+            body_owned = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            &body_owned
+        } else {
+            ""
+        };
 
         zip.start_file(format!("ppt/slides/slide{slide_num}.xml"), options)
             .context("Failed to write slide")?;
