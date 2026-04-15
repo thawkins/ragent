@@ -121,12 +121,22 @@ impl Tool for OfficeWriteTool {
         let path_str = input["path"]
             .as_str()
             .context("Missing required 'path' parameter")?;
-        let content = &input["content"];
-        if content.is_null() {
+
+        // LLMs sometimes put slides/sheets/paragraphs at the top level instead
+        // of inside "content".  Fall back to the whole input object when "content"
+        // is absent so the format-specific writers can find their data.
+        let content = if !input["content"].is_null() {
+            input["content"].clone()
+        } else if !input["slides"].is_null()
+            || !input["sheets"].is_null()
+            || !input["paragraphs"].is_null()
+        {
+            input.clone()
+        } else {
             bail!(
                 "Missing required 'content' parameter. Provide the document content as a JSON object."
             );
-        }
+        };
 
         let path = resolve_path(&ctx.working_dir, path_str);
 
@@ -147,13 +157,13 @@ impl Tool for OfficeWriteTool {
                 .with_context(|| format!("Failed to create directories: {}", parent.display()))?;
         }
 
-        let content_clone = content.clone();
         let path_clone = path.clone();
+        let content_ref = content.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             match doc_type {
-                OfficeFormat::Docx => write_docx(&path_clone, &content_clone),
-                OfficeFormat::Xlsx => write_xlsx(&path_clone, &content_clone),
-                OfficeFormat::Pptx => write_pptx(&path_clone, &content_clone),
+                OfficeFormat::Docx => write_docx(&path_clone, &content_ref),
+                OfficeFormat::Xlsx => write_xlsx(&path_clone, &content_ref),
+                OfficeFormat::Pptx => write_pptx(&path_clone, &content_ref),
             }
         })
         .await
@@ -522,6 +532,69 @@ fn write_xlsx(path: &Path, content: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Attempt to locate a `slides` array from arbitrarily shaped LLM output.
+///
+/// Accepted shapes:
+/// - A bare JSON array of slide objects
+/// - `{"slides": [...]}`
+/// - `{"presentation": {"slides": [...]}}` or any single-key wrapper
+/// - A JSON **string** containing any of the above
+/// - Any object where exactly one value is an array of objects (heuristic)
+fn extract_slides(content: &Value) -> Result<Vec<Value>> {
+    // 1. Bare array
+    if let Some(arr) = content.as_array() {
+        return Ok(arr.clone());
+    }
+
+    // 2. Content is a JSON string — parse and recurse
+    if let Some(s) = content.as_str() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+            return extract_slides(&parsed);
+        }
+    }
+
+    if let Some(obj) = content.as_object() {
+        // 3. Explicit "slides" key
+        if let Some(arr) = obj.get("slides").and_then(|v| v.as_array()) {
+            return Ok(arr.clone());
+        }
+
+        // 4. Single-key wrapper — look inside
+        if obj.len() == 1 {
+            let inner = obj.values().next().unwrap();
+            if let Ok(slides) = extract_slides(inner) {
+                return Ok(slides);
+            }
+        }
+
+        // 5. Heuristic: find the first value that is an array of objects
+        for v in obj.values() {
+            if let Some(arr) = v.as_array() {
+                if !arr.is_empty() && arr[0].is_object() {
+                    return Ok(arr.clone());
+                }
+            }
+        }
+    }
+
+    bail!(
+        "Invalid pptx content: expected {{\"slides\": [...]}} or a direct array of slide objects. \
+         Each slide: {{\"title\": \"...\", \"body\": \"...\", \"notes\": \"...\"}}.  \
+         Received: {}",
+        truncate_json_for_error(content)
+    );
+}
+
+/// Truncate a JSON value to a short string for error messages.
+fn truncate_json_for_error(v: &Value) -> String {
+    let s = v.to_string();
+    if s.len() > 200 {
+        format!("{}…", &s[..200])
+    } else {
+        s
+    }
+}
+
 /// Writes a `PowerPoint` presentation from structured JSON content.
 ///
 /// Expected content format:
@@ -542,17 +615,16 @@ fn write_xlsx(path: &Path, content: &Value) -> Result<()> {
 fn write_pptx(path: &Path, content: &Value) -> Result<()> {
     use std::io::Write;
 
-    // Accept either {"slides": [...]} or a bare array of slide objects
-    let slides = if let Some(arr) = content.as_array() {
-        arr.clone()
-    } else if let Some(arr) = content["slides"].as_array() {
-        arr.clone()
-    } else {
-        bail!(
-            "Invalid pptx content: expected {{\"slides\": [...]}} or a direct array of slide objects. \
-             Each slide: {{\"title\": \"...\", \"body\": \"...\", \"notes\": \"...\"}}"
-        );
-    };
+    // Accept multiple LLM-produced shapes:
+    //   {"slides": [...]}
+    //   [...] (bare array)
+    //   {"presentation": {"slides": [...]}} or similar nested wrappers
+    //   JSON string containing any of the above
+    let slides = extract_slides(content)?;
+
+    if slides.is_empty() {
+        bail!("pptx content contains no slides");
+    }
 
     let file = std::fs::File::create(path)
         .with_context(|| format!("Failed to create file: {}", path.display()))?;
