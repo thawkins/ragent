@@ -64,8 +64,8 @@ use anyhow::{Context, Result};
 use parser::ParserRegistry;
 use search::{FtsIndex, FtsSymbol, SearchResult};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use store::IndexStore;
 use tracing::{debug, warn};
@@ -160,7 +160,10 @@ impl CodeIndex {
             "CodeIndex search"
         );
         let mut results = fts.search(&query.query, limit * 2)?;
-        debug!(raw_results = results.len(), "CodeIndex FTS results before filtering");
+        debug!(
+            raw_results = results.len(),
+            "CodeIndex FTS results before filtering"
+        );
 
         // Apply post-FTS filters.
         if let Some(ref kind) = query.kind {
@@ -532,8 +535,7 @@ impl CodeIndex {
             }
 
             // Update progress counter.
-            let done_so_far = self.reindex_done.load(Ordering::Relaxed)
-                + chunk.len() as u32;
+            let done_so_far = self.reindex_done.load(Ordering::Relaxed) + chunk.len() as u32;
             self.reindex_done.store(done_so_far, Ordering::Relaxed);
 
             // Yield between chunks so the TUI event loop can acquire locks.

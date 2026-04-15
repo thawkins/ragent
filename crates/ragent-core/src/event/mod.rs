@@ -404,6 +404,79 @@ pub enum Event {
         /// The text the user typed.
         response: String,
     },
+
+    // ── Journal events ─────────────────────────────────────────────────
+    /// A new journal entry was created.
+    JournalEntryCreated {
+        /// Session that created the entry.
+        session_id: String,
+        /// Unique identifier of the new entry.
+        id: String,
+        /// Title of the new entry.
+        title: String,
+    },
+    /// A journal search was performed.
+    JournalSearched {
+        /// Session that performed the search.
+        session_id: String,
+        /// The search query used.
+        query: String,
+        /// Number of results returned.
+        result_count: usize,
+    },
+    /// A structured memory was stored.
+    MemoryStored {
+        /// Session that stored the memory.
+        session_id: String,
+        /// Row ID of the new memory.
+        id: i64,
+        /// Category of the memory.
+        category: String,
+    },
+    /// A structured memory search was performed.
+    MemoryRecalled {
+        /// Session that performed the search.
+        session_id: String,
+        /// The search query used.
+        query: String,
+        /// Number of results returned.
+        result_count: usize,
+    },
+    /// Structured memories were deleted.
+    MemoryForgotten {
+        /// Session that triggered the deletion.
+        session_id: String,
+        /// Number of memories deleted.
+        count: usize,
+    },
+    /// A semantic or keyword memory search was performed.
+    MemorySearched {
+        /// Session that performed the search.
+        session_id: String,
+        /// The search query used.
+        query: String,
+        /// Number of results returned.
+        result_count: usize,
+        /// Search mode used: "semantic" or "fts".
+        mode: String,
+    },
+    /// A memory candidate was extracted automatically (requires confirmation).
+    MemoryCandidateExtracted {
+        /// Session that triggered the extraction.
+        session_id: String,
+        /// Proposed memory content.
+        content: String,
+        /// Category of the candidate.
+        category: String,
+        /// Tags for the candidate.
+        tags: Vec<String>,
+        /// Confidence score.
+        confidence: f64,
+        /// Source of the extraction.
+        source: String,
+        /// Why this was extracted.
+        reason: String,
+    },
 }
 
 /// Broadcast-based event bus for distributing [`Event`] values to subscribers.
@@ -462,6 +535,13 @@ impl Event {
             Self::LspStatusChanged { .. } => "LspStatusChanged",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
             Self::UserInput { .. } => "UserInput",
+            Self::JournalEntryCreated { .. } => "JournalEntryCreated",
+            Self::JournalSearched { .. } => "JournalSearched",
+            Self::MemoryStored { .. } => "MemoryStored",
+            Self::MemoryRecalled { .. } => "MemoryRecalled",
+            Self::MemoryForgotten { .. } => "MemoryForgotten",
+            Self::MemorySearched { .. } => "MemorySearched",
+            Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
         }
     }
 
@@ -512,6 +592,13 @@ impl Event {
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }
+            Self::JournalEntryCreated { session_id, .. }
+            | Self::JournalSearched { session_id, .. }
+            | Self::MemoryStored { session_id, .. }
+            | Self::MemoryRecalled { session_id, .. }
+            | Self::MemoryForgotten { session_id, .. }
+            | Self::MemorySearched { session_id, .. }
+            | Self::MemoryCandidateExtracted { session_id, .. } => Some(session_id.as_str()),
         }
     }
 }

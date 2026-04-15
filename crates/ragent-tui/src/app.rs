@@ -489,21 +489,31 @@ impl App {
             prompt_start_time: None,
             tool_time_ms: 0,
             llm_time_ms: 0,
-                          plan_approval_pending: None,
-                          role_mode: None,
-                          webapi_server: None,
-                          webapi_addr: "127.0.0.1:3000".to_string(),
-                          webapi_token: None,
-                          needs_redraw: true,
-                          code_index: None,
-                          code_index_enabled: ragent_core::config::Config::load()
-                              .map(|c| c.code_index.enabled)
-                              .unwrap_or(false),
-                          code_index_stats_cache: None,
-                          code_index_stats_last_refresh: std::time::Instant::now(),
-                          code_index_busy: false,
-                          code_index_watch_session: None,
-                      };        // Log any warnings from custom agent loading into the log panel
+            plan_approval_pending: None,
+            role_mode: None,
+            webapi_server: None,
+            webapi_addr: "127.0.0.1:3000".to_string(),
+            webapi_token: None,
+            memory_browser: None,
+            memory_browser_close_area: Rect::default(),
+            memory_browser_area: Rect::default(),
+            journal_viewer: None,
+            journal_viewer_close_area: Rect::default(),
+            journal_viewer_area: Rect::default(),
+            memory_block_count: 0,
+            memory_entry_count: 0,
+            journal_entry_count: 0,
+            memory_last_updated: None,
+            needs_redraw: true,
+            code_index: None,
+            code_index_enabled: ragent_core::config::Config::load()
+                .map(|c| c.code_index.enabled)
+                .unwrap_or(false),
+            code_index_stats_cache: None,
+            code_index_stats_last_refresh: std::time::Instant::now(),
+            code_index_busy: false,
+            code_index_watch_session: None,
+        }; // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -1596,6 +1606,19 @@ impl App {
         }
     }
 
+    /// Refresh cached memory/journal counts for the status bar.
+    ///
+    /// Debounced to run at most once per 5 seconds to avoid unnecessary I/O.
+    pub fn refresh_memory_stats(&mut self) {
+        // Load memory block count
+        let working_dir = std::env::current_dir().unwrap_or_default();
+        let block_storage = ragent_core::memory::FileBlockStorage::new();
+        let blocks = ragent_core::memory::load_all_blocks(&block_storage, &working_dir);
+        self.memory_block_count = blocks.len();
+        self.memory_entry_count = self.storage.count_memories().unwrap_or(0);
+        self.journal_entry_count = self.storage.count_journal_entries().unwrap_or(0);
+    }
+
     /// Register the primary session's short_sid → agent_name mapping.
     ///
     /// This must be called after setting `self.session_id` so that tool call
@@ -2398,9 +2421,8 @@ impl App {
 
         // Compute context-window usage % from last request's input token count.
         let ctx_window = self.selected_model_context_window();
-        let context_pct: Option<f32> = ctx_window.map(|cw| {
-            (self.last_input_tokens as f32 / cw as f32 * 100.0).min(100.0)
-        });
+        let context_pct: Option<f32> =
+            ctx_window.map(|cw| (self.last_input_tokens as f32 / cw as f32 * 100.0).min(100.0));
 
         // Format context usage as "prefix ctx: usedK/totalK pct%"
         let ctx_label = |prefix: &str| -> String {
@@ -2424,7 +2446,15 @@ impl App {
         } else if provider_id == "ollama" || provider_id == "ollama_cloud" {
             let label = ctx_label("");
             if label.is_empty() {
-                (if provider_id == "ollama" { "local" } else { "ollama" }.to_string(), false)
+                (
+                    if provider_id == "ollama" {
+                        "local"
+                    } else {
+                        "ollama"
+                    }
+                    .to_string(),
+                    false,
+                )
             } else {
                 (label, false)
             }
@@ -6467,12 +6497,28 @@ Type `/swarm help` for more info.\n";
                                     let mut output = String::from("## Code Index Status\n\n");
                                     output.push_str(&format!(
                                         "**Enabled:** {}\n",
-                                        if config_enabled { "\u{2713} yes" } else { "\u{2717} no" }
+                                        if config_enabled {
+                                            "\u{2713} yes"
+                                        } else {
+                                            "\u{2717} no"
+                                        }
                                     ));
-                                    output.push_str(&format!("**Files indexed:** {}\n", stats.files_indexed));
-                                    output.push_str(&format!("**Total symbols:** {}\n", stats.total_symbols));
-                                    output.push_str(&format!("**FTS documents:** {}\n", stats.fts_doc_count));
-                                    output.push_str(&format!("**References:** {}\n", stats.total_references));
+                                    output.push_str(&format!(
+                                        "**Files indexed:** {}\n",
+                                        stats.files_indexed
+                                    ));
+                                    output.push_str(&format!(
+                                        "**Total symbols:** {}\n",
+                                        stats.total_symbols
+                                    ));
+                                    output.push_str(&format!(
+                                        "**FTS documents:** {}\n",
+                                        stats.fts_doc_count
+                                    ));
+                                    output.push_str(&format!(
+                                        "**References:** {}\n",
+                                        stats.total_references
+                                    ));
                                     output.push_str(&format!(
                                         "**Total size:** {:.1} KB\n",
                                         stats.total_bytes as f64 / 1024.0
@@ -6482,7 +6528,9 @@ Type `/swarm help` for more info.\n";
                                     if stats.total_symbols > 0 && stats.fts_doc_count == 0 {
                                         output.push_str("\n\u{26a0}\u{fe0f} **FTS index is empty** — search will not work. Use `/codeindex rebuild` to fix.\n");
                                     } else if stats.fts_doc_count > 0
-                                        && (stats.fts_doc_count as f64 / stats.total_symbols.max(1) as f64) < 0.5
+                                        && (stats.fts_doc_count as f64
+                                            / stats.total_symbols.max(1) as f64)
+                                            < 0.5
                                     {
                                         output.push_str(&format!(
                                             "\n\u{26a0}\u{fe0f} **FTS index may be out of sync** ({} FTS docs vs {} symbols). Use `/codeindex rebuild` to fix.\n",
@@ -6514,7 +6562,9 @@ Type `/swarm help` for more info.\n";
                                     self.append_assistant_text(&output);
                                     self.status = format!(
                                         "codeindex: {} files, {} symbols, {} FTS docs",
-                                        stats.files_indexed, stats.total_symbols, stats.fts_doc_count
+                                        stats.files_indexed,
+                                        stats.total_symbols,
+                                        stats.fts_doc_count
                                     );
                                 }
                                 Err(e) => {
@@ -6526,7 +6576,11 @@ Type `/swarm help` for more info.\n";
                             }
                         } else {
                             // No active code index
-                            let state = if config_enabled { "enabled" } else { "disabled" };
+                            let state = if config_enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            };
                             self.append_assistant_text(&format!(
                                 "## Code Index Status\n\n\
                                  **Enabled:** {}\n\n\
@@ -6559,9 +6613,7 @@ Type `/swarm help` for more info.\n";
                                     );
                                 }
                                 Err(e) => {
-                                    self.append_assistant_text(&format!(
-                                        "❌ Re-index failed: {e}"
-                                    ));
+                                    self.append_assistant_text(&format!("❌ Re-index failed: {e}"));
                                     self.status = "codeindex: reindex failed".to_string();
                                 }
                             }
@@ -6579,12 +6631,14 @@ Type `/swarm help` for more info.\n";
                             );
                             match idx.rebuild_fts() {
                                 Ok(()) => {
-                                    let fts_count = idx.status().map(|s| s.fts_doc_count).unwrap_or(0);
+                                    let fts_count =
+                                        idx.status().map(|s| s.fts_doc_count).unwrap_or(0);
                                     self.append_assistant_text(&format!(
                                         "\u{2705} FTS rebuild complete: {} documents indexed.",
                                         fts_count,
                                     ));
-                                    self.status = format!("codeindex: FTS rebuilt ({fts_count} docs)");
+                                    self.status =
+                                        format!("codeindex: FTS rebuilt ({fts_count} docs)");
                                 }
                                 Err(e) => {
                                     self.append_assistant_text(&format!(
@@ -6923,9 +6977,7 @@ Type `/swarm help` for more info.\n";
                     .active_agents_area
                     .contains((event.column, event.row).into())
                 {
-                    let row = event
-                        .row
-                        .saturating_sub(self.active_agents_area.y);
+                    let row = event.row.saturating_sub(self.active_agents_area.y);
                     let absolute_row =
                         row.saturating_add(self.active_agents_scroll_offset) as usize;
                     if absolute_row == 1 {
@@ -6948,9 +7000,7 @@ Type `/swarm help` for more info.\n";
                     }
                 }
                 if self.teams_area.contains((event.column, event.row).into()) {
-                    let row = event
-                        .row
-                        .saturating_sub(self.teams_area.y);
+                    let row = event.row.saturating_sub(self.teams_area.y);
                     let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
                     if absolute_row == 1 {
                         // Lead row clicked — unfocus any teammate

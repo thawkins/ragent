@@ -144,11 +144,7 @@ impl FtsIndex {
     ///
     /// Much faster than calling `remove_file()` + `add_symbols()` per file
     /// because it avoids per-file writer allocation and commit overhead.
-    pub fn batch_update(
-        &self,
-        remove_paths: &[&str],
-        symbols: &[FtsSymbol<'_>],
-    ) -> Result<()> {
+    pub fn batch_update(&self, remove_paths: &[&str], symbols: &[FtsSymbol<'_>]) -> Result<()> {
         let mut writer = self.writer()?;
 
         for path in remove_paths {
@@ -322,8 +318,8 @@ impl FtsIndex {
                     for entry in std::fs::read_dir(path)?.flatten() {
                         let _ = std::fs::remove_file(entry.path());
                     }
-                    let dir2 = tantivy::directory::MmapDirectory::open(path)
-                        .with_context(|| {
+                    let dir2 =
+                        tantivy::directory::MmapDirectory::open(path).with_context(|| {
                             format!("cannot reopen tantivy dir: {}", path.display())
                         })?;
                     return Index::create(dir2, schema.clone(), Default::default())

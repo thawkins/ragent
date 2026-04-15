@@ -9,6 +9,7 @@ pub mod input;
 pub mod layout;
 pub mod layout_active_agents;
 pub mod layout_teams;
+pub mod panels;
 pub mod theme;
 pub mod tips;
 pub mod tracing_layer;
@@ -133,10 +134,7 @@ pub async fn run_tui(
                 app.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
 
-                app.append_assistant_text(&format!(
-                    "\n✔ Session created: `{}`",
-                    &session_id[..8]
-                ));
+                app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
 
@@ -251,7 +249,10 @@ pub async fn run_tui(
                             app.set_code_index(Some(arc_idx.clone()));
                             let _ = session_processor.code_index.set(arc_idx.clone());
                             app.append_assistant_text("\n✔ Code index: enabled");
-                            tracing::info!("Code index initialized at {:?}", index_config.index_dir);
+                            tracing::info!(
+                                "Code index initialized at {:?}",
+                                index_config.index_dir
+                            );
                             Some(arc_idx)
                         }
                         Err(e) => {
@@ -343,13 +344,15 @@ pub async fn run_tui(
         // Refresh cached code index stats periodically (every 5s, not every frame).
         app.refresh_code_index_stats();
 
+        // Refresh cached memory/journal stats for the status bar.
+        app.refresh_memory_stats();
+
         // Only draw when UI dirty or periodic refresh
         if app.needs_redraw {
             terminal.draw(|frame| layout::render(frame, &mut app))?;
             app.needs_redraw = false;
         }
-        tokio::select! {
-            // Terminal key/mouse events (polled at 50ms intervals)
+        tokio::select! {            // Terminal key/mouse events (polled at 50ms intervals)
             _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                 let mut got_input = false;
                 while ct_event::poll(std::time::Duration::ZERO)? {

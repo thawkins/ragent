@@ -240,7 +240,8 @@ impl Provider for OllamaCloudProvider {
         };
         Ok(Box::new(client))
     }
-}struct OllamaCloudClient {
+}
+struct OllamaCloudClient {
     api_key: String,
     base_url: String,
     http: reqwest::Client,
@@ -449,7 +450,9 @@ impl LlmClient for OllamaCloudClient {
                 .send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Ollama Cloud: initial response timed out after {timeout_secs}s"))?
+        .map_err(|_| {
+            anyhow::anyhow!("Ollama Cloud: initial response timed out after {timeout_secs}s")
+        })?
         .context("Failed to connect to Ollama Cloud")?;
 
         if !response.status().is_success() {

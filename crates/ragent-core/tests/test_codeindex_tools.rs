@@ -197,10 +197,7 @@ async fn test_search_with_kind_filter() {
     use ragent_core::tool::codeindex_search::CodeIndexSearchTool;
     let (ctx, _dir) = ctx_with_index();
     let out = CodeIndexSearchTool
-        .execute(
-            json!({"query": "Config", "kind": "struct"}),
-            &ctx,
-        )
+        .execute(json!({"query": "Config", "kind": "struct"}), &ctx)
         .await
         .unwrap();
     assert!(
@@ -225,10 +222,7 @@ async fn test_search_no_results() {
 async fn test_symbols_lists_all() {
     use ragent_core::tool::codeindex_symbols::CodeIndexSymbolsTool;
     let (ctx, _dir) = ctx_with_index();
-    let out = CodeIndexSymbolsTool
-        .execute(json!({}), &ctx)
-        .await
-        .unwrap();
+    let out = CodeIndexSymbolsTool.execute(json!({}), &ctx).await.unwrap();
     // Should contain at least parse_config and Config
     assert!(
         out.content.contains("parse_config") || out.content.contains("Config"),
@@ -269,10 +263,7 @@ async fn test_symbols_no_match() {
 async fn test_status_shows_stats() {
     use ragent_core::tool::codeindex_status::CodeIndexStatusTool;
     let (ctx, _dir) = ctx_with_index();
-    let out = CodeIndexStatusTool
-        .execute(json!({}), &ctx)
-        .await
-        .unwrap();
+    let out = CodeIndexStatusTool.execute(json!({}), &ctx).await.unwrap();
     assert!(out.content.contains("Files indexed"));
     assert!(out.content.contains("Total symbols"));
     let meta = out.metadata.unwrap();
@@ -284,10 +275,7 @@ async fn test_status_shows_stats() {
 async fn test_reindex_succeeds() {
     use ragent_core::tool::codeindex_reindex::CodeIndexReindexTool;
     let (ctx, _dir) = ctx_with_index();
-    let out = CodeIndexReindexTool
-        .execute(json!({}), &ctx)
-        .await
-        .unwrap();
+    let out = CodeIndexReindexTool.execute(json!({}), &ctx).await.unwrap();
     assert!(out.content.contains("Re-index complete"));
     let meta = out.metadata.unwrap();
     // Second reindex may find 0 stale files — just verify it ran successfully.
@@ -298,12 +286,12 @@ async fn test_reindex_succeeds() {
 
 #[test]
 fn test_tool_names_and_schemas() {
-    use ragent_core::tool::codeindex_search::CodeIndexSearchTool;
-    use ragent_core::tool::codeindex_symbols::CodeIndexSymbolsTool;
-    use ragent_core::tool::codeindex_references::CodeIndexReferencesTool;
     use ragent_core::tool::codeindex_dependencies::CodeIndexDependenciesTool;
-    use ragent_core::tool::codeindex_status::CodeIndexStatusTool;
+    use ragent_core::tool::codeindex_references::CodeIndexReferencesTool;
     use ragent_core::tool::codeindex_reindex::CodeIndexReindexTool;
+    use ragent_core::tool::codeindex_search::CodeIndexSearchTool;
+    use ragent_core::tool::codeindex_status::CodeIndexStatusTool;
+    use ragent_core::tool::codeindex_symbols::CodeIndexSymbolsTool;
 
     let tools: Vec<Box<dyn Tool>> = vec![
         Box::new(CodeIndexSearchTool),

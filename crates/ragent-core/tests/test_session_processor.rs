@@ -13,6 +13,7 @@ use serde_json::Value;
 use tokio::time::timeout;
 
 use ragent_core::agent::{AgentInfo, ModelRef};
+use ragent_core::config::StreamConfig;
 use ragent_core::event::{Event, EventBus, FinishReason};
 use ragent_core::llm::{ChatRequest, LlmClient, StreamEvent};
 use ragent_core::permission::PermissionChecker;
@@ -42,6 +43,8 @@ async fn test_session_processor_errors_when_model_missing() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -104,6 +107,8 @@ async fn test_session_processor_errors_when_provider_missing() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -233,6 +238,8 @@ async fn test_session_processor_injects_ollama_read_guidance() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();
@@ -284,6 +291,8 @@ async fn test_session_processor_injects_git_and_readme_context() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     };
 
     let tempdir = tempfile::tempdir().unwrap();

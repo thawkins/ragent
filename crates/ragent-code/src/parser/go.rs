@@ -198,8 +198,8 @@ fn extract_type_spec(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[St
         .unwrap_or(SymbolKind::TypeAlias);
 
     let visibility = go_visibility(&name);
-    let doc = extract_go_doc(ctx, node)
-        .or_else(|| extract_go_doc(ctx, node.parent().unwrap_or(node)));
+    let doc =
+        extract_go_doc(ctx, node).or_else(|| extract_go_doc(ctx, node.parent().unwrap_or(node)));
     let sig = format!("type {name}");
     let qname = build_qname(scope, &name);
     let hash = hash_node(ctx, node);
@@ -324,11 +324,7 @@ fn extract_imports(ctx: &mut Ctx, node: Node) {
             let path = ctx.text(child).trim_matches('"').to_string();
             ctx.imports.push(ImportEntry {
                 file_id: 0,
-                imported_name: path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&path)
-                    .to_string(),
+                imported_name: path.rsplit('/').next().unwrap_or(&path).to_string(),
                 source_module: path,
                 alias: None,
                 line,
@@ -544,7 +540,11 @@ import (
 )
 "#;
         let parsed = parse_go(source);
-        assert!(parsed.imports.len() >= 2, "got {} imports", parsed.imports.len());
+        assert!(
+            parsed.imports.len() >= 2,
+            "got {} imports",
+            parsed.imports.len()
+        );
 
         let fmt_imp = parsed.imports.iter().find(|i| i.imported_name == "fmt");
         assert!(fmt_imp.is_some());
@@ -554,7 +554,11 @@ import (
     fn test_type_alias() {
         let source = "package main\n\ntype MyString string\n";
         let parsed = parse_go(source);
-        let ms = parsed.symbols.iter().find(|s| s.name == "MyString").unwrap();
+        let ms = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "MyString")
+            .unwrap();
         assert_eq!(ms.kind, SymbolKind::TypeAlias);
     }
 

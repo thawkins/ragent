@@ -519,8 +519,10 @@ fn extract_namespace(ctx: &mut Ctx, node: Node, _parent: Option<i64>, scope: &[S
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn find_identifier(ctx: &Ctx, node: Node) -> Option<String> {
-    if node.kind() == "identifier" || node.kind() == "field_identifier"
-        || node.kind() == "type_identifier" || node.kind() == "primitive_type"
+    if node.kind() == "identifier"
+        || node.kind() == "field_identifier"
+        || node.kind() == "type_identifier"
+        || node.kind() == "primitive_type"
     {
         return Some(ctx.text(node).to_string());
     }
@@ -676,7 +678,11 @@ enum Color {
 #include "myheader.h"
 "#;
         let parsed = parse_c(source);
-        assert!(parsed.imports.len() >= 2, "got {} imports", parsed.imports.len());
+        assert!(
+            parsed.imports.len() >= 2,
+            "got {} imports",
+            parsed.imports.len()
+        );
     }
 
     #[test]

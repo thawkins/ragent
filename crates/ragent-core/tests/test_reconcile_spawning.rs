@@ -4,6 +4,7 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
+use ragent_core::config::StreamConfig;
 use ragent_core::event::EventBus;
 use ragent_core::session::SessionManager;
 use ragent_core::session::processor::SessionProcessor;
@@ -50,6 +51,8 @@ async fn test_reconcile_spawning_members_updates_config() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     });
 
     // Create TeamManager and set it into the processor OnceLock

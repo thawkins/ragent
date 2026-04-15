@@ -3,12 +3,12 @@
 //! This module defines the `LanguageParser` trait and a [`ParserRegistry`]
 //! that dispatches parsing to language-specific implementations.
 
-pub mod rust;
-pub mod python;
-pub mod typescript;
-pub mod go;
 pub mod c_cpp;
+pub mod go;
 pub mod java;
+pub mod python;
+pub mod rust;
+pub mod typescript;
 
 use crate::types::{ImportEntry, Symbol, SymbolRef};
 use anyhow::Result;
@@ -68,16 +68,24 @@ impl ParserRegistry {
         let python_parser = Arc::new(python::PythonParser::new());
         parsers.insert("python".to_string(), python_parser);
 
-        let ts_parser = Arc::new(typescript::TypeScriptParser::new(typescript::TsVariant::TypeScript));
+        let ts_parser = Arc::new(typescript::TypeScriptParser::new(
+            typescript::TsVariant::TypeScript,
+        ));
         parsers.insert("typescript".to_string(), ts_parser);
 
-        let tsx_parser = Arc::new(typescript::TypeScriptParser::new(typescript::TsVariant::Tsx));
+        let tsx_parser = Arc::new(typescript::TypeScriptParser::new(
+            typescript::TsVariant::Tsx,
+        ));
         parsers.insert("tsx".to_string(), tsx_parser);
 
-        let js_parser = Arc::new(typescript::TypeScriptParser::new(typescript::TsVariant::JavaScript));
+        let js_parser = Arc::new(typescript::TypeScriptParser::new(
+            typescript::TsVariant::JavaScript,
+        ));
         parsers.insert("javascript".to_string(), js_parser);
 
-        let jsx_parser = Arc::new(typescript::TypeScriptParser::new(typescript::TsVariant::Jsx));
+        let jsx_parser = Arc::new(typescript::TypeScriptParser::new(
+            typescript::TsVariant::Jsx,
+        ));
         parsers.insert("jsx".to_string(), jsx_parser);
 
         let go_parser = Arc::new(go::GoParser::new());

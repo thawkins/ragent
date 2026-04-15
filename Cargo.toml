@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.37"
+version = "0.1.0-alpha.38"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -216,6 +216,11 @@ rayon = "1"
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }
+
+# ── Embeddings (optional, feature-gated) ────────────────────────────────
+ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"] }
+tokenizers = { version = "0.21", features = ["onig"] }
+ndarray = "0.17"
 
 [[bin]]
 name = "ragent"

@@ -110,12 +110,7 @@ fn extract_node(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope:
 
 // ── Function / Method ───────────────────────────────────────────────────────
 
-fn extract_function(
-    ctx: &mut ExtractCtx,
-    node: Node,
-    parent_id: Option<i64>,
-    scope: &[String],
-) {
+fn extract_function(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
@@ -168,12 +163,7 @@ fn extract_function(
 
 // ── Class ───────────────────────────────────────────────────────────────────
 
-fn extract_class(
-    ctx: &mut ExtractCtx,
-    node: Node,
-    parent_id: Option<i64>,
-    scope: &[String],
-) {
+fn extract_class(ctx: &mut ExtractCtx, node: Node, parent_id: Option<i64>, scope: &[String]) {
     let name = child_by_field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
@@ -228,7 +218,10 @@ fn extract_import(ctx: &mut ExtractCtx, node: Node) {
     for part in path.split(',') {
         let part = part.trim();
         let (name, alias) = if let Some(idx) = part.find(" as ") {
-            (part[..idx].trim().to_string(), Some(part[idx + 4..].trim().to_string()))
+            (
+                part[..idx].trim().to_string(),
+                Some(part[idx + 4..].trim().to_string()),
+            )
         } else {
             (part.to_string(), None)
         };
@@ -255,7 +248,10 @@ fn extract_from_import(ctx: &mut ExtractCtx, node: Node) {
         for part in imports_str.split(',') {
             let part = part.trim();
             let (name, alias) = if let Some(ai) = part.find(" as ") {
-                (part[..ai].trim().to_string(), Some(part[ai + 4..].trim().to_string()))
+                (
+                    part[..ai].trim().to_string(),
+                    Some(part[ai + 4..].trim().to_string()),
+                )
             } else {
                 (part.to_string(), None)
             };
@@ -286,7 +282,9 @@ fn try_extract_assignment(
                 let name = ctx.node_text(left).trim().to_string();
                 // Only treat ALL_CAPS names as constants.
                 if !name.is_empty()
-                    && name.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                    && name
+                        .chars()
+                        .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
                     && name.chars().any(|c| c.is_alphabetic())
                 {
                     let type_ann = child
@@ -509,16 +507,32 @@ def __dunder__():
 "#;
         let parsed = parse_py(source);
 
-        let public = parsed.symbols.iter().find(|s| s.name == "public_fn").unwrap();
+        let public = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "public_fn")
+            .unwrap();
         assert_eq!(public.visibility, Visibility::Public);
 
-        let private = parsed.symbols.iter().find(|s| s.name == "_private_fn").unwrap();
+        let private = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "_private_fn")
+            .unwrap();
         assert_eq!(private.visibility, Visibility::PubCrate);
 
-        let mangled = parsed.symbols.iter().find(|s| s.name == "__mangled_fn").unwrap();
+        let mangled = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "__mangled_fn")
+            .unwrap();
         assert_eq!(mangled.visibility, Visibility::Private);
 
-        let dunder = parsed.symbols.iter().find(|s| s.name == "__dunder__").unwrap();
+        let dunder = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "__dunder__")
+            .unwrap();
         assert_eq!(dunder.visibility, Visibility::Public);
     }
 
@@ -532,16 +546,32 @@ from typing import List, Optional
 from collections import OrderedDict as OD
 "#;
         let parsed = parse_py(source);
-        assert!(parsed.imports.len() >= 4, "got {} imports", parsed.imports.len());
+        assert!(
+            parsed.imports.len() >= 4,
+            "got {} imports",
+            parsed.imports.len()
+        );
 
-        let os_imp = parsed.imports.iter().find(|i| i.imported_name == "os").unwrap();
+        let os_imp = parsed
+            .imports
+            .iter()
+            .find(|i| i.imported_name == "os")
+            .unwrap();
         assert_eq!(os_imp.kind, "import");
 
-        let path_imp = parsed.imports.iter().find(|i| i.imported_name == "Path").unwrap();
+        let path_imp = parsed
+            .imports
+            .iter()
+            .find(|i| i.imported_name == "Path")
+            .unwrap();
         assert_eq!(path_imp.source_module, "pathlib");
         assert_eq!(path_imp.kind, "from_import");
 
-        let od = parsed.imports.iter().find(|i| i.imported_name == "OrderedDict").unwrap();
+        let od = parsed
+            .imports
+            .iter()
+            .find(|i| i.imported_name == "OrderedDict")
+            .unwrap();
         assert_eq!(od.alias.as_deref(), Some("OD"));
     }
 
@@ -561,7 +591,10 @@ regular_var = 42
             .map(|s| s.name.as_str())
             .collect();
         assert!(const_names.contains(&"MAX_SIZE"), "got: {const_names:?}");
-        assert!(const_names.contains(&"DEFAULT_NAME"), "got: {const_names:?}");
+        assert!(
+            const_names.contains(&"DEFAULT_NAME"),
+            "got: {const_names:?}"
+        );
         // _not_constant and regular_var should NOT be extracted as constants
         assert!(!const_names.contains(&"_not_constant"));
         assert!(!const_names.contains(&"regular_var"));
@@ -603,10 +636,7 @@ class Outer:
 "#;
         let parsed = parse_py(source);
         let method = parsed.symbols.iter().find(|s| s.name == "method").unwrap();
-        assert_eq!(
-            method.qualified_name.as_deref(),
-            Some("Outer.Inner.method")
-        );
+        assert_eq!(method.qualified_name.as_deref(), Some("Outer.Inner.method"));
     }
 
     #[test]

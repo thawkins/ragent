@@ -233,10 +233,7 @@ fn extract_call_reference(ctx: &mut ExtractionContext, node: Node) {
 fn extract_field_reference(ctx: &mut ExtractionContext, node: Node) {
     if let Some(field_node) = node.child_by_field_name("field") {
         // Skip if the parent is a call_expression (already captured as a call reference).
-        if node
-            .parent()
-            .is_some_and(|p| p.kind() == "call_expression")
-        {
+        if node.parent().is_some_and(|p| p.kind() == "call_expression") {
             return;
         }
         let name = ctx.node_text(field_node);

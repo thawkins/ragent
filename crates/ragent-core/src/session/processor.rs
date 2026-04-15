@@ -57,8 +57,9 @@ async fn build_lsp_guidance_section(lsp_manager: &crate::lsp::SharedLspManager) 
     let mut section = String::from(
         "\n## Code Intelligence — LSP Tools\n\n\
         The following Language Server Protocol (LSP) servers are **currently connected**. \
-        For source files in these languages, PREFER the LSP tools over `grep`/`glob` — \
-        they are semantic and understand types, scopes, and cross-file relationships.\n\n\
+        For source files in these languages, you MUST use LSP tools instead of `grep`/`glob` — \
+        they are semantic and understand types, scopes, and cross-file relationships. \
+        `grep` does NOT understand code structure.\n\n\
         **Connected servers and their file extensions:**\n",
     );
 
@@ -88,30 +89,59 @@ async fn build_lsp_guidance_section(lsp_manager: &crate::lsp::SharedLspManager) 
         - Get type info / docs for a symbol → `lsp_hover` (args: `path`, `line`, `column`)\n\
         - List all symbols in a file → `lsp_symbols` (arg: `path`)\n\
         - Show compiler errors and warnings → `lsp_diagnostics` (optional arg: `path`)\n\n\
-        **Fallback:** Use `grep` or `glob` only for languages not listed above, \
-        or when searching for patterns across many files simultaneously.\n\n",
+        **Do NOT use grep for these tasks** when an LSP server is connected for that \
+        language. Use `grep` or `glob` only for languages not listed above, \
+        or when searching for arbitrary text patterns across many files.\n\n",
     );
     section
 }
 
-/// Build a system-prompt section describing the codebase index tools.
+/// Build a system-prompt section describing the codebase index tools
+/// when the index **is** active.
 ///
-/// Injected when a code index is available so the model knows to prefer
-/// codeindex tools over grep/glob for symbol lookups.
-fn build_codeindex_guidance_section() -> String {
+/// Uses strong directive language to steer the LLM away from `grep`/`search`
+/// for any query that involves code symbols, types, or structure.
+fn build_codeindex_guidance_section_active() -> String {
     "\n## Code Intelligence — Codebase Index Tools\n\n\
      A **codebase index** is active for this project. It provides fast, structured \
      search across all indexed source files — symbols, references, dependencies, \
      and documentation.\n\n\
-     **PREFER** codeindex tools over `grep`/`glob` for:\n\
-     - Finding functions, structs, enums, traits by name → `codeindex_search`\n\
-     - Listing symbols in a file or matching a filter → `codeindex_symbols`\n\
-     - Finding all references to a symbol → `codeindex_references`\n\
-     - Understanding file dependencies → `codeindex_dependencies`\n\
-     - Checking index health → `codeindex_status`\n\
-     - Refreshing the index after bulk changes → `codeindex_reindex`\n\n\
-     **Fallback:** Use `grep` or `glob` for pattern matching across file contents, \
-     or when searching for text that isn't a code symbol.\n\n"
+     **MANDATORY — You MUST use codeindex tools instead of grep/search for code symbol queries.**\n\
+     When the index is active, `grep` and `search` are the WRONG choice for finding \
+     functions, types, structs, enums, traits, or any named code entity. The index \
+     is faster, returns structured results with file/line/signature, and understands \
+     symbol kinds.\n\n\
+     **Decision flow — which tool to use:**\n\
+     - \"Where is function X defined?\" → `codeindex_search` (NOT grep)\n\
+     - \"Find all structs matching Y\" → `codeindex_symbols` with kind=struct (NOT grep)\n\
+     - \"Who calls function Z?\" → `codeindex_references` (NOT grep)\n\
+     - \"What does file A import?\" → `codeindex_dependencies` (NOT grep for imports)\n\
+     - \"List all functions in file B\" → `codeindex_symbols` with file_path (NOT grep)\n\
+     - \"Is the index working?\" → `codeindex_status`\n\
+     - \"Re-index after bulk edits\" → `codeindex_reindex`\n\n\
+     **When grep/search IS appropriate:**\n\
+     - Searching for arbitrary text strings, comments, or prose (not symbols)\n\
+     - Finding TODO/FIXME/HACK comments\n\
+     - Searching config files, markdown, or non-code text\n\
+     - Pattern matching across many files for non-structural content\n\n\
+     **Rule of thumb:** If you are looking for a named code entity (function, type, \
+     variable, import), use codeindex. If you are searching for a text pattern that \
+     is NOT a code symbol, use grep/search.\n\n"
+        .to_string()
+}
+
+/// Build a system-prompt section for when the codebase index is NOT active.
+///
+/// Informs the LLM that codeindex tools will return "not available" and
+/// that grep/search should be used as fallback. Suggests enabling the index.
+fn build_codeindex_guidance_section_disabled() -> String {
+    "\n## Code Intelligence — Codebase Index Tools\n\n\
+     The codebase index is **not active** for this project. Code index tools \
+     (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
+     `codeindex_dependencies`) will return \"not available\" if called.\n\n\
+     Use `grep` or `search` for code lookups in the meantime. You can suggest \
+     the user enable the index with `/codeindex on` for faster, structured \
+     symbol search.\n\n"
         .to_string()
 }
 
@@ -174,6 +204,8 @@ pub struct SessionProcessor {
     pub code_index: std::sync::OnceLock<Arc<ragent_code::CodeIndex>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::config::StreamConfig,
+    /// Memory extraction engine for automatic memory candidate generation.
+    pub extraction_engine: std::sync::OnceLock<Arc<crate::memory::ExtractionEngine>>,
 }
 
 impl SessionProcessor {
@@ -433,7 +465,7 @@ impl SessionProcessor {
         let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
         let (git_status, readme, agents_md, file_tree) =
             crate::agent::collect_prompt_context(&working_dir).await;
-        let mut system_prompt = crate::agent::build_system_prompt_with_context(
+        let mut system_prompt = crate::agent::build_system_prompt_with_storage(
             agent,
             &working_dir,
             &file_tree,
@@ -441,9 +473,9 @@ impl SessionProcessor {
             Some(&git_status),
             Some(&readme),
             Some(&agents_md),
-        );
-
-        // Inject a tool reference listing so the model knows the exact tool names.
+            Some(self.session_manager.storage()),
+            Some(&session_config.memory),
+        ); // Inject a tool reference listing so the model knows the exact tool names.
         // This is critical for models (especially via Ollama) that may hallucinate
         // tool names like "search" instead of the actual "grep" tool.
         let tool_reference = build_tool_reference_section(&self.tool_registry);
@@ -456,11 +488,15 @@ impl SessionProcessor {
             system_prompt.push_str(&lsp_guidance);
         }
 
-        // Inject codebase index guidance. The codeindex tools are always
-        // registered but return a graceful "not available" when the index is
-        // disabled. Including guidance unconditionally keeps the model aware
-        // of these tools so it can leverage them when active.
-        system_prompt.push_str(&build_codeindex_guidance_section());
+        // Inject codebase index guidance. When the index is active, emit strong
+        // directives to use codeindex over grep/search. When disabled, inform the
+        // model that codeindex tools will return "not available" and suggest grep.
+        let code_index_active = self.code_index.get().is_some();
+        if code_index_active {
+            system_prompt.push_str(&build_codeindex_guidance_section_active());
+        } else {
+            system_prompt.push_str(&build_codeindex_guidance_section_disabled());
+        }
 
         if matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud") {
             system_prompt.push_str(OLLAMA_TOOL_GUIDANCE);
@@ -766,7 +802,11 @@ impl SessionProcessor {
                 let mut stream = match client.chat(attempt_request).await {
                     Ok(s) => s,
                     Err(e) => {
-                        debug!("LLM call failed (attempt {}): {}", attempt + 1, redact_secrets(&e.to_string()));
+                        debug!(
+                            "LLM call failed (attempt {}): {}",
+                            attempt + 1,
+                            redact_secrets(&e.to_string())
+                        );
                         if attempt < max_retries {
                             self.event_bus.publish(Event::AgentError {
                                 session_id: session_id.to_string(),
@@ -792,91 +832,95 @@ impl SessionProcessor {
                 let mut had_stall = false;
                 while let Some(event) = stream.next().await {
                     match event {
-                    StreamEvent::TextDelta { text } => {
-                        self.event_bus.publish(Event::TextDelta {
-                            session_id: session_id.to_string(),
-                            text: text.clone(),
-                        });
-                        text_buffer.push_str(&text);
-                    }
-                    StreamEvent::ReasoningStart => {}
-                    StreamEvent::ReasoningDelta { text } => {
-                        self.event_bus.publish(Event::ReasoningDelta {
-                            session_id: session_id.to_string(),
-                            text: text.clone(),
-                        });
-                        reasoning_buffer.push_str(&text);
-                    }
-                    StreamEvent::ReasoningEnd => {}
-                    StreamEvent::ToolCallStart { id, name } => {
-                        self.event_bus.publish(Event::ToolCallStart {
-                            session_id: session_id.to_string(),
-                            call_id: id.clone(),
-                            tool: name.clone(),
-                        });
-                        tool_calls.push(PendingToolCall {
-                            id,
-                            name,
-                            args_json: String::new(),
-                        });
-                    }
-                    StreamEvent::ToolCallDelta { id, args_json } => {
-                        if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
-                            tc.args_json.push_str(&args_json);
-                        }
-                    }
-                    StreamEvent::ToolCallEnd { id } => {
-                        if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
-                            self.event_bus.publish(Event::ToolCallArgs {
+                        StreamEvent::TextDelta { text } => {
+                            self.event_bus.publish(Event::TextDelta {
                                 session_id: session_id.to_string(),
-                                call_id: tc.id.clone(),
-                                tool: tc.name.clone(),
-                                args: tc.args_json.clone(),
+                                text: text.clone(),
+                            });
+                            text_buffer.push_str(&text);
+                        }
+                        StreamEvent::ReasoningStart => {}
+                        StreamEvent::ReasoningDelta { text } => {
+                            self.event_bus.publish(Event::ReasoningDelta {
+                                session_id: session_id.to_string(),
+                                text: text.clone(),
+                            });
+                            reasoning_buffer.push_str(&text);
+                        }
+                        StreamEvent::ReasoningEnd => {}
+                        StreamEvent::ToolCallStart { id, name } => {
+                            self.event_bus.publish(Event::ToolCallStart {
+                                session_id: session_id.to_string(),
+                                call_id: id.clone(),
+                                tool: name.clone(),
+                            });
+                            tool_calls.push(PendingToolCall {
+                                id,
+                                name,
+                                args_json: String::new(),
                             });
                         }
-                    }
-                    StreamEvent::Usage {
-                        input_tokens,
-                        output_tokens,
-                    } => {
-                        last_input_tokens = input_tokens;
-                        last_output_tokens = output_tokens;
-                        self.event_bus.publish(Event::TokenUsage {
-                            session_id: session_id.to_string(),
+                        StreamEvent::ToolCallDelta { id, args_json } => {
+                            if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
+                                tc.args_json.push_str(&args_json);
+                            }
+                        }
+                        StreamEvent::ToolCallEnd { id } => {
+                            if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                                self.event_bus.publish(Event::ToolCallArgs {
+                                    session_id: session_id.to_string(),
+                                    call_id: tc.id.clone(),
+                                    tool: tc.name.clone(),
+                                    args: tc.args_json.clone(),
+                                });
+                            }
+                        }
+                        StreamEvent::Usage {
                             input_tokens,
                             output_tokens,
-                        });
-                    }
-                    StreamEvent::Error { message } => {
-                        debug!("Stream error (attempt {}): {}", attempt + 1, redact_secrets(&message));
-                        if message.contains("stall") && attempt < max_retries {
-                            self.event_bus.publish(Event::AgentError {
+                        } => {
+                            last_input_tokens = input_tokens;
+                            last_output_tokens = output_tokens;
+                            self.event_bus.publish(Event::TokenUsage {
                                 session_id: session_id.to_string(),
-                                error: format!("{} — will retry", message),
-                            });
-                            had_stall = true;
-                        } else {
-                            self.event_bus.publish(Event::AgentError {
-                                session_id: session_id.to_string(),
-                                error: message,
+                                input_tokens,
+                                output_tokens,
                             });
                         }
-                    }
-                    StreamEvent::RateLimit {
-                        requests_used_pct,
-                        tokens_used_pct,
-                    } => {
-                        let percent = requests_used_pct.or(tokens_used_pct);
-                        if let Some(pct) = percent {
-                            self.event_bus.publish(Event::QuotaUpdate {
-                                session_id: session_id.to_string(),
-                                percent: pct,
-                            });
+                        StreamEvent::Error { message } => {
+                            debug!(
+                                "Stream error (attempt {}): {}",
+                                attempt + 1,
+                                redact_secrets(&message)
+                            );
+                            if message.contains("stall") && attempt < max_retries {
+                                self.event_bus.publish(Event::AgentError {
+                                    session_id: session_id.to_string(),
+                                    error: format!("{} — will retry", message),
+                                });
+                                had_stall = true;
+                            } else {
+                                self.event_bus.publish(Event::AgentError {
+                                    session_id: session_id.to_string(),
+                                    error: message,
+                                });
+                            }
                         }
-                    }
-                    StreamEvent::Finish { reason } => {
-                        _finish_reason = reason;
-                    }
+                        StreamEvent::RateLimit {
+                            requests_used_pct,
+                            tokens_used_pct,
+                        } => {
+                            let percent = requests_used_pct.or(tokens_used_pct);
+                            if let Some(pct) = percent {
+                                self.event_bus.publish(Event::QuotaUpdate {
+                                    session_id: session_id.to_string(),
+                                    percent: pct,
+                                });
+                            }
+                        }
+                        StreamEvent::Finish { reason } => {
+                            _finish_reason = reason;
+                        }
                     }
                 }
 
@@ -1021,15 +1065,18 @@ impl SessionProcessor {
                         .get()
                         .cloned()
                         .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                                          code_index: self.code_index.get().cloned(),                };
+                    code_index: self.code_index.get().cloned(),
+                };
 
                 let tc_clone = tc.clone();
                 let registry = self.tool_registry.clone();
                 let event_bus = self.event_bus.clone();
+                let event_bus_clone = self.event_bus.clone();
                 let session_id_str = session_id.to_string();
                 let hook_working_dir = working_dir.clone();
                 let hook_configs = session_config.hooks.clone();
-
+                let extraction_engine = self.extraction_engine.clone();
+                let storage_clone = self.session_manager.storage().clone();
                 // Spawn each tool execution as a future — the tool semaphore
                 // inside the spawned task bounds concurrency.
                 let fut = tokio::spawn(async move {
@@ -1124,7 +1171,7 @@ impl SessionProcessor {
                     let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
 
                     event_bus.publish(Event::ToolResult {
-                        session_id: session_id_str,
+                        session_id: session_id_str.clone(),
                         call_id: tc_clone.id.clone(),
                         tool: tc_clone.name.clone(),
                         content: result_preview,
@@ -1133,7 +1180,23 @@ impl SessionProcessor {
                         success,
                     });
 
-                    // Return all the info we need to reconstruct state
+                    // ── Memory extraction hook ────────────��────────────
+                    // After the tool result is processed, invoke the
+                    // extraction engine (if initialised) to propose memory
+                    // candidates from the tool usage.
+                    if let Some(engine) = extraction_engine.get() {
+                        let sid = session_id_str.clone();
+                        engine.on_tool_result(
+                            &tc_clone.name,
+                            &input,
+                            &result_content,
+                            success,
+                            &sid,
+                            &storage_clone,
+                            &event_bus_clone,
+                            &hook_working_dir,
+                        );
+                    } // Return all the info we need to reconstruct state
                     (
                         tc_clone,
                         input,
@@ -1386,7 +1449,8 @@ impl SessionProcessor {
         // Build a minimal system prompt using the agent's configured prompt.
         let (git_status, readme, agents_md, file_tree) =
             crate::agent::collect_prompt_context(&working_dir).await;
-        let system_prompt = crate::agent::build_system_prompt_with_context(
+        let run_init_config = crate::config::Config::load().unwrap_or_default();
+        let system_prompt = crate::agent::build_system_prompt_with_storage(
             agent,
             &working_dir,
             &file_tree,
@@ -1394,8 +1458,9 @@ impl SessionProcessor {
             Some(&git_status),
             Some(&readme),
             Some(&agents_md),
+            Some(self.session_manager.storage()),
+            Some(&run_init_config.memory),
         );
-
         let init_text = "AGENTS.md project guidelines have been loaded. \
                          Please acknowledge them briefly.";
         let init_messages = vec![ChatMessage {

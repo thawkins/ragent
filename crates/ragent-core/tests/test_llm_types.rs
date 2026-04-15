@@ -75,8 +75,8 @@ fn test_chat_request_serde() {
         max_tokens: Some(4096),
         system: Some("You are helpful.".into()),
         options: Default::default(),
+        stream_timeout_secs: None,
     };
-
     let json = serde_json::to_string(&request).unwrap();
     let deserialized: ChatRequest = serde_json::from_str(&json).unwrap();
 

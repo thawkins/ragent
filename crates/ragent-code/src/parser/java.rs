@@ -583,10 +583,18 @@ public class Vis {
 "#;
         let parsed = parse_java(source);
 
-        let pub_f = parsed.symbols.iter().find(|s| s.name == "pub_field").unwrap();
+        let pub_f = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "pub_field")
+            .unwrap();
         assert_eq!(pub_f.visibility, Visibility::Public);
 
-        let priv_f = parsed.symbols.iter().find(|s| s.name == "priv_field").unwrap();
+        let priv_f = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "priv_field")
+            .unwrap();
         assert_eq!(priv_f.visibility, Visibility::Private);
     }
 
@@ -598,13 +606,25 @@ import java.util.Map;
 import static java.lang.Math.PI;
 "#;
         let parsed = parse_java(source);
-        assert!(parsed.imports.len() >= 3, "got {} imports", parsed.imports.len());
+        assert!(
+            parsed.imports.len() >= 3,
+            "got {} imports",
+            parsed.imports.len()
+        );
 
-        let list = parsed.imports.iter().find(|i| i.imported_name == "List").unwrap();
+        let list = parsed
+            .imports
+            .iter()
+            .find(|i| i.imported_name == "List")
+            .unwrap();
         assert_eq!(list.source_module, "java.util");
         assert_eq!(list.kind, "import");
 
-        let pi = parsed.imports.iter().find(|i| i.imported_name == "PI").unwrap();
+        let pi = parsed
+            .imports
+            .iter()
+            .find(|i| i.imported_name == "PI")
+            .unwrap();
         assert_eq!(pi.kind, "static_import");
     }
 
@@ -627,10 +647,21 @@ public class Utils {
 "#;
         let parsed = parse_java(source);
         let utils = parsed.symbols.iter().find(|s| s.name == "Utils").unwrap();
-        assert!(utils.doc_comment.as_ref().unwrap().contains("utility class"));
+        assert!(
+            utils
+                .doc_comment
+                .as_ref()
+                .unwrap()
+                .contains("utility class")
+        );
 
         let add = parsed.symbols.iter().find(|s| s.name == "add").unwrap();
-        assert!(add.doc_comment.as_ref().unwrap().contains("Adds two numbers"));
+        assert!(
+            add.doc_comment
+                .as_ref()
+                .unwrap()
+                .contains("Adds two numbers")
+        );
     }
 
     #[test]
@@ -647,10 +678,7 @@ public class Outer {
         assert_eq!(inner.qualified_name.as_deref(), Some("Outer.Inner"));
 
         let method = parsed.symbols.iter().find(|s| s.name == "method").unwrap();
-        assert_eq!(
-            method.qualified_name.as_deref(),
-            Some("Outer.Inner.method")
-        );
+        assert_eq!(method.qualified_name.as_deref(), Some("Outer.Inner.method"));
     }
 
     #[test]
@@ -663,7 +691,11 @@ public class Dog {
 }
 "#;
         let parsed = parse_java(source);
-        let ctor = parsed.symbols.iter().find(|s| s.name == "Dog" && s.kind == SymbolKind::Method).unwrap();
+        let ctor = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "Dog" && s.kind == SymbolKind::Method)
+            .unwrap();
         assert_eq!(ctor.kind, SymbolKind::Method);
     }
 

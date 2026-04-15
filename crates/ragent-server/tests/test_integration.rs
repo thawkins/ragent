@@ -35,8 +35,9 @@ fn test_state(token: &str) -> AppState {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        stream_config: Default::default(),
+        extraction_engine: std::sync::OnceLock::new(),
     });
-
     AppState {
         event_bus,
         config: Arc::new(tokio::sync::RwLock::new(Config::default())),

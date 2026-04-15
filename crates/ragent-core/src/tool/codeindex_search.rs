@@ -31,7 +31,10 @@ impl Tool for CodeIndexSearchTool {
     fn description(&self) -> &'static str {
         "Search the codebase index for symbols, functions, types, and documentation. \
          Uses full-text search with optional filters by kind, language, and file path. \
-         Faster and more structured than grep for symbol lookups."
+         USE THIS instead of `grep` or `search` when looking for named code entities \
+         (functions, structs, enums, traits, variables). The index is faster, returns \
+         structured results with file/line/signature, and understands symbol kinds. \
+         Only use `grep`/`search` for arbitrary text patterns, comments, or non-symbol content."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -79,9 +82,9 @@ impl Tool for CodeIndexSearchTool {
             .as_str()
             .context("Missing required 'query' parameter")?;
 
-        let kind = input["kind"].as_str().and_then(|k| {
-            k.parse::<ragent_code::types::SymbolKind>().ok()
-        });
+        let kind = input["kind"]
+            .as_str()
+            .and_then(|k| k.parse::<ragent_code::types::SymbolKind>().ok());
         let language = input["language"].as_str().map(String::from);
         let file_pattern = input["file_pattern"].as_str().map(String::from);
         let max_results = input["max_results"]

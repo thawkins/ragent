@@ -417,24 +417,37 @@ fn test_ensure_fts_sync_rebuilds_empty_fts() {
 
     // Verify search works initially.
     let results = idx.search(&SearchQuery::new("parse_config")).unwrap();
-    assert!(!results.is_empty(), "should find parse_config after reindex");
+    assert!(
+        !results.is_empty(),
+        "should find parse_config after reindex"
+    );
 
     // Simulate FTS loss by clearing it.
     {
         let fts = idx.fts_for_test();
         fts.clear().unwrap();
-        assert_eq!(fts.doc_count().unwrap(), 0, "FTS should be empty after clear");
+        assert_eq!(
+            fts.doc_count().unwrap(),
+            0,
+            "FTS should be empty after clear"
+        );
     }
 
     // Verify search fails with empty FTS.
     let results = idx.search(&SearchQuery::new("parse_config")).unwrap();
-    assert!(results.is_empty(), "search should return empty after FTS clear");
+    assert!(
+        results.is_empty(),
+        "search should return empty after FTS clear"
+    );
 
     // ensure_fts_sync should rebuild the FTS from SQLite.
     idx.ensure_fts_sync().unwrap();
 
     // Search should work again.
     let results = idx.search(&SearchQuery::new("parse_config")).unwrap();
-    assert!(!results.is_empty(), "should find parse_config after FTS sync");
+    assert!(
+        !results.is_empty(),
+        "should find parse_config after FTS sync"
+    );
     assert_eq!(results[0].symbol_name, "parse_config");
 }

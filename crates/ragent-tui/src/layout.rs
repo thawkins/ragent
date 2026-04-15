@@ -425,7 +425,9 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 };
                 let end = (start + visible).min(models.len());
 
-                for (i, (_mid, mname, _ctx)) in models.iter().enumerate().skip(start).take(end - start) {
+                for (i, (_mid, mname, _ctx)) in
+                    models.iter().enumerate().skip(start).take(end - start)
+                {
                     let (indicator, style) = if i == *selected {
                         (
                             "▸ ",
@@ -792,7 +794,6 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
 
 #[allow(dead_code)]
 
-
 /// Split `text` into fixed-width character-wrapped lines.
 ///
 /// Unlike word wrapping, this breaks at exact character boundaries so that
@@ -1123,6 +1124,22 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.teams_close_button_area = Rect::default();
     }
 
+    // Memory browser overlay
+    if app.memory_browser.is_some() {
+        crate::panels::render_memory_browser(frame, app);
+    } else {
+        app.memory_browser_close_area = Rect::default();
+        app.memory_browser_area = Rect::default();
+    }
+
+    // Journal viewer overlay
+    if app.journal_viewer.is_some() {
+        crate::panels::render_journal_viewer(frame, app);
+    } else {
+        app.journal_viewer_close_area = Rect::default();
+        app.journal_viewer_area = Rect::default();
+    }
+
     // Render output overlay last so it always appears above Teams/Agents popups.
     if app.output_view.is_some() {
         render_output_view_overlay(frame, app);
@@ -1130,7 +1147,6 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.output_view_area = Rect::default();
     }
 }
-
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1667,56 +1683,58 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::Cyan),
     ));
 
-          // Usage quota indicator
-          {
-              let (usage_text, is_unknown) = app.usage_display();
-              // Extract percentage from text (e.g., "ctx: 45%" or "Pro quota: 85.5%")
-              let pct_in_text = usage_text
-                  .split_whitespace()
-                  .last()
-                  .and_then(|s| s.trim_end_matches('%').parse::<f32>().ok());
-              let fg = if is_unknown {
-                  Color::White
-              } else if let Some(q) = app.quota_percent {
-                  if q >= 95.0 {
-                      Color::Red
-                  } else if q >= 80.0 {
-                      Color::Yellow
-                  } else {
-                      Color::Green
-                  }
-              } else if let Some(p) = pct_in_text {
-                  // Color based on context window percentage
-                  if p >= 95.0 {
-                      Color::Red
-                  } else if p >= 80.0 {
-                      Color::Yellow
-                  } else {
-                      Color::Green
-                  }
-              } else {
-                  Color::Green
-              };
-              row2_left.push(Span::styled(
-                  format!("[{}] ", usage_text),
-                  Style::default().fg(fg).add_modifier(Modifier::BOLD),
-              ));
-          }
+    // Usage quota indicator
+    {
+        let (usage_text, is_unknown) = app.usage_display();
+        // Extract percentage from text (e.g., "ctx: 45%" or "Pro quota: 85.5%")
+        let pct_in_text = usage_text
+            .split_whitespace()
+            .last()
+            .and_then(|s| s.trim_end_matches('%').parse::<f32>().ok());
+        let fg = if is_unknown {
+            Color::White
+        } else if let Some(q) = app.quota_percent {
+            if q >= 95.0 {
+                Color::Red
+            } else if q >= 80.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            }
+        } else if let Some(p) = pct_in_text {
+            // Color based on context window percentage
+            if p >= 95.0 {
+                Color::Red
+            } else if p >= 80.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            }
+        } else {
+            Color::Green
+        };
+        row2_left.push(Span::styled(
+            format!("[{}] ", usage_text),
+            Style::default().fg(fg).add_modifier(Modifier::BOLD),
+        ));
+    }
 
-          // Stream bytes received counter
-          if app.stream_bytes > 0 {
-              let bytes_text = if app.stream_bytes >= 1_048_576 {
-                  format!("↓ {:.1}M", app.stream_bytes as f64 / 1_048_576.0)
-              } else if app.stream_bytes >= 1024 {
-                  format!("↓ {:.1}K", app.stream_bytes as f64 / 1024.0)
-              } else {
-                  format!("↓ {}B", app.stream_bytes)
-              };
-              row2_left.push(Span::styled(
-                  format!("[{}] ", bytes_text),
-                  Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-              ));
-          }
+    // Stream bytes received counter
+    if app.stream_bytes > 0 {
+        let bytes_text = if app.stream_bytes >= 1_048_576 {
+            format!("↓ {:.1}M", app.stream_bytes as f64 / 1_048_576.0)
+        } else if app.stream_bytes >= 1024 {
+            format!("↓ {:.1}K", app.stream_bytes as f64 / 1024.0)
+        } else {
+            format!("↓ {}B", app.stream_bytes)
+        };
+        row2_left.push(Span::styled(
+            format!("[{}] ", bytes_text),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     // Active tasks
     if !app.active_tasks.is_empty() {
@@ -1778,10 +1796,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 } else {
                     "empty".to_string()
                 };
-                row2_left.push(Span::styled(
-                    label,
-                    Style::default().fg(Color::Cyan),
-                ));
+                row2_left.push(Span::styled(label, Style::default().fg(Color::Cyan)));
             }
             if app.code_index_busy {
                 let pct_label = if let Some(ref idx) = app.code_index {
@@ -1797,10 +1812,48 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 };
                 row2_left.push(Span::styled(
                     pct_label,
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ));
             }
             row2_left.push(Span::raw(" "));
+        }
+    }
+
+    // ── Memory indicator ────────────────────────────────────────────────────
+    {
+        let block_count = app.memory_block_count;
+        let entry_count = app.memory_entry_count;
+        let journal_count = app.journal_entry_count;
+        if block_count > 0 || entry_count > 0 || journal_count > 0 {
+            let mem_label = if entry_count > 0 {
+                format!("│ MEM: {}blk, {}mem", block_count, entry_count)
+            } else {
+                format!("│ MEM: {}blk", block_count)
+            };
+            row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
+            if journal_count > 0 {
+                row2_left.push(Span::styled(
+                    format!(", {}j", journal_count),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+            row2_left.push(Span::raw(" "));
+
+            // Relative time of last update
+            if let Some(updated) = app.memory_last_updated {
+                let elapsed = updated.elapsed();
+                let time_str = if elapsed.as_secs() < 60 {
+                    format!("{}s ago", elapsed.as_secs())
+                } else if elapsed.as_secs() < 3600 {
+                    format!("{}m ago", elapsed.as_secs() / 60)
+                } else {
+                    format!("{}h ago", elapsed.as_secs() / 3600)
+                };
+                row2_left.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
+                row2_left.push(Span::raw(" "));
+            }
         }
     }
 

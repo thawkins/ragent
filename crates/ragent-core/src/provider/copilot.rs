@@ -478,7 +478,9 @@ impl LlmClient for CopilotClient {
                 .send(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("HTTP 408: Copilot API request timed out after {timeout_secs}s"))?
+        .map_err(|_| {
+            anyhow::anyhow!("HTTP 408: Copilot API request timed out after {timeout_secs}s")
+        })?
         .context("Failed to connect to GitHub Copilot API")?;
 
         if !response.status().is_success() {

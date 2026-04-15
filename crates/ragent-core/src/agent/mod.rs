@@ -1023,6 +1023,34 @@ pub fn build_system_prompt_with_context(
     readme: Option<&str>,
     agents_md: Option<&str>,
 ) -> String {
+    build_system_prompt_with_storage(
+        agent,
+        working_dir,
+        file_tree,
+        skills,
+        git_status,
+        readme,
+        agents_md,
+        None,
+        None,
+    )
+}
+
+/// Build a system prompt with storage access for structured memory injection.
+///
+/// This is the full-featured variant that can load relevant structured memories
+/// from SQLite when storage is provided.
+pub fn build_system_prompt_with_storage(
+    agent: &AgentInfo,
+    working_dir: &Path,
+    file_tree: &str,
+    skills: Option<&crate::skill::SkillRegistry>,
+    git_status: Option<&str>,
+    readme: Option<&str>,
+    agents_md: Option<&str>,
+    storage: Option<&crate::storage::Storage>,
+    memory_config: Option<&crate::config::MemoryConfig>,
+) -> String {
     let mut prompt = String::new();
 
     // Use provided agents_md content or collect it from the project tree.
@@ -1133,34 +1161,105 @@ pub fn build_system_prompt_with_context(
 
     // Auto-load project and user memory files into context
     {
-        let project_mem = working_dir.join(".ragent").join("memory").join("MEMORY.md");
+        use crate::memory::block::BlockScope;
+        use crate::memory::storage::{FileBlockStorage, load_all_blocks, load_legacy_memory};
+
+        let block_storage = FileBlockStorage::new();
+        let wd = working_dir.to_path_buf();
+
+        // Load all structured memory blocks from both scopes.
+        let blocks = load_all_blocks(&block_storage, &wd);
+        if !blocks.is_empty() {
+            prompt.push_str("## Memory Blocks\n");
+            for (scope, block) in &blocks {
+                let scope_label = match scope {
+                    BlockScope::Global => "global",
+                    BlockScope::Project => "project",
+                };
+                prompt.push_str(&format!("### {} ({})\n", block.label, scope_label));
+                if !block.description.is_empty() {
+                    prompt.push_str(&format!("*{}*\n\n", block.description));
+                }
+                if block.read_only {
+                    prompt.push_str("*[read-only]*\n");
+                }
+                prompt.push_str(&block.content);
+                prompt.push_str("\n\n");
+                if block.limit > 0 {
+                    let pct = (block.content.len() as f64 / block.limit as f64 * 100.0) as u32;
+                    prompt.push_str(&format!(
+                        "*[size: {}/{} bytes, {}%]*\n\n",
+                        block.content.len(),
+                        block.limit,
+                        pct
+                    ));
+                }
+            }
+        }
+
+        // Also load legacy MEMORY.md files that aren't already loaded as blocks.
+        // This maintains backward compatibility with existing flat memory files.
+        let has_project_memory_block = blocks
+            .iter()
+            .any(|(s, b)| *s == BlockScope::Project && b.label == "MEMORY");
+        let has_global_memory_block = blocks
+            .iter()
+            .any(|(s, b)| *s == BlockScope::Global && b.label == "MEMORY");
+
+        if !has_project_memory_block {
+            if let Some(block) = load_legacy_memory(&BlockScope::Project, &wd) {
+                prompt.push_str("## Project Memory\n");
+                prompt.push_str(&block.content);
+                prompt.push_str("\n\n");
+            }
+        }
+
+        // Load PROJECT_ANALYSIS.md if present (legacy).
         let project_analysis = working_dir
             .join(".ragent")
             .join("memory")
             .join("PROJECT_ANALYSIS.md");
-        let user_mem = dirs::home_dir().map(|h| h.join(".ragent").join("memory").join("MEMORY.md"));
+        if let Ok(content) = std::fs::read_to_string(&project_analysis) {
+            if !content.trim().is_empty() {
+                prompt.push_str("## Project Analysis\n");
+                prompt.push_str(&content);
+                prompt.push_str("\n\n");
+            }
+        }
 
-        if let Ok(content) = std::fs::read_to_string(&project_mem)
-            && !content.trim().is_empty()
-        {
-            prompt.push_str("## Project Memory\n");
-            prompt.push_str(&content);
-            prompt.push_str("\n\n");
+        if !has_global_memory_block {
+            if let Some(block) = load_legacy_memory(&BlockScope::Global, &wd) {
+                prompt.push_str("## User Memory\n");
+                prompt.push_str(&block.content);
+                prompt.push_str("\n\n");
+            }
         }
-        if let Ok(content) = std::fs::read_to_string(&project_analysis)
-            && !content.trim().is_empty()
-        {
-            prompt.push_str("## Project Analysis\n");
-            prompt.push_str(&content);
-            prompt.push_str("\n\n");
-        }
-        if let Some(path) = user_mem
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && !content.trim().is_empty()
-        {
-            prompt.push_str("## User Memory\n");
-            prompt.push_str(&content);
-            prompt.push_str("\n\n");
+    }
+
+    // Load relevant structured memories from SQLite.
+    if let Some(sqlite_storage) = storage {
+        let project = working_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let max = memory_config
+            .map(|c| c.retrieval.max_memories_per_prompt)
+            .unwrap_or(5);
+        if let Ok(memories) = sqlite_storage.list_memories(project, max) {
+            if !memories.is_empty() {
+                prompt.push_str("## Relevant Memories\n");
+                for mem in &memories {
+                    let mem_tags = sqlite_storage.get_memory_tags(mem.id).unwrap_or_default();
+                    prompt.push_str(&format!(
+                        "- [{}] {} (confidence: {:.2})\n",
+                        mem.category, mem.content, mem.confidence,
+                    ));
+                    if !mem_tags.is_empty() {
+                        prompt.push_str(&format!("  tags: {}\n", mem_tags.join(", ")));
+                    }
+                }
+                prompt.push('\n');
+            }
         }
     }
 

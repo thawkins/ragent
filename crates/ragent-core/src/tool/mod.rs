@@ -25,10 +25,10 @@ pub mod calculator;
 pub mod cancel_task;
 /// Codebase index dependency graph tool.
 pub mod codeindex_dependencies;
-/// Codebase index re-index trigger tool.
-pub mod codeindex_reindex;
 /// Codebase index reference lookup tool.
 pub mod codeindex_references;
+/// Codebase index re-index trigger tool.
+pub mod codeindex_reindex;
 /// Codebase index full-text search tool.
 pub mod codeindex_search;
 /// Codebase index status tool.
@@ -60,6 +60,8 @@ pub mod glob;
 pub mod grep;
 /// Full HTTP client tool.
 pub mod http_request;
+/// Journal write, search, and read tools.
+pub mod journal;
 pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
@@ -71,6 +73,12 @@ pub mod lsp_diagnostics;
 pub mod lsp_hover;
 pub mod lsp_references;
 pub mod lsp_symbols;
+/// Memory block migration tool.
+pub mod memory_migrate;
+/// Memory block replace tool.
+pub mod memory_replace;
+/// Semantic memory search tool (embeddings + FTS5).
+pub mod memory_search;
 pub mod memory_write;
 /// Directory creation tool.
 pub mod mkdir;
@@ -92,6 +100,8 @@ pub mod rm;
 pub mod search;
 /// Claude-compatible multi-command file editor.
 pub mod str_replace_editor;
+/// Structured memory store, recall, and forget tools.
+pub mod structured_memory;
 pub mod task_complete;
 /// Team coordination tools (create, spawn, message, tasks, etc.).
 pub mod team_approve_plan;
@@ -493,7 +503,18 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(lsp_diagnostics::LspDiagnosticsTool));
     registry.register(Arc::new(memory_write::MemoryWriteTool));
     registry.register(Arc::new(memory_write::MemoryReadTool));
-    // GitHub tools
+    registry.register(Arc::new(memory_replace::MemoryReplaceTool));
+    registry.register(Arc::new(memory_migrate::MemoryMigrateTool));
+    // Journal tools
+    registry.register(Arc::new(journal::JournalWriteTool));
+    registry.register(Arc::new(journal::JournalSearchTool));
+    registry.register(Arc::new(journal::JournalReadTool));
+    // Structured memory tools
+    registry.register(Arc::new(structured_memory::MemoryStoreTool));
+    registry.register(Arc::new(structured_memory::MemoryRecallTool));
+    registry.register(Arc::new(structured_memory::MemoryForgetTool));
+    // Semantic memory search
+    registry.register(Arc::new(memory_search::MemorySearchTool));
     registry.register(Arc::new(github_issues::GithubListIssuesTool));
     registry.register(Arc::new(github_issues::GithubGetIssueTool));
     registry.register(Arc::new(github_issues::GithubCreateIssueTool));

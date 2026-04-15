@@ -57,6 +57,28 @@ lru = { workspace = true }
 rayon = { workspace = true }
 ragent-code = { path = "../ragent-code" }
 
+[features]
+default = []
+## Enable local ONNX-based embedding provider for semantic search.
+## Adds `ort` and `tokenizers` as dependencies. When disabled, the
+## embedding subsystem falls back to `NoOpEmbedding` (empty vectors)
+## and `memory_search`/`journal_search` use FTS5-only mode.
+embeddings = ["ort", "tokenizers", "ndarray"]
+
+[dependencies.ort]
+version = "2.0.0-rc.12"
+features = ["download-binaries", "load-dynamic"]
+optional = true
+
+[dependencies.tokenizers]
+version = "0.21"
+features = ["onig"]
+optional = true
+
+[dependencies.ndarray]
+version = "0.17"
+optional = true
+
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }

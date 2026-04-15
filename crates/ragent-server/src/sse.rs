@@ -281,6 +281,13 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::TaskCompleted { .. } => "task_completed",
         Event::ShellCwdChanged { .. } => "shell_cwd_changed",
         Event::UserInput { .. } => "user_input",
+        Event::JournalEntryCreated { .. } => "journal_entry_created",
+        Event::JournalSearched { .. } => "journal_searched",
+        Event::MemoryStored { .. } => "memory_stored",
+        Event::MemoryRecalled { .. } => "memory_recalled",
+        Event::MemoryForgotten { .. } => "memory_forgotten",
+        Event::MemorySearched { .. } => "memory_searched",
+        Event::MemoryCandidateExtracted { .. } => "memory_candidate_extracted",
     }
 }
 
@@ -648,8 +655,82 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "request_id": request_id,
             "response": response,
         })),
-    };
 
+        Event::JournalEntryCreated {
+            session_id,
+            id,
+            title,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "id": id,
+            "title": title,
+        })),
+
+        Event::JournalSearched {
+            session_id,
+            query,
+            result_count,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "query": query,
+            "result_count": result_count,
+        })),
+
+        Event::MemoryStored {
+            session_id,
+            id,
+            category,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "id": id,
+            "category": category,
+        })),
+
+        Event::MemoryRecalled {
+            session_id,
+            query,
+            result_count,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "query": query,
+            "result_count": result_count,
+        })),
+
+        Event::MemoryForgotten { session_id, count } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "count": count,
+        })),
+
+        Event::MemorySearched {
+            session_id,
+            query,
+            result_count,
+            mode,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "query": query,
+            "result_count": result_count,
+            "mode": mode,
+        })),
+
+        Event::MemoryCandidateExtracted {
+            session_id,
+            content,
+            category,
+            tags,
+            confidence,
+            source,
+            reason,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "content": content,
+            "category": category,
+            "tags": tags,
+            "confidence": confidence,
+            "source": source,
+            "reason": reason,
+        })),
+    };
     (name, data)
 }
 

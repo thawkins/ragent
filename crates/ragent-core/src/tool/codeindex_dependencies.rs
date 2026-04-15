@@ -28,9 +28,10 @@ impl Tool for CodeIndexDependenciesTool {
 
     fn description(&self) -> &'static str {
         "Query file-level dependencies from the code index. \
-         Show what a file imports or what other files depend on it."
+               Show what a file imports or what other files depend on it. \
+               USE THIS instead of `grep` for import/use statements — the index tracks \
+               dependency edges that grep can only approximate with fragile pattern matching."
     }
-
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

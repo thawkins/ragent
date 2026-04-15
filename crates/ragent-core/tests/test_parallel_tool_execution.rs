@@ -2,6 +2,7 @@
 
 //! Integration tests for parallel tool execution with concurrency limits.
 
+use ragent_core::config::StreamConfig;
 use ragent_core::event::EventBus;
 use ragent_core::permission::PermissionChecker;
 use ragent_core::provider::ProviderRegistry;
@@ -126,6 +127,8 @@ async fn test_max_5_parallel_tools() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     };
 
     // Note: This test is simplified and won't actually call process_message

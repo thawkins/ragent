@@ -16,11 +16,20 @@ fn diag_raw_fts_search() {
     assert!(count > 0, "FTS should have docs");
 
     let results = fts.search("append_assistant_text", 10).unwrap();
-    eprintln!("FTS search('append_assistant_text'): {} results", results.len());
+    eprintln!(
+        "FTS search('append_assistant_text'): {} results",
+        results.len()
+    );
     for r in &results {
-        eprintln!("  {:.3} {} ({}) @ {}:{}", r.score, r.symbol_name, r.kind, r.file_path, r.line);
+        eprintln!(
+            "  {:.3} {} ({}) @ {}:{}",
+            r.score, r.symbol_name, r.kind, r.file_path, r.line
+        );
     }
-    assert!(!results.is_empty(), "should find results for 'append_assistant_text'");
+    assert!(
+        !results.is_empty(),
+        "should find results for 'append_assistant_text'"
+    );
 }
 
 /// Test CodeIndex search (full pipeline)
@@ -44,8 +53,10 @@ fn diag_codeindex_search() {
 
     // Check status
     let status = idx.status().unwrap();
-    eprintln!("CodeIndex status: files={}, symbols={}, fts_docs={}",
-        status.files_indexed, status.total_symbols, status.fts_doc_count);
+    eprintln!(
+        "CodeIndex status: files={}, symbols={}, fts_docs={}",
+        status.files_indexed, status.total_symbols, status.fts_doc_count
+    );
 
     // Search
     let query = ragent_code::types::SearchQuery {
@@ -57,9 +68,18 @@ fn diag_codeindex_search() {
         include_body: false,
     };
     let results = idx.search(&query).unwrap();
-    eprintln!("CodeIndex search('append_assistant_text'): {} results", results.len());
+    eprintln!(
+        "CodeIndex search('append_assistant_text'): {} results",
+        results.len()
+    );
     for r in &results {
-        eprintln!("  {:.3} {} ({}) @ {}:{}", r.score, r.symbol_name, r.kind, r.file_path, r.line);
+        eprintln!(
+            "  {:.3} {} ({}) @ {}:{}",
+            r.score, r.symbol_name, r.kind, r.file_path, r.line
+        );
     }
-    assert!(!results.is_empty(), "CodeIndex should find results for 'append_assistant_text'");
+    assert!(
+        !results.is_empty(),
+        "CodeIndex should find results for 'append_assistant_text'"
+    );
 }

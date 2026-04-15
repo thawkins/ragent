@@ -1,15 +1,64 @@
 # Changelog
 
+## [0.1.0-alpha.38] - 2026-04-14
+
+### Fixed
+- **MS Office and LibreOffice presentation writer** — Fixed PPTX and ODP slide rendering: body text now produces proper layout, geometry, and paragraph elements
+- **todo_write tool** — Updated result summary output for improved clarity
+
+### Changed
+- Version bump to 0.1.0-alpha.38
+
 ## [0.1.0-alpha.37] - 2026-04-13
 
 ### Added
+- **Memory compaction and deduplication** (Milestone 6) — Automatic memory lifecycle management: deduplication, block compaction, stale eviction, and trigger-based scheduling
+  - `deduplicate_memory()` checks for semantically similar memories using FTS5 (or cosine similarity when embeddings enabled) and merges or proposes merging duplicates
+  - `DedupResult` enum: `NoDuplicate`, `Duplicate` (>0.95 similarity, auto-merge), `NearDuplicate` (0.8–0.95, requires confirmation)
+  - `apply_dedup_merge()` merges content (combines unique sentences), takes highest confidence, unions tags
+  - `compact_blocks()` detects memory blocks exceeding 90% of `block_size_limit` and truncates them, logging originals to journal
+  - `compact_block_content()` preserves YAML frontmatter, truncates body to 75% of limit, appends compaction note
+  - `evict_stale_memories()` identifies memories with `confidence < min_confidence` AND `last_accessed > stale_days` for deletion (or logging if `auto_evict: false`)
+  - `CompactionTrigger` tracks when compaction last ran and how many memories stored; triggers on: first run, time-based (>24h), count-based (>10 stored), total count threshold
+  - `run_compaction()` performs full compaction pass: block compaction → stale eviction → dedup merge
+  - `CompactionConfig` in `MemoryConfig`: `enabled` (true), `block_size_limit` (4096), `memory_count_threshold` (500), `min_interval_hours` (24)
+  - `EvictionConfig` in `MemoryConfig`: `auto` (false), `stale_days` (30), `min_confidence` (0.1)
+  - `ForgetFilter` changed from struct to enum: `Id(i64)` for single delete, `Filter { ... }` for criteria-based delete
+  - New `Storage` methods: `update_memory_content()`, `set_memory_tags()`, `delete_memories()` (unified API)
+  - Startup compaction: runs automatically if `compaction.enabled` and trigger conditions met
+- **Automatic memory extraction** (Milestone 5) — The extraction engine observes tool usage and session events to propose structured memories automatically
+  - `ExtractionEngine` with hook points after tool execution (`on_tool_result`) and at session end (`on_session_end`)
+  - `MemoryCandidate` type for proposed memories with `content`, `category`, `tags`, `confidence`, `source`, `reason` fields
+  - Pattern extraction from file edits: detects coding conventions (anyhow, tracing, async, serde), test file locations, module structure, and configuration files
+  - Error resolution extraction: tracks bash failures and detects when a subsequent success resolves the error, storing the problem and resolution as a category `"error"` memory
+  - Session summary extraction: at session end, compiles tool usage patterns and files edited into a category `"workflow"` memory
+  - Confirmation flow: when `auto_extract.require_confirmation` is `true` (default), candidates are emitted as `MemoryCandidateExtracted` events but NOT auto-stored; when `false`, candidates are stored directly
+  - `AutoExtractConfig` in `MemoryConfig` with `enabled` (default: false) and `require_confirmation` (default: true) fields
+  - Memory confidence decay: `decay_confidence()` function applies exponential decay to stale memories (configurable `factor` default 0.95/day, `min_confidence` default 0.1)
+  - `DecayConfig` in `MemoryConfig` with `factor` and `min_confidence` fields
+  - `MemoryCandidateExtracted` event for SSE and TUI notification
+  - SSE event `memory_candidate_extracted` in HTTP server
+  - Extraction engine wired into `SessionProcessor` via `OnceLock<Arc<ExtractionEngine>>`
+  - Confidence decay applied on startup when `decay.factor < 1.0`
+  - Content deduplication: extraction engine uses FTS5 word-overlap checking to avoid proposing duplicate memories
+- **Semantic search (embeddings)** (Milestone 4) — Added embedding-based semantic search for memories and journal entries, enabling similarity-based retrieval beyond keyword matching
+  - `EmbeddingProvider` trait with `embed()`, `embed_batch()`, `dimensions()`, `name()`, `is_available()` methods
+  - `NoOpEmbedding` implementation (default, returns empty vectors when embeddings disabled)
+  - `LocalEmbeddingProvider` (feature-gated, `embeddings` feature) using ONNX Runtime (`ort` crate) with `all-MiniLM-L6-v2` sentence-transformer (384-dim vectors)
+  - `memory_search` tool for semantic + FTS5 hybrid search across structured memories and memory blocks
+  - `SemanticConfig` in `MemoryConfig` with `enabled`, `model`, `dimensions` fields (default: disabled)
+  - Embedding BLOB columns in SQLite (`memories.embedding`, `journal_entries.embedding`)
+  - Cosine similarity brute-force search for <10K entries via `search_memories_by_embedding()` and `search_journal_by_embedding()`
+  - Lazy embedding: memories are embedded on first semantic search if they don't already have embeddings
+  - `MemorySearched` event with mode indicator ("semantic" or "fts")
+  - SSE event `memory_searched` in HTTP server
+  - Embedding evaluation document at `docs/performance/embedding-evaluation.md`
 - **Code index — multi-language support** (Milestone 6) — Added tree-sitter parsers for Python, TypeScript/JavaScript (TS/TSX/JS/JSX), Go, C/C++, and Java alongside the existing Rust parser, bringing the total to 7 supported languages; each parser extracts functions, classes/structs, interfaces, enums, imports, type aliases, constants, and more
 - **Code index benchmarks** — Criterion-based benchmarks (`cargo bench -p ragent-code`) covering per-language parse throughput, store upsert, FTS search latency, and full 7-file indexing
 - **Code index config persistence** — `code_index` section in `ragent.json` for persisting `enabled`, `max_file_size`, `extra_exclude_dirs`, and `extra_exclude_patterns`
 
 ### Fixed
-- Fixed `test_registry_total_tool_count` assertion to match actual registered tool count (105)
-
+  - Fixed `test_registry_total_tool_count` assertion to match actual registered tool count (114)
 ### Changed
 - Version bump to 0.1.0-alpha.37
 

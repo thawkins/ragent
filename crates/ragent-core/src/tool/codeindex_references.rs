@@ -28,9 +28,10 @@ impl Tool for CodeIndexReferencesTool {
 
     fn description(&self) -> &'static str {
         "Find all references to a symbol by name across the indexed codebase. \
-         Returns file locations grouped by file, with reference kind (call, type, field_access)."
+               Returns file locations grouped by file, with reference kind (call, type, field_access). \
+               USE THIS instead of `grep` when you need to find where a function, type, or variable \
+               is used. The index provides semantic reference kinds that grep cannot."
     }
-
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

@@ -278,6 +278,12 @@ async fn test_remove() {
         .unwrap();
 
     assert!(result.content.contains("Removed todo 't1'"));
+    // The title "Task" should appear in the summary since we look it up before deletion
+    assert!(
+        result.content.contains("Task"),
+        "remove should include the title in summary: {:?}",
+        result.content
+    );
     assert_eq!(result.metadata.as_ref().unwrap()["count"], 0);
     assert!(storage.get_todos("test-session", None).unwrap().is_empty());
 }
@@ -420,4 +426,133 @@ fn test_todo_write_in_registry() {
         "expected at least 31 tools, found {}",
         registry.list().len()
     );
+}
+// ── Title enrichment tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn test_add_includes_title_in_content_and_metadata() {
+    let storage = setup();
+    let ctx = make_ctx(storage.clone());
+
+    let result = TodoWriteTool
+        .execute(json!({"action": "add", "title": "My Important Task"}), &ctx)
+        .await
+        .unwrap();
+
+    // Content summary should include the title after the dash
+    assert!(
+        result.content.contains("My Important Task"),
+        "add content should include the title: {:?}",
+        result.content
+    );
+    // Metadata should include the title
+    assert_eq!(
+        result.metadata.as_ref().unwrap()["title"], "My Important Task",
+        "add metadata should include title"
+    );
+    assert_eq!(result.metadata.as_ref().unwrap()["action"], "add");
+}
+
+#[tokio::test]
+async fn test_update_includes_title_in_content_and_metadata() {
+    let storage = setup();
+    storage
+        .create_todo("t1", "test-session", "Original Title", "pending", "")
+        .unwrap();
+    let ctx = make_ctx(storage.clone());
+
+    let result = TodoWriteTool
+        .execute(json!({"action": "update", "id": "t1", "status": "done"}), &ctx)
+        .await
+        .unwrap();
+
+    // Content summary should include the title
+    assert!(
+        result.content.contains("Original Title"),
+        "update content should include the title: {:?}",
+        result.content
+    );
+    // Metadata should include the title
+    assert_eq!(
+        result.metadata.as_ref().unwrap()["title"], "Original Title",
+        "update metadata should include title"
+    );
+    assert_eq!(result.metadata.as_ref().unwrap()["action"], "update");
+}
+
+#[tokio::test]
+async fn test_complete_includes_title_in_content_and_metadata() {
+    let storage = setup();
+    storage
+        .create_todo("t2", "test-session", "Mark Me Done", "in_progress", "")
+        .unwrap();
+    let ctx = make_ctx(storage.clone());
+
+    let result = TodoWriteTool
+        .execute(json!({"action": "complete", "id": "t2"}), &ctx)
+        .await
+        .unwrap();
+
+    // Content summary should include the title
+    assert!(
+        result.content.contains("Mark Me Done"),
+        "complete content should include the title: {:?}",
+        result.content
+    );
+    // Metadata should include the title
+    assert_eq!(
+        result.metadata.as_ref().unwrap()["title"], "Mark Me Done",
+        "complete metadata should include title"
+    );
+    assert_eq!(result.metadata.as_ref().unwrap()["action"], "complete");
+}
+
+#[tokio::test]
+async fn test_remove_includes_title_in_content() {
+    let storage = setup();
+    storage
+        .create_todo("t3", "test-session", "Delete This Task", "pending", "")
+        .unwrap();
+    let ctx = make_ctx(storage.clone());
+
+    let result = TodoWriteTool
+        .execute(json!({"action": "remove", "id": "t3"}), &ctx)
+        .await
+        .unwrap();
+
+    // Content summary should include the title
+    assert!(
+        result.content.contains("Delete This Task"),
+        "remove content should include the title: {:?}",
+        result.content
+    );
+    // Remove has no affected_id so no title in metadata (todo is already deleted)
+    assert!(
+        result.metadata.as_ref().unwrap().get("title").is_none(),
+        "remove metadata should NOT include title (todo deleted)"
+    );
+    assert_eq!(result.metadata.as_ref().unwrap()["action"], "remove");
+}
+
+#[tokio::test]
+async fn test_clear_has_no_title_in_metadata() {
+    let storage = setup();
+    storage
+        .create_todo("c1", "test-session", "Item 1", "pending", "")
+        .unwrap();
+    storage
+        .create_todo("c2", "test-session", "Item 2", "pending", "")
+        .unwrap();
+    let ctx = make_ctx(storage.clone());
+
+    let result = TodoWriteTool
+        .execute(json!({"action": "clear"}), &ctx)
+        .await
+        .unwrap();
+
+    assert!(
+        result.metadata.as_ref().unwrap().get("title").is_none(),
+        "clear metadata should NOT include title"
+    );
+    assert_eq!(result.metadata.as_ref().unwrap()["action"], "clear");
 }

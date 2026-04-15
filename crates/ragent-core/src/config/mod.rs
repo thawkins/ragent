@@ -58,8 +58,10 @@ pub struct Config {
     /// LLM streaming configuration (timeouts, retries).
     #[serde(default)]
     pub stream: StreamConfig,
+    /// Memory system configuration (blocks, structured store, retrieval).
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
-
 /// Configuration for LLM streaming behaviour (timeouts, retries).
 ///
 /// Override in `ragent.json`:
@@ -554,4 +556,514 @@ impl Config {
 
         base
     }
+}
+// ── Memory configuration ─────────────────────────────────────────────────────
+
+/// Memory system configuration.
+///
+/// Controls the behaviour of the persistent memory system including file-based
+/// blocks, structured SQLite storage, semantic search (embeddings), and
+/// context retrieval.
+///
+/// Override in `ragent.json`:
+/// ```json
+/// {
+///   "memory": {
+///     "enabled": true,
+///     "tier": "semantic",
+///     "semantic": {
+///       "enabled": true,
+///       "model": "all-MiniLM-L6-v2",
+///       "dimensions": 384
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    /// Whether the memory system is enabled.
+    #[serde(default = "default_memory_enabled")]
+    pub enabled: bool,
+    /// Memory tier: "core" (file blocks only), "structured" (SQLite store),
+    /// or "semantic" (with embeddings).
+    #[serde(default = "default_memory_tier")]
+    pub tier: String,
+    /// Structured store configuration.
+    #[serde(default)]
+    pub structured: StructuredMemoryConfig,
+    /// Retrieval configuration for prompt injection.
+    #[serde(default)]
+    pub retrieval: RetrievalConfig,
+    /// Semantic search (embedding) configuration.
+    #[serde(default)]
+    pub semantic: SemanticConfig,
+    /// Automatic memory extraction configuration.
+    #[serde(default)]
+    pub auto_extract: AutoExtractConfig,
+    /// Confidence decay configuration.
+    #[serde(default)]
+    pub decay: DecayConfig,
+    /// Compaction configuration.
+    #[serde(default)]
+    pub compaction: CompactionConfig,
+    /// Eviction configuration.
+    #[serde(default)]
+    pub eviction: EvictionConfig,
+    /// Cross-project memory sharing configuration.
+    #[serde(default)]
+    pub cross_project: CrossProjectConfig,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            tier: default_memory_tier(),
+            structured: StructuredMemoryConfig::default(),
+            retrieval: RetrievalConfig::default(),
+            semantic: SemanticConfig::default(),
+            auto_extract: AutoExtractConfig::default(),
+            decay: DecayConfig::default(),
+            compaction: CompactionConfig::default(),
+            eviction: EvictionConfig::default(),
+            cross_project: CrossProjectConfig::default(),
+        }
+    }
+}
+
+impl MemoryConfig {
+    /// Returns the block size limit in bytes.
+    ///
+    /// Default is 4096 bytes (4 KiB). Override in `ragent.json`:
+    /// ```json
+    /// { "memory": { "block_size_limit": 8192 } }
+    /// ```
+    pub fn block_size_limit(&self) -> usize {
+        self.compaction.block_size_limit
+    }
+}
+
+/// Structured memory store configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StructuredMemoryConfig {
+    /// Whether the structured store is enabled.
+    #[serde(default = "default_structured_enabled")]
+    pub enabled: bool,
+}
+
+impl Default for StructuredMemoryConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+/// Semantic search (embedding) configuration.
+///
+/// When enabled, memories and journal entries are embedded using a local
+/// sentence-transformer model for similarity-based retrieval. This extends
+/// the existing FTS5 keyword search with cosine-similarity ranking.
+///
+/// # Feature flag
+///
+/// The `embeddings` Cargo feature must be enabled for the local ONNX-based
+/// embedding provider. When the feature is disabled, `memory_search` and
+/// `journal_search` fall back to FTS5-only mode regardless of this config.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "semantic": {
+///       "enabled": true,
+///       "model": "all-MiniLM-L6-v2",
+///       "dimensions": 384
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticConfig {
+    /// Whether semantic search via embeddings is enabled.
+    ///
+    /// When `false` (default), `memory_search` and `journal_search` use
+    /// FTS5 keyword search only. When `true` and the `embeddings` feature
+    /// is compiled in, entries are embedded and searched by cosine similarity.
+    #[serde(default = "default_semantic_enabled")]
+    pub enabled: bool,
+    /// Name of the ONNX sentence-transformer model to use.
+    ///
+    /// Currently only `all-MiniLM-L6-v2` is supported. The model file is
+    /// downloaded on first use to the ragent data directory.
+    #[serde(default = "default_semantic_model")]
+    pub model: String,
+    /// Embedding vector dimensions (must match the model output).
+    ///
+    /// `all-MiniLM-L6-v2` produces 384-dimensional vectors.
+    #[serde(default = "default_semantic_dimensions")]
+    pub dimensions: usize,
+}
+
+impl Default for SemanticConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_semantic_enabled(),
+            model: default_semantic_model(),
+            dimensions: default_semantic_dimensions(),
+        }
+    }
+}
+
+fn default_semantic_enabled() -> bool {
+    false
+}
+
+fn default_semantic_model() -> String {
+    "all-MiniLM-L6-v2".to_string()
+}
+
+fn default_semantic_dimensions() -> usize {
+    384
+}
+
+/// Retrieval configuration for injecting memories into the system prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalConfig {
+    /// Maximum number of structured memories to inject into the system prompt.
+    #[serde(default = "default_max_memories_per_prompt")]
+    pub max_memories_per_prompt: usize,
+    /// Weight for recency when ranking memories (0.0–1.0).
+    #[serde(default = "default_recency_weight")]
+    pub recency_weight: f64,
+    /// Weight for relevance when ranking memories (0.0–1.0).
+    #[serde(default = "default_relevance_weight")]
+    pub relevance_weight: f64,
+}
+
+impl Default for RetrievalConfig {
+    fn default() -> Self {
+        Self {
+            max_memories_per_prompt: default_max_memories_per_prompt(),
+            recency_weight: default_recency_weight(),
+            relevance_weight: default_relevance_weight(),
+        }
+    }
+}
+
+fn default_memory_tier() -> String {
+    "core".to_string()
+}
+
+fn default_max_memories_per_prompt() -> usize {
+    5
+}
+
+fn default_recency_weight() -> f64 {
+    0.3
+}
+
+fn default_relevance_weight() -> f64 {
+    0.7
+}
+
+fn default_memory_enabled() -> bool {
+    true
+}
+
+fn default_structured_enabled() -> bool {
+    true
+}
+
+/// Automatic memory extraction configuration.
+///
+/// Controls whether the extraction engine observes tool usage and session
+/// events to propose structured memories automatically.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "auto_extract": {
+///       "enabled": true,
+///       "require_confirmation": true
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoExtractConfig {
+    /// Whether automatic memory extraction is enabled.
+    ///
+    /// When `true`, the extraction engine observes tool executions and
+    /// session events, proposing memories for patterns, error resolutions,
+    /// and session summaries. When `false`, no automatic extraction occurs.
+    #[serde(default = "default_auto_extract_enabled")]
+    pub enabled: bool,
+    /// Whether extracted candidates require explicit confirmation before storage.
+    ///
+    /// When `true` (default), candidates are emitted as events but **not**
+    /// automatically stored. The agent or user must explicitly call
+    /// `memory_store` to persist them. When `false`, candidates are
+    /// auto-stored directly.
+    #[serde(default = "default_require_confirmation")]
+    pub require_confirmation: bool,
+}
+
+impl Default for AutoExtractConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auto_extract_enabled(),
+            require_confirmation: default_require_confirmation(),
+        }
+    }
+}
+
+fn default_auto_extract_enabled() -> bool {
+    false
+}
+
+fn default_require_confirmation() -> bool {
+    true
+}
+
+/// Memory confidence decay configuration.
+///
+/// Memories that are not accessed gradually lose confidence over time.
+/// This keeps the memory store clean — stale, unconfirmed memories fade
+/// while frequently recalled memories maintain high confidence.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "decay": {
+///       "factor": 0.95,
+///       "min_confidence": 0.1
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecayConfig {
+    /// Multiplicative decay factor per day since last access.
+    ///
+    /// A value of 0.95 means confidence is reduced by 5% per day.
+    /// Set to 1.0 to disable decay entirely.
+    #[serde(default = "default_decay_factor")]
+    pub factor: f64,
+    /// Minimum confidence threshold — memories never decay below this value.
+    ///
+    /// Once a memory's confidence reaches this floor, it stays there
+    /// until explicitly deleted or re-confirmed.
+    #[serde(default = "default_decay_min_confidence")]
+    pub min_confidence: f64,
+}
+
+impl Default for DecayConfig {
+    fn default() -> Self {
+        Self {
+            factor: default_decay_factor(),
+            min_confidence: default_decay_min_confidence(),
+        }
+    }
+}
+
+fn default_decay_factor() -> f64 {
+    0.95
+}
+
+fn default_decay_min_confidence() -> f64 {
+    0.1
+}
+/// Compaction configuration.
+///
+/// Controls when and how memory blocks and structured memories are compacted
+/// to prevent unbounded growth.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "compaction": {
+///       "enabled": true,
+///       "block_size_limit": 4096,
+///       "memory_count_threshold": 500,
+///       "min_interval_hours": 24
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionConfig {
+    /// Whether memory compaction is enabled.
+    ///
+    /// When `true` (default), block compaction, deduplication, and eviction
+    /// run automatically based on trigger conditions.
+    #[serde(default = "default_compaction_enabled")]
+    pub enabled: bool,
+    /// Maximum content size in bytes for a memory block.
+    ///
+    /// Blocks exceeding 90% of this limit are compacted (truncated with
+    /// original content logged to the journal). Default: 4096 (4 KiB).
+    #[serde(default = "default_block_size_limit")]
+    pub block_size_limit: usize,
+    /// Total memory count that triggers compaction.
+    ///
+    /// When the total number of stored memories exceeds this threshold,
+    /// a compaction pass is triggered. Default: 500.
+    #[serde(default = "default_memory_count_threshold")]
+    pub memory_count_threshold: usize,
+    /// Minimum hours between automatic compaction passes.
+    ///
+    /// Prevents excessive compaction on busy sessions. Default: 24.
+    #[serde(default = "default_min_interval_hours")]
+    pub min_interval_hours: u64,
+}
+
+impl Default for CompactionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_compaction_enabled(),
+            block_size_limit: default_block_size_limit(),
+            memory_count_threshold: default_memory_count_threshold(),
+            min_interval_hours: default_min_interval_hours(),
+        }
+    }
+}
+
+fn default_compaction_enabled() -> bool {
+    true
+}
+
+fn default_block_size_limit() -> usize {
+    4096
+}
+
+fn default_memory_count_threshold() -> usize {
+    500
+}
+
+fn default_min_interval_hours() -> u64 {
+    24
+}
+
+/// Stale memory eviction configuration.
+///
+/// Controls how memories that have decayed below the minimum confidence
+/// threshold are evicted from the store.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "eviction": {
+///       "auto": false,
+///       "stale_days": 30,
+///       "min_confidence": 0.1
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvictionConfig {
+    /// Whether to auto-evict stale memories without user confirmation.
+    ///
+    /// When `false` (default), stale memories are identified and logged to
+    /// the journal but not deleted automatically. When `true`, they are
+    /// deleted without confirmation.
+    #[serde(default = "default_eviction_auto")]
+    pub auto: bool,
+    /// Number of days since last access before a memory is considered stale.
+    ///
+    /// Memories older than this that have decayed below `min_confidence`
+    /// are candidates for eviction. Default: 30.
+    #[serde(default = "default_eviction_stale_days")]
+    pub stale_days: u32,
+    /// Confidence threshold below which a stale memory is evicted.
+    ///
+    /// Only memories with confidence below this value AND older than
+    /// `stale_days` are evicted. Default: 0.1.
+    #[serde(default = "default_eviction_min_confidence")]
+    pub min_confidence: f64,
+}
+
+impl Default for EvictionConfig {
+    fn default() -> Self {
+        Self {
+            auto: default_eviction_auto(),
+            stale_days: default_eviction_stale_days(),
+            min_confidence: default_eviction_min_confidence(),
+        }
+    }
+}
+
+fn default_eviction_auto() -> bool {
+    false
+}
+
+fn default_eviction_stale_days() -> u32 {
+    30
+}
+
+fn default_eviction_min_confidence() -> f64 {
+    0.1
+}
+/// Cross-project memory sharing configuration.
+///
+/// When enabled, global memory blocks are accessible from any project,
+/// and search operations span both global and current project scopes.
+/// Project-specific blocks override global blocks with the same label.
+///
+/// ```json
+/// {
+///   "memory": {
+///     "cross_project": {
+///       "enabled": true,
+///       "search_global": true,
+///       "project_override": true
+///     }
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossProjectConfig {
+    /// Whether cross-project memory sharing is enabled.
+    ///
+    /// When `true`, global memory blocks (stored under `~/.ragent/memory/`)
+    /// are accessible from any project. Search operations include both
+    /// global and project-scoped memories. When `false` (default), only
+    /// the current project's memories are visible.
+    #[serde(default = "default_cross_project_enabled")]
+    pub enabled: bool,
+    /// Whether search operations include global memories.
+    ///
+    /// When `true` (default when cross_project is enabled), `memory_search`
+    /// and `memory_recall` search across both global and project scopes.
+    /// When `false`, even if cross_project is enabled, searches are
+    /// restricted to the current project scope.
+    #[serde(default = "default_search_global")]
+    pub search_global: bool,
+    /// Whether project-specific blocks override global blocks with the same label.
+    ///
+    /// When `true` (default), if a project has a block with the same label
+    /// as a global block, the project version takes precedence. When `false`,
+    /// global and project blocks coexist and both appear in search results.
+    #[serde(default = "default_project_override")]
+    pub project_override: bool,
+}
+
+impl Default for CrossProjectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_cross_project_enabled(),
+            search_global: default_search_global(),
+            project_override: default_project_override(),
+        }
+    }
+}
+
+fn default_cross_project_enabled() -> bool {
+    false
+}
+
+fn default_search_global() -> bool {
+    true
+}
+
+fn default_project_override() -> bool {
+    true
 }

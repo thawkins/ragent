@@ -179,7 +179,7 @@ impl Tool for TodoWriteTool {
                 (
                     format!("Added todo '{id}' with status '{status}'"),
                     "add",
-                    None,
+                    Some(id.to_string()),
                 )
             }
             "update" => {
@@ -243,7 +243,19 @@ impl Tool for TodoWriteTool {
             "remove" => {
                 let id = input["id"]
                     .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for remove action. Specify which TODO item to delete."))?;
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "Missing required 'id' for remove action. Specify which TODO item to delete."
+                    ))?;
+
+                // Look up the todo before deletion so we can include its title in the summary.
+                let existing = storage
+                    .get_todos(&ctx.session_id, None)
+                    .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?;
+                let existing_title = existing
+                    .iter()
+                    .find(|t| &t.id == id)
+                    .map(|t| t.title.as_str())
+                    .unwrap_or("");
 
                 let removed = storage
                     .delete_todo(id, &ctx.session_id)
@@ -253,7 +265,12 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
-                (format!("Removed todo '{id}'"), "remove", None)
+                let summary = if existing_title.is_empty() {
+                    format!("Removed todo '{id}'")
+                } else {
+                    format!("Removed todo '{id}' — \"{existing_title}\"")
+                };
+                (summary, "remove", None)
             }
             "clear" => {
                 let count = storage
@@ -294,10 +311,23 @@ impl Tool for TodoWriteTool {
         let mut output = format!("{summary}\n\n");
         output.push_str(&format_todo_list(&todos, "all"));
 
-        let metadata = json!({
+        // Determine the title of the affected todo for metadata enrichment.
+        let title_for_metadata = if let Some(ref id) = affected_id {
+            todos.iter().find(|t| &t.id == id).map(|t| t.title.clone())
+        } else {
+            None
+        };
+
+        let mut metadata = json!({
             "action": action_label,
             "count": todos.len(),
         });
+        if let Some(title) = title_for_metadata {
+            metadata
+                .as_object_mut()
+                .unwrap()
+                .insert("title".to_string(), json!(title));
+        }
 
         Ok(ToolOutput {
             content: output,

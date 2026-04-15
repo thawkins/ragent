@@ -8,8 +8,8 @@ use ragent_code::watcher::{CodeWatcher, WatchEvent};
 use ragent_code::worker::{IndexWorker, WorkerConfig};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::Duration;
 use tempfile::TempDir;
 

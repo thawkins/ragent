@@ -517,7 +517,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "memory",
-        description: "View or clear agent memory: /memory show | /memory clear [project|user]",
+        description: "Memory browser: /memory | /memory show | /memory read <label> | /memory search <query>",
     },
     SlashCommandDef {
         trigger: "github",
@@ -542,6 +542,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "codeindex",
         description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+    },
+    SlashCommandDef {
+        trigger: "journal",
+        description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
     },
 ];
 
@@ -1091,6 +1095,32 @@ pub struct App {
     pub webapi_addr: String,
     /// Bearer token for the HTTP API. Randomly generated on `/webapi enable`.
     pub webapi_token: Option<String>,
+
+    // ── Memory browser (M7-T1) ────────────────────────────────────────────────
+    /// Active memory browser overlay, if visible.
+    pub memory_browser: Option<crate::panels::MemoryBrowserState>,
+    /// Cached click target for memory browser close button.
+    pub memory_browser_close_area: Rect,
+    /// Render area for memory browser content.
+    pub memory_browser_area: Rect,
+
+    // ── Journal viewer (M7-T2) ───────────────────────────────────────────────
+    /// Active journal viewer overlay, if visible.
+    pub journal_viewer: Option<crate::panels::JournalViewerState>,
+    /// Cached click target for journal viewer close button.
+    pub journal_viewer_close_area: Rect,
+    /// Render area for journal viewer content.
+    pub journal_viewer_area: Rect,
+
+    // ── Memory status (M7-T3) ─────────────────────────────────────────────────
+    /// Cached count of memory blocks (global + project).
+    pub memory_block_count: usize,
+    /// Cached count of structured memories (SQLite).
+    pub memory_entry_count: u64,
+    /// Cached count of journal entries.
+    pub journal_entry_count: u64,
+    /// Timestamp of the last memory update event (for relative time display).
+    pub memory_last_updated: Option<std::time::Instant>,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

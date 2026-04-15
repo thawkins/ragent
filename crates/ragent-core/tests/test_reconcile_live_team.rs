@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use ragent_core::config::StreamConfig;
 use ragent_core::event::EventBus;
 use ragent_core::session::SessionManager;
 use ragent_core::session::processor::SessionProcessor;
@@ -58,6 +59,8 @@ async fn test_reconcile_against_existing_team_dir() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: StreamConfig::default(),
     });
 
     let manager = Arc::new(TeamManager::new(

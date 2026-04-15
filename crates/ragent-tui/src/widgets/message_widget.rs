@@ -432,6 +432,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
             match action {
                 "add" => format!("📋 +{}", trunc50(&title)),
+                "update" if !title.is_empty() => format!("📋 ~{} \"{}\"", id, trunc50(&title)),
                 "update" => format!("📋 ~{}", id),
                 "complete" => format!("📋 ✓{}", id),
                 "remove" => format!("📋 -{}", id),
@@ -439,7 +440,6 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 _ => format!("📋 {}", action),
             }
         }
-
         // ═══════════════════════════════════════════════════════════════════
         // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
@@ -1093,9 +1093,18 @@ pub fn tool_result_summary(
         "todo_write" => {
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-            Some(format!("{} → {} remaining", action, count))
+            let title = out.get("title").and_then(|v| v.as_str());
+            match title {
+                Some(t) => Some(format!(
+                    "{} \"{}\" → {} remaining",
+                    action,
+                    truncate_str(t, 50),
+                    count
+                )),
+                None => Some(format!("{} → {} remaining", action, count)),
+            }
         }
-        // ═══════════════════════════════════════════════════════════════════
+        // ══════════════════════════════════��════════════════════════════════
         // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
         "new_task" => {
@@ -1321,20 +1330,14 @@ pub fn tool_result_summary(
                 .get("total_results")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
-            Some(format!(
-                "{} found",
-                pluralize(total, "result", "results")
-            ))
+            Some(format!("{} found", pluralize(total, "result", "results")))
         }
         "codeindex_symbols" => {
             let total = out
                 .get("total_results")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
-            Some(format!(
-                "{} found",
-                pluralize(total, "symbol", "symbols")
-            ))
+            Some(format!("{} found", pluralize(total, "symbol", "symbols")))
         }
         "codeindex_references" => {
             let total = out

@@ -405,15 +405,54 @@ impl Storage {
                                                       CREATE INDEX IF NOT EXISTS idx_memories_confidence
                                                           ON memories(confidence DESC, updated_at DESC);
                           
-                                                                                                              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-                                                                                                                  USING fts5(content, content=memories, content_rowid=rowid);
-                                                      
-                                                    ",        )?;
-
+                                                                                                                                                                                                                              CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                                                                                                                                                                                                                                  USING fts5(content, content=memories, content_rowid=rowid);
+                                                                                                                                                                      
+                                                                                                                                                                      -- Knowledge graph tables (Milestone 9)
+                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_entities (
+                                                                                                                                                                          id INTEGER PRIMARY KEY,
+                                                                                                                                                                          name TEXT NOT NULL,
+                                                                                                                                                                          entity_type TEXT NOT NULL CHECK(entity_type IN ('project','tool','language','pattern','person','concept')),
+                                                                                                                                                                          mention_count INTEGER NOT NULL DEFAULT 1,
+                                                                                                                                                                          first_memory_id INTEGER,
+                                                                                                                                                                          created_at TEXT NOT NULL,
+                                                                                                                                                                          updated_at TEXT NOT NULL,
+                                                                                                                                                                          UNIQUE(name, entity_type)
+                                                                                                                                                                      );
+                                                                                                              
+                                                                                                                                                                      CREATE TABLE IF NOT EXISTS kg_relationships (
+                                                                                                                                                                          id INTEGER PRIMARY KEY,
+                                                                                                                                                                          source_id INTEGER NOT NULL,
+                                                                                                                                                                          target_id INTEGER NOT NULL,
+                                                                                                                                                                          relation_type TEXT NOT NULL CHECK(relation_type IN ('uses','prefers','depends_on','avoids','related_to')),
+                                                                                                                                                                          confidence REAL NOT NULL DEFAULT 0.7,
+                                                                                                                                                                          source_memory_id INTEGER,
+                                                                                                                                                                          created_at TEXT NOT NULL,
+                                                                                                                                                                          FOREIGN KEY (source_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+                                                                                                                                                                          FOREIGN KEY (target_id) REFERENCES kg_entities(id) ON DELETE CASCADE,
+                                                                                                                                                                          UNIQUE(source_id, target_id, relation_type)
+                                                                                                                                                                      );
+                                                                                                              
+                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_name
+                                                                                                                                                                          ON kg_entities(name);
+                                                                                                              
+                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_entities_type
+                                                                                                                                                                          ON kg_entities(entity_type);
+                                                                                                              
+                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_source
+                                                                                                                                                                          ON kg_relationships(source_id);
+                                                                                                              
+                                                                                                                                                                      CREATE INDEX IF NOT EXISTS idx_kg_relationships_target
+                                                                                                                                                                          ON kg_relationships(target_id);
+                                                                                                              
+                                                                                                                                                                    ",        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
         for (table, col) in &[("memories", "embedding"), ("journal_entries", "embedding")] {
             let has_col: bool = conn
-                .prepare(&format!("SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'", table, col))?
+                .prepare(&format!(
+                    "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'",
+                    table, col
+                ))?
                 .query_row([], |r| r.get::<_, i64>(0))
                 .unwrap_or(0)
                 > 0;
@@ -1821,17 +1860,18 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the update fails.
-            pub fn update_memory_content(&self, id: i64, content: &str) -> Result<bool> {
-                let conn = lock_conn!(self)?;
-                let now = Utc::now().to_rfc3339();
-                let affected = conn.execute(
-                    "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![content, now, id],
-                )?;
-                // For content-synced FTS5 tables, the index is automatically updated
-                // when the underlying content table is modified. No manual FTS update needed.
-                Ok(affected > 0)
-            }    /// Sets the tags for a memory, replacing any existing tags.
+    pub fn update_memory_content(&self, id: i64, content: &str) -> Result<bool> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        let affected = conn.execute(
+            "UPDATE memories SET content = ?1, updated_at = ?2 WHERE id = ?3",
+            params![content, now, id],
+        )?;
+        // For content-synced FTS5 tables, the index is automatically updated
+        // when the underlying content table is modified. No manual FTS update needed.
+        Ok(affected > 0)
+    }
+    /// Sets the tags for a memory, replacing any existing tags.
     ///
     /// # Errors
     ///
@@ -2045,9 +2085,210 @@ impl Storage {
         Ok(results)
     }
 
+    // ── Knowledge Graph CRUD ────────────────────────────────────────────
+
+    /// Insert or update a knowledge graph entity.
+    ///
+    /// If an entity with the same `name` and `entity_type` already exists,
+    /// its `mention_count` is incremented and `updated_at` is refreshed.
+    /// Otherwise, a new entity is created.
+    ///
+    /// Returns the entity's row ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert/upsert fails.
+    pub fn upsert_entity(
+        &self,
+        name: &str,
+        entity_type: &str,
+        first_memory_id: i64,
+    ) -> Result<i64> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+
+        // Try to find existing entity.
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT id FROM kg_entities WHERE name = ?1 AND entity_type = ?2",
+                params![name, entity_type],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(id) = existing {
+            // Increment mention count and update timestamp.
+            conn.execute(
+                        "UPDATE kg_entities SET mention_count = mention_count + 1, updated_at = ?1 WHERE id = ?2",
+                        params![now, id],
+                    )?;
+            Ok(id)
+        } else {
+            // Insert new entity.
+            conn.execute(
+                        "INSERT INTO kg_entities (name, entity_type, mention_count, first_memory_id, created_at, updated_at) VALUES (?1, ?2, 1, ?3, ?4, ?5)",
+                        params![name, entity_type, first_memory_id, now, now],
+                    )?;
+            Ok(conn.last_insert_rowid())
+        }
+    }
+
+    /// Create a relationship between two entities.
+    ///
+    /// If a relationship with the same source, target, and type already exists,
+    /// the confidence is updated to the maximum of the existing and new values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the insert fails.
+    pub fn create_relationship(
+        &self,
+        source_id: i64,
+        target_id: i64,
+        relation_type: &str,
+        confidence: f64,
+        source_memory_id: Option<i64>,
+    ) -> Result<i64> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+
+        // Use INSERT OR REPLACE to handle uniqueness constraint.
+        conn.execute(
+                    "INSERT INTO kg_relationships (source_id, target_id, relation_type, confidence, source_memory_id, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(source_id, target_id, relation_type) DO UPDATE SET confidence = MAX(confidence, ?4)",
+                    params![source_id, target_id, relation_type, confidence, source_memory_id, now],
+                )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// List all knowledge graph entities.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_entities(&self) -> Result<Vec<crate::memory::knowledge_graph::Entity>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+                    "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities ORDER BY mention_count DESC",
+                )?;
+        let entities = stmt
+            .query_map([], |row| {
+                Ok(crate::memory::knowledge_graph::Entity {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    entity_type: row.get(2)?,
+                    mention_count: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(entities)
+    }
+
+    /// List all knowledge graph relationships.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn list_relationships(&self) -> Result<Vec<crate::memory::knowledge_graph::Relationship>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt = conn.prepare(
+                    "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at FROM kg_relationships ORDER BY confidence DESC",
+                )?;
+        let relationships = stmt
+            .query_map([], |row| {
+                Ok(crate::memory::knowledge_graph::Relationship {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    target_id: row.get(2)?,
+                    relation_type: row.get(3)?,
+                    confidence: row.get(4)?,
+                    source_memory_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(relationships)
+    }
+
+    /// Execute a knowledge graph query: find all entities and relationships
+    /// connected to a given entity (1-hop neighbours).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn query_entity_neighbours(
+        &self,
+        entity_id: i64,
+    ) -> Result<(
+        Vec<crate::memory::knowledge_graph::Entity>,
+        Vec<crate::memory::knowledge_graph::Relationship>,
+    )> {
+        let conn = lock_conn!(self)?;
+
+        // Find all relationships where this entity is source or target.
+        let mut rel_stmt = conn.prepare(
+                    "SELECT id, source_id, target_id, relation_type, confidence, source_memory_id, created_at
+                     FROM kg_relationships WHERE source_id = ?1 OR target_id = ?1",
+                )?;
+        let relationships: Vec<crate::memory::knowledge_graph::Relationship> = rel_stmt
+            .query_map(params![entity_id], |row| {
+                Ok(crate::memory::knowledge_graph::Relationship {
+                    id: row.get(0)?,
+                    source_id: row.get(1)?,
+                    target_id: row.get(2)?,
+                    relation_type: row.get(3)?,
+                    confidence: row.get(4)?,
+                    source_memory_id: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        // Collect all unique entity IDs from relationships.
+        let mut entity_ids = std::collections::HashSet::new();
+        entity_ids.insert(entity_id);
+        for rel in &relationships {
+            entity_ids.insert(rel.source_id);
+            entity_ids.insert(rel.target_id);
+        }
+
+        // Fetch all neighbour entities.
+        let ids: Vec<i64> = entity_ids.into_iter().collect();
+        let placeholders: Vec<String> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("?{}", i + 1))
+            .collect::<Vec<_>>();
+        let sql = format!(
+            "SELECT id, name, entity_type, mention_count, created_at, updated_at FROM kg_entities WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let mut entity_stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+        let entities: Vec<crate::memory::knowledge_graph::Entity> = entity_stmt
+            .query_map(params.as_slice(), |row| {
+                Ok(crate::memory::knowledge_graph::Entity {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    entity_type: row.get(2)?,
+                    mention_count: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok((entities, relationships))
+    }
+
     /// Executes a blocking write closure on a Tokio blocking-thread-pool thread.    ///
-    /// All `rusqlite` operations are synchronous. Call this from async code to
-    /// avoid stalling the async executor during writes. The closure receives a
+    /// All `rusqlite` operations are synchronous. Call this from async code to    /// avoid stalling the async executor during writes. The closure receives a
     /// reference to the storage and returns any `Result<T>`.
     ///
     /// # Errors

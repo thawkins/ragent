@@ -32,7 +32,9 @@ impl Tool for CodeIndexSymbolsTool {
     fn description(&self) -> &'static str {
         "Query symbols (functions, structs, enums, traits) from the codebase index. \
          Supports filtering by name, kind, file, language, and visibility. \
-         Returns structured results with location, signature, and documentation."
+         Returns structured results with location, signature, and documentation. \
+         USE THIS instead of `grep` when you need to list or find named symbols \
+         in a file or across the project."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -81,14 +83,14 @@ impl Tool for CodeIndexSymbolsTool {
         };
 
         let name = input["name"].as_str().map(String::from);
-        let kind = input["kind"].as_str().and_then(|k| {
-            k.parse::<ragent_code::types::SymbolKind>().ok()
-        });
+        let kind = input["kind"]
+            .as_str()
+            .and_then(|k| k.parse::<ragent_code::types::SymbolKind>().ok());
         let file_path = input["file_path"].as_str().map(String::from);
         let language = input["language"].as_str().map(String::from);
-        let visibility = input["visibility"].as_str().and_then(|v| {
-            v.parse::<ragent_code::types::Visibility>().ok()
-        });
+        let visibility = input["visibility"]
+            .as_str()
+            .and_then(|v| v.parse::<ragent_code::types::Visibility>().ok());
         let limit = input["limit"]
             .as_u64()
             .map(|n| n.min(200) as u32)

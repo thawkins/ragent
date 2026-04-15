@@ -3,6 +3,9 @@
 //! Defines the Axum router, shared [`AppState`], and all REST/SSE endpoint
 //! handlers for session management, messaging, permissions, and configuration.
 
+pub mod journal;
+pub mod memory;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -112,8 +115,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/events", get(events_stream))
         .route("/opt", post(prompt_opt_handler))
-        // Orchestration endpoints (Milestone 3 — Task 3.1)
-        .route("/orchestrator/metrics", get(orch_metrics))
+        // Memory & Journal API (Milestone 8)
+        .nest("/memory", memory::memory_routes())
+        .nest("/journal", journal::journal_routes())
+        // Orchestration endpoints (Milestone 3 — Task 3.1)        .route("/orchestrator/metrics", get(orch_metrics))
         .route("/orchestrator/start", post(orch_start))
         .route("/orchestrator/jobs/{id}", get(orch_job))
         .route_layer(middleware::from_fn_with_state(

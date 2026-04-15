@@ -164,7 +164,11 @@ fn extract_function(
         return;
     }
 
-    let visibility = if exported { Visibility::Public } else { Visibility::Private };
+    let visibility = if exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
     let sig = build_fn_sig(ctx, node, &name, exported);
     let doc = extract_jsdoc(ctx, node);
     let qname = build_qname(scope, &name);
@@ -191,19 +195,17 @@ fn extract_function(
 
 // ── Class ───────────────────────────────────────────────────────────────────
 
-fn extract_class(
-    ctx: &mut Ctx,
-    node: Node,
-    parent: Option<i64>,
-    scope: &[String],
-    exported: bool,
-) {
+fn extract_class(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
     }
 
-    let visibility = if exported { Visibility::Public } else { Visibility::Private };
+    let visibility = if exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
     let doc = extract_jsdoc(ctx, node);
     let qname = build_qname(scope, &name);
     let hash = hash_node(ctx, node);
@@ -249,7 +251,11 @@ fn extract_interface(
         return;
     }
 
-    let visibility = if exported { Visibility::Public } else { Visibility::Private };
+    let visibility = if exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
     let doc = extract_jsdoc(ctx, node);
     let qname = build_qname(scope, &name);
     let hash = hash_node(ctx, node);
@@ -275,19 +281,17 @@ fn extract_interface(
 
 // ── Enum ────────────────────────────────────────────────────────────────────
 
-fn extract_enum(
-    ctx: &mut Ctx,
-    node: Node,
-    parent: Option<i64>,
-    scope: &[String],
-    exported: bool,
-) {
+fn extract_enum(ctx: &mut Ctx, node: Node, parent: Option<i64>, scope: &[String], exported: bool) {
     let name = field_text(ctx, node, "name").unwrap_or_default();
     if name.is_empty() {
         return;
     }
 
-    let visibility = if exported { Visibility::Public } else { Visibility::Private };
+    let visibility = if exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
     let doc = extract_jsdoc(ctx, node);
     let qname = build_qname(scope, &name);
     let hash = hash_node(ctx, node);
@@ -359,7 +363,11 @@ fn extract_type_alias(
         return;
     }
 
-    let visibility = if exported { Visibility::Public } else { Visibility::Private };
+    let visibility = if exported {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
     let full_text = ctx.text(node).trim().to_string();
     let qname = build_qname(scope, &name);
 
@@ -410,7 +418,11 @@ fn extract_variable_decl(
                 })
                 .unwrap_or(false);
 
-            let visibility = if exported { Visibility::Public } else { Visibility::Private };
+            let visibility = if exported {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            };
 
             if is_fn {
                 let doc = extract_jsdoc(ctx, node);
@@ -436,7 +448,9 @@ fn extract_variable_decl(
                     body_hash: Some(hash),
                 });
             } else if parent.is_none()
-                && name.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
+                && name
+                    .chars()
+                    .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
                 && name.chars().any(|c| c.is_alphabetic())
             {
                 // Module-level ALL_CAPS constant
@@ -665,7 +679,13 @@ mod tests {
     fn test_exported_function() {
         let parsed = parse_ts("export function hello(): string { return 'hi'; }");
         assert_eq!(parsed.symbols[0].visibility, Visibility::Public);
-        assert!(parsed.symbols[0].signature.as_ref().unwrap().contains("export"));
+        assert!(
+            parsed.symbols[0]
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("export")
+        );
     }
 
     #[test]
@@ -728,7 +748,11 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 "#;
         let parsed = parse_ts(source);
-        assert!(parsed.imports.len() >= 2, "got {} imports", parsed.imports.len());
+        assert!(
+            parsed.imports.len() >= 2,
+            "got {} imports",
+            parsed.imports.len()
+        );
 
         let react = parsed
             .imports
@@ -760,7 +784,11 @@ export enum Direction {
 }
 "#;
         let parsed = parse_ts(source);
-        let dir = parsed.symbols.iter().find(|s| s.name == "Direction").unwrap();
+        let dir = parsed
+            .symbols
+            .iter()
+            .find(|s| s.name == "Direction")
+            .unwrap();
         assert_eq!(dir.kind, SymbolKind::Enum);
         assert_eq!(dir.visibility, Visibility::Public);
     }

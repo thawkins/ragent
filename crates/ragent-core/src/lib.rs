@@ -24,6 +24,7 @@ pub mod llm;
 /// Language Server Protocol client for code-intelligence queries.
 pub mod lsp;
 pub mod mcp;
+pub mod memory;
 pub mod message;
 pub mod orchestrator;
 pub mod permission;
