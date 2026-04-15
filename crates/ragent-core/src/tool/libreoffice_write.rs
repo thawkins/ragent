@@ -437,6 +437,50 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
         // Fall through to plain-text handling below
     }
 
+    // Helper to flatten structured content elements into plain text lines.
+    // Handles: {"type":"heading","text":"..."}, {"type":"paragraph","text":"..."},
+    //          {"type":"bullet_list","items":[...]}, plain strings, etc.
+    let flatten_elements = |arr: &[Value]| -> Vec<String> {
+        let mut lines = Vec::new();
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                lines.push(s.to_owned());
+                continue;
+            }
+            let elem_type = item["type"].as_str().unwrap_or("paragraph");
+            match elem_type {
+                "heading" => {
+                    let text = item["text"]
+                        .as_str()
+                        .or_else(|| item["heading"].as_str())
+                        .unwrap_or("");
+                    if !text.is_empty() {
+                        lines.push(text.to_owned());
+                    }
+                }
+                "bullet_list" | "ordered_list" | "numbered_list" => {
+                    if let Some(items) = item["items"].as_array() {
+                        for li in items {
+                            let text = li
+                                .as_str()
+                                .unwrap_or_else(|| li["text"].as_str().unwrap_or(""));
+                            if !text.is_empty() {
+                                lines.push(format!("• {text}"));
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    let text = item["text"].as_str().unwrap_or("");
+                    if !text.is_empty() {
+                        lines.push(text.to_owned());
+                    }
+                }
+            }
+        }
+        lines
+    };
+
     // Helper to convert a single slide object to OdpSlide
     let slide_from_obj = |s: &Value| -> OdpSlide {
         let title = s["title"].as_str().unwrap_or("").to_owned();
@@ -449,13 +493,7 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
             &s["text"]
         };
         let lines: Vec<String> = if let Some(c) = body_val.as_array() {
-            c.iter()
-                .map(|item| {
-                    item.as_str()
-                        .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                        .to_owned()
-                })
-                .collect()
+            flatten_elements(c)
         } else if let Some(t) = body_val.as_str() {
             t.lines().map(str::to_owned).collect()
         } else {
