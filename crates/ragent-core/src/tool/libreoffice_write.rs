@@ -88,7 +88,14 @@ impl Tool for LibreWriteTool {
         let libre_format = detect_format(&path)?;
 
         // Extract parameters before moving into spawn_blocking.
-        let content = input["content"].clone();
+        // LLMs sometimes put slides/paragraphs at the top level instead of inside "content"
+        let content = if !input["content"].is_null() {
+            input["content"].clone()
+        } else if !input["slides"].is_null() || !input["paragraphs"].is_null() {
+            input.clone()
+        } else {
+            Value::Null
+        };
         let rows: Vec<Vec<String>> = input["rows"]
             .as_array()
             .map(|arr| {
@@ -419,57 +426,79 @@ struct OdpSlide {
 }
 
 fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
-    // Structured: array of slide objects [{title, content:[...]}]
-    if let Some(arr) = content.as_array()
-        && arr.first().is_some_and(serde_json::Value::is_object)
-    {
-        return arr
-            .iter()
-            .map(|s| {
-                let title = s["title"].as_str().unwrap_or("").to_owned();
-                let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
-                    c.iter()
-                        .map(|item| {
-                            item.as_str()
-                                .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                                .to_owned()
-                        })
-                        .collect()
-                } else if let Some(t) = s["text"].as_str() {
-                    t.lines().map(str::to_owned).collect()
-                } else {
-                    Vec::new()
-                };
-                OdpSlide { title, lines }
-            })
-            .collect();
+    // If content is a JSON string, try parsing it first
+    if let Some(s) = content.as_str() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+            let result = resolve_odp_slides(&parsed);
+            if !result.is_empty() {
+                return result;
+            }
+        }
+        // Fall through to plain-text handling below
     }
-    // Object with slides key
+
+    // Helper to convert a single slide object to OdpSlide
+    let slide_from_obj = |s: &Value| -> OdpSlide {
+        let title = s["title"].as_str().unwrap_or("").to_owned();
+        // Accept "content", "body", or "text" for slide body
+        let body_val = if !s["content"].is_null() {
+            &s["content"]
+        } else if !s["body"].is_null() {
+            &s["body"]
+        } else {
+            &s["text"]
+        };
+        let lines: Vec<String> = if let Some(c) = body_val.as_array() {
+            c.iter()
+                .map(|item| {
+                    item.as_str()
+                        .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
+                        .to_owned()
+                })
+                .collect()
+        } else if let Some(t) = body_val.as_str() {
+            t.lines().map(str::to_owned).collect()
+        } else {
+            Vec::new()
+        };
+        OdpSlide { title, lines }
+    };
+
+    // Bare array of slide objects
+    if let Some(arr) = content.as_array() {
+        if arr.first().is_some_and(serde_json::Value::is_object) {
+            return arr.iter().map(|s| slide_from_obj(s)).collect();
+        }
+    }
+
+    // Object with "slides" key
     if let Some(arr) = content["slides"].as_array() {
-        return arr
-            .iter()
-            .map(|s| {
-                let title = s["title"].as_str().unwrap_or("").to_owned();
-                let lines: Vec<String> = if let Some(c) = s["content"].as_array() {
-                    c.iter()
-                        .map(|item| {
-                            item.as_str()
-                                .unwrap_or_else(|| item["text"].as_str().unwrap_or(""))
-                                .to_owned()
-                        })
-                        .collect()
-                } else if let Some(t) = s["text"].as_str() {
-                    t.lines().map(str::to_owned).collect()
-                } else {
-                    Vec::new()
-                };
-                OdpSlide { title, lines }
-            })
-            .collect();
+        return arr.iter().map(|s| slide_from_obj(s)).collect();
     }
+
+    // Single-key wrapper — look inside
+    if let Some(obj) = content.as_object() {
+        if obj.len() == 1 {
+            let inner = obj.values().next().unwrap();
+            let result = resolve_odp_slides(inner);
+            if !result.is_empty() {
+                return result;
+            }
+        }
+        // Heuristic: find first value that is an array of objects
+        for v in obj.values() {
+            if let Some(arr) = v.as_array() {
+                if !arr.is_empty() && arr[0].is_object() {
+                    return arr.iter().map(|s| slide_from_obj(s)).collect();
+                }
+            }
+        }
+    }
+
     // Plain text: split on blank lines
     let text = content.as_str().unwrap_or("");
     text.split("\n\n")
+        .filter(|block| !block.trim().is_empty())
         .map(|block| {
             let mut lines = block.lines();
             let title = lines.next().unwrap_or("").to_owned();
