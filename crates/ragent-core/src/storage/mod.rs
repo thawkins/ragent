@@ -273,19 +273,19 @@ impl Storage {
         let conn = lock_conn!(self)?;
         conn.execute_batch(
             "
-            CREATE TABLE IF NOT EXISTS sessions (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL DEFAULT '',
-                project_id TEXT NOT NULL DEFAULT '',
-                directory TEXT NOT NULL,
-                parent_id TEXT,
-                version INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                archived_at TEXT,
-                summary TEXT
-            );
-
+                          CREATE TABLE IF NOT EXISTS sessions (
+                              id TEXT PRIMARY KEY,
+                              title TEXT NOT NULL DEFAULT '',
+                              project_id TEXT NOT NULL DEFAULT '',
+                              directory TEXT NOT NULL,
+                              parent_id TEXT,
+                              version INTEGER NOT NULL DEFAULT 1,
+                              format_version INTEGER NOT NULL DEFAULT 1,
+                              created_at TEXT NOT NULL,
+                              updated_at TEXT NOT NULL,
+                              archived_at TEXT,
+                              summary TEXT
+                          );
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -447,7 +447,7 @@ impl Storage {
                                                                                                               
                                                                                                                                                                     ",        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
-        for (table, col) in &[("memories", "embedding"), ("journal_entries", "embedding")] {
+        for (table, col) in &[("memories", "embedding"), ("journal_entries", "embedding"), ("sessions", "format_version")] {
             let has_col: bool = conn
                 .prepare(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'",
@@ -457,7 +457,12 @@ impl Storage {
                 .unwrap_or(0)
                 > 0;
             if !has_col {
-                conn.execute_batch(&format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col))?;
+                let sql = if *table == "sessions" && *col == "format_version" {
+                    "ALTER TABLE sessions ADD COLUMN format_version INTEGER NOT NULL DEFAULT 1;"
+                } else {
+                    &format!("ALTER TABLE {} ADD COLUMN {} BLOB;", table, col)
+                };
+                conn.execute_batch(sql)?;
             }
         }
 
@@ -508,10 +513,22 @@ impl Storage {
     /// ```
     pub fn get_session(&self, id: &str) -> Result<Option<SessionRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        // Check if format_version column exists (for backward compatibility)
+        let has_format_version: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'")?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        
+        let sql = if has_format_version {
+            "SELECT id, title, project_id, directory, parent_id, version, format_version, \
+             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1".to_string()
+        } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1",
-        )?;
+             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1".to_string()
+        };
+        
+        let mut stmt = conn.prepare(&sql)?;
         let row = stmt
             .query_row(params![id], |row| {
                 Ok(SessionRow {
@@ -521,10 +538,11 @@ impl Storage {
                     directory: row.get(3)?,
                     parent_id: row.get(4)?,
                     version: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    archived_at: row.get(8)?,
-                    summary: row.get(9)?,
+                    format_version: if has_format_version { row.get(6)? } else { 1 },
+                    created_at: if has_format_version { row.get(7)? } else { row.get(6)? },
+                    updated_at: if has_format_version { row.get(8)? } else { row.get(7)? },
+                    archived_at: if has_format_version { row.get(9)? } else { row.get(8)? },
+                    summary: if has_format_version { row.get(10)? } else { row.get(9)? },
                 })
             })
             .optional()?;
@@ -550,11 +568,24 @@ impl Storage {
     /// ```
     pub fn list_sessions(&self) -> Result<Vec<SessionRow>> {
         let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
+        // Check if format_version column exists (for backward compatibility)
+        let has_format_version: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'")?
+            .query_row([], |r| r.get::<_, i64>(0))
+            .unwrap_or(0)
+            > 0;
+        
+        let sql = if has_format_version {
+            "SELECT id, title, project_id, directory, parent_id, version, format_version, \
+             created_at, updated_at, archived_at, summary \
+             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC".to_string()
+        } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
              created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC",
-        )?;
+             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC".to_string()
+        };
+        
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(SessionRow {
@@ -564,10 +595,11 @@ impl Storage {
                     directory: row.get(3)?,
                     parent_id: row.get(4)?,
                     version: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    archived_at: row.get(8)?,
-                    summary: row.get(9)?,
+                    format_version: if has_format_version { row.get(6)? } else { 1 },
+                    created_at: if has_format_version { row.get(7)? } else { row.get(6)? },
+                    updated_at: if has_format_version { row.get(8)? } else { row.get(7)? },
+                    archived_at: if has_format_version { row.get(9)? } else { row.get(8)? },
+                    summary: if has_format_version { row.get(10)? } else { row.get(9)? },
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -2336,6 +2368,8 @@ pub struct SessionRow {
     pub parent_id: Option<String>,
     /// Optimistic-concurrency version counter.
     pub version: i64,
+    /// Storage format version for backward compatibility.
+    pub format_version: i64,
     /// ISO-8601 creation timestamp.
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.

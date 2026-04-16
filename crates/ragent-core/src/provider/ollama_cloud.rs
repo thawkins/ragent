@@ -43,7 +43,7 @@ impl OllamaCloudProvider {
         }
 
         let url = format!("{}/api/tags", self.base_url);
-        let response = reqwest::Client::new()
+        let response = crate::provider::http_client::create_http_client()
             .get(&url)
             .header("Authorization", format!("Bearer {api_key}"))
             .timeout(std::time::Duration::from_secs(10))
@@ -71,7 +71,7 @@ impl OllamaCloudProvider {
     /// Returns context_length and vision capability if available.
     async fn show_model(&self, api_key: &str, model_name: &str) -> Option<OllamaShowResponse> {
         let url = format!("{}/api/show", self.base_url);
-        let response = reqwest::Client::new()
+        let response = crate::provider::http_client::create_http_client()
             .post(&url)
             .header("Authorization", format!("Bearer {api_key}"))
             .json(&json!({ "model": model_name }))
@@ -232,11 +232,7 @@ impl Provider for OllamaCloudProvider {
                 .unwrap_or(&self.base_url)
                 .trim_end_matches('/')
                 .to_string(),
-            http: reqwest::Client::builder()
-                .tcp_keepalive(std::time::Duration::from_secs(30))
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::provider::http_client::create_streaming_http_client(),
         };
         Ok(Box::new(client))
     }

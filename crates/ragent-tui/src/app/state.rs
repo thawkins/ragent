@@ -8,7 +8,7 @@ use arboard::ImageData;
 use image::{ImageBuffer, Rgba};
 use lru::LruCache;
 use ratatui::layout::Rect;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
@@ -268,8 +268,31 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("ollama", "Ollama (Local)"),
 ];
 
+/// Entry in the model picker with full metadata for table display.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelPickerEntry {
+    /// Model identifier (e.g. "gpt-4o").
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Context window size in tokens.
+    pub context_window: usize,
+    /// Max output tokens, if specified.
+    pub max_output: Option<usize>,
+    /// Input cost per million tokens.
+    pub cost_input: f64,
+    /// Output cost per million tokens.
+    pub cost_output: f64,
+    /// Whether the model supports reasoning.
+    pub reasoning: bool,
+    /// Whether the model supports vision.
+    pub vision: bool,
+    /// Whether the model supports tool use.
+    pub tool_use: bool,
+}
+
 /// State of the interactive provider-setup dialog.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProviderSetupStep {
     /// Choosing which provider to configure.
     SelectProvider {
@@ -308,8 +331,8 @@ pub enum ProviderSetupStep {
         provider_id: String,
         /// Human-readable provider display name.
         provider_name: String,
-        /// Available models as `(model_id, display_name, context_window)` tuples.
-        models: Vec<(String, String, usize)>,
+        /// Available models with full metadata.
+        models: Vec<ModelPickerEntry>,
         /// Index of the highlighted model.
         selected: usize,
     },
@@ -331,6 +354,31 @@ pub enum ProviderSetupStep {
     ResetProvider {
         /// Index of the highlighted provider in [`PROVIDER_LIST`].
         selected: usize,
+    },
+    // ── GitLab setup steps ────────────────────────────────────────────
+    /// Multi-field GitLab configuration: instance URL, PAT, username.
+    ///
+    /// Tab cycles between fields; Enter validates and saves.
+    GitLabSetup {
+        /// Instance URL entered so far (e.g. `https://gitlab.com`).
+        url_input: String,
+        /// Cursor position inside `url_input`.
+        url_cursor: usize,
+        /// Personal Access Token entered so far.
+        token_input: String,
+        /// Cursor position inside `token_input`.
+        token_cursor: usize,
+        /// Which field is currently focused (0 = URL, 1 = Token).
+        active_field: u8,
+        /// Optional error message from a previous attempt.
+        error: Option<String>,
+    },
+    /// GitLab token validation in progress (async background task).
+    GitLabValidating {
+        /// Instance URL being validated.
+        instance_url: String,
+        /// Token being validated.
+        token: String,
     },
 }
 
@@ -522,6 +570,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "github",
         description: "GitHub integration: /github login | logout | status",
+    },
+    SlashCommandDef {
+        trigger: "gitlab",
+        description: "GitLab integration: /gitlab setup | logout | status",
     },
     SlashCommandDef {
         trigger: "update",
@@ -813,10 +865,12 @@ pub struct App {
     pub agent_name: String,
     /// Human-readable status string shown in the status bar.
     pub status: String,
-    /// Active permission request overlay, if any.
-    pub permission_pending: Option<PermissionRequest>,
+    /// Queue of pending permission requests awaiting user resolution.
+    /// The front of the queue is the currently displayed dialog; subsequent
+    /// requests are shown one-at-a-time as earlier ones are resolved.
+    pub permission_queue: VecDeque<PermissionRequest>,
     /// Text typed by the user in response to a `question`-type permission dialog.
-    /// Only active when `permission_pending.permission == "question"`.
+    /// Only active when the front permission request has `permission == "question"`.
     pub pending_question_input: String,
     /// Cumulative (input, output) token counts.
     pub token_usage: (u64, u64),

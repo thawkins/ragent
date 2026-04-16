@@ -61,6 +61,9 @@ pub struct Config {
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// GitLab integration configuration.
+    #[serde(default)]
+    pub gitlab: GitLabIntegrationConfig,
 }
 /// Configuration for LLM streaming behaviour (timeouts, retries).
 ///
@@ -554,9 +557,49 @@ impl Config {
             }
         }
 
+        // GitLab: overlay fields override base
+        if overlay.gitlab.instance_url.is_some() {
+            base.gitlab.instance_url = overlay.gitlab.instance_url;
+        }
+        if overlay.gitlab.token.is_some() {
+            base.gitlab.token = overlay.gitlab.token;
+        }
+        if overlay.gitlab.username.is_some() {
+            base.gitlab.username = overlay.gitlab.username;
+        }
+
         base
     }
 }
+// ── GitLab integration configuration ─────────────────────────────────────────
+
+/// GitLab integration configuration.
+///
+/// Provides connection details for a GitLab instance. Values set here
+/// override those stored in the ragent database (set via `/gitlab setup`).
+/// Environment variables (`GITLAB_TOKEN`, `GITLAB_URL`, `GITLAB_USERNAME`)
+/// take the highest priority.
+///
+/// Override in `ragent.json`:
+/// ```json
+/// {
+///   "gitlab": {
+///     "instance_url": "https://gitlab.example.com",
+///     "token": "glpat-xxxxxxxxxxxx",
+///     "username": "myuser"
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GitLabIntegrationConfig {
+    /// GitLab instance base URL, e.g. `https://gitlab.com`.
+    pub instance_url: Option<String>,
+    /// Personal Access Token for the GitLab API.
+    pub token: Option<String>,
+    /// GitLab username / identity.
+    pub username: Option<String>,
+}
+
 // ── Memory configuration ─────────────────────────────────────────────────────
 
 /// Memory system configuration.

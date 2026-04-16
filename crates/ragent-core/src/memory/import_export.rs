@@ -64,6 +64,7 @@ pub struct MemoryExport {
 
 /// Exported memory blocks organised by scope.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct MemoryBlocksExport {
     /// Project-scoped blocks, keyed by label.
     #[serde(default)]
@@ -73,14 +74,6 @@ pub struct MemoryBlocksExport {
     pub global: std::collections::HashMap<String, String>,
 }
 
-impl Default for MemoryBlocksExport {
-    fn default() -> Self {
-        Self {
-            project: std::collections::HashMap::new(),
-            global: std::collections::HashMap::new(),
-        }
-    }
-}
 
 /// Result of an export operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -255,7 +248,7 @@ pub fn import_ragent(
             continue;
         }
         if !dry_run {
-            let id = storage.create_memory(
+            let _id = storage.create_memory(
                 &mem.content,
                 &mem.category,
                 &mem.source,
@@ -396,7 +389,9 @@ pub fn import_cline(
             continue;
         }
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !filename.ends_with(".md") {
+        if !std::path::Path::new(filename)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
             continue;
         }
 

@@ -229,6 +229,13 @@ pub enum Event {
         /// The plan-specific API base URL discovered during setup.
         api_base: String,
     },
+    /// Result of an async GitLab token validation started by `/gitlab setup`.
+    GitLabSetupComplete {
+        /// Whether validation and credential save succeeded.
+        success: bool,
+        /// Error message, if any.
+        error: Option<String>,
+    },
     /// Rate-limit / quota usage from a provider response.
     QuotaUpdate {
         /// Session this update belongs to.
@@ -519,6 +526,7 @@ impl Event {
             Self::ToolCallArgs { .. } => "ToolCallArgs",
             Self::ToolResult { .. } => "ToolResult",
             Self::CopilotDeviceFlowComplete { .. } => "CopilotDeviceFlowComplete",
+            Self::GitLabSetupComplete { .. } => "GitLabSetupComplete",
             Self::SessionAborted { .. } => "SessionAborted",
             Self::QuotaUpdate { .. } => "QuotaUpdate",
             Self::SubagentStart { .. } => "SubagentStart",
@@ -588,6 +596,7 @@ impl Event {
             | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
+            | Self::GitLabSetupComplete { .. }
             | Self::LspStatusChanged { .. } => None,
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())

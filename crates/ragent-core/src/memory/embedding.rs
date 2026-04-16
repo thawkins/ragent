@@ -120,7 +120,7 @@ impl EmbeddingProvider for NoOpEmbedding {
         0
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "noop"
     }
 }

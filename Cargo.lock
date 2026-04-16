@@ -3913,7 +3913,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "0.1.0-alpha.39"
+version = "0.1.0-alpha.40"
 dependencies = [
  "anyhow",
  "clap",
@@ -3931,7 +3931,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-code"
-version = "0.1.0-alpha.39"
+version = "0.1.0-alpha.40"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3950,18 +3950,24 @@ dependencies = [
  "tracing",
  "tree-sitter",
  "tree-sitter-c",
+ "tree-sitter-cmake",
  "tree-sitter-cpp",
  "tree-sitter-go",
+ "tree-sitter-groovy",
+ "tree-sitter-hcl",
  "tree-sitter-java",
  "tree-sitter-javascript",
+ "tree-sitter-kotlin-ng",
+ "tree-sitter-openscad-ng",
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "tree-sitter-xml",
 ]
 
 [[package]]
 name = "ragent-core"
-version = "0.1.0-alpha.39"
+version = "0.1.0-alpha.40"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4022,7 +4028,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "0.1.0-alpha.39"
+version = "0.1.0-alpha.40"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4047,7 +4053,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "0.1.0-alpha.39"
+version = "0.1.0-alpha.40"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5753,6 +5759,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-cmake"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c1b35d1dd7396d24b3e826bb0f975b915ec7e9125b989d5e9d24ebb6a08509a"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-cpp"
 version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5767,6 +5783,26 @@ name = "tree-sitter-go"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-groovy"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a20016017f0865ba902ca50354f92429de5de8df994e64ab7fae087a13c40ed"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-hcl"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7b2cc3d7121553b84309fab9d11b3ff3d420403eef9ae50f9fd1cd9d9cf012"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -5793,10 +5829,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-kotlin-ng"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e800ebbda938acfbf224f4d2c34947a31994b1295ee6e819b65226c7b51b4450"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-language"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-openscad-ng"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9286371873e82cb888be0d9394dd3c6a6aaca66fa2fd31879baafb2e4008488"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
 
 [[package]]
 name = "tree-sitter-python"
@@ -5823,6 +5879,16 @@ name = "tree-sitter-typescript"
 version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c5f76ed8d947a75cc446d5fccd8b602ebf0cde64ccf2ffa434d873d7a575eff"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-xml"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e670041f591d994f54d597ddcd8f4ebc930e282c4c76a42268743b71f0c8b6b3"
 dependencies = [
  "cc",
  "tree-sitter-language",

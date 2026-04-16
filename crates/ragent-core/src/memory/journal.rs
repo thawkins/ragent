@@ -81,18 +81,21 @@ impl JournalEntry {
     }
 
     /// Set the tags for this entry.
+    #[must_use]
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
         self
     }
 
     /// Set the project name.
+    #[must_use]
     pub fn with_project(mut self, project: impl Into<String>) -> Self {
         self.project = project.into();
         self
     }
 
     /// Set the session ID.
+    #[must_use]
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = session_id.into();
         self
@@ -100,8 +103,8 @@ impl JournalEntry {
 
     /// Validate that tag strings are well-formed.
     ///
-    /// Tags must be non-empty, lowercase, and contain only ASCII letters,
-    /// digits, and hyphens. Returns `Ok(())` if all tags are valid.
+    /// Tags must be non-empty and contain only ASCII letters (any case),
+    /// digits, hyphens, and underscores. Returns `Ok(())` if all tags are valid.
     pub fn validate_tags(tags: &[String]) -> Result<(), String> {
         for tag in tags {
             if tag.is_empty() {
@@ -111,10 +114,10 @@ impl JournalEntry {
                 return Err(format!("Tag '{tag}' exceeds 64 characters"));
             }
             for ch in tag.chars() {
-                if !ch.is_ascii_lowercase() && !ch.is_ascii_digit() && ch != '-' && ch != '_' {
+                if !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_' {
                     return Err(format!(
                         "Tag '{tag}' contains invalid character '{ch}'. \
-                         Use lowercase letters, digits, hyphens, or underscores."
+                         Use letters, digits, hyphens, or underscores."
                     ));
                 }
             }
@@ -192,7 +195,11 @@ mod tests {
                 .is_ok()
         );
         assert!(JournalEntry::validate_tags(&["".to_string()]).is_err());
-        assert!(JournalEntry::validate_tags(&["Has Upper".to_string()]).is_err());
+        // Spaces are invalid, but uppercase letters are allowed
+        assert!(JournalEntry::validate_tags(&["Has Space".to_string()]).is_err());
+        assert!(JournalEntry::validate_tags(&["HasUpper".to_string()]).is_ok());
+        assert!(JournalEntry::validate_tags(&["B1".to_string()]).is_ok());
+        assert!(JournalEntry::validate_tags(&["Part-B".to_string()]).is_ok());
         assert!(JournalEntry::validate_tags(&["valid_tag".to_string()]).is_ok());
     }
 

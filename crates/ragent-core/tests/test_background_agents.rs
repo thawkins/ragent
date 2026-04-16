@@ -95,6 +95,7 @@ fn test_task_entry_reported_round_trip() {
         created_at: chrono::Utc::now(),
         completed_at: Some(chrono::Utc::now()),
         reported: true,
+        waiter_count: 0,
     };
     let json = serde_json::to_string(&entry).unwrap();
     let parsed: TaskEntry = serde_json::from_str(&json).unwrap();

@@ -31,6 +31,48 @@ use crate::agent::{AgentMode, ModelRef};
 use crate::event::{Event, EventBus};
 use crate::session::processor::SessionProcessor;
 
+/// D4 fix: Sanitize agent name for use in task ID.
+/// Converts to lowercase, replaces spaces and special chars with hyphens.
+fn sanitize_for_id(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c.to_lowercase().next().unwrap_or(c)
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    // Remove consecutive hyphens and trim leading/trailing
+    let mut result = String::new();
+    let mut prev_hyphen = true; // Treat start as hyphen to trim leading
+    for c in sanitized.chars() {
+        if c == '-' {
+            if !prev_hyphen {
+                result.push(c);
+            }
+            prev_hyphen = true;
+        } else {
+            result.push(c);
+            prev_hyphen = false;
+        }
+    }
+    // Trim trailing hyphen if any
+    if result.ends_with('-') {
+        result.pop();
+    }
+    // Limit to 20 chars to keep IDs readable
+    if result.len() > 20 {
+        result.truncate(20);
+    }
+    // Ensure we have something - fallback to "task" if empty
+    if result.is_empty() {
+        result = "task".to_string();
+    }
+    result
+}
+
 /// Maximum number of concurrent background tasks (default).
 pub const DEFAULT_MAX_BACKGROUND_TASKS: usize = 4;
 
@@ -87,6 +129,11 @@ pub struct TaskEntry {
     /// Whether this completion has been injected into the parent session.
     #[serde(default)]
     pub reported: bool,
+    /// Number of active waiters for this task (via wait_tasks tool).
+    /// When > 0, the task result should not be redundantly reported via drain_completed
+    /// because a waiter is already handling it.
+    #[serde(default)]
+    pub waiter_count: u32,
 }
 
 /// Result of a completed sub-agent task.
@@ -143,9 +190,13 @@ impl TaskManager {
         model_override: Option<&str>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<TaskResult> {
-        let task_id = uuid::Uuid::new_v4().to_string();
-        let start = Instant::now();
-
+                  // D4 fix: Generate human-readable task ID based on agent name
+                  // e.g., "explore-a1b2c3d4" instead of full UUID
+                  let task_id = format!("{}-{}", 
+                      sanitize_for_id(agent_name),
+                      uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("task")
+                  );
+                  let start = Instant::now();
         // Create isolated session
         let child_session = self
             .processor
@@ -153,22 +204,22 @@ impl TaskManager {
             .create_session(working_dir.to_path_buf())?;
         let child_sid = child_session.id.clone();
 
-        // Register task entry
-        let entry = TaskEntry {
-            id: task_id.clone(),
-            parent_session_id: parent_session_id.to_string(),
-            child_session_id: child_sid.clone(),
-            agent_name: agent_name.to_string(),
-            task_prompt: task_prompt.to_string(),
-            background: false,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-        };
-        self.tasks.write().await.insert(task_id.clone(), entry);
+                  // Register task entry
+                  let entry = TaskEntry {
+                      id: task_id.clone(),
+                      parent_session_id: parent_session_id.to_string(),
+                      child_session_id: child_sid.clone(),
+                      agent_name: agent_name.to_string(),
+                      task_prompt: task_prompt.to_string(),
+                      background: false,
+                      status: TaskStatus::Running,
+                      result: None,
+                      error: None,
+                      created_at: Utc::now(),
+                      completed_at: None,
+                      reported: false,
+                      waiter_count: 0,
+                  };        self.tasks.write().await.insert(task_id.clone(), entry);
 
         let cancel_flag = Arc::new(AtomicBool::new(false));
         self.cancel_flags
@@ -283,31 +334,35 @@ impl TaskManager {
             );
         }
 
-        let task_id = uuid::Uuid::new_v4().to_string();
-
-        // Create isolated session
-        let child_session = self
-            .processor
-            .session_manager
-            .create_session(working_dir.to_path_buf())?;
-        let child_sid = child_session.id.clone();
-
-        // Register task entry
-        let entry = TaskEntry {
-            id: task_id.clone(),
-            parent_session_id: parent_session_id.to_string(),
-            child_session_id: child_sid.clone(),
-            agent_name: agent_name.to_string(),
-            task_prompt: task_prompt.to_string(),
-            background: true,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-        };
-        self.tasks
+                            // D4 fix: Generate human-readable task ID based on agent name
+                            // e.g., "explore-a1b2c3d4" instead of full UUID
+                            let task_id = format!("{}-{}", 
+                                sanitize_for_id(agent_name),
+                                uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("task")
+                            );
+                  
+                            // Create isolated session
+                            let child_session = self
+                                .processor
+                                .session_manager
+                                .create_session(working_dir.to_path_buf())?;
+                            let child_sid = child_session.id.clone();
+                  
+                            // Register task entry
+                            let entry = TaskEntry {
+                                id: task_id.clone(),
+                                parent_session_id: parent_session_id.to_string(),
+                                child_session_id: child_sid.clone(),
+                                agent_name: agent_name.to_string(),
+                                task_prompt: task_prompt.to_string(),
+                                background: true,
+                                status: TaskStatus::Running,
+                                result: None,
+                                error: None,                      created_at: Utc::now(),
+                      completed_at: None,
+                      reported: false,
+                      waiter_count: 0,
+                  };        self.tasks
             .write()
             .await
             .insert(task_id.clone(), entry.clone());
@@ -503,38 +558,60 @@ impl TaskManager {
         }
     }
 
-    /// Returns completed background tasks that have not yet been reported
-    /// to the parent session, and marks them as reported.
-    ///
-    /// This is called by the processor loop between iterations to inject
-    /// background task results into the conversation.
-    pub async fn drain_completed(&self, parent_session_id: &str) -> Vec<TaskEntry> {
-        let mut tasks = self.tasks.write().await;
-        let mut completed = Vec::new();
-        for entry in tasks.values_mut() {
-            if entry.parent_session_id == parent_session_id
-                && entry.background
-                && !entry.reported
-                && entry.status != TaskStatus::Running
-            {
-                entry.reported = true;
-                completed.push(entry.clone());
-            }
-        }
-        completed
-    }
-
-    /// Internal helper: resolve agent and run through the processor loop.
-    async fn run_subagent(
-        &self,
-        child_session_id: &str,
-        agent_name: &str,
-        task_prompt: &str,
-        model_override: Option<&str>,
-        cancel_flag: Arc<AtomicBool>,
-        working_dir: &std::path::Path,
-    ) -> anyhow::Result<String> {
-        let config = crate::config::Config::default();
+                /// Returns completed background tasks that have not yet been reported
+                /// to the parent session, and marks them as reported.
+                ///
+                /// This is called by the processor loop between iterations to inject
+                /// background task results into the conversation.
+                ///
+                /// Note: Tasks with waiter_count > 0 are skipped because they are being
+                /// actively waited on via wait_tasks tool and should not be redundantly
+                /// injected into the conversation.
+                pub async fn drain_completed(&self, parent_session_id: &str) -> Vec<TaskEntry> {
+                    let mut tasks = self.tasks.write().await;
+                    let mut completed = Vec::new();
+                    for entry in tasks.values_mut() {
+                        if entry.parent_session_id == parent_session_id
+                            && entry.background
+                            && !entry.reported
+                            && entry.status != TaskStatus::Running
+                            && entry.waiter_count == 0 // Skip tasks with active waiters
+                        {
+                            entry.reported = true;
+                            completed.push(entry.clone());
+                        }
+                    }
+                    completed
+                }
+          
+                /// Increments the waiter count for a task (called when wait_tasks starts waiting).
+                pub async fn increment_waiter(&self, task_id: &str) {
+                    let mut tasks = self.tasks.write().await;
+                    if let Some(entry) = tasks.get_mut(task_id) {
+                        entry.waiter_count = entry.waiter_count.saturating_add(1);
+                        tracing::debug!(task_id, waiter_count = entry.waiter_count, "Incremented waiter count");
+                    }
+                }
+          
+                /// Decrements the waiter count for a task (called when wait_tasks completes).
+                pub async fn decrement_waiter(&self, task_id: &str) {
+                    let mut tasks = self.tasks.write().await;
+                    if let Some(entry) = tasks.get_mut(task_id) {
+                        entry.waiter_count = entry.waiter_count.saturating_sub(1);
+                        tracing::debug!(task_id, waiter_count = entry.waiter_count, "Decremented waiter count");
+                    }
+                }
+          
+                  /// Internal helper: resolve agent and run through the processor loop.
+                  async fn run_subagent(
+                      &self,
+                      child_session_id: &str,
+                      agent_name: &str,
+                      task_prompt: &str,
+                      model_override: Option<&str>,
+                      cancel_flag: Arc<AtomicBool>,
+                      working_dir: &std::path::Path,
+                  ) -> anyhow::Result<String> {        let config = crate::config::Config::default();
         let mut agent = crate::agent::resolve_agent_with_customs(agent_name, &config, working_dir)?;
         agent.mode = AgentMode::Subagent;
 
@@ -615,24 +692,68 @@ mod tests {
         assert_eq!(result, "naïve");
     }
 
-    #[test]
-    fn test_task_entry_serialization() {
-        let entry = TaskEntry {
-            id: "task-1".to_string(),
-            parent_session_id: "parent-1".to_string(),
-            child_session_id: "child-1".to_string(),
-            agent_name: "explore".to_string(),
-            task_prompt: "Find auth code".to_string(),
-            background: true,
-            status: TaskStatus::Running,
-            result: None,
-            error: None,
-            created_at: Utc::now(),
-            completed_at: None,
-            reported: false,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(json.contains("\"explore\""));
-        assert!(json.contains("\"running\""));
-    }
-}
+                      #[test]
+                      fn test_task_entry_serialization() {
+                          let entry = TaskEntry {
+                              id: "task-1".to_string(),
+                              parent_session_id: "parent-1".to_string(),
+                              child_session_id: "child-1".to_string(),
+                              agent_name: "explore".to_string(),
+                              task_prompt: "Find auth code".to_string(),
+                              background: true,
+                              status: TaskStatus::Running,
+                              result: None,
+                              error: None,
+                              created_at: Utc::now(),
+                              completed_at: None,
+                              reported: false,
+                              waiter_count: 0,
+                          };
+                          let json = serde_json::to_string(&entry).unwrap();
+                          assert!(json.contains("\"explore\""));
+                          assert!(json.contains("\"running\""));
+                      }
+          
+                      // D4 fix: Tests for sanitize_for_id
+                      #[test]
+                      fn test_sanitize_for_id_basic() {
+                          assert_eq!(sanitize_for_id("explore"), "explore");
+                          assert_eq!(sanitize_for_id("code-review"), "code-review");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_with_spaces() {
+                          assert_eq!(sanitize_for_id("Code Review"), "code-review");
+                          assert_eq!(sanitize_for_id("  spaced  "), "spaced");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_with_special_chars() {
+                          assert_eq!(sanitize_for_id("test@agent"), "test-agent");
+                          assert_eq!(sanitize_for_id("agent.name"), "agent-name");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_consecutive_specials() {
+                          assert_eq!(sanitize_for_id("a--b"), "a-b");
+                          assert_eq!(sanitize_for_id("a---b"), "a-b");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_trims_leading_trailing() {
+                          assert_eq!(sanitize_for_id("-leading"), "leading");
+                          assert_eq!(sanitize_for_id("trailing-"), "trailing");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_empty_fallback() {
+                          assert_eq!(sanitize_for_id(""), "task");
+                          assert_eq!(sanitize_for_id("---"), "task");
+                      }
+          
+                      #[test]
+                      fn test_sanitize_for_id_length_limit() {
+                          let long = "a".repeat(50);
+                          let result = sanitize_for_id(&long);
+                          assert!(result.len() <= 20, "Result should be limited to 20 chars");
+                      }}

@@ -13,7 +13,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+        Block, Borders, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Wrap,
     },
 };
 
@@ -400,74 +400,128 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             selected,
             ..
         } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    format!("Select a Model ({})", provider_name),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-            ];
+            // Create header row
+            let header = Row::new(vec!["Model", "Context", "Cost", "Features"])
+                .style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan));
 
-            if models.is_empty() {
-                lines.push(Line::from(Span::styled(
-                    "No models available",
-                    Style::default().fg(Color::DarkGray),
-                )));
+            // Calculate visible rows based on available height
+            let header_height = 3; // Header + border lines
+            let footer_height = 3; // Footer hint + spacing
+            let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
+            let visible = available_rows.max(1).min(models.len());
+            let start = if *selected >= visible {
+                (*selected + 1).saturating_sub(visible)
             } else {
-                let max_visible = area.height.saturating_sub(6) as usize;
-                let visible = max_visible.max(1).min(models.len());
-                let start = if *selected >= visible {
-                    (*selected + 1).saturating_sub(visible)
-                } else {
-                    0
-                };
-                let end = (start + visible).min(models.len());
+                0
+            };
+            let end = (start + visible).min(models.len());
 
-                for (i, (_mid, mname, _ctx)) in
-                    models.iter().enumerate().skip(start).take(end - start)
-                {
-                    let (indicator, style) = if i == *selected {
-                        (
-                            "▸ ",
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        )
+            let rows: Vec<Row> = models
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(end - start)
+                .map(|(i, entry)| {
+                    let is_selected = i == *selected;
+                    let style = if is_selected {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        ("  ", Style::default().fg(Color::White))
+                        Style::default().fg(Color::White)
                     };
-                    lines.push(Line::from(vec![
-                        Span::styled(indicator, style),
-                        Span::styled(mname.as_str(), style),
-                    ]));
-                }
 
-                if models.len() > visible {
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        format!("Showing {}-{} of {}", start + 1, end, models.len()),
-                        Style::default().fg(Color::DarkGray),
-                    )));
-                }
+                    // Format context window
+                    let ctx_str = if entry.context_window >= 1_000_000 {
+                        format!("{}M", entry.context_window / 1_000_000)
+                    } else if entry.context_window >= 1_000 {
+                        format!("{}K", entry.context_window / 1_000)
+                    } else {
+                        entry.context_window.to_string()
+                    };
+
+                    // Format cost
+                    let cost_str = if entry.cost_input == 0.0 && entry.cost_output == 0.0 {
+                        "Free".to_string()
+                    } else {
+                        format!("${:.2}/${:.2}", entry.cost_input, entry.cost_output)
+                    };
+
+                    // Format features
+                    let mut features = Vec::new();
+                    if entry.reasoning {
+                        features.push("R");
+                    }
+                    if entry.vision {
+                        features.push("V");
+                    }
+                    if entry.tool_use {
+                        features.push("T");
+                    }
+                    let features_str = if features.is_empty() {
+                        "-".to_string()
+                    } else {
+                        features.join(",")
+                    };
+
+                    // Add selection indicator
+                    let model_name = if is_selected {
+                        format!("▸ {}", entry.name)
+                    } else {
+                        format!("  {}", entry.name)
+                    };
+
+                    Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)
+                })
+                .collect();
+
+            let table = Table::new(rows, [
+                Constraint::Percentage(45), // Model name
+                Constraint::Percentage(15), // Context window
+                Constraint::Percentage(25), // Cost
+                Constraint::Percentage(15), // Features
+            ])
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" Select Model - {} ", provider_name))
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+
+            frame.render_widget(table, area);
+
+            // Render footer hint at the bottom of the area
+            if area.height > 2 {
+                let hint = Span::styled(
+                    "↑/↓ navigate  Enter select  Esc cancel",
+                    Style::default().fg(Color::DarkGray),
+                );
+                let hint_line = Line::from(hint);
+                let hint_area = Rect::new(
+                    area.x + 2,
+                    area.y + area.height - 2,
+                    area.width.saturating_sub(4),
+                    1,
+                );
+                frame.render_widget(Paragraph::new(hint_line), hint_area);
             }
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter select  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
-
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Select Model ")
-                .border_style(Style::default().fg(Color::Cyan));
-
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+            // Render "showing X of Y" if needed
+            if models.len() > visible && area.height > 4 {
+                let showing = Span::styled(
+                    format!("Showing {}-{} of {}", start + 1, end, models.len()),
+                    Style::default().fg(Color::DarkGray),
+                );
+                let showing_line = Line::from(showing);
+                let showing_area = Rect::new(
+                    area.x + 2,
+                    area.y + area.height - 3,
+                    area.width.saturating_sub(4),
+                    1,
+                );
+                frame.render_widget(Paragraph::new(showing_line).alignment(Alignment::Right), showing_area);
+            }
         }
         ProviderSetupStep::Done {
             provider_name,
@@ -604,6 +658,146 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .borders(Borders::ALL)
                 .title(" Provider Reset ")
                 .border_style(Style::default().fg(Color::Yellow));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+
+        // ── GitLab setup form ────────────────────────────────────────────
+        ProviderSetupStep::GitLabSetup {
+            url_input,
+            url_cursor,
+            token_input,
+            token_cursor,
+            active_field,
+            error,
+        } => {
+            let mut lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    "Configure GitLab",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("Instance URL:"),
+            ];
+
+            // URL field
+            let url_cursor_display = if *active_field == 0 {
+                *url_cursor
+            } else {
+                url_input.chars().count()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if *active_field == 0 { "> " } else { "  " },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    if url_input.is_empty() {
+                        "https://gitlab.com".to_string()
+                    } else {
+                        with_cursor_marker(url_input, url_cursor_display)
+                    },
+                    Style::default().fg(if url_input.is_empty() {
+                        Color::DarkGray
+                    } else {
+                        Color::White
+                    }),
+                ),
+            ]));
+
+            lines.push(Line::from(""));
+            lines.push(Line::from("Personal Access Token:"));
+
+            // Token field (masked)
+            let masked = if token_input.is_empty() {
+                String::new()
+            } else {
+                let char_count = token_input.chars().count();
+                if char_count <= 8 {
+                    "*".repeat(char_count)
+                } else {
+                    let first4: String = token_input.chars().take(4).collect();
+                    let last4: String = token_input
+                        .chars()
+                        .rev()
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    format!("{}…{}", first4, last4)
+                }
+            };
+            let tok_cursor_display = if *active_field == 1 {
+                *token_cursor
+            } else {
+                masked.chars().count()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if *active_field == 1 { "> " } else { "  " },
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    with_cursor_marker(&masked, tok_cursor_display),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+
+            if let Some(err) = error {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    err.as_str(),
+                    Style::default().fg(Color::Red),
+                )));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Tab switch fields  Enter validate & save  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" GitLab Setup ")
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+
+        ProviderSetupStep::GitLabValidating { .. } => {
+            let lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    "Configure GitLab",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Validating token…",
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Esc cancel",
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ];
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" GitLab Setup ")
+                .border_style(Style::default().fg(Color::Cyan));
 
             let paragraph = Paragraph::new(lines)
                 .block(block)
@@ -793,7 +987,6 @@ fn render_file_menu(frame: &mut Frame, app: &App, input_area: Rect) {
 }
 
 #[allow(dead_code)]
-
 /// Split `text` into fixed-width character-wrapped lines.
 ///
 /// Unlike word wrapping, this breaks at exact character boundaries so that
@@ -1074,7 +1267,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_file_menu(frame, app, input_chunks[1]);
     }
 
-    if app.permission_pending.is_some() {
+    if !app.permission_queue.is_empty() {
         render_permission_dialog(frame, app);
     }
 
@@ -2109,15 +2302,17 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         .block(messages_block)
         .wrap(Wrap { trim: false });
 
-    // Use line_count() which accounts for word-wrap at the inner width
-    // (area width minus left+right borders).
-    let inner_width = area.width.saturating_sub(2);
-    let total = paragraph.line_count(inner_width) as u16;
-    let visible = area.height.saturating_sub(2);
-    let max_scroll = total.saturating_sub(visible);
-    app.message_max_scroll = max_scroll;
-    let scroll = max_scroll.saturating_sub(app.scroll_offset);
-
+          // Use line_count() which accounts for word-wrap at the inner width
+          // (area width minus left+right borders).
+          let inner_width = area.width.saturating_sub(2);
+          let total = paragraph.line_count(inner_width) as u16;
+          let visible = area.height.saturating_sub(2);
+          let max_scroll = total.saturating_sub(visible);
+          // Clamp scroll_offset when content shrinks to prevent blank timeline
+          // (C3 fix: Timeline no longer goes blank when content shrinks)
+          app.scroll_offset = app.scroll_offset.min(max_scroll);
+          app.message_max_scroll = max_scroll;
+          let scroll = max_scroll.saturating_sub(app.scroll_offset);
     let paragraph = paragraph.scroll((scroll, 0));
 
     frame.render_widget(paragraph, area);
@@ -2379,7 +2574,7 @@ fn render_context_menu(frame: &mut Frame, app: &App) {
 }
 
 fn render_permission_dialog(frame: &mut Frame, app: &App) {
-    let Some(ref req) = app.permission_pending else {
+    let Some(ref req) = app.permission_queue.front() else {
         return;
     };
 
@@ -2458,10 +2653,17 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
               )),
           ];
     
+          let queue_depth = app.permission_queue.len();
+          let title_suffix = if queue_depth > 1 {
+              format!(" Permission: {} ({} queued) ", req.permission, queue_depth)
+          } else {
+              format!(" Permission: {} ", req.permission)
+          };
+
           let block = Block::default()
               .borders(Borders::ALL)
               .border_type(ratatui::widgets::BorderType::Double) // Double border for emphasis
-              .title(format!(" Permission: {} ", req.permission))
+              .title(title_suffix)
               .style(Style::default().fg(Color::Yellow).bg(Color::Black)); // Ensure contrast
     
           let paragraph = Paragraph::new(text)
@@ -3065,6 +3267,7 @@ fn render_history_picker(frame: &mut Frame, app: &App) {
 ///
 /// Shows the plan text (scrollable) with Approve / Reject buttons. The user
 /// presses Enter to approve or `r`/Esc to reject.
+#[allow(dead_code)]
 fn render_plan_approval_dialog(frame: &mut Frame, app: &App) {
     let Some(ref state) = app.plan_approval_pending else {
         return;

@@ -1227,6 +1227,7 @@ fn test_buttons_render_with_active_blue_state() {
         created_at: chrono::Utc::now(),
         completed_at: None,
         reported: false,
+        waiter_count: 0,
     });
     app.show_agents_window = true;
 
@@ -1280,6 +1281,7 @@ fn test_agents_popup_renders_tidy_table_columns() {
         created_at: chrono::Utc::now(),
         completed_at: None,
         reported: false,
+        waiter_count: 0,
     });
 
     let backend = TestBackend::new(160, 44);

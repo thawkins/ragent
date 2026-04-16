@@ -97,30 +97,35 @@ impl StructuredMemory {
     }
 
     /// Set the confidence score.
+    #[must_use]
     pub fn with_confidence(mut self, confidence: f64) -> Self {
         self.confidence = confidence.clamp(0.0, 1.0);
         self
     }
 
     /// Set the source.
+    #[must_use]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = source.into();
         self
     }
 
     /// Set the project name.
+    #[must_use]
     pub fn with_project(mut self, project: impl Into<String>) -> Self {
         self.project = project.into();
         self
     }
 
     /// Set the session ID.
+    #[must_use]
     pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.session_id = session_id.into();
         self
     }
 
     /// Set the tags.
+    #[must_use]
     pub fn with_tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
         self
@@ -173,8 +178,8 @@ impl ForgetFilter {
     /// Check that at least one filter criterion is set (for Filter variant only).
     pub fn has_any_criterion(&self) -> bool {
         match self {
-            ForgetFilter::Id(_) => true,
-            ForgetFilter::Filter {
+            Self::Id(_) => true,
+            Self::Filter {
                 older_than_days,
                 max_confidence,
                 category,

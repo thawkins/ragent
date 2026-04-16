@@ -253,7 +253,7 @@ impl Tool for TodoWriteTool {
                     .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?;
                 let existing_title = existing
                     .iter()
-                    .find(|t| &t.id == id)
+                    .find(|t| t.id == id)
                     .map(|t| t.title.as_str())
                     .unwrap_or("");
 

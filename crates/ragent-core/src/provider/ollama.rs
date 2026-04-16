@@ -79,7 +79,7 @@ impl OllamaProvider {
     /// Queries the Ollama `/api/tags` endpoint to discover locally available models.
     async fn discover_models(&self) -> Result<Vec<OllamaModelEntry>> {
         let url = format!("{}/api/tags", self.base_url);
-        let http = reqwest::Client::new();
+        let http = crate::provider::http_client::create_http_client();
 
         let response = http
             .get(&url)
@@ -218,11 +218,7 @@ impl Provider for OllamaProvider {
                 Some(api_key.to_string())
             },
             base_url: url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::builder()
-                .tcp_keepalive(std::time::Duration::from_secs(30))
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::provider::http_client::create_streaming_http_client(),
         };
         Ok(Box::new(client))
     }

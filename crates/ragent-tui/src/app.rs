@@ -4,7 +4,7 @@
 //! scroll position, and permission state. It processes both terminal key events
 //! and agent bus events to drive the UI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -378,7 +378,7 @@ impl App {
             session_id: None,
             agent_name,
             status: "ready".to_string(),
-            permission_pending: None,
+            permission_queue: VecDeque::new(),
             pending_question_input: String::new(),
             token_usage: (0, 0),
             llm_request_stats: Vec::new(),
@@ -521,6 +521,9 @@ impl App {
         // Initialise the bash allowlist/denylist from config
         ragent_core::bash_lists::load_from_config();
 
+        // Migrate legacy file-based GitLab credentials into the database
+        ragent_core::gitlab::auth::migrate_legacy_files(&app.storage);
+
         app
     }
 
@@ -653,15 +656,15 @@ impl App {
 
         // Query the provider for its full model list.
         let models = self.models_for_provider(provider_id);
-        if let Some((_, _, ctx)) = models.iter().find(|(id, _, _)| id == model_id) {
-            if *ctx > 0 {
-                self.selected_model_ctx_window = Some(*ctx);
+        if let Some(entry) = models.iter().find(|e| e.id == model_id) {
+            if entry.context_window > 0 {
+                self.selected_model_ctx_window = Some(entry.context_window);
                 let _ = self
                     .storage
-                    .set_setting("selected_model_ctx_window", &ctx.to_string());
+                    .set_setting("selected_model_ctx_window", &entry.context_window.to_string());
                 tracing::info!(
                     model = %model,
-                    context_window = ctx,
+                    context_window = entry.context_window,
                     "Backfilled context window for selected model"
                 );
             }
@@ -1503,6 +1506,32 @@ impl App {
                 key_input.insert_str(insert_pos, &clean);
                 *key_cursor += clean.chars().count();
             }
+        } else if let ProviderSetupStep::GitLabSetup {
+            url_input,
+            url_cursor,
+            token_input,
+            token_cursor,
+            active_field,
+            ..
+        } = step
+        {
+            if *active_field == 0 {
+                let insert_pos = url_input
+                    .char_indices()
+                    .nth(*url_cursor)
+                    .map(|(byte, _)| byte)
+                    .unwrap_or_else(|| url_input.len());
+                url_input.insert_str(insert_pos, &clean);
+                *url_cursor += clean.chars().count();
+            } else {
+                let insert_pos = token_input
+                    .char_indices()
+                    .nth(*token_cursor)
+                    .map(|(byte, _)| byte)
+                    .unwrap_or_else(|| token_input.len());
+                token_input.insert_str(insert_pos, &clean);
+                *token_cursor += clean.chars().count();
+            }
         }
     }
 
@@ -2026,8 +2055,9 @@ impl App {
         }
     }
 
-    /// Returns the list of available models for a provider as `(id, display_name)` pairs.
+    /// Returns a sorted list of models with full metadata for the given provider.
     ///
+    /// Models are sorted alphabetically by display name.
     /// For Ollama, queries the running server to discover actual models.
     /// Falls back to the provider's static defaults if discovery fails.
     ///
@@ -2037,28 +2067,43 @@ impl App {
     /// # use ragent_tui::App;
     /// # fn example(app: &App) {
     /// let models = app.models_for_provider("anthropic");
-    /// for (id, name) in &models {
-    ///     println!("{id}: {name}");
+    /// for entry in &models {
+    ///     println!("{}: {}", entry.id, entry.name);
     /// }
     /// # }
     /// ```
-    pub fn models_for_provider(&self, provider_id: &str) -> Vec<(String, String, usize)> {
-        if provider_id == "ollama" {
+    pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 let result = tokio::task::block_in_place(|| {
                     handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
                 });
-                if let Ok(models) = result {
-                    if !models.is_empty() {
-                        return models
+                if let Ok(fetched) = result {
+                    if !fetched.is_empty() {
+                        fetched
                             .into_iter()
-                            .map(|m| (m.id, m.name, m.context_window))
-                            .collect();
+                            .map(|m| ModelPickerEntry {
+                                id: m.id,
+                                name: m.name,
+                                context_window: m.context_window,
+                                max_output: m.max_output,
+                                cost_input: m.cost.input,
+                                cost_output: m.cost.output,
+                                reasoning: m.capabilities.reasoning,
+                                vision: m.capabilities.vision,
+                                tool_use: m.capabilities.tool_use,
+                            })
+                            .collect()
+                    } else {
+                        vec![]
                     }
+                } else {
+                    vec![]
                 }
+            } else {
+                vec![]
             }
-        }
-        if provider_id == "ollama_cloud" {
+        } else if provider_id == "ollama_cloud" {
             if let Some(token) = self.ollama_cloud_api_key() {
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     let result = tokio::task::block_in_place(|| {
@@ -2068,18 +2113,35 @@ impl App {
                             ),
                         )
                     });
-                    if let Ok(models) = result
-                        && !models.is_empty()
-                    {
-                        return models
-                            .into_iter()
-                            .map(|m| (m.id, m.name, m.context_window))
-                            .collect();
+                    if let Ok(fetched) = result {
+                        if !fetched.is_empty() {
+                            fetched
+                                .into_iter()
+                                .map(|m| ModelPickerEntry {
+                                    id: m.id,
+                                    name: m.name,
+                                    context_window: m.context_window,
+                                    max_output: m.max_output,
+                                    cost_input: m.cost.input,
+                                    cost_output: m.cost.output,
+                                    reasoning: m.capabilities.reasoning,
+                                    vision: m.capabilities.vision,
+                                    tool_use: m.capabilities.tool_use,
+                                })
+                                .collect()
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
                     }
+                } else {
+                    vec![]
                 }
+            } else {
+                vec![]
             }
-        }
-        if provider_id == "copilot" {
+        } else if provider_id == "copilot" {
             // Prefer DB-stored device flow token (works for token exchange),
             // then fall back to other token sources for model discovery.
             let token = self
@@ -2098,26 +2160,59 @@ impl App {
                     let result = tokio::task::block_in_place(|| {
                         handle.block_on(ragent_core::provider::copilot::list_copilot_models(&token))
                     });
-                    if let Ok(models) = result {
-                        if !models.is_empty() {
-                            return models
+                    if let Ok(fetched) = result {
+                        if !fetched.is_empty() {
+                            fetched
                                 .into_iter()
-                                .map(|m| (m.id, m.name, m.context_window))
-                                .collect();
+                                .map(|m| ModelPickerEntry {
+                                    id: m.id,
+                                    name: m.name,
+                                    context_window: m.context_window,
+                                    max_output: m.max_output,
+                                    cost_input: m.cost.input,
+                                    cost_output: m.cost.output,
+                                    reasoning: m.capabilities.reasoning,
+                                    vision: m.capabilities.vision,
+                                    tool_use: m.capabilities.tool_use,
+                                })
+                                .collect()
+                        } else {
+                            vec![]
                         }
+                    } else {
+                        vec![]
                     }
+                } else {
+                    vec![]
                 }
+            } else {
+                vec![]
             }
-        }
-        self.provider_registry
-            .get(provider_id)
-            .map(|p| {
-                p.default_models()
-                    .into_iter()
-                    .map(|m| (m.id, m.name, m.context_window))
-                    .collect()
-            })
-            .unwrap_or_default()
+        } else {
+            self.provider_registry
+                .get(provider_id)
+                .map(|p| {
+                    p.default_models()
+                        .into_iter()
+                        .map(|m| ModelPickerEntry {
+                            id: m.id,
+                            name: m.name,
+                            context_window: m.context_window,
+                            max_output: m.max_output,
+                            cost_input: m.cost.input,
+                            cost_output: m.cost.output,
+                            reasoning: m.capabilities.reasoning,
+                            vision: m.capabilities.vision,
+                            tool_use: m.capabilities.tool_use,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        // Sort models alphabetically by name
+        models.sort_by(|a, b| a.name.cmp(&b.name));
+        models
     }
 
     /// Returns a human-readable `"provider / model"` label, or `None` if no model is selected.
@@ -2872,25 +2967,24 @@ impl App {
         }
 
         match cmd {
-            "about" => {
-                let about = format!(
-                    "  ragent — AI Coding Agent\n\
-                     \n\
-                     \x20 An interactive TUI-based AI coding agent\n\
-                     \x20 supporting multiple LLM providers.\n\
-                     \n\
-                     \x20 Version:     {}\n\
-                     \x20 Built:       {}\n\
-                     \x20 Repository:  https://github.com/thawkins/ragent\n\
-                     \x20 License:     MIT\n\
-                     \n\
-                     \x20 Authors:\n\
-                     \x20   Tim Hawkins <tim.thawkins@gmail.com>\n",
-                    env!("CARGO_PKG_VERSION"),
-                    env!("BUILD_TIMESTAMP"),
-                );
-                self.append_assistant_text(&format!("From: /about\n{about}"));
-
+                        "about" => {
+                            let about = format!(
+                                "  ragent — AI Coding Agent\n\
+                                 \n\
+                                 \x20 An interactive TUI-based AI coding agent\n\
+                                 \x20 supporting multiple LLM providers.\n\
+                                 \n\
+                                 \x20 Version:     {}\n\
+                                 \x20 Built:       {}\n\
+                                 \x20 Repository:  https://github.com/thawkins/ragent\n\
+                                 \x20 License:     MIT\n\
+                                 \n\
+                                 \x20 Authors:\n\
+                                 \x20   Tim Hawkins <tim.thawkins@gmail.com>\n",
+                                env!("CARGO_PKG_VERSION"),
+                                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
+                            );
+                            self.append_assistant_text(&format!("From: /about\n{about}"));
                 self.status = "about".to_string();
             }
             "agent" => {
@@ -6090,6 +6184,85 @@ Type `/swarm help` for more info.\n";
                 }
             },
 
+            "gitlab" => match args.trim() {
+                "setup" => {
+                    // Pre-fill from existing config if available
+                    let (url, _user) = {
+                        let storage = &self.storage;
+                        let cfg = ragent_core::gitlab::auth::load_config(storage);
+                        match cfg {
+                            Some(c) => (c.instance_url, c.username),
+                            None => ("https://gitlab.com".to_string(), String::new()),
+                        }
+                    };
+                    self.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                        url_input: url,
+                        url_cursor: 0,
+                        token_input: String::new(),
+                        token_cursor: 0,
+                        active_field: 0,
+                        error: None,
+                    });
+                }
+                "logout" => {
+                    let storage = &self.storage;
+                    let mut msgs = Vec::new();
+                    if let Err(e) = ragent_core::gitlab::auth::delete_token(storage) {
+                        msgs.push(format!("❌ Failed to remove token: {e}"));
+                    }
+                    if let Err(e) = ragent_core::gitlab::auth::delete_config(storage) {
+                        msgs.push(format!("❌ Failed to remove config: {e}"));
+                    }
+                    if msgs.is_empty() {
+                        self.append_assistant_text(
+                            "From: /gitlab\n✅ GitLab configuration and token removed.",
+                        );
+                    } else {
+                        self.append_assistant_text(&format!(
+                            "From: /gitlab\n{}",
+                            msgs.join("\n")
+                        ));
+                    }
+                }
+                "status" | "" => {
+                    let storage = &self.storage;
+                    let config = ragent_core::gitlab::auth::load_config(storage);
+                    let token = ragent_core::gitlab::auth::load_token(storage);
+                    match (config, token) {
+                        (Some(cfg), Some(_)) => {
+                            self.append_assistant_text(&format!(
+                                "From: /gitlab\n✅ GitLab configured\n\n\
+                                 **Instance**: {}  \n\
+                                 **Username**: {}  \n\
+                                 **Token**: ✅ configured",
+                                cfg.instance_url, cfg.username
+                            ));
+                        }
+                        (Some(cfg), None) => {
+                            self.append_assistant_text(&format!(
+                                "From: /gitlab\n⚠️  GitLab partially configured\n\n\
+                                 **Instance**: {}  \n\
+                                 **Username**: {}  \n\
+                                 **Token**: ❌ not set\n\n\
+                                 Run `/gitlab setup` to complete configuration.",
+                                cfg.instance_url, cfg.username
+                            ));
+                        }
+                        _ => {
+                            self.append_assistant_text(
+                                "From: /gitlab\n❌ GitLab not configured.\n\n\
+                                 Run `/gitlab setup` to configure instance URL, username, and token.",
+                            );
+                        }
+                    }
+                }
+                _ => {
+                    self.append_assistant_text(
+                        "From: /gitlab\nUsage: `/gitlab setup` | `/gitlab logout` | `/gitlab status`",
+                    );
+                }
+            },
+
             "update" => match args.trim() {
                 "install" => {
                     self.append_assistant_text(
@@ -7074,14 +7247,14 @@ Type `/swarm help` for more info.\n";
                                                                               return;
                                                                           }
                                                                       }
-                                                                      if self.output_view.is_some()
-                                                                          && self
-                                                                              .output_view_area
-                                                                              .contains((event.column, event.row).into())
-                                                                      {
-                                                                          return;
-                                                                      }                if self.output_view.is_some() {
-                    self.output_view = None;
+                                                                                                                                              if self.output_view.is_some()
+                                                                                                                                                  && self
+                                                                                                                                                      .output_view_area
+                                                                                                                                                      .contains((event.column, event.row).into())
+                                                                                                                                              {
+                                                                                                                                                  return;
+                                                                                                                                              }
+                                                                                                                                              if self.output_view.is_some() {                    self.output_view = None;
                     self.selected_agent_session_id = None;
                     self.selected_agent_index = None;
                 }
@@ -7280,6 +7453,7 @@ Type `/swarm help` for more info.\n";
                 let provider_setup_input = matches!(
                     self.provider_setup,
                     Some(ProviderSetupStep::EnterKey { .. })
+                        | Some(ProviderSetupStep::GitLabSetup { .. })
                 );
 
                 let items = vec![
@@ -7563,6 +7737,7 @@ Type `/swarm help` for more info.\n";
                 if matches!(
                     self.provider_setup,
                     Some(ProviderSetupStep::EnterKey { .. })
+                        | Some(ProviderSetupStep::GitLabSetup { .. })
                 ) {
                     self.paste_provider_setup_from_clipboard();
                 } else if matches!(pane, Some(SelectionPane::Input)) {
@@ -8427,25 +8602,37 @@ Type `/swarm help` for more info.\n";
                 ref description,
             } => {
                 if self.is_current_session(session_id) {
-                    tracing::info!(
-                        session_id = %session_id,
-                        request_id = %request_id,
-                        permission = %permission,
-                        "TUI received PermissionRequested, showing dialog"
-                    );
-                    self.permission_pending = Some(PermissionRequest {
-                        id: request_id.clone(),
-                        session_id: session_id.clone(),
-                        permission: permission.clone(),
-                        patterns: vec![description.clone()],
-                        metadata: serde_json::Value::Null,
-                        tool_call_id: None,
-                    });
-                    self.status = "awaiting permission".to_string();
-                    self.push_log_no_agent(
-                        LogLevel::Warn,
-                        format!("permission requested: {} — {}", permission, description),
-                    );
+                    // Deduplicate: skip if this request_id is already queued.
+                    if self
+                        .permission_queue
+                        .iter()
+                        .any(|r| r.id == *request_id)
+                    {
+                        tracing::warn!(
+                            request_id = %request_id,
+                            "Duplicate PermissionRequested ignored"
+                        );
+                    } else {
+                        tracing::info!(
+                            session_id = %session_id,
+                            request_id = %request_id,
+                            permission = %permission,
+                            "TUI received PermissionRequested, showing dialog"
+                        );
+                        self.permission_queue.push_back(PermissionRequest {
+                            id: request_id.clone(),
+                            session_id: session_id.clone(),
+                            permission: permission.clone(),
+                            patterns: vec![description.clone()],
+                            metadata: serde_json::Value::Null,
+                            tool_call_id: None,
+                        });
+                        self.status = "awaiting permission".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!("permission requested: {} — {}", permission, description),
+                        );
+                    }
                 } else {
                     tracing::warn!(
                         expected_session = %self.session_id.as_deref().unwrap_or("none"),
@@ -8457,13 +8644,17 @@ Type `/swarm help` for more info.\n";
             }
             Event::PermissionReplied {
                 ref session_id,
+                ref request_id,
                 allowed,
-                ..
             } => {
                 if self.is_current_session(session_id) {
-                    self.permission_pending = None;
+                    // Remove the specific answered request from the queue.
+                    self.permission_queue
+                        .retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
-                    self.status = "processing...".to_string();
+                    if self.permission_queue.is_empty() {
+                        self.status = "processing...".to_string();
+                    }
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("permission {}", if allowed { "granted" } else { "denied" }),
@@ -8735,23 +8926,23 @@ Type `/swarm help` for more info.\n";
                     let short_sid = short_session_id(child_session_id);
                     self.sid_to_display_name.insert(short_sid, agent.clone());
 
-                    // Add to active_tasks so the agent panel shows it immediately.
-                    let entry = ragent_core::task::TaskEntry {
-                        id: task_id.clone(),
-                        parent_session_id: session_id.clone(),
-                        child_session_id: child_session_id.clone(),
-                        agent_name: agent.clone(),
-                        task_prompt: task.clone(),
-                        background,
-                        status: ragent_core::task::TaskStatus::Running,
-                        result: None,
-                        error: None,
-                        created_at: chrono::Utc::now(),
-                        completed_at: None,
-                        reported: false,
-                    };
-                    self.active_tasks.push(entry);
-
+                                          // Add to active_tasks so the agent panel shows it immediately.
+                                          let entry = ragent_core::task::TaskEntry {
+                                              id: task_id.clone(),
+                                              parent_session_id: session_id.clone(),
+                                              child_session_id: child_session_id.clone(),
+                                              agent_name: agent.clone(),
+                                              task_prompt: task.clone(),
+                                              background,
+                                              status: ragent_core::task::TaskStatus::Running,
+                                              result: None,
+                                              error: None,
+                                              created_at: chrono::Utc::now(),
+                                              completed_at: None,
+                                              reported: false,
+                                              waiter_count: 0,
+                                          };
+                                          self.active_tasks.push(entry);
                     let (icon, kind) = if background {
                         ("⚙️", "Background")
                     } else {
@@ -9050,12 +9241,19 @@ Type `/swarm help` for more info.\n";
                     self.shell_cwd = Some(cwd.clone());
                 }
             }
-            Event::UserInput { ref session_id, .. } => {
+            Event::UserInput {
+                ref session_id,
+                ref request_id,
+                ..
+            } => {
                 if self.is_current_session(session_id) {
-                    // The tool is unblocked; clear the question UI and resume.
-                    self.permission_pending = None;
+                    // The tool is unblocked; remove the answered question from the queue.
+                    self.permission_queue
+                        .retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
-                    self.status = "processing...".to_string();
+                    if self.permission_queue.is_empty() {
+                        self.status = "processing...".to_string();
+                    }
                 }
             }
             _ => {}
@@ -9084,6 +9282,33 @@ Type `/swarm help` for more info.\n";
                 models,
                 selected: 0,
             });
+        }
+
+        // ── GitLab setup complete ────────────────────────────────────────
+        if let Event::GitLabSetupComplete { success, ref error } = event {
+            if success {
+                self.provider_setup = None;
+                self.push_log_no_agent(LogLevel::Info, "GitLab configured successfully".to_string());
+            } else {
+                // Revert to form with error
+                let (url, tok) = if let Some(ProviderSetupStep::GitLabValidating {
+                    ref instance_url,
+                    ref token,
+                }) = self.provider_setup
+                {
+                    (instance_url.clone(), token.clone())
+                } else {
+                    (String::new(), String::new())
+                };
+                self.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input: url,
+                    url_cursor: 0,
+                    token_input: tok,
+                    token_cursor: 0,
+                    active_field: 0,
+                    error: error.clone().or_else(|| Some("Validation failed.".to_string())),
+                });
+            }
         }
     }
 

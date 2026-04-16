@@ -427,13 +427,76 @@ async fn test_bash_allows_path_containing_wget_substring() {
     let tool = bash_tool();
     // "download-wget-results" contains "wget" — must NOT be rejected
     let result = tool
-        .execute(json!({"command": "ls download-wget-results"}), &make_ctx())
-        .await;
-    let rejected = result
-        .as_ref()
-        .is_err_and(|e| e.to_string().contains("banned external tool"));
-    assert!(
-        !rejected,
-        "ls of a path containing 'wget' substring should not be banned"
-    );
-}
+                  .execute(json!({"command": "ls download-wget-results"}), &make_ctx())
+                  .await;
+              let rejected = result
+                  .as_ref()
+                  .is_err_and(|e| e.to_string().contains("banned external tool"));
+              assert!(
+                  !rejected,
+                  "ls of a path containing 'wget' substring should not be banned"
+              );
+          }
+        
+          #[tokio::test]
+          #[serial]
+          async fn test_bash_allows_single_segment_slash_prefixed_command() {
+              // D1 fix: Single-segment slash-prefixed tokens like /help, /start should not
+              // be treated as file paths in directory escape detection.
+              let tool = bash_tool();
+        
+              // These should not trigger directory escape detection
+              let single_segment_commands = vec![
+                  "cd /help",
+                  "cd /start",
+                  "cd /status",
+                  "pushd /menu",
+                  "cd /version",
+                  "cd /home", // This IS a real path, but single segment should still be allowed
+              ];
+        
+              for cmd in single_segment_commands {
+                  let result = tool.execute(json!({"command": cmd}), &make_ctx()).await;
+                  // Should not fail due to directory escape
+                  let rejected = result.as_ref().is_err_and(|e| {
+                      let msg = e.to_string();
+                      msg.contains("escape working directory")
+                  });
+                  assert!(
+                      !rejected,
+                      "Command '{}' should not be rejected as directory escape: {:?}",
+                      cmd,
+                      result
+                  );
+              }
+          }
+        
+          #[tokio::test]
+          #[serial]
+          async fn test_bash_rejects_multi_segment_absolute_path_escape() {
+              // Multi-segment paths should still be rejected as directory escape attempts
+              let tool = bash_tool();
+        
+              let multi_segment_commands = vec![
+                  "cd /etc/passwd",
+                  "cd /usr/bin",
+                  "cd /tmp/test",
+                  "pushd /var/log",
+              ];
+        
+              for cmd in multi_segment_commands {
+                  let result = tool.execute(json!({"command": cmd}), &make_ctx()).await;
+                  // Should fail due to directory escape
+                  let rejected = result.as_ref().is_err_and(|e| {
+                      let msg = e.to_string();
+                      msg.contains("escape working directory")
+                  });
+                  assert!(
+                      rejected,
+                      "Command '{}' should be rejected as directory escape: {:?}",
+                      cmd,
+                      result
+                  );
+              }
+          }
+        }

@@ -134,6 +134,19 @@ pub enum InputAction {
 /// # }
 /// ```
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
+    // Always check for quit commands first, before any modal interception.
+    // This ensures Ctrl+C (arm quit) and Ctrl+D (confirm quit) work globally.
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        // Copy if a keyboard selection is active; otherwise arm quit.
+        if app.kb_select_anchor.is_some() {
+            return Some(InputAction::CopyToClipboard);
+        }
+        return Some(InputAction::Quit);
+    }
+    if key.code == KeyCode::Char('d') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Some(InputAction::ConfirmQuit);
+    }
+
     // If context menu is active, route all keys there.
     if app.context_menu.is_some() {
         handle_context_menu_key(app, key);
@@ -173,10 +186,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     }
 
     // If permission dialog is active, intercept keys
-    if app.permission_pending.is_some() {
+    if !app.permission_queue.is_empty() {
         let is_question = app
-            .permission_pending
-            .as_ref()
+            .permission_queue
+            .front()
             .map(|r| r.permission == "question")
             .unwrap_or(false);
 
@@ -184,7 +197,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // Question-type: accept free-text input, submit on Enter, cancel on Esc.
             return match key.code {
                 KeyCode::Enter => {
-                    if let Some(ref req) = app.permission_pending.clone() {
+                    if let Some(req) = app.permission_queue.front().cloned() {
                         let response = app.pending_question_input.trim().to_string();
                         if !response.is_empty() {
                             app.event_bus.publish(ragent_core::event::Event::UserInput {
@@ -192,7 +205,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                                 request_id: req.id.clone(),
                                 response,
                             });
-                            app.permission_pending = None;
+                            app.permission_queue.pop_front();
                             app.pending_question_input.clear();
                         }
                     }
@@ -200,14 +213,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 }
                 KeyCode::Esc => {
                     // Cancel — send empty string so the tool can return gracefully.
-                    if let Some(ref req) = app.permission_pending.clone() {
+                    if let Some(req) = app.permission_queue.front().cloned() {
                         app.event_bus.publish(ragent_core::event::Event::UserInput {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             response: "[User dismissed question]".to_string(),
                         });
                     }
-                    app.permission_pending = None;
+                    app.permission_queue.pop_front();
                     app.pending_question_input.clear();
                     None
                 }
@@ -226,7 +239,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         // Standard permission dialog: y/a/n only.
         return match key.code {
             KeyCode::Char('y') => {
-                if let Some(ref req) = app.permission_pending {
+                if let Some(ref req) = app.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -242,7 +255,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 None
             }
             KeyCode::Char('a') => {
-                if let Some(ref req) = app.permission_pending {
+                if let Some(ref req) = app.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -258,7 +271,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 None
             }
             KeyCode::Char('n') => {
-                if let Some(ref req) = app.permission_pending {
+                if let Some(ref req) = app.permission_queue.front() {
                     tracing::info!(
                         session_id = %req.session_id,
                         request_id = %req.id,
@@ -496,11 +509,41 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
-    // Journal viewer: Esc closes the panel
+    // Journal viewer: Esc closes the panel, Up/Down/j/k navigate, Enter toggles expand
     if app.journal_viewer.is_some() {
         return match key.code {
             KeyCode::Esc => {
                 app.journal_viewer = None;
+                None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                if let Some(ref mut viewer) = app.journal_viewer {
+                    viewer.move_up();
+                }
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(ref mut viewer) = app.journal_viewer {
+                    viewer.move_down();
+                }
+                None
+            }
+            KeyCode::Enter => {
+                if let Some(ref mut viewer) = app.journal_viewer {
+                    viewer.toggle_expand();
+                }
+                None
+            }
+            KeyCode::PageUp => {
+                if let Some(ref mut viewer) = app.journal_viewer {
+                    viewer.scroll_offset = viewer.scroll_offset.saturating_sub(5);
+                }
+                None
+            }
+            KeyCode::PageDown => {
+                if let Some(ref mut viewer) = app.journal_viewer {
+                    viewer.scroll_offset = viewer.scroll_offset.saturating_add(5);
+                }
                 None
             }
             _ => None,
@@ -539,14 +582,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             Some(InputAction::SendMessage(text))
         }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Copy if a keyboard selection is active; otherwise arm quit.
-            if app.kb_select_anchor.is_some() {
-                Some(InputAction::CopyToClipboard)
-            } else {
-                Some(InputAction::Quit)
-            }
-        }
         KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::CutToClipboard)
         }
@@ -560,9 +595,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             // Alt+V: paste image from clipboard as a staged attachment.
             app.paste_image_from_clipboard();
             None
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(InputAction::ConfirmQuit)
         }
         KeyCode::Char('?') if app.input.is_empty() => {
             // Show keybindings help panel when '?' is typed on an empty input.
@@ -1092,24 +1124,24 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
             KeyCode::Enter => {
-                let model_name = if let Some((mid, mname, ctx_window)) = models.get(selected) {
-                    let model_value = format!("{}/{}", provider_id, mid);
+                let model_name = if let Some(entry) = models.get(selected) {
+                    let model_value = format!("{}/{}", provider_id, entry.id);
                     let _ = app.storage.set_setting("selected_model", &model_value);
                     // Persist the user's explicit provider choice so it survives restarts.
                     let _ = app.storage.set_setting("preferred_provider", &provider_id);
                     // Persist the context window so the status bar can show usage %.
                     let _ = app
                         .storage
-                        .set_setting("selected_model_ctx_window", &ctx_window.to_string());
+                        .set_setting("selected_model_ctx_window", &entry.context_window.to_string());
                     app.selected_model = Some(model_value);
-                    app.selected_model_ctx_window = Some(*ctx_window);
+                    app.selected_model_ctx_window = Some(entry.context_window);
                     // Ensure the UI reflects the provider the user just chose.
                     app.configured_provider = Some(ConfiguredProvider {
                         id: provider_id.clone(),
                         name: provider_name.clone(),
                         source: ProviderSource::Database,
                     });
-                    Some(mname.clone())
+                    Some(entry.name.clone())
                 } else {
                     None
                 };
@@ -1217,6 +1249,179 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = Some(ProviderSetupStep::ResetProvider { selected });
             }
         },
+
+        // ── GitLab setup (multi-field form) ──────────────────────────────
+        ProviderSetupStep::GitLabSetup {
+            mut url_input,
+            mut url_cursor,
+            mut token_input,
+            mut token_cursor,
+            mut active_field,
+            error,
+        } => match key.code {
+            KeyCode::Tab | KeyCode::BackTab => {
+                active_field = if active_field == 0 { 1 } else { 0 };
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+            KeyCode::Enter => {
+                let url = url_input.trim().to_string();
+                let tok = token_input.trim().to_string();
+                if url.is_empty() || tok.is_empty() {
+                    app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                        url_input,
+                        url_cursor,
+                        token_input,
+                        token_cursor,
+                        active_field,
+                        error: Some("Both URL and token are required.".to_string()),
+                    });
+                } else {
+                    // Start async validation
+                    app.provider_setup = Some(ProviderSetupStep::GitLabValidating {
+                        instance_url: url.clone(),
+                        token: tok.clone(),
+                    });
+                    start_gitlab_validation(app, url, tok);
+                }
+            }
+            KeyCode::Char(c) => {
+                if active_field == 0 {
+                    url_input.insert(url_cursor, c);
+                    url_cursor += 1;
+                } else {
+                    token_input.insert(token_cursor, c);
+                    token_cursor += 1;
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error: None,
+                });
+            }
+            KeyCode::Backspace => {
+                if active_field == 0 {
+                    if url_cursor > 0 {
+                        url_cursor -= 1;
+                        url_input.remove(url_cursor);
+                    }
+                } else if token_cursor > 0 {
+                    token_cursor -= 1;
+                    token_input.remove(token_cursor);
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error: None,
+                });
+            }
+            KeyCode::Left => {
+                if active_field == 0 {
+                    url_cursor = url_cursor.saturating_sub(1);
+                } else {
+                    token_cursor = token_cursor.saturating_sub(1);
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+            KeyCode::Right => {
+                if active_field == 0 {
+                    if url_cursor < url_input.len() {
+                        url_cursor += 1;
+                    }
+                } else if token_cursor < token_input.len() {
+                    token_cursor += 1;
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+            KeyCode::Home => {
+                if active_field == 0 {
+                    url_cursor = 0;
+                } else {
+                    token_cursor = 0;
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+            KeyCode::End => {
+                if active_field == 0 {
+                    url_cursor = url_input.len();
+                } else {
+                    token_cursor = token_input.len();
+                }
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+            _ => {
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input,
+                    url_cursor,
+                    token_input,
+                    token_cursor,
+                    active_field,
+                    error,
+                });
+            }
+        },
+
+        ProviderSetupStep::GitLabValidating {
+            instance_url,
+            token,
+        } => {
+            // Esc cancels and returns to the form
+            if key.code == KeyCode::Esc {
+                app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                    url_input: instance_url,
+                    url_cursor: 0,
+                    token_input: token,
+                    token_cursor: 0,
+                    active_field: 0,
+                    error: Some("Validation cancelled.".to_string()),
+                });
+            } else {
+                app.provider_setup = Some(ProviderSetupStep::GitLabValidating {
+                    instance_url,
+                    token,
+                });
+            }
+        },
     }
 }
 
@@ -1322,6 +1527,84 @@ fn start_copilot_device_flow_setup(app: &mut App) {
                     // Expired or denied — give up silently (user can Esc)
                     break;
                 }
+            }
+        }
+    });
+}
+
+/// Spawns an async task to validate a GitLab PAT and save credentials on success.
+///
+/// On completion the task publishes an `AgentError` event with the result,
+/// and clears `provider_setup` (or reverts to the form with an error).
+fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
+    let event_bus = app.event_bus.clone();
+    let sid = app.session_id.clone().unwrap_or_default();
+    let storage = app.storage.clone();
+
+    let handle = match tokio::runtime::Handle::try_current() {
+        Ok(h) => h,
+        Err(_) => {
+            app.provider_setup = Some(ProviderSetupStep::GitLabSetup {
+                url_input: instance_url,
+                url_cursor: 0,
+                token_input: token,
+                token_cursor: 0,
+                active_field: 0,
+                error: Some("No async runtime available.".to_string()),
+            });
+            return;
+        }
+    };
+
+    handle.spawn(async move {
+        match ragent_core::gitlab::auth::validate_token(&instance_url, &token).await {
+            Ok(username) => {
+                // Save token (encrypted) and config to database
+                let cfg = ragent_core::gitlab::auth::GitLabConfig {
+                    instance_url: instance_url.clone(),
+                    username: username.clone(),
+                };
+                let mut errors = Vec::new();
+                if let Err(e) = ragent_core::gitlab::auth::save_token(&storage, &token) {
+                    errors.push(format!("token save: {e}"));
+                }
+                if let Err(e) = ragent_core::gitlab::auth::save_config(&storage, &cfg) {
+                    errors.push(format!("config save: {e}"));
+                }
+                if errors.is_empty() {
+                    event_bus.publish(ragent_core::event::Event::AgentError {
+                        session_id: sid,
+                        error: format!(
+                            "✅ GitLab configured successfully!\n\n\
+                             **Instance**: {instance_url}\n\
+                             **Username**: {username}\n\
+                             **Token**: saved (encrypted)"
+                        ),
+                    });
+                } else {
+                    event_bus.publish(ragent_core::event::Event::AgentError {
+                        session_id: sid,
+                        error: format!(
+                            "⚠️ GitLab authenticated as {username} but failed to save: {}",
+                            errors.join(", ")
+                        ),
+                    });
+                }
+                // Signal the TUI to close the dialog
+                event_bus.publish(ragent_core::event::Event::GitLabSetupComplete {
+                    success: errors.is_empty(),
+                    error: if errors.is_empty() {
+                        None
+                    } else {
+                        Some(errors.join(", "))
+                    },
+                });
+            }
+            Err(e) => {
+                event_bus.publish(ragent_core::event::Event::GitLabSetupComplete {
+                    success: false,
+                    error: Some(format!("{e}")),
+                });
             }
         }
     });

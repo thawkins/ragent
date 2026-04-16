@@ -15,10 +15,12 @@ use std::path::PathBuf;
 ///   the current project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum BlockScope {
     /// Global memory shared across all projects (`~/.ragent/memory/`).
     Global,
     /// Project-specific memory (`<working_dir>/.ragent/memory/`).
+    #[default]
     Project,
 }
 
@@ -50,11 +52,6 @@ impl std::fmt::Display for BlockScope {
     }
 }
 
-impl Default for BlockScope {
-    fn default() -> Self {
-        Self::Project
-    }
-}
 
 /// A named, scoped unit of persistent memory.
 ///
@@ -218,6 +215,7 @@ impl MemoryBlock {
     }
 
     /// Set the block content and update the `updated_at` timestamp.
+    #[must_use]
     pub fn with_content(mut self, content: String) -> Self {
         self.updated_at = Utc::now();
         self.content = content;
@@ -225,18 +223,21 @@ impl MemoryBlock {
     }
 
     /// Set the description.
+    #[must_use]
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = desc.into();
         self
     }
 
     /// Set the size limit in bytes.
+    #[must_use]
     pub fn with_limit(mut self, limit: usize) -> Self {
         self.limit = limit;
         self
     }
 
     /// Set the read-only flag.
+    #[must_use]
     pub fn with_read_only(mut self, read_only: bool) -> Self {
         self.read_only = read_only;
         self

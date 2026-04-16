@@ -1,11 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.39
+## Current Version: 0.1.0-alpha.40
 
 ### Changed
-- Version bump to 0.1.0-alpha.39 - an number of stability fixes
+- **Model picker now displays models in a tabular format with metadata** — The model selection dialog now shows a table with columns for Model name, Context window size, Cost (input/output per million tokens), and Features (Reasoning, Vision, Tool-use). Models are now sorted alphabetically by name for all providers.
 
-## Previous: 0.1.0-alpha.38
+### Added
+- **GitLab integration** — Full GitLab REST API support mirroring GitHub toolset (issues, MRs, CI/CD pipelines, jobs)
+- **Code index parsers for CMake, Gradle, Maven, OpenSCAD, and Terraform** — 13 total languages now supported
+- **Extensive SPEC.md rewrite** — Comprehensive rewrite of project specification document
+
+## Previous: 0.1.0-alpha.39
 
 ### Fixed
 - **MS Office and LibreOffice presentation writer** — Fixed PPTX and ODP slide rendering: body text now produces proper layout, geometry, and paragraph elements

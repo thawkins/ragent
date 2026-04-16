@@ -128,42 +128,54 @@ impl Tool for WaitTasksTool {
             }
         }
 
-        // Wait for any remaining tasks via event bus (no polling).
-        if !waiting_for.is_empty() {
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
-
-            loop {
-                if waiting_for.is_empty() {
-                    break;
-                }
-
-                match tokio::time::timeout_at(deadline, rx.recv()).await {
-                    Ok(Ok(Event::SubagentComplete {
-                        session_id,
-                        task_id,
-                        summary,
-                        success,
-                        ..
-                    })) if session_id == ctx.session_id && waiting_for.contains(&task_id) => {
-                        waiting_for.remove(&task_id);
-                        results.insert(task_id, (summary, success));
-                    }
-                    Ok(Ok(_)) => {
-                        // Unrelated event — keep waiting.
-                        continue;
-                    }
-                    Ok(Err(_)) => {
-                        // Broadcast channel closed (shouldn't happen in practice).
-                        break;
-                    }
-                    Err(_) => {
-                        // Timeout expired.
-                        break;
-                    }
-                }
-            }
-        }
-
+                  // Increment waiter count for all tasks we're about to wait for.
+                  // This prevents redundant notification via drain_completed.
+                  for task_id in &waiting_for {
+                      task_manager.increment_waiter(task_id).await;
+                  }
+        
+                  // Wait for any remaining tasks via event bus (no polling).
+                  if !waiting_for.is_empty() {
+                      let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout_secs);
+        
+                      loop {
+                          if waiting_for.is_empty() {
+                              break;
+                          }
+        
+                          match tokio::time::timeout_at(deadline, rx.recv()).await {
+                              Ok(Ok(Event::SubagentComplete {
+                                  session_id,
+                                  task_id,
+                                  summary,
+                                  success,
+                                  ..
+                              })) if session_id == ctx.session_id && waiting_for.contains(&task_id) => {
+                                  waiting_for.remove(&task_id);
+                                  results.insert(task_id, (summary, success));
+                              }
+                              Ok(Ok(_)) => {
+                                  // Unrelated event — keep waiting.
+                                  continue;
+                              }
+                              Ok(Err(_)) => {
+                                  // Broadcast channel closed (shouldn't happen in practice).
+                                  break;
+                              }
+                              Err(_) => {
+                                  // Timeout expired.
+                                  break;
+                              }
+                          }
+                      }
+                  }
+        
+                  // Decrement waiter count for all tasks we were waiting on (clean up).
+                  // This needs to happen for both completed and timed-out tasks.
+                  let all_waited_ids: Vec<String> = results.keys().chain(waiting_for.iter()).cloned().collect();
+                  for task_id in &all_waited_ids {
+                      task_manager.decrement_waiter(task_id).await;
+                  }
         // Format the output.
         let timed_out = !waiting_for.is_empty();
         let mut output = String::new();

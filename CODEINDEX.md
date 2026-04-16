@@ -253,6 +253,12 @@ File extension → language mapping:
 | `.c`, `.h` | C | `tree-sitter-c` |
 | `.cpp`, `.hpp`, `.cc` | C++ | `tree-sitter-cpp` |
 | `.java` | Java | `tree-sitter-java` |
+| `.tf`, `.tfvars` | Terraform (HCL) | `tree-sitter-hcl` |
+| `.scad` | OpenSCAD | `tree-sitter-openscad-ng` |
+| `.cmake`, `CMakeLists.txt` | CMake | `tree-sitter-cmake` |
+| `.gradle` | Gradle (Groovy DSL) | `tree-sitter-groovy` |
+| `.gradle.kts` | Gradle (Kotlin DSL) | `tree-sitter-kotlin-ng` |
+| `pom.xml` | Maven (XML) | `tree-sitter-xml` |
 | `.toml` | TOML | `tree-sitter-toml` |
 | `.json` | JSON | `tree-sitter-json` |
 | `.yaml`, `.yml` | YAML | `tree-sitter-yaml` |

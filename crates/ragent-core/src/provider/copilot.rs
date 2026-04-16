@@ -239,10 +239,7 @@ impl Provider for CopilotProvider {
         let client = CopilotClient {
             token: auth.token,
             base_url: auth.base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http: crate::provider::http_client::create_streaming_http_client(),
         };
         Ok(Box::new(client))
     }
@@ -833,7 +830,7 @@ pub struct DeviceFlowStart {
 /// # }
 /// ```
 pub async fn start_copilot_device_flow() -> Result<DeviceFlowStart> {
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
     let resp = http
         .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
@@ -962,7 +959,7 @@ async fn try_copilot_token_exchange(github_token: &str) -> Result<TokenExchangeR
         }
     }
 
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
     let response = http
         .get(COPILOT_TOKEN_ENDPOINT)
         .header("Authorization", format!("token {github_token}"))
@@ -1133,7 +1130,7 @@ struct CopilotTokenEndpoints {
 /// # }
 /// ```
 pub async fn check_copilot_health(github_token: &str) -> bool {
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
 
     // Try the user's plan-specific API first
     if let Some(api_base) = discover_copilot_api_base(github_token).await {
@@ -1335,7 +1332,7 @@ struct CopilotEndpoints {
 /// # }
 /// ```
 pub async fn discover_copilot_api_base(github_token: &str) -> Option<String> {
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
     let resp = http
         .get("https://api.github.com/copilot_internal/user")
         .header("Authorization", format!("token {github_token}"))
@@ -1429,7 +1426,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
         .unwrap_or_else(|| DEFAULT_COPILOT_API_BASE.to_string());
 
     let url = format!("{api_base}/models");
-    let http = reqwest::Client::new();
+    let http = crate::provider::http_client::create_http_client();
     let resp = http
         .get(&url)
         .header("Authorization", format!("Bearer {github_token}"))
@@ -1682,7 +1679,7 @@ mod tests {
         let client = CopilotClient {
             token: "x".to_string(),
             base_url: "https://api.githubcopilot.com".to_string(),
-            http: reqwest::Client::new(),
+            http: crate::provider::http_client::create_http_client(),
         };
         let mut options = HashMap::new();
         options.insert("reasoning_effort".to_string(), json!("medium"));
@@ -1712,7 +1709,7 @@ mod tests {
         let client = CopilotClient {
             token: "x".to_string(),
             base_url: "https://api.githubcopilot.com".to_string(),
-            http: reqwest::Client::new(),
+            http: crate::provider::http_client::create_http_client(),
         };
         let mut options = HashMap::new();
         options.insert("thinking".to_string(), json!("disabled"));
@@ -1742,7 +1739,7 @@ mod tests {
         let client = CopilotClient {
             token: "x".to_string(),
             base_url: "https://api.githubcopilot.com".to_string(),
-            http: reqwest::Client::new(),
+            http: crate::provider::http_client::create_http_client(),
         };
         let mut options = HashMap::new();
         options.insert("reasoning_effort".to_string(), json!("high"));

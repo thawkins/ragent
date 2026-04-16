@@ -4,8 +4,14 @@
 //! that dispatches parsing to language-specific implementations.
 
 pub mod c_cpp;
+pub mod cmake;
 pub mod go;
+pub mod gradle;
+pub mod gradle_kts;
+pub mod hcl;
 pub mod java;
+pub mod maven;
+pub mod openscad;
 pub mod python;
 pub mod rust;
 pub mod typescript;
@@ -102,6 +108,24 @@ impl ParserRegistry {
         let java_parser = Arc::new(java::JavaParser::new());
         parsers.insert("java".to_string(), java_parser);
 
+        let hcl_parser = Arc::new(hcl::HclParser::new());
+        parsers.insert("terraform".to_string(), hcl_parser);
+
+        let openscad_parser = Arc::new(openscad::OpenScadParser::new());
+        parsers.insert("openscad".to_string(), openscad_parser);
+
+        let cmake_parser = Arc::new(cmake::CmakeParser::new());
+        parsers.insert("cmake".to_string(), cmake_parser);
+
+        let gradle_parser = Arc::new(gradle::GradleParser::new());
+        parsers.insert("gradle".to_string(), gradle_parser);
+
+        let gradle_kts_parser = Arc::new(gradle_kts::GradleKtsParser::new());
+        parsers.insert("gradle_kts".to_string(), gradle_kts_parser);
+
+        let maven_parser = Arc::new(maven::MavenParser::new());
+        parsers.insert("maven".to_string(), maven_parser);
+
         Self { parsers }
     }
 
@@ -132,6 +156,8 @@ mod tests {
         let reg = ParserRegistry::new();
         assert!(reg.get("rust").is_some());
         assert!(reg.get("python").is_some());
+        assert!(reg.get("openscad").is_some());
+        assert!(reg.get("terraform").is_some());
         assert!(reg.get("nonexistent_lang").is_none());
     }
 
@@ -140,6 +166,12 @@ mod tests {
         let reg = ParserRegistry::new();
         let langs = reg.supported_languages();
         assert!(langs.contains(&"rust"));
+        assert!(langs.contains(&"openscad"));
+        assert!(langs.contains(&"terraform"));
+        assert!(langs.contains(&"cmake"));
+        assert!(langs.contains(&"gradle"));
+        assert!(langs.contains(&"gradle_kts"));
+        assert!(langs.contains(&"maven"));
     }
 
     #[test]
@@ -149,6 +181,58 @@ mod tests {
         assert!(result.is_some());
         let parsed = result.unwrap().unwrap();
         assert!(!parsed.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_parse_openscad_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse("openscad", b"module foo() { cube(10); }");
+        assert!(result.is_some());
+        let parsed = result.unwrap().unwrap();
+        assert!(!parsed.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_parse_terraform_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse(
+            "terraform",
+            b"resource \"aws_instance\" \"web\" { ami = \"ami-123\" }",
+        );
+        assert!(result.is_some());
+        let parsed = result.unwrap().unwrap();
+        assert!(!parsed.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_parse_cmake_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse("cmake", b"function(my_func) endfunction()");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_gradle_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse("gradle", b"plugins { id 'java' }");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_gradle_kts_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse("gradle_kts", b"plugins { java }");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_maven_dispatch() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse(
+            "maven",
+            b"<?xml version=\"1.0\"?><project><artifactId>test</artifactId></project>",
+        );
+        assert!(result.is_some());
     }
 
     #[test]

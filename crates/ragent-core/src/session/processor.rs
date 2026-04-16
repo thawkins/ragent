@@ -571,11 +571,25 @@ impl SessionProcessor {
             );
         }
 
-        // 4. Build chat messages from history
-        let history = self.session_manager.get_messages(session_id)?;
-        let mut chat_messages = history_to_chat_messages(&history);
-
-        // 4b. AGENTS.md init exchange — on the first message of a session,
+                            // 4. Build chat messages from history with context window awareness
+                            let history = self.session_manager.get_messages(session_id)?;
+                            
+                                      // Get model's context window size for potential compaction
+                                      let context_window = self.provider_registry
+                                          .get(&model_ref.provider_id)
+                                          .map(|p| p.default_models().into_iter().find(|m| m.id == model_ref.model_id))
+                                          .flatten()
+                                          .map(|m| m.context_window)
+                                          .unwrap_or(128_000); // Default fallback                            
+                            // Compact history if needed to prevent context window overflow
+                            // This ensures tool calls are atomic and not split across boundaries
+                            let compacted_history = compact_history_with_atomic_tool_calls(
+                                &history,
+                                context_window,
+                                8192, // Default max output tokens
+                            );
+                            
+                            let mut chat_messages = history_to_chat_messages(&compacted_history);        // 4b. AGENTS.md init exchange — on the first message of a session,
         // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.
         // Note: history already contains the user message we just stored,
@@ -829,7 +843,7 @@ impl SessionProcessor {
                     }
                 };
 
-                let mut had_stall = false;
+                let mut had_retryable_error = false;
                 while let Some(event) = stream.next().await {
                     match event {
                         StreamEvent::TextDelta { text } => {
@@ -893,12 +907,13 @@ impl SessionProcessor {
                                 attempt + 1,
                                 redact_secrets(&message)
                             );
-                            if message.contains("stall") && attempt < max_retries {
+                            let is_retryable = is_retryable_stream_error(&message);
+                            if is_retryable && attempt < max_retries {
                                 self.event_bus.publish(Event::AgentError {
                                     session_id: session_id.to_string(),
                                     error: format!("{} — will retry", message),
                                 });
-                                had_stall = true;
+                                had_retryable_error = true;
                             } else {
                                 self.event_bus.publish(Event::AgentError {
                                     session_id: session_id.to_string(),
@@ -924,7 +939,7 @@ impl SessionProcessor {
                     }
                 }
 
-                if had_stall {
+                if had_retryable_error {
                     continue 'retry;
                 }
                 break;
@@ -1039,62 +1054,150 @@ impl SessionProcessor {
 
             let mut futures = Vec::new();
 
-            for tc in &tool_calls {
-                let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
-                    warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
-                    json!({})
-                });
-
-                assistant_content_parts.push(ContentPart::ToolUse {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    input: input.clone(),
-                });
-
-                let tool_ctx = ToolContext {
-                    session_id: session_id.to_string(),
-                    working_dir: working_dir.clone(),
-                    event_bus: self.event_bus.clone(),
-                    storage: Some(self.session_manager.storage().clone()),
-                    task_manager: self.task_manager.get().cloned(),
-                    lsp_manager: self.lsp_manager.get().cloned(),
-                    active_model: Some(model_ref.clone()),
-                    team_context: team_context_for_session.clone(),
-                    team_manager: self
-                        .team_manager
-                        .get()
-                        .cloned()
-                        .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                    code_index: self.code_index.get().cloned(),
-                };
-
-                let tc_clone = tc.clone();
-                let registry = self.tool_registry.clone();
-                let event_bus = self.event_bus.clone();
-                let event_bus_clone = self.event_bus.clone();
-                let session_id_str = session_id.to_string();
-                let hook_working_dir = working_dir.clone();
-                let hook_configs = session_config.hooks.clone();
-                let extraction_engine = self.extraction_engine.clone();
-                let storage_clone = self.session_manager.storage().clone();
-                // Spawn each tool execution as a future — the tool semaphore
-                // inside the spawned task bounds concurrency.
-                let fut = tokio::spawn(async move {
-                    let _permit = crate::resource::acquire_tool_permit()
-                        .await
-                        .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
-                    let start = Instant::now();
-
-                    let result = registry
-                        .get(&tc_clone.name)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
-                    let result = match result {
-                        Ok(tool) => tool.execute(input.clone(), &tool_ctx).await,
-                        Err(e) => Err(e),
-                    };
-                    let duration_ms = start.elapsed().as_millis() as u64;
-
-                    let (output_value, error) = match &result {
+                          for tc in &tool_calls {
+                              let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
+                                  warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
+                                  json!({})
+                              });
+            
+                              assistant_content_parts.push(ContentPart::ToolUse {
+                                  id: tc.id.clone(),
+                                  name: tc.name.clone(),
+                                  input: input.clone(),
+                              });
+            
+                              let tool_ctx = ToolContext {
+                                  session_id: session_id.to_string(),
+                                  working_dir: working_dir.clone(),
+                                  event_bus: self.event_bus.clone(),
+                                  storage: Some(self.session_manager.storage().clone()),
+                                  task_manager: self.task_manager.get().cloned(),
+                                  lsp_manager: self.lsp_manager.get().cloned(),
+                                  active_model: Some(model_ref.clone()),
+                                  team_context: team_context_for_session.clone(),
+                                  team_manager: self
+                                      .team_manager
+                                      .get()
+                                      .cloned()
+                                      .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                                  code_index: self.code_index.get().cloned(),
+                              };
+            
+                              let tc_clone = tc.clone();
+                              let registry = self.tool_registry.clone();
+                              let event_bus = self.event_bus.clone();
+                              let event_bus_clone = self.event_bus.clone();
+                              let session_id_str = session_id.to_string();
+                              let hook_working_dir = working_dir.clone();
+                              let hook_configs = session_config.hooks.clone();
+                              let extraction_engine = self.extraction_engine.clone();
+                              let storage_clone = self.session_manager.storage().clone();
+            
+                              // Spawn each tool execution as a future — the tool semaphore
+                              // inside the spawned task bounds concurrency.
+                              let fut = tokio::spawn(async move {
+                                                                      // Check PreToolUse hooks first
+                                                                      let pre_hook_result = crate::hooks::run_pre_tool_use_hooks(
+                                                                          &hook_configs,
+                                                                          &hook_working_dir,
+                                                                          &tc_clone.name,
+                                                                          &tc_clone.args_json,
+                                                                      );
+                                  
+                                                                      // Apply hook result
+                                                                      let tool_input = match pre_hook_result {
+                                                                          crate::hooks::PreToolUseResult::Allow => {
+                                                                              // Hook approved - skip the UI prompt but still execute
+                                                                              serde_json::from_str(&tc_clone.args_json).unwrap_or_else(|_| serde_json::json!({}))
+                                                                          }
+                                                                          crate::hooks::PreToolUseResult::Deny { reason } => {
+                                                                              // Hook denied - return error without executing
+                                                                              tracing::info!(
+                                                                                  tool = %tc_clone.name,
+                                                                                  reason = %reason,
+                                                                                  "PreToolUse hook denied tool execution"
+                                                                              );
+                                                                              let err_msg = format!("Permission denied by hook: {}", reason);
+                                                                              event_bus.publish(Event::ToolCallEnd {
+                                                                                  session_id: session_id_str.clone(),
+                                                                                  call_id: tc_clone.id.clone(),
+                                                                                  tool: tc_clone.name.clone(),
+                                                                                  error: Some(err_msg.clone()),
+                                                                                  duration_ms: 0,
+                                                                              });
+                                                                              let input_val: Value = serde_json::from_str(&tc_clone.args_json)
+                                                                                  .unwrap_or_else(|_| serde_json::json!({}));
+                                                                              return (
+                                                                                  tc_clone.clone(),
+                                                                                  input_val,
+                                                                                  ToolCallStatus::Error,
+                                                                                  None,
+                                                                                  Some(err_msg),
+                                                                                  0u64,
+                                                                                  String::new(),
+                                                                                  None,
+                                                                              );
+                                                                          }
+                                                                          crate::hooks::PreToolUseResult::ModifiedInput { input } => {
+                                                                              // Hook modified the input - use the modified input
+                                                                              tracing::debug!(
+                                                                                  tool = %tc_clone.name,
+                                                                                  "PreToolUse hook modified tool input"
+                                                                              );
+                                                                              input
+                                                                          }
+                                                                          crate::hooks::PreToolUseResult::NoDecision => {
+                                                                              // No hook decision - use original input
+                                                                              serde_json::from_str(&tc_clone.args_json).unwrap_or_else(|_| serde_json::json!({}))
+                                                                          }
+                                                                      };
+                                  
+                                                                      let _permit = crate::resource::acquire_tool_permit()
+                                                                          .await
+                                                                          .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
+                                                                      let start = Instant::now();
+                                  
+                                                                      // D3 fix: Serialize tool_input before it's moved for PostToolUse hooks
+                                                                      let tool_input_for_post_hook = serde_json::to_string(&tool_input).unwrap_or_else(|_| tc_clone.args_json.clone());
+                                  
+                                                                      let result = registry
+                                                                          .get(&tc_clone.name)
+                                                                          .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
+                                                                      let result = match result {
+                                                                          Ok(tool) => tool.execute(tool_input, &tool_ctx).await,
+                                                                          Err(e) => Err(e),
+                                                                      };
+                                                                      let duration_ms = start.elapsed().as_millis() as u64;
+                                  
+                                                                      // Run PostToolUse hooks after execution
+                                                                      let output_content = result.as_ref().map(|o| o.content.clone()).unwrap_or_default();
+                                                                      let output_json = result.as_ref().ok().and_then(|o| o.metadata.clone()).unwrap_or_else(|| {
+                                                                          serde_json::json!({"content": output_content})
+                                                                      });
+                                                                      let success = result.is_ok();
+                                  
+                                                                      let modified_output = crate::hooks::run_post_tool_use_hooks(
+                                                                          &hook_configs,
+                                                                          &hook_working_dir,
+                                                                          &tc_clone.name,
+                                                                          &tool_input_for_post_hook,  // Use modified input here
+                                                                          &output_json.to_string(),
+                                                                          success,
+                                                                      ).await;
+                                  
+                                                                      // If hook modified the output, create a new ToolOutput with the modified content
+                                                                      let result = if let Some(modified) = modified_output {
+                                                                          if let Some(modified_content) = modified.get("content").and_then(|v| v.as_str()) {
+                                                                              Ok(crate::tool::ToolOutput {
+                                                                                  content: modified_content.to_string(),
+                                                                                  metadata: Some(modified.clone()),
+                                                                              })
+                                                                          } else {
+                                                                              result
+                                                                          }
+                                                                      } else {
+                                                                          result
+                                                                      };                    let (output_value, error) = match &result {
                         Ok(output) => {
                             // Merge metadata into the output value so the
                             // renderer can access line counts, summaries, etc.
@@ -1728,6 +1831,157 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
     }
 
     chat_messages
+}
+
+/// Compacts message history to fit within a context window while ensuring
+/// tool call atomicity - tool calls and their results are never split across
+/// compaction boundaries.
+///
+/// This function trims messages from the beginning (oldest first) until the
+/// estimated token count is below the threshold. It ensures that when a
+/// message containing tool calls is retained, the corresponding tool result
+/// messages are also retained, preventing incomplete tool call pairs.
+fn compact_history_with_atomic_tool_calls(
+    messages: &[Message],
+    context_window: usize,
+    _max_output_tokens: usize,
+) -> Vec<Message> {
+    if messages.is_empty() {
+        return Vec::new();
+    }
+
+          // Rough token estimation: ~4 chars per token on average
+        const CHARS_PER_TOKEN: usize = 4;
+    
+        // Calculate estimated tokens for a message
+        let estimate_tokens = |msg: &Message| -> usize {
+            let text_len: usize = msg
+                .parts
+                .iter()
+                .map(|p| match p {
+                    MessagePart::Text { text } => text.len(),
+                    MessagePart::ToolCall { tool, state, .. } => {
+                        tool.len()
+                            + state
+                                .output
+                                .as_ref()
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.len())
+                                .unwrap_or(0)
+                            + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                    }
+                    MessagePart::Image { .. } => 1000, // Rough estimate for image
+                    MessagePart::Reasoning { text } => text.len(),
+                })
+                .sum();
+            text_len / CHARS_PER_TOKEN + 10 // Base overhead per message
+        };
+    // Build a map of tool call IDs to their result indices
+    let mut tool_call_indices: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        if msg.role == Role::Assistant {
+            for part in &msg.parts {
+                if let MessagePart::ToolCall { call_id, .. } = part {
+                    tool_call_indices.insert(call_id.clone(), idx);
+                }
+            }
+        }
+    }
+
+    // Calculate total estimated tokens
+    let total_tokens: usize = messages.iter().map(estimate_tokens).sum();
+    let max_tokens = context_window.saturating_sub(1000); // Leave headroom
+
+    if total_tokens <= max_tokens {
+        return messages.to_vec();
+    }
+
+    // Need to compact - identify which messages must be kept together
+    // Messages with tool calls must keep their corresponding results
+    let mut must_keep: std::collections::HashSet<usize> =
+        std::collections::HashSet::new();
+
+    for (idx, msg) in messages.iter().enumerate() {
+        if msg.role == Role::Assistant {
+            let has_tool_calls = msg
+                .parts
+                .iter()
+                .any(|p| matches!(p, MessagePart::ToolCall { .. }));
+            if has_tool_calls {
+                must_keep.insert(idx);
+                // The result is in the user message that follows
+                if idx + 1 < messages.len() {
+                    must_keep.insert(idx + 1);
+                }
+            }
+        }
+    }
+
+    // Trim from the beginning, respecting atomic groups
+    let mut trimmed = messages.to_vec();
+    let mut current_tokens: usize = total_tokens;
+
+    while current_tokens > max_tokens && trimmed.len() > 2 {
+        // Always keep at least the last 2 messages (user query + context)
+        let to_remove = 0; // Try removing the oldest message
+
+        // Check if removing this would break atomicity
+        let would_break_atomicity = must_keep.contains(&to_remove)
+            || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
+
+        if would_break_atomicity {
+            // Skip this message and try the next
+            break;
+        }
+
+        let removed_tokens = estimate_tokens(&trimmed[to_remove]);
+        trimmed.remove(to_remove);
+
+        // Update indices in must_keep
+        let mut new_must_keep: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        for &idx in &must_keep {
+            if idx > to_remove {
+                new_must_keep.insert(idx - 1);
+            } else if idx != to_remove {
+                new_must_keep.insert(idx);
+            }
+        }
+        must_keep = new_must_keep;
+
+        current_tokens = current_tokens.saturating_sub(removed_tokens);
+    }
+
+    tracing::debug!(
+        original_count = messages.len(),
+        trimmed_count = trimmed.len(),
+        original_tokens = total_tokens,
+        final_tokens = current_tokens,
+        "Compacted message history"
+    );
+
+    trimmed
+}
+
+/// Determines whether a stream error message represents a transient failure
+/// that should be retried rather than treated as fatal.
+///
+/// Retryable errors include stream stalls, body decoding failures, connection
+/// resets, and protocol errors that are typically caused by transient network
+/// conditions.
+fn is_retryable_stream_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("stall")
+        || lower.contains("error decoding response body")
+        || lower.contains("connection reset")
+        || lower.contains("connection closed")
+        || lower.contains("broken pipe")
+        || lower.contains("unexpected eof")
+        || lower.contains("incomplete message")
+        || lower.contains("stream ended unexpectedly")
+        || lower.contains("h2 protocol error")
+        || lower.contains("http2 error")
 }
 
 fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {

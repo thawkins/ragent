@@ -17,6 +17,7 @@ pub mod error;
 pub mod event;
 pub mod file_ops;
 pub mod github;
+pub mod gitlab;
 /// Lifecycle hooks — run shell commands at session lifecycle points.
 pub mod hooks;
 pub mod id;

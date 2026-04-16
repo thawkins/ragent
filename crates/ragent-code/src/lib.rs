@@ -314,7 +314,7 @@ impl CodeIndex {
 
         // Detect significant divergence (accumulated duplicates or missing docs).
         let ratio = fts_docs as f64 / sqlite_symbols as f64;
-        if ratio > 2.0 || ratio < 0.5 {
+        if !(0.5..=2.0).contains(&ratio) {
             debug!(
                 fts_docs = fts_docs,
                 sqlite_symbols = sqlite_symbols,

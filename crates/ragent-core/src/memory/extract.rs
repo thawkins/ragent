@@ -118,6 +118,7 @@ struct FailedToolCall {
     /// Error message from the tool.
     error: String,
     /// Timestamp of the failure.
+    #[allow(dead_code)]
     timestamp: chrono::DateTime<Utc>,
 }
 
@@ -292,7 +293,9 @@ impl ExtractionEngine {
         }
 
         // Detect Rust source files.
-        if rel_path.ends_with(".rs") {
+        if std::path::Path::new(&rel_path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
             tags.push("rust".to_string());
             let module_path = rel_path.replace('/', "::").replace(".rs", "");
             if module_path.contains("::") {
@@ -301,32 +304,42 @@ impl ExtractionEngine {
         }
 
         // Detect Python source files.
-        if rel_path.ends_with(".py") {
+        if std::path::Path::new(&rel_path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("py")) {
             tags.push("python".to_string());
         }
 
         // Detect TypeScript/JavaScript files.
-        if rel_path.ends_with(".ts")
-            || rel_path.ends_with(".tsx")
-            || rel_path.ends_with(".js")
-            || rel_path.ends_with(".jsx")
-        {
+        if std::path::Path::new(&rel_path)
+            .extension()
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("ts")
+                    || ext.eq_ignore_ascii_case("tsx")
+                    || ext.eq_ignore_ascii_case("js")
+                    || ext.eq_ignore_ascii_case("jsx")
+            }) {
             tags.push("typescript".to_string());
         }
 
         // Detect configuration files.
-        if rel_path.ends_with(".toml")
-            || rel_path.ends_with(".json")
-            || rel_path.ends_with(".yaml")
-            || rel_path.ends_with(".yml")
-        {
+        if std::path::Path::new(&rel_path)
+            .extension()
+            .is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("toml")
+                    || ext.eq_ignore_ascii_case("json")
+                    || ext.eq_ignore_ascii_case("yaml")
+                    || ext.eq_ignore_ascii_case("yml")
+            }) {
             tags.push("config".to_string());
             content_parts.push(format!("Configuration file: {rel_path}"));
             confidence = 0.4;
         }
 
         // Detect doc files.
-        if rel_path.ends_with(".md") {
+        if std::path::Path::new(&rel_path)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
             tags.push("documentation".to_string());
             confidence = 0.3;
         }
@@ -728,7 +741,7 @@ impl ExtractionEngine {
                 "Memory candidate extracted (awaiting confirmation): {}",
                 &candidate.content[..candidate.content.len().min(80)]
             );
-            let _ = event_bus.publish(Event::MemoryCandidateExtracted {
+            event_bus.publish(Event::MemoryCandidateExtracted {
                 session_id: session_id.to_string(),
                 content: candidate.content.clone(),
                 category: candidate.category.clone(),
@@ -760,7 +773,7 @@ impl ExtractionEngine {
                         category = candidate.category,
                         "Auto-stored memory candidate"
                     );
-                    let _ = event_bus.publish(Event::MemoryStored {
+                    event_bus.publish(Event::MemoryStored {
                         session_id: session_id.to_string(),
                         id,
                         category: candidate.category.clone(),

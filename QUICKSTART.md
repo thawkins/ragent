@@ -38,8 +38,7 @@ Ragent needs at least one LLM provider. The easiest way is via the **interactive
 
 ```bash
 ragent        # launch ragent
-               # press 'p' on the home screen to open the provider setup dialog
-```
+                               # press 'p' to open the provider setup dialog```
 
 The dialog walks you through:
 1. **Selecting a provider** (Anthropic, OpenAI, GitHub Copilot, or Ollama)

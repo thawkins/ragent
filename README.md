@@ -19,7 +19,7 @@ It is reimplemented in Rust as a learninh exercise for the author.
   todo management, office document read/write/info, PDF read/write, and file deletion (rm)
 - **3 sub-agent tools** — new_task, cancel_task, list_tasks for spawning and managing
   background agents
-- **Terminal UI** — full-screen ratatui interface with home screen, provider setup
+- **Terminal UI** — full-screen ratatui interface with provider setup
   dialog, slash-command autocomplete, agent cycling, streaming chat, step-numbered
   tool calls with pretty-printed JSON in the log panel
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
@@ -42,7 +42,8 @@ It is reimplemented in Rust as a learninh exercise for the author.
 - **Code index** — automatic codebase indexing with tree-sitter parsing, full-text
   search via Tantivy, incremental updates via file watcher, and LLM-accessible tools
   (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`,
-  `codeindex_status`); supports Rust, Python, TypeScript/JavaScript, Go, C/C++, and Java;
+  `codeindex_status`); supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
+  Terraform, CMake, Gradle, and Maven;
   enable/disable via `/codeindex on|off`
 
 ## Installation

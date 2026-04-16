@@ -168,8 +168,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .unwrap_or_default()
     };
 
-    // Helper: truncate to standard 50 chars
-    let trunc50 = |s: &str| truncate_str(s, 50);
+    // Helper: truncate to standard 100 chars
+    let trunc50 = |s: &str| truncate_str(s, 100);
 
     match tool {
         // ═══════════════════════════════════════════════════════════════════
@@ -1014,7 +1014,7 @@ pub fn tool_result_summary(
         }
         "calculator" => {
             let result = out.get("result").and_then(|v| v.as_str());
-            result.map(|r| format!("= {}", truncate_str(r, 50)))
+            result.map(|r| format!("= {}", truncate_str(r, 100)))
         }
         // ═══════════════════════════════════════════════════════════════════
         // 🌐 NETWORK
@@ -1060,7 +1060,7 @@ pub fn tool_result_summary(
                 .and_then(|v| v.as_str())
                 .or_else(|| out.get("content").and_then(|v| v.as_str()))
                 .unwrap_or("");
-            Some(format!("{}", truncate_str(response, 60)))
+            Some(format!("{}", truncate_str(response, 100)))
         }
         // ═══════════════════════════════════════════════════════════════════
         // 💭 REASONING
@@ -1095,13 +1095,12 @@ pub fn tool_result_summary(
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
             let title = out.get("title").and_then(|v| v.as_str());
             match title {
-                Some(t) => Some(format!(
-                    "{} \"{}\" → {} remaining",
-                    action,
-                    truncate_str(t, 50),
-                    count
-                )),
-                None => Some(format!("{} → {} remaining", action, count)),
+                                  Some(t) => Some(format!(
+                                      "{} \"{}\" → {} remaining",
+                                      action,
+                                      truncate_str(t, 100),
+                                      count
+                                  )),                None => Some(format!("{} → {} remaining", action, count)),
             }
         }
         // ══════════════════════════════════��════════════════════════════════

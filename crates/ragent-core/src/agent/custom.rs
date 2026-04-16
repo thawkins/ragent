@@ -368,24 +368,25 @@ pub fn record_to_agent_info(
         return Err(format!("top_p {top_p} out of range [0.0, 1.0]"));
     }
 
-    let model = if let Some(ref model_str) = payload.model {
-        match model_str.split_once(':') {
-            Some((provider, model_id)) if !provider.is_empty() && !model_id.is_empty() => {
-                Some(ModelRef {
-                    provider_id: provider.to_string(),
-                    model_id: model_id.to_string(),
-                })
-            }
-            _ => {
-                return Err(format!(
-                    "model '{model_str}' must be in 'provider:model' format"
-                ));
-            }
-        }
-    } else {
-        None
-    };
-
+          let model = if let Some(ref model_str) = payload.model {
+              // D2 fix: Support "provider:model@vendor" format with vendor suffix
+              let base_model_str = model_str.split_once('@').map(|(base, _)| base).unwrap_or(model_str);
+              match base_model_str.split_once(':') {
+                  Some((provider, model_id)) if !provider.is_empty() && !model_id.is_empty() => {
+                      Some(ModelRef {
+                          provider_id: provider.to_string(),
+                          model_id: model_id.to_string(),
+                      })
+                  }
+                  _ => {
+                      return Err(format!(
+                          "model '{model_str}' must be in 'provider:model' or 'provider:model@vendor' format"
+                      ));
+                  }
+              }
+          } else {
+              None
+          };
     if let Some(steps) = payload.max_steps
         && steps == 0
     {

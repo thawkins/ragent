@@ -146,7 +146,7 @@ impl Tool for TeamSpawnTool {
                                           );
                                           break allowed;
                                       }
-                                      Ok(Event::PermissionReplied { session_id: ref s, request_id: ref rid, allowed }) => {
+                                      Ok(Event::PermissionReplied { session_id: ref s, request_id: ref rid, allowed: _ }) => {
                                           tracing::debug!(
                                               expected_session = %ctx.session_id,
                                               received_session = %s,

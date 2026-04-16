@@ -276,7 +276,7 @@ Ragent requires at least one LLM provider to function. You can configure provide
    ragent
    ```
 
-2. Press 'p' on the home screen to open the provider setup dialog.
+2. Press 'p' to open the provider setup dialog.
 
 3. Follow the prompts to:
    - Select a provider (Anthropic, OpenAI, GitHub Copilot, or Ollama)
@@ -361,7 +361,7 @@ Ragent can also be configured using a `ragent.json` file in your project directo
    ragent serve --port 9100
    ```
 
-4. **Check Health Status**: Look for the health indicator next to the provider on both the home and chat screens:
+4. **Check Health Status**: Look for the health indicator next to the provider on the chat screen:
    - **●** (green) — provider is reachable
    - **✗** (red) — provider is unreachable
    - **●** (yellow) — health check in progress

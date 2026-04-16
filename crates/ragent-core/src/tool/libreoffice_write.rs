@@ -505,13 +505,13 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
     // Bare array of slide objects
     if let Some(arr) = content.as_array() {
         if arr.first().is_some_and(serde_json::Value::is_object) {
-            return arr.iter().map(|s| slide_from_obj(s)).collect();
+            return arr.iter().map(&slide_from_obj).collect();
         }
     }
 
     // Object with "slides" key
     if let Some(arr) = content["slides"].as_array() {
-        return arr.iter().map(|s| slide_from_obj(s)).collect();
+        return arr.iter().map(&slide_from_obj).collect();
     }
 
     // Single-key wrapper — look inside
@@ -527,7 +527,7 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
         for v in obj.values() {
             if let Some(arr) = v.as_array() {
                 if !arr.is_empty() && arr[0].is_object() {
-                    return arr.iter().map(|s| slide_from_obj(s)).collect();
+                    return arr.iter().map(&slide_from_obj).collect();
                 }
             }
         }

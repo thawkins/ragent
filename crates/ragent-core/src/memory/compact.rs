@@ -29,7 +29,7 @@ use crate::config::{CompactionConfig, EvictionConfig, MemoryConfig};
 use crate::event::EventBus;
 use crate::memory::block::BlockScope;
 use crate::memory::embedding::{
-    EmbeddingProvider, NoOpEmbedding, cosine_similarity, deserialise_embedding,
+    EmbeddingProvider, cosine_similarity, deserialise_embedding,
 };
 use crate::memory::storage::{BlockStorage, FileBlockStorage};
 use crate::storage::Storage;
@@ -120,7 +120,7 @@ pub fn deduplicate_memory(
 /// Deduplicate using cosine similarity on stored embeddings.
 fn deduplicate_by_embedding(
     content: &str,
-    category: &str,
+    _category: &str,
     tags: &[String],
     confidence: f64,
     query_embedding: &[f32],
@@ -607,7 +607,7 @@ pub fn evict_stale_memories(
             "system",
             &tag_strs
                 .iter()
-                .map(|s| format!("eviction"))
+                .map(|_s| format!("eviction"))
                 .chain(std::iter::once("memory-eviction".to_string()))
                 .collect::<Vec<_>>(),
         );
@@ -849,7 +849,7 @@ fn deduplicate_existing_memories(
                         checked.insert(mem.id);
                         merged += 1;
 
-                        let _ = event_bus.publish(Event::MemoryCandidateExtracted {
+                        event_bus.publish(Event::MemoryCandidateExtracted {
                             session_id: session_id.to_string(),
                             content: format!("Merged duplicate memory into ID {}", existing_id),
                             category: "compaction".to_string(),

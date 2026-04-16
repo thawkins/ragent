@@ -186,21 +186,21 @@ fn test_clicking_active_agents_row_opens_output_view() {
     app.session_id = Some("lead-s1".to_string());
     app.show_agents_window = true;
     app.active_agents_area = Rect::new(0, 10, 80, 8);
-    app.active_tasks.push(ragent_core::task::TaskEntry {
-        id: "task-12345678".to_string(),
-        parent_session_id: "lead-s1".to_string(),
-        child_session_id: "child-s1".to_string(),
-        agent_name: "explore".to_string(),
-        task_prompt: "x".to_string(),
-        background: true,
-        status: ragent_core::task::TaskStatus::Running,
-        result: None,
-        error: None,
-        created_at: chrono::Utc::now(),
-        completed_at: None,
-        reported: false,
-    });
-
+          app.active_tasks.push(ragent_core::task::TaskEntry {
+              id: "task-12345678".to_string(),
+              parent_session_id: "lead-s1".to_string(),
+              child_session_id: "child-s1".to_string(),
+              agent_name: "explore".to_string(),
+              task_prompt: "x".to_string(),
+              background: true,
+              status: ragent_core::task::TaskStatus::Running,
+              result: None,
+              error: None,
+              created_at: chrono::Utc::now(),
+              completed_at: None,
+              reported: false,
+              waiter_count: 0,
+          });
     app.handle_mouse_event(mouse_down(2, 13));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
@@ -255,6 +255,7 @@ fn test_clicking_agents_button_toggles_agents_window() {
         created_at: chrono::Utc::now(),
         completed_at: None,
         reported: false,
+        waiter_count: 0,
     });
     app.agents_button_area = Rect::new(2, 30, 9, 3);
 

@@ -288,6 +288,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::MemoryForgotten { .. } => "memory_forgotten",
         Event::MemorySearched { .. } => "memory_searched",
         Event::MemoryCandidateExtracted { .. } => "memory_candidate_extracted",
+        Event::GitLabSetupComplete { .. } => "gitlab_setup_complete",
     }
 }
 
@@ -730,6 +731,10 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "source": source,
             "reason": reason,
         })),
+        Event::GitLabSetupComplete { success, error } => to_data(&serde_json::json!({
+            "success": success,
+            "error": error,
+        })),
     };
     (name, data)
 }
@@ -738,8 +743,6 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
 ///
 /// Payloads are serialized directly from typed structs — no intermediate
 /// `serde_json::Value` is allocated.
-///
-/// # Examples
 ///
 /// ```rust
 /// use ragent_core::event::Event;

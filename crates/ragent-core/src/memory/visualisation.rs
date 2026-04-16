@@ -14,10 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::memory::block::{BlockScope, MemoryBlock};
-use crate::memory::journal::JournalEntry;
 use crate::memory::storage::BlockStorage;
-use crate::memory::store::StructuredMemory;
 use crate::storage::Storage;
 use std::path::PathBuf;
 
@@ -157,8 +154,8 @@ pub struct VisualisationData {
 /// A `VisualisationData` struct containing all visualisation components.
 pub fn generate_visualisation(
     storage: &Storage,
-    block_storage: &dyn BlockStorage,
-    working_dir: &PathBuf,
+    _block_storage: &dyn BlockStorage,
+    _working_dir: &PathBuf,
 ) -> anyhow::Result<VisualisationData> {
     let graph = generate_graph(storage)?;
     let timeline = generate_timeline(storage)?;

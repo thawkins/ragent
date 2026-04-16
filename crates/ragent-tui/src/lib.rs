@@ -30,6 +30,70 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use tokio::signal::unix::{SignalKind, signal};
+
+/// RAII guard that ensures terminal state is restored on drop.
+///
+/// This struct handles the terminal setup (raw mode, alternate screen, mouse capture)
+/// and automatically restores the terminal state when dropped. This is critical
+/// for ensuring the terminal is usable after crashes (panic, OOM, segfault, etc.).
+pub struct TerminalGuard {
+    keyboard_enhanced: bool,
+}
+
+impl TerminalGuard {
+    /// Create a new terminal guard, setting up the terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if terminal setup fails.
+    ///
+    /// # Safety
+    ///
+    /// This function modifies global terminal state. The caller must ensure
+    /// that `restore_terminal` is called before the program exits.
+    pub fn new() -> Result<Self> {
+        // Enable the Kitty keyboard protocol before entering raw mode
+        let keyboard_enhanced = execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )
+        .is_ok();
+
+        enable_raw_mode()?;
+        let mut stdout = std::io::stdout();
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
+        Ok(Self { keyboard_enhanced })
+    }
+
+    /// Restore the terminal to its original state.
+    ///
+    /// This is called automatically on drop, but can also be called explicitly.
+    /// It is safe to call multiple times.
+    pub fn restore_terminal(&self) {
+        // Disable mouse capture first to stop generating escape sequences
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+
+        // Drain any buffered events so they don't leak into the shell
+        while ct_event::poll(std::time::Duration::ZERO).unwrap_or(false) {
+            let _ = ct_event::read();
+        }
+
+        if self.keyboard_enhanced {
+            let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+        }
+
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        self.restore_terminal();
+    }
+}
 
 use ragent_core::agent::AgentInfo;
 use ragent_core::config::Config;
@@ -88,19 +152,32 @@ pub async fn run_tui(
     resume_session_id: Option<String>,
     log_rx: TuiLogReceiver,
 ) -> Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-
-    // Enable the Kitty keyboard protocol so terminals that support it will
-    // send distinct escape codes for Shift+Enter (vs plain Enter).
-    // `execute!` returns an error on unsupporting terminals; we ignore it so
-    // the TUI still works on xterm/gnome-terminal/etc.
-    let keyboard_enhanced = execute!(
-        stdout,
-        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-    )
-    .is_ok();
+    // Set up panic handler to ensure terminal state is restored on crashes
+    // This handles panics, OOM, and segfaults by restoring the terminal before
+    // the default panic handler prints the backtrace
+    let default_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Restore terminal state before printing panic message
+        // This is best-effort; ignore errors
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::DisableMouseCapture
+        );
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen
+        );
+        
+              // Call the default panic hook to print the backtrace
+                  default_panic_hook(info);
+              }));
+          
+              // Create the terminal guard - it will automatically restore terminal state on drop
+              // We don't need to reference it after creation - Drop handles cleanup
+              let _terminal_guard = TerminalGuard::new()?;
+    // Now create the ratatui terminal
+    let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -296,6 +373,11 @@ pub async fn run_tui(
     // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+    // Set up signal handlers for graceful shutdown (SIGINT, SIGTERM)
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+
     while app.is_running {
         // Drain ALL pending bus events before rendering so the screen
         // always reflects the latest state.
@@ -356,36 +438,46 @@ pub async fn run_tui(
             terminal.draw(|frame| layout::render(frame, &mut app))?;
             app.needs_redraw = false;
         }
-        tokio::select! {            // Terminal key/mouse events (polled at 50ms intervals)
-            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                let mut got_input = false;
-                while ct_event::poll(std::time::Duration::ZERO)? {
-                    match ct_event::read()? {
-                        CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                        CtEvent::Mouse(mouse) => { app.handle_mouse_event(mouse); got_input = true; }
-                        _ => {}
-                    }
-                }
-                if got_input {
-                    app.needs_redraw = true;
-                }
-            }
-            // Wake up when a new bus event arrives (handled in drain loop above)
-            result = bus_rx.recv() => {
-                match result {
-                    Ok(event) => app.handle_event(event),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        app.push_log(
-                            app::LogLevel::Warn,
-                            format!("{n} events dropped (event bus lag)"),
-                            None,
-                        );
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
-                }
-            }
-        }
-    }
+                  tokio::select! {
+                      // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
+                      _ = sigint.recv() => {
+                          tracing::info!("SIGINT received, initiating graceful shutdown");
+                          app.is_running = false;
+                      }
+                      // Handle SIGTERM - initiate graceful shutdown
+                      _ = sigterm.recv() => {
+                          tracing::info!("SIGTERM received, initiating graceful shutdown");
+                          app.is_running = false;
+                      }
+                      // Terminal key/mouse events (polled at 50ms intervals)
+                      _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                          let mut got_input = false;
+                          while ct_event::poll(std::time::Duration::ZERO)? {
+                              match ct_event::read()? {
+                                  CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                                  CtEvent::Mouse(mouse) => { app.handle_mouse_event(mouse); got_input = true; }
+                                  _ => {}
+                              }
+                          }
+                          if got_input {
+                              app.needs_redraw = true;
+                          }
+                      }
+                      // Wake up when a new bus event arrives (handled in drain loop above)
+                      result = bus_rx.recv() => {
+                          match result {
+                              Ok(event) => app.handle_event(event),
+                              Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                  app.push_log(
+                                      app::LogLevel::Warn,
+                                      format!("{n} events dropped (event bus lag)"),
+                                      None,
+                                  );
+                              }
+                              Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                          }
+                      }
+                  }    }
 
     // Final synchronous save if history was modified since last flush.
     if app.history_dirty {
@@ -425,19 +517,10 @@ pub async fn run_tui(
         }
     }
 
-    // Restore terminal — disable mouse capture first to stop generating
-    // escape sequences, then drain any buffered events so they don't leak
-    // into the shell after we leave raw mode.
-    if keyboard_enhanced {
-        let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
-    }
-    execute!(terminal.backend_mut(), DisableMouseCapture)?;
-    while ct_event::poll(std::time::Duration::ZERO)? {
-        let _ = ct_event::read();
-    }
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    // Terminal restoration is handled by TerminalGuard's Drop implementation
+    // when `terminal_guard` goes out of scope at the end of this function.
+    // This ensures the terminal is restored even if the function returns early
+    // or panics (via the panic handler set up at the start).
 
     Ok(())
 }

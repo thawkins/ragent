@@ -55,6 +55,12 @@ pub mod file_ops_tool;
 pub mod get_env;
 pub mod github_issues;
 pub mod github_prs;
+/// GitLab issue tools (list, get, create, comment, close).
+pub mod gitlab_issues;
+/// GitLab merge request tools (list, get, create, merge, approve).
+pub mod gitlab_mrs;
+/// GitLab CI/CD pipeline and job tools.
+pub mod gitlab_pipelines;
 /// File globbing tool.
 pub mod glob;
 pub mod grep;
@@ -548,6 +554,28 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(github_prs::GithubCreatePrTool));
     registry.register(Arc::new(github_prs::GithubMergePrTool));
     registry.register(Arc::new(github_prs::GithubReviewPrTool));
+    // GitLab issue tools
+    registry.register(Arc::new(gitlab_issues::GitlabListIssuesTool));
+    registry.register(Arc::new(gitlab_issues::GitlabGetIssueTool));
+    registry.register(Arc::new(gitlab_issues::GitlabCreateIssueTool));
+    registry.register(Arc::new(gitlab_issues::GitlabCommentIssueTool));
+    registry.register(Arc::new(gitlab_issues::GitlabCloseIssueTool));
+    // GitLab merge request tools
+    registry.register(Arc::new(gitlab_mrs::GitlabListMrsTool));
+    registry.register(Arc::new(gitlab_mrs::GitlabGetMrTool));
+    registry.register(Arc::new(gitlab_mrs::GitlabCreateMrTool));
+    registry.register(Arc::new(gitlab_mrs::GitlabMergeMrTool));
+    registry.register(Arc::new(gitlab_mrs::GitlabApproveMrTool));
+    // GitLab CI/CD pipeline and job tools
+    registry.register(Arc::new(gitlab_pipelines::GitlabListPipelinesTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabGetPipelineTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabListJobsTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabGetJobTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabGetJobLogTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabRetryJobTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabCancelJobTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabRetryPipelineTool));
+    registry.register(Arc::new(gitlab_pipelines::GitlabCancelPipelineTool));
     // Phase 2 — new file-system tools
     registry.register(Arc::new(move_file::MoveFileTool));
     registry.register(Arc::new(copy_file::CopyFileTool));

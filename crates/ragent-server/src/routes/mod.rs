@@ -486,6 +486,7 @@ struct OrchestrateRequest {
 }
 
 /// `GET /orchestrator/metrics` — return live counter snapshot.
+#[allow(dead_code)]
 async fn orch_metrics(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
     match &state.coordinator {
         Some(c) => {

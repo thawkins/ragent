@@ -156,8 +156,8 @@ impl Tool for ListTasksTool {
                 .as_deref()
                 .or(task.error.as_deref())
                 .unwrap_or("—");
-            let summary_short = if summary.len() > 60 {
-                format!("{}…", &summary[..60])
+            let summary_short = if summary.len() > 100 {
+                format!("{}…", &summary[..100])
             } else {
                 summary.to_string()
             };

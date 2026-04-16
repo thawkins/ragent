@@ -216,9 +216,27 @@ pub fn detect_language(path: &Path) -> Option<String> {
         "pl" | "pm" => "perl",
         "v" | "sv" => "verilog",
         "vhd" | "vhdl" => "vhdl",
-        "tf" => "terraform",
+        "tf" | "tfvars" => "terraform",
+        "scad" => "openscad",
+        "cmake" => "cmake",
+        "gradle" => "gradle",
         "nix" => "nix",
-        _ => return None,
+        _ => {
+            // Filename-based detection for files without standard extensions.
+            let filename = path.file_name()?.to_str()?.to_lowercase();
+            match filename.as_str() {
+                "cmakelists.txt" => "cmake",
+                "pom.xml" => "maven",
+                _ => {
+                    // Handle double extensions like .gradle.kts
+                    let name = path.file_stem()?.to_str()?.to_lowercase();
+                    if name.ends_with(".gradle") && ext == "kts" {
+                        return Some("gradle_kts".to_string());
+                    }
+                    return None;
+                }
+            }
+        }
     };
     Some(lang.to_string())
 }

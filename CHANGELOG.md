@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Model picker now displays models in a tabular format with metadata** — The model selection dialog now shows a table with columns for Model name, Context window size, Cost (input/output per million tokens), and Features (Reasoning, Vision, Tool-use). Models are now sorted alphabetically by name for all providers.
+
+### Added
+- **Code index parsers for OpenSCAD and Terraform** — Added tree-sitter-based parsers for OpenSCAD (`.scad`) and HCL/Terraform (`.tf`, `.tfvars`), bringing the total to 9 supported languages with full symbol extraction
+  - OpenSCAD parser: extracts modules, functions, variable declarations, include/use statements, and module/function call references
+  - HCL/Terraform parser: extracts resource blocks, data blocks, module calls, variables, locals, outputs, provider blocks, and terraform settings blocks with nested attribute extraction
+  - Registered both parsers in `ParserRegistry` and added file extension detection (`.scad` → `openscad`, `.tf`/`.tfvars` → `terraform`)
+  - `tree-sitter-openscad-ng` and `tree-sitter-hcl` dependencies were already present in Cargo.toml but previously unused
+- **Code index parsers for CMake, Gradle, and Maven** — Added tree-sitter-based parsers for CMake (`.cmake`/`CMakeLists.txt`), Gradle Groovy DSL (`.gradle`), Gradle Kotlin DSL (`.gradle.kts`), and Maven POM (`pom.xml`), bringing the total to 13 supported languages
+  - CMake parser: extracts function definitions, macro definitions, block scopes, foreach/while loops, if conditions, command references, and include/add_subdirectory imports
+  - Gradle Groovy parser: extracts classes, interfaces, enums, methods, constructors, standalone functions, imports, closures, annotations, variable declarations, and DSL block calls
+  - Gradle Kotlin DSL parser: extracts classes, objects, companion objects, functions, properties, type aliases, imports, and DSL call expressions
+  - Maven parser: extracts project coordinates, dependencies (as imports), modules, plugins, profiles, properties, repositories, and parent POM references
+  - Added file extension/filename detection (`.cmake`/`CMakeLists.txt` → `cmake`, `.gradle` → `gradle`, `.gradle.kts` → `gradle_kts`, `pom.xml` → `maven`)
+  - Added `tree-sitter-cmake`, `tree-sitter-groovy`, `tree-sitter-kotlin-ng`, and `tree-sitter-xml` dependencies
+- **GitLab integration** — Full GitLab REST API support mirroring GitHub toolset
+  - Issue management: `gitlab_list_issues`, `gitlab_get_issue`, `gitlab_create_issue`, `gitlab_comment_issue`, `gitlab_close_issue`
+  - Merge requests: `gitlab_list_mrs`, `gitlab_get_mr`, `gitlab_create_mr`, `gitlab_approve_mr`, `gitlab_merge_mr`
+  - CI/CD pipelines: `gitlab_list_pipelines`, `gitlab_get_pipeline`, `gitlab_cancel_pipeline`, `gitlab_retry_pipeline`
+  - Jobs: `gitlab_list_jobs`, `gitlab_get_job`, `gitlab_get_job_log`, `gitlab_retry_job`, `gitlab_cancel_job`
+- **Extensive SPEC.md rewrite** — Comprehensive rewrite of project specification document
+
+## [0.1.0-alpha.40] - 2026-04-14
+
+### Changed
+- **Model picker now displays models in a tabular format with metadata** — The model selection dialog now shows a table with columns for Model name, Context window size, Cost (input/output per million tokens), and Features (Reasoning, Vision, Tool-use). Models are now sorted alphabetically by name for all providers.
+
 ## [0.1.0-alpha.39] - 2026-04-14
 
 ### Changed
@@ -522,9 +552,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [0.1.0-alpha.1] - 2026-03-09
 
 ### Added
-- TUI home screen with ASCII logo, random tips, and centered prompt
+- TUI startup screen with ASCII logo, random tips, and centered prompt
 - Interactive provider setup dialog (select provider → enter API key → choose model)
-- Provider health indicator (green/yellow/red) on home and chat screens
+- Provider health indicator (green/yellow/red) on chat screen
 - Slash-command autocomplete dropdown (`/agent`, `/model`, `/provider`)
 - Agent cycling with Tab/Shift+Tab across non-hidden agents
 - `ask` agent — quick Q&A without tools (single-step, no project context)

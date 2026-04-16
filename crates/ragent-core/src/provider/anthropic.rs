@@ -110,7 +110,7 @@ impl Provider for AnthropicProvider {
                 .unwrap_or(Self::API_BASE)
                 .trim_end_matches('/')
                 .to_string(),
-            http: reqwest::Client::new(),
+            http: crate::provider::http_client::create_streaming_http_client(),
         };
         Ok(Box::new(client))
     }

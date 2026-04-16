@@ -114,7 +114,7 @@ impl OpenAiClient {
         Self {
             api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http: crate::provider::http_client::create_streaming_http_client(),
         }
     }
 
