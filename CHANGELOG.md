@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.0-alpha.39] - 2026-04-14
+
+### Changed
+- Version bump to 0.1.0-alpha.39 - an number of stability fixes
+
 ## [0.1.0-alpha.38] - 2026-04-14
 
 ### Fixed

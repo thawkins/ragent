@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.38
+## Current Version: 0.1.0-alpha.39
+
+### Changed
+- Version bump to 0.1.0-alpha.39 - an number of stability fixes
+
+## Previous: 0.1.0-alpha.38
 
 ### Fixed
 - **MS Office and LibreOffice presentation writer** — Fixed PPTX and ODP slide rendering: body text now produces proper layout, geometry, and paragraph elements

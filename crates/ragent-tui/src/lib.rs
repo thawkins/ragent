@@ -210,6 +210,9 @@ pub async fn run_tui(
     app.status = "starting code index…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
+    // Track the fallback reindex thread so we can join it on shutdown
+    let mut code_index_fallback_thread: Option<std::thread::JoinHandle<()>> = None;
+
     let _code_index: Option<Arc<ragent_code::CodeIndex>> = {
         let cwd = std::env::current_dir().unwrap_or_default();
         match ragent_core::config::Config::load() {
@@ -239,11 +242,12 @@ pub async fn run_tui(
                                     tracing::warn!(error = %e, "Failed to start code index watcher, falling back to one-shot reindex");
                                     // Fall back to one-shot background reindex without watcher
                                     let bg = arc_idx.clone();
-                                    std::thread::spawn(move || {
+                                    let handle = std::thread::spawn(move || {
                                         if let Err(e) = bg.full_reindex() {
                                             tracing::warn!(error = %e, "Background code index reindex failed");
                                         }
                                     });
+                                    code_index_fallback_thread = Some(handle);
                                 }
                             }
                             app.set_code_index(Some(arc_idx.clone()));
@@ -387,6 +391,37 @@ pub async fn run_tui(
     if app.history_dirty {
         if let Err(e) = app.save_history() {
             tracing::warn!("Failed to save input history: {}", e);
+        }
+    }
+
+    // -- Graceful shutdown of background resources --
+    // Stop code index watcher (if running) - this has a Drop impl that calls stop()
+    if let Some(session) = app.code_index_watch_session.take() {
+        drop(session);
+        tracing::debug!("Code index watch session stopped");
+    }
+
+    // Disconnect LSP servers gracefully
+    if let Some(mgr) = app.lsp_manager.take() {
+        // Clone the manager to get a lock and call disconnect_all
+        let mgr_clone = mgr.clone();
+        if let Ok(mut guard) = mgr_clone.try_write() {
+            guard.disconnect_all().await;
+            tracing::debug!("LSP manager disconnected");
+        }
+    }
+
+    // Wait for fallback reindex thread to complete (if spawned)
+    if let Some(handle) = code_index_fallback_thread.take() {
+        // Give it a reasonable timeout before giving up
+        let join_result = tokio::task::spawn_blocking(move || {
+            handle.join().ok()
+        })
+        .await;
+        if join_result.is_ok() {
+            tracing::debug!("Code index fallback thread joined");
+        } else {
+            tracing::warn!("Code index fallback thread did not join in time");
         }
     }
 

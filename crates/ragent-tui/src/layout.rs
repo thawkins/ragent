@@ -2429,42 +2429,47 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
         return;
     }
 
-    // Standard permission dialog: y/a/n.
-    let area = centered_rect(60, 30, frame.area());
-    frame.render_widget(Clear, area);
-
-    let text = vec![
-        Line::from(Span::styled(
-            "Permission Required",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(format!("Permission: {}", req.permission)),
-        Line::from(format!(
-            "Details: {}",
-            req.patterns.first().map(|s| s.as_str()).unwrap_or("")
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "[y]es  [a]lways  [n]o",
-            Style::default().fg(Color::Cyan),
-        )),
-    ];
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Permission ")
-        .style(Style::default().fg(Color::Yellow));
-
-    let paragraph = Paragraph::new(text)
-        .block(block)
-        .alignment(Alignment::Center);
-
-    frame.render_widget(paragraph, area);
-}
-
+          // Standard permission dialog: y/a/n.
+          let area = centered_rect(60, 40, frame.area()); // Increased height for better visibility
+          frame.render_widget(Clear, area);
+    
+          // Wrap the dialog in a block with strong styling to make it prominent
+          let text = vec![
+              Line::from(Span::styled(
+                  "⚠️  Permission Required",
+                  Style::default()
+                      .fg(Color::Yellow)
+                      .add_modifier(Modifier::BOLD),
+              )),
+              Line::from(""),
+              Line::from(format!("Permission: {}", req.permission)),
+              Line::from(""),
+              Line::from("Details:"),
+              Line::from(Span::styled(
+                  req.patterns.first().map(|s| s.as_str()).unwrap_or(""),
+                  Style::default().fg(Color::White),
+              )),
+              Line::from(""),
+              Line::from(Span::styled(
+                  "Press [y] to allow  [a] to always allow  [n] to deny",
+                  Style::default()
+                      .fg(Color::Cyan)
+                      .add_modifier(Modifier::BOLD),
+              )),
+          ];
+    
+          let block = Block::default()
+              .borders(Borders::ALL)
+              .border_type(ratatui::widgets::BorderType::Double) // Double border for emphasis
+              .title(format!(" Permission: {} ", req.permission))
+              .style(Style::default().fg(Color::Yellow).bg(Color::Black)); // Ensure contrast
+    
+          let paragraph = Paragraph::new(text)
+              .block(block)
+              .alignment(Alignment::Center);
+    
+          frame.render_widget(paragraph, area);
+      }
 fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
     frame.render_widget(Clear, area);

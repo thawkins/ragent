@@ -227,6 +227,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return match key.code {
             KeyCode::Char('y') => {
                 if let Some(ref req) = app.permission_pending {
+                    tracing::info!(
+                        session_id = %req.session_id,
+                        request_id = %req.id,
+                        "User pressed 'y' to grant permission"
+                    );
                     app.event_bus
                         .publish(ragent_core::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
@@ -238,6 +243,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             KeyCode::Char('a') => {
                 if let Some(ref req) = app.permission_pending {
+                    tracing::info!(
+                        session_id = %req.session_id,
+                        request_id = %req.id,
+                        "User pressed 'a' to grant permission (always)"
+                    );
                     app.event_bus
                         .publish(ragent_core::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
@@ -249,6 +259,11 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             KeyCode::Char('n') => {
                 if let Some(ref req) = app.permission_pending {
+                    tracing::info!(
+                        session_id = %req.session_id,
+                        request_id = %req.id,
+                        "User pressed 'n' to deny permission"
+                    );
                     app.event_bus
                         .publish(ragent_core::event::Event::PermissionReplied {
                             session_id: req.session_id.clone(),
@@ -475,6 +490,28 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 app.output_view = None;
                 app.selected_agent_session_id = None;
                 app.selected_agent_index = None;
+                None
+            }
+            _ => None,
+        };
+    }
+
+    // Journal viewer: Esc closes the panel
+    if app.journal_viewer.is_some() {
+        return match key.code {
+            KeyCode::Esc => {
+                app.journal_viewer = None;
+                None
+            }
+            _ => None,
+        };
+    }
+
+    // Memory browser: Esc closes the panel
+    if app.memory_browser.is_some() {
+        return match key.code {
+            KeyCode::Esc => {
+                app.memory_browser = None;
                 None
             }
             _ => None,

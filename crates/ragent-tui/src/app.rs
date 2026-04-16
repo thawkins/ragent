@@ -6396,6 +6396,89 @@ Type `/swarm help` for more info.\n";
                 }
             },
 
+            "journal" => {
+                let sub = args.split_whitespace().next().unwrap_or("");
+                let rest = args.trim_start().strip_prefix(sub).unwrap_or("").trim();
+                match sub {
+                    "" | "show" => {
+                        // Open the journal viewer panel
+                        self.journal_viewer = Some(crate::panels::JournalViewerState::load(&self.storage));
+                        self.status = "journal: viewer opened".to_string();
+                    }
+                    "search" => {
+                        if rest.is_empty() {
+                            self.append_assistant_text(
+                                "From: /journal\nUsage: `/journal search <query>`",
+                            );
+                            return;
+                        }
+                        // Open viewer and perform search
+                        let mut viewer = crate::panels::JournalViewerState::load(&self.storage);
+                        viewer.search_query = rest.to_string();
+                        viewer.search(&self.storage);
+                        self.journal_viewer = Some(viewer);
+                        self.status = format!("journal: searching for '{}'", rest);
+                    }
+                    "add" => {
+                        if rest.is_empty() {
+                            self.append_assistant_text(
+                                "From: /journal\nUsage: `/journal add <title>`",
+                            );
+                            return;
+                        }
+                        // Add a new journal entry
+                        // Generate a unique ID for the journal entry
+                        let id = format!("je-{}", ragent_core::id::SessionId::new());
+                        let project = std::env::current_dir()
+                            .ok()
+                            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                            .unwrap_or_else(|| "ragent".to_string());
+                        let session_id = self.session_id.clone().unwrap_or_default();
+
+                        match self.storage.create_journal_entry(
+                            &id,
+                            rest,
+                            "",
+                            &project,
+                            &session_id,
+                            &[] as &[String]
+                        ) {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /journal add\n✅ Created journal entry: {} (id: {})",
+                                    rest, id
+                                ));
+                                // Refresh cached stats
+                                self.refresh_memory_stats();
+                            }
+                            Err(e) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /journal add\n❌ Failed to create entry: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    "help" => {
+                        self.append_assistant_text(
+                            "## /journal — Journal Viewer\n\n\
+                             | Sub-command | Description |\n\
+                             |-------------|-------------|\n\
+                             | `/journal` | Open the journal viewer panel |\n\
+                             | `/journal search <query>` | Search journal entries |\n\
+                             | `/journal add <title>` | Add a new journal entry |\n\
+                             | `/journal help` | Show this help |",
+                        );
+                        self.status = "journal: help".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "From: /journal\nUsage: `/journal` | `/journal search <query>` | `/journal add <title>` | `/journal help`",
+                        );
+                    }
+                }
+            }
+
             "codeindex" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
@@ -6953,22 +7036,51 @@ Type `/swarm help` for more info.\n";
                     }
                     return;
                 }
-                if self.agents_close_button_area.contains(pos.into()) {
-                    self.show_agents_window = false;
-                    return;
-                }
-                if self.teams_close_button_area.contains(pos.into()) {
-                    self.show_teams_window = false;
-                    return;
-                }
-                if self.output_view.is_some()
-                    && self
-                        .output_view_area
-                        .contains((event.column, event.row).into())
-                {
-                    return;
-                }
-                if self.output_view.is_some() {
+                                  if self.agents_close_button_area.contains(pos.into()) {
+                                      self.show_agents_window = false;
+                                      return;
+                                  }
+                                  if self.teams_close_button_area.contains(pos.into()) {
+                                      self.show_teams_window = false;
+                                      return;
+                                  }
+                                  // Journal viewer close button
+                                  if self.journal_viewer.is_some()
+                                      && self.journal_viewer_close_area.contains(pos.into())
+                                  {
+                                      self.journal_viewer = None;
+                                      return;
+                                  }
+                                  // Memory browser close button
+                                  if self.memory_browser.is_some()
+                                      && self.memory_browser_close_area.contains(pos.into())
+                                  {
+                                      self.memory_browser = None;
+                                      return;
+                                                                      }
+                                                                      // Click outside journal viewer closes it
+                                                                      if self.journal_viewer.is_some() {
+                                                                          let journal_area = self.journal_viewer_area.union(self.journal_viewer_close_area);
+                                                                          if !journal_area.contains(pos.into()) {
+                                                                              self.journal_viewer = None;
+                                                                              return;
+                                                                          }
+                                                                      }
+                                                                      // Click outside memory browser closes it
+                                                                      if self.memory_browser.is_some() {
+                                                                          let memory_area = self.memory_browser_area.union(self.memory_browser_close_area);
+                                                                          if !memory_area.contains(pos.into()) {
+                                                                              self.memory_browser = None;
+                                                                              return;
+                                                                          }
+                                                                      }
+                                                                      if self.output_view.is_some()
+                                                                          && self
+                                                                              .output_view_area
+                                                                              .contains((event.column, event.row).into())
+                                                                      {
+                                                                          return;
+                                                                      }                if self.output_view.is_some() {
                     self.output_view = None;
                     self.selected_agent_session_id = None;
                     self.selected_agent_index = None;
@@ -8315,6 +8427,12 @@ Type `/swarm help` for more info.\n";
                 ref description,
             } => {
                 if self.is_current_session(session_id) {
+                    tracing::info!(
+                        session_id = %session_id,
+                        request_id = %request_id,
+                        permission = %permission,
+                        "TUI received PermissionRequested, showing dialog"
+                    );
                     self.permission_pending = Some(PermissionRequest {
                         id: request_id.clone(),
                         session_id: session_id.clone(),
@@ -8327,6 +8445,13 @@ Type `/swarm help` for more info.\n";
                     self.push_log_no_agent(
                         LogLevel::Warn,
                         format!("permission requested: {} — {}", permission, description),
+                    );
+                } else {
+                    tracing::warn!(
+                        expected_session = %self.session_id.as_deref().unwrap_or("none"),
+                        received_session = %session_id,
+                        permission = %permission,
+                        "Ignoring PermissionRequested for different session"
                     );
                 }
             }
