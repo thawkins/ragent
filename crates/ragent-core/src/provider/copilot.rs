@@ -1162,6 +1162,7 @@ pub async fn check_copilot_health(github_token: &str) -> bool {
 /// Response from the Copilot `/models` endpoint.
 #[derive(Debug, Deserialize)]
 struct CopilotModelsResponse {
+    #[serde(default)]
     data: Vec<CopilotModelEntry>,
 }
 

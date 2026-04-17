@@ -1,6 +1,16 @@
 # Release
 
-## Current Version: 0.1.0-alpha.40
+## Current Version: 0.1.0-alpha.42
+
+### Added
+- **Gemini provider** — Google Gemini API support as a first-class LLM provider
+- **Hugging Face provider** — Hugging Face Inference API support as a first-class LLM provider
+- **Unfinished goal detection** — Session processor now detects when the agent's stated goals have not been fully achieved
+
+### Fixed
+- Various fixes across provider implementations and session processing
+
+## Previous: 0.1.0-alpha.40
 
 ### Changed
 - **Model picker now displays models in a tabular format with metadata** — The model selection dialog now shows a table with columns for Model name, Context window size, Cost (input/output per million tokens), and Features (Reasoning, Vision, Tool-use). Models are now sorted alphabetically by name for all providers.
@@ -97,23 +107,3 @@
 - CI Clippy: redundant closures in `lsp/discovery.rs`
 
 ## Previous: 0.1.0-alpha.26
-
-### Fixed
-- **LSP discover** — deduplicates across all VS code extension directories; shows version column; scrollable with ↑/↓/PgUp/PgDn
-- **LSP system prompt** — only injects guidance for actually-connected servers
-- **CI** — bench and test unused-mut / missing-docs warnings resolved
-
-## Previous: 0.1.0-alpha.25
-
-### Fixed
-- **CI lint fixes** — resolved 1339 Clippy warnings/errors across 127 files workspace-wide
-- Rewrote workspace lint config with priority-aware lint groups and 50+ `allow` entries
-- Fixed `prompt_opt::from_str` Clippy `should_implement_trait` by implementing `std::str::FromStr`
-
-## Previous: 0.1.0-alpha.24
-
-### Fixed
-- **Security Audit CI** — all `cargo audit` and `cargo deny check` failures resolved:
-  - Upgraded criterion 0.4→0.5 (removes `atty` vulnerability)
-  - Updated `rustls-webpki` and `quinn-proto` to patched versions
-  - Rewrote `deny.toml` for cargo-deny ≥0.19 schema

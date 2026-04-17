@@ -96,6 +96,7 @@ impl Default for OllamaCloudProvider {
 
 #[derive(Debug, Deserialize)]
 struct OllamaTagsResponse {
+    #[serde(default)]
     models: Vec<OllamaModelEntry>,
 }
 

@@ -15,7 +15,7 @@ configuration, and common workflows.
 ## Prerequisites
 
 - **Rust 1.85+** (edition 2024) — install via [rustup](https://rustup.rs)
-- An LLM provider: **Anthropic**, **OpenAI**, or a local **Ollama** server
+- An LLM provider: **Anthropic**, **OpenAI**, **Hugging Face**, or a local **Ollama** server
 
 ## Installation
 
@@ -41,7 +41,7 @@ ragent        # launch ragent
                                # press 'p' to open the provider setup dialog```
 
 The dialog walks you through:
-1. **Selecting a provider** (Anthropic, OpenAI, GitHub Copilot, or Ollama)
+1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, or Ollama)
 2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none)
 3. **Choosing a model** from the provider's available models
 
@@ -71,7 +71,15 @@ export OPENAI_API_KEY="sk-..."
 ragent auth openai sk-your-key-here
 ```
 
-### Option C: GitHub Copilot (No Extra API Key)
+### Option C: Google Gemini
+
+```bash
+export GEMINI_API_KEY="AIza..."
+# or store persistently:
+ragent auth gemini AIza-your-key-here
+```
+
+### Option D: GitHub Copilot (No Extra API Key)
 
 If you have an active [GitHub Copilot](https://github.com/features/copilot)
 subscription and the extension installed in VS Code or JetBrains, ragent will
@@ -85,7 +93,25 @@ ragent run --model copilot/gpt-4o "Explain this code"
 export GITHUB_COPILOT_TOKEN="ghu_your_token_here"
 ```
 
-### Option D: Ollama (Local — No API Key Required)
+### Option E: Hugging Face
+
+```bash
+export HF_TOKEN="hf_..."
+# or store persistently:
+ragent auth huggingface hf_your-token-here
+```
+
+HuggingFace provides free access to many open-source models via the Inference API.
+Get your token at https://huggingface.co/settings/tokens.
+
+```bash
+# Use a specific HF model
+ragent run --model huggingface/meta-llama/Llama-3.1-70B-Instruct "Hello world"
+
+# For dedicated Inference Endpoints, set base_url in ragent.json
+```
+
+### Option F: Ollama (Local — No API Key Required)
 
 ```bash
 # Install Ollama: https://ollama.com/download
@@ -140,6 +166,7 @@ ragent models --ollama-url http://remote-server:11434
 # Filter by provider
 ragent models --provider anthropic
 ragent models --provider openai
+ragent models --provider gemini
 ```
 
 **Default models:**
@@ -151,6 +178,9 @@ ragent models --provider openai
 | Copilot    | `gpt-4o`                        | 128K     | Included with subscription |
 | Copilot    | `claude-sonnet-4`               | 200K     | Included with subscription |
 | Copilot    | `o3-mini`                       | 200K     | Included with subscription |
+| Gemini     | `gemini-2.5-pro-preview-05-06`  | 1,048K   | $1.25 / $10              |
+| Gemini     | `gemini-2.5-flash-preview-05-20`| 1,048K   | $0.15 / $0.60            |
+| Gemini     | `gemini-1.5-pro`                | 2,097K   | $1.25 / $5               |
 | OpenAI     | `gpt-4o`                        | 128K     | $2.50 / $10              |
 | OpenAI     | `gpt-4o-mini`                   | 128K     | $0.15 / $0.60            |
 | Ollama     | *(discovered from server)*      | varies   | Free (local)             |
@@ -693,11 +723,14 @@ Rate limit: 60 requests per minute per session on the messages endpoint.
 |------------------------|------------------------------------------------|----------------------------|
 | `ANTHROPIC_API_KEY`    | Anthropic API key                              | —                          |
 | `OPENAI_API_KEY`       | OpenAI API key                                 | —                          |
+| `GEMINI_API_KEY`       | Google Gemini API key                          | —                          |
 | `GENERIC_OPENAI_API_KEY` | Generic OpenAI API key                       | —                          |
 | `GENERIC_OPENAI_API_BASE` | Generic OpenAI endpoint URL (host + port)   | `https://api.openai.com`   |
 | `GITHUB_COPILOT_TOKEN` | Copilot OAuth token (auto-discovered from IDE) | —                          |
 | `OLLAMA_HOST`          | Ollama server URL                              | `http://localhost:11434`   |
 | `OLLAMA_API_KEY`       | Optional auth for remote Ollama                | —                          |
+| `HF_TOKEN`             | HuggingFace API token                          | —                          |
+| `HUGGING_FACE_HUB_TOKEN` | HuggingFace API token (legacy name)          | —                          |
 | `RAGENT_CONFIG`        | Path to a config file                          | —                          |
 | `RAGENT_CONFIG_CONTENT`| Inline JSON config                             | —                          |
 | `RUST_LOG`             | Log level filter (e.g. `info`, `debug`)        | `info`                     |

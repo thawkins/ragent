@@ -39,3 +39,60 @@ async fn test_ollama_cloud_model_listing_uses_bearer_token() {
     assert_eq!(models[0].id, "gpt-oss:120b-cloud");
     assert_eq!(models[0].name, "gpt-oss:120b-cloud (120B)");
 }
+
+#[tokio::test]
+async fn test_ollama_cloud_empty_models_field() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = vec![0u8; 4096];
+        let _n = socket.read(&mut buffer).await.unwrap();
+
+        let body = r#"{"models":[]}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let models = list_ollama_cloud_models("test-token", Some(&base_url))
+        .await
+        .unwrap();
+
+    server.await.unwrap();
+    assert!(models.is_empty(), "Empty models array should return empty vec");
+}
+
+#[tokio::test]
+async fn test_ollama_cloud_missing_models_field() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = vec![0u8; 4096];
+        let _n = socket.read(&mut buffer).await.unwrap();
+
+        // Response with no "models" field at all
+        let body = r#"{}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let base_url = format!("http://{}", addr);
+    let models = list_ollama_cloud_models("test-token", Some(&base_url))
+        .await
+        .unwrap();
+
+    server.await.unwrap();
+    assert!(models.is_empty(), "Missing models field should return empty vec");
+}

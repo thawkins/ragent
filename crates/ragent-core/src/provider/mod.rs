@@ -5,8 +5,10 @@
 
 pub mod anthropic;
 pub mod copilot;
+pub mod gemini;
 pub mod generic_openai;
 pub mod http_client;
+pub mod huggingface;
 pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
@@ -250,7 +252,9 @@ pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));
     registry.register(Box::new(copilot::CopilotProvider::new()));
+    registry.register(Box::new(gemini::GeminiProvider));
     registry.register(Box::new(openai::OpenAiProvider));
+    registry.register(Box::new(huggingface::HuggingFaceProvider));
     registry.register(Box::new(generic_openai::GenericOpenAiProvider));
     registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));
     registry.register(Box::new(ollama::OllamaProvider::new()));

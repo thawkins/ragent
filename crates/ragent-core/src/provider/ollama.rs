@@ -114,6 +114,7 @@ impl Default for OllamaProvider {
 /// Response from the Ollama `/api/tags` endpoint.
 #[derive(Debug, Deserialize)]
 struct OllamaTagsResponse {
+    #[serde(default)]
     models: Vec<OllamaModelEntry>,
 }
 

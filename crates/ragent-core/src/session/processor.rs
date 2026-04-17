@@ -692,6 +692,7 @@ impl SessionProcessor {
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
+        let mut task_completeness_nudged = false;
 
         // Timing tracking for the agent loop
         let total_start = Instant::now();
@@ -1010,11 +1011,27 @@ impl SessionProcessor {
                 // text nudges are limited to Ollama which commonly narrates before acting.
                 let should_nudge_stall = looks_like_stall && step <= 8;
                 let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
-                if should_nudge_stall || should_nudge_planning {
+
+                // Task completeness check: if the user requested a file output
+                // (e.g. "create hugplan.md") but no write tool was used, nudge
+                // the model to finish. This fires once, at any step, for all
+                // providers, to catch cases where sub-agent results were consumed
+                // but the model stopped without producing the requested artefact.
+                let should_nudge_incomplete = !task_completeness_nudged
+                    && !tool_definitions.is_empty()
+                    && detect_incomplete_file_task(
+                        &user_msg.text_content(),
+                        &assistant_parts,
+                    );
+
+                if should_nudge_stall || should_nudge_planning || should_nudge_incomplete {
                     let reason = if should_nudge_stall {
                         "stall (dots-only output)"
-                    } else {
+                    } else if should_nudge_planning {
                         "planning text without tool calls"
+                    } else {
+                        task_completeness_nudged = true;
+                        "task incomplete — file output requested but not created"
                     };
                     tracing::info!(
                         session_id = %session_id,
@@ -1025,13 +1042,19 @@ impl SessionProcessor {
                         role: "assistant".to_string(),
                         content: ChatContent::Text(text_buffer.clone()),
                     });
+                    let nudge_text = if should_nudge_incomplete {
+                        "You have not completed the requested task. The user asked \
+                         you to create or write a file, but no file-writing tool \
+                         was called. Please use the appropriate tool (e.g. \
+                         write_file, create_file) to produce the requested output \
+                         now."
+                    } else {
+                        "Please continue — use tool calls to proceed with the task. \
+                         Do not output dots or placeholder text."
+                    };
                     chat_messages.push(ChatMessage {
                         role: "user".to_string(),
-                        content: ChatContent::Text(
-                            "Please continue — use tool calls to proceed with the task. \
-                             Do not output dots or placeholder text."
-                                .to_string(),
-                        ),
+                        content: ChatContent::Text(nudge_text.to_string()),
                     });
                     text_buffer = String::new();
                     reasoning_buffer = String::new();
@@ -1699,6 +1722,8 @@ impl SessionProcessor {
         let env_vars = match provider_id {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],
             "openai" => vec!["OPENAI_API_KEY"],
+            "gemini" => vec!["GEMINI_API_KEY"],
+            "huggingface" => vec!["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
             "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
             "ollama_cloud" => vec!["OLLAMA_API_KEY"],
             _ => vec![],
@@ -2017,4 +2042,75 @@ fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
         })
         .collect();
     ChatContent::Parts(content_parts)
+}
+
+/// Detects whether the user's original message requested file creation or
+/// writing, and whether any file-writing tool was actually executed during
+/// the session so far.
+///
+/// Returns `true` when the user appears to have asked for a file to be
+/// created/written but no write tool has been called — indicating the task
+/// is incomplete.
+///
+/// This is intentionally conservative: it only triggers on clear
+/// verb+filename patterns and only checks for common file-output tools.
+pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePart]) -> bool {
+    let lower = user_text.to_lowercase();
+
+    // 1. Check if user message contains a file-output request.
+    //    Look for action verbs near file-like tokens (word.ext patterns).
+    let has_file_action_verb = lower.contains("create ")
+        || lower.contains("produce ")
+        || lower.contains("write ")
+        || lower.contains("generate ")
+        || lower.contains("make ")
+        || lower.contains("save ")
+        || lower.contains("output ");
+
+    if !has_file_action_verb {
+        return false;
+    }
+
+    // Look for something that resembles a filename (word.ext) in the user text.
+    let has_filename = user_text
+        .split_whitespace()
+        .any(|word| {
+            let cleaned = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-' && c != '/');
+            if let Some(dot_pos) = cleaned.rfind('.') {
+                let ext = &cleaned[dot_pos + 1..];
+                // Extension must be 1-10 alphanumeric chars and have content before the dot
+                dot_pos > 0
+                    && !ext.is_empty()
+                    && ext.len() <= 10
+                    && ext.chars().all(|c| c.is_alphanumeric())
+            } else {
+                false
+            }
+        });
+
+    if !has_filename {
+        return false;
+    }
+
+    // 2. Check if any file-writing tool was executed in assistant_parts.
+    let write_tools = [
+        "write_file",
+        "create_file",
+        "write_new_file",
+        "edit_file",
+        "patch_file",
+        "append_file",
+        "save_file",
+    ];
+
+    let has_write_tool = assistant_parts.iter().any(|part| {
+        if let MessagePart::ToolCall { tool, .. } = part {
+            write_tools.iter().any(|w| tool == w)
+        } else {
+            false
+        }
+    });
+
+    // Incomplete if user asked for file creation but no write tool was used.
+    !has_write_tool
 }

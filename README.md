@@ -11,7 +11,7 @@ It is reimplemented in Rust as a learninh exercise for the author.
 
 ## Features
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, and Ollama
+- **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, and Ollama
   out of the box, with an extensible provider trait for adding more
 - **8 built-in tools** — file read/write/create/edit, bash execution, grep, glob, directory
   listing, and interactive questions

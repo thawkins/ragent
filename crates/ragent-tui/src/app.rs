@@ -684,6 +684,30 @@ impl App {
             })
     }
 
+    /// Returns the hardcoded default HuggingFace models as [`ModelPickerEntry`] values.
+    /// Used as a fallback when dynamic discovery fails or no token is available.
+    fn hf_default_model_entries(&self) -> Vec<ModelPickerEntry> {
+        self.provider_registry
+            .get("huggingface")
+            .map(|p| {
+                p.default_models()
+                    .into_iter()
+                    .map(|m| ModelPickerEntry {
+                        id: m.id,
+                        name: m.name,
+                        context_window: m.context_window,
+                        max_output: m.max_output,
+                        cost_input: m.cost.input,
+                        cost_output: m.cost.output,
+                        reasoning: m.capabilities.reasoning,
+                        vision: m.capabilities.vision,
+                        tool_use: m.capabilities.tool_use,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn should_auto_compact_before_send(&self) -> bool {
         if self.auto_compact_in_progress
             || self.auto_compact_failed
@@ -2187,6 +2211,53 @@ impl App {
                 }
             } else {
                 vec![]
+            }
+        } else if provider_id == "huggingface" {
+            let token = self
+                .storage
+                .get_provider_auth("huggingface")
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty())
+                .or_else(|| std::env::var("HF_TOKEN").ok().filter(|k| !k.is_empty()))
+                .or_else(|| {
+                    std::env::var("HUGGING_FACE_HUB_TOKEN")
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                });
+            if let Some(token) = token {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle
+                            .block_on(ragent_core::provider::huggingface::discover_models(&token))
+                    });
+                    if let Ok(fetched) = result {
+                        if !fetched.is_empty() {
+                            fetched
+                                .into_iter()
+                                .map(|m| ModelPickerEntry {
+                                    id: m.id,
+                                    name: m.name,
+                                    context_window: m.context_window,
+                                    max_output: m.max_output,
+                                    cost_input: m.cost.input,
+                                    cost_output: m.cost.output,
+                                    reasoning: m.capabilities.reasoning,
+                                    vision: m.capabilities.vision,
+                                    tool_use: m.capabilities.tool_use,
+                                })
+                                .collect()
+                        } else {
+                            self.hf_default_model_entries()
+                        }
+                    } else {
+                        self.hf_default_model_entries()
+                    }
+                } else {
+                    self.hf_default_model_entries()
+                }
+            } else {
+                self.hf_default_model_entries()
             }
         } else {
             self.provider_registry
@@ -6487,14 +6558,20 @@ Type `/swarm help` for more info.\n";
                         });
                         self.webapi_server = Some(handle);
 
-                        self.append_assistant_text(&format!(
-                            "✅ **Web API enabled** at `http://{addr}`\n\n\
-                                **Bearer Token:**\n```\n{token}\n```\n\
-                                Include this token in all API requests (except `/health`):\n\
-                                ```\nAuthorization: Bearer {token}\n```\n\n\
-                                Run `/webapi help` to see all endpoints."
-                        ));
-                    }
+                                                  self.append_assistant_text(&format!(
+                                                      "✅ **Web API enabled** at `http://{addr}`\n\n\
+                                                          **Bearer Token:**\n```\n{token}\n```\n\
+                                                          Include this token in all API requests (except `/health`):\n\
+                                                          ```\nAuthorization: Bearer {token}\n```\n\n\
+                                                          ### Example curl commands:\n\
+                                                          ```bash\n\
+                                                          # Health check (no auth required)\n\
+                                                          curl http://{addr}/health\n\n\
+                                                          # Get ragent status (requires auth)\n\
+                                                          curl -H 'Authorization: Bearer {token}' http://{addr}/config\n\
+                                                          ```\n\n\
+                                                          Run `/webapi help` to see all endpoints."
+                                                  ));                    }
                 }
                 "disable" | "stop" => {
                     if let Some(handle) = self.webapi_server.take() {
@@ -6514,15 +6591,23 @@ Type `/swarm help` for more info.\n";
                     } else {
                         "🔴 **Disabled** — run `/webapi enable` to start".to_string()
                     };
-                    let auth_note = if let Some(ref tok) = self.webapi_token {
-                        format!(
-                            "\n**Bearer Token:** `{tok}`\n\
-                                Add `Authorization: Bearer {tok}` to all requests (except `/health`)."
-                        )
-                    } else {
-                        "\n*No token set — start the server with `/webapi enable`.*".to_string()
-                    };
-                    self.append_assistant_text(&format!(
+                                          let auth_note = if let Some(ref tok) = self.webapi_token {
+                                              let curl_example = format!(
+                                                "\n### Example curl commands:\n\
+                                                ```bash\n\
+                                                # Health check (no auth required)\n\
+                                                curl {base}/health\n\n\
+                                                # Get ragent status (requires auth)\n\
+                                                curl -H 'Authorization: Bearer {tok}' {base}/config\n\
+                                                ```"
+                                              );
+                                              format!(
+                                                  "\n**Bearer Token:** `{tok}`\n\
+                                                      Add `Authorization: Bearer {tok}` to all requests (except `/health`).{curl_example}"
+                                              )
+                                          } else {
+                                              "\n*No token set — start the server with `/webapi enable`.*".to_string()
+                                          };                    self.append_assistant_text(&format!(
                             "## 🌐 Web API\n\n\
                             **Status:** {status}{auth_note}\n\n\
                             ### Endpoints\n\n\

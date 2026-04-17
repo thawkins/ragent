@@ -47,7 +47,7 @@ User ──▶ TUI / HTTP API ──▶ Session Processor ──▶ LLM Provider
 
 | Capability | Summary |
 |-----------|---------|
-| **Multi-provider LLM** | 6 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
+| **Multi-provider LLM** | 7 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
 | **Tool System** | 147+ tools: file ops, shell, search, GitHub, GitLab, code index, memory, journal, teams, sub-agents, LSP, office/PDF, web, MCP |
@@ -114,6 +114,12 @@ of all subsystems.
 18. [Concurrent File Operations](#18-concurrent-file-operations-planned)
 19. [LSP Integration](#19-lsp-integration)
 20. [GitLab Integration](#20-gitlab-integration)
+21. [MCP Integration](#21-mcp-integration-model-context-protocol)
+22. [Orchestrator & Multi-Agent Coordination](#22-orchestrator--multi-agent-coordination)
+23. [Event Bus Architecture](#23-event-bus-architecture)
+24. [Auto-Update Mechanism](#24-auto-update-mechanism)
+25. [CLI Command Reference](#25-cli-command-reference)
+26. [Testing & CI/CD](#26-testing--cicd)
 
 **Appendices**
 
@@ -192,8 +198,9 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 | **GitHub Copilot** | `copilot` | Auto-discovered from VS Code | Streaming, tools, vision, reasoning levels |
 | **Ollama** | `ollama` | No key required | Local models, streaming |
 | **Ollama Cloud** | `ollama_cloud` | `OLLAMA_API_KEY` | Remote Ollama servers, dynamic model discovery, vision |
+| **Hugging Face** | `huggingface` | `HF_TOKEN` | Streaming, tools, vision, dynamic model discovery |
 | **Generic OpenAI** | `generic_openai` | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
-| **Google Gemini** | `gemini` *(planned)* | `GEMINI_API_KEY` *(planned)* | Streaming, tools, vision |
+| **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
 
 #### Provider Features
 
@@ -273,15 +280,86 @@ The local Ollama provider connects to self-hosted Ollama instances (no authentic
 ragent models --provider ollama
 ```
 
-#### Google Gemini Provider *(Planned)*
+#### Google Gemini Provider
 
-Support for Google Gemini models is planned for a future release.
+The Google Gemini provider connects to Google's Gemini API for state-of-the-art multimodal models with extensive context windows.
 
-**Planned Features:**
-- **Authentication:** `GEMINI_API_KEY` environment variable
-- **Models:** Gemini 1.5 Pro, Gemini 1.5 Flash
-- **Capabilities:** Streaming, tool use, vision
-- **API:** Google AI Gemini API or Vertex AI
+**Authentication:** `GEMINI_API_KEY` environment variable
+
+**Default Models:**
+
+| Model | Context | Cost (Input/Output) | Capabilities |
+|-------|---------|---------------------|--------------|
+| `gemini-2.5-flash-preview-05-20` | 1,048,576 | $0.15 / $0.60 | reasoning, streaming, vision, tool_use |
+| `gemini-2.5-pro-preview-05-06` | 1,048,576 | $1.25 / $10.00 | reasoning, streaming, vision, tool_use |
+| `gemini-2.0-flash` | 1,048,576 | $0.10 / $0.40 | streaming, vision, tool_use |
+| `gemini-2.0-flash-lite` | 1,048,576 | $0.075 / $0.30 | streaming, vision, tool_use |
+| `gemini-1.5-flash` | 1,048,576 | $0.075 / $0.30 | streaming, vision, tool_use |
+| `gemini-1.5-pro` | 2,097,152 | $1.25 / $5.00 | reasoning, streaming, vision, tool_use |
+
+**Features:**
+- **Streaming** — Real-time token-by-token response streaming
+- **Tool Use** — Native function calling for all models
+- **Vision** — Image understanding capabilities
+- **Reasoning** — Available on Pro and Flash 2.5 models
+- **Massive Context Windows** — Up to 2M tokens on 1.5 Pro
+
+**API Base:** `https://generativelanguage.googleapis.com`
+
+#### Hugging Face Provider
+
+The HuggingFace provider connects to the HuggingFace Inference API, which exposes an OpenAI-compatible `/v1/chat/completions` endpoint. Supports both the free/Pro shared Inference API and dedicated Inference Endpoints.
+
+**Authentication:**
+- **Primary:** `HF_TOKEN` environment variable (standard HuggingFace token)
+- **Legacy:** `HUGGING_FACE_HUB_TOKEN` (older HF token name)
+- **Ragent convention:** `RAGENT_API_KEY_HUGGINGFACE` (auto-checked)
+
+**Default Models:**
+
+| Model | Context | Capabilities |
+|-------|---------|--------------|
+| `meta-llama/Llama-3.1-8B-Instruct` | 128,000 | streaming, tool_use |
+| `meta-llama/Llama-3.1-70B-Instruct` | 128,000 | streaming, tool_use |
+| `mistralai/Mixtral-8x7B-Instruct-v0.1` | 32,000 | streaming, tool_use |
+| `Qwen/Qwen2.5-72B-Instruct` | 128,000 | streaming, tool_use |
+| `microsoft/Phi-3-mini-4k-instruct` | 4,096 | streaming |
+
+**Features:**
+- **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint (same as OpenAI)
+- **Streaming Support** — Full SSE streaming with tool call deltas
+- **Tool Use** — Function calling for models that support it (Llama 3.1+, Mixtral, Qwen)
+- **Dynamic Model Discovery** — Queries HuggingFace Hub API for available text-generation models with warm inference endpoints (up to 50 models)
+- **Model Loading Detection** — Detects 503 "model loading" responses with estimated wait time
+- **Gated Model Handling** — Clear error messages for models requiring license acceptance
+- **Rate Limit Tracking** — Parses `X-RateLimit-Limit`/`X-RateLimit-Remaining` headers
+
+**Provider-Specific Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `wait_for_model` | bool | `true` | Send `x-wait-for-model: true` header to wait for cold models |
+| `use_cache` | bool | `true` | Enable server-side response caching |
+
+**Inference Endpoints:**
+
+For dedicated deployments, configure the custom endpoint URL:
+```json
+{
+  "provider": {
+    "huggingface": {
+      "api": {
+        "base_url": "https://my-endpoint.endpoints.huggingface.cloud"
+      }
+    }
+  }
+}
+```
+
+**Model Listing:**
+```bash
+ragent models --provider huggingface
+```
 
 ### 3.2 Tool System
 
@@ -414,6 +492,43 @@ The following are aliases for commonly requested operations:
 - **Template variables** — Dynamic injection of context (`{{WORKING_DIR}}`, `{{FILE_TREE}}`, `{{AGENTS_MD}}`, `{{GIT_STATUS}}`, `{{README}}`)
 - **Permission rules** — Per-agent access control for file paths and commands
 - **Memory scoping** — Project-level and user-level memory for agents
+
+### 3.3.1 GitHub Integration Tools
+
+ragent provides native GitHub issue and pull request tools that auto-detect
+the repository owner and name from the local git remote configuration.
+
+#### Issue Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `github_issues_list` | List issues with filtering | `state` (open/closed/all), `labels`, `limit` |
+| `github_issues_get` | Get issue details | `number` |
+| `github_issues_create` | Create a new issue | `title`, `body`, `labels`, `assignees` |
+| `github_issues_comment` | Add comment to an issue | `number`, `body` |
+| `github_issues_close` | Close an issue | `number`, `comment` (optional) |
+
+#### Pull Request Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `github_pr_list` | List pull requests | `state`, `base`, `limit` |
+| `github_pr_get` | Get PR details and diff | `number` |
+| `github_pr_create` | Create a new pull request | `title`, `body`, `base`, `head`, `draft` |
+| `github_pr_merge` | Merge a pull request | `number`, `method` (merge/squash/rebase) |
+| `github_pr_review` | Submit a PR review | `number`, `event` (approve/comment/request_changes), `body` |
+
+#### Auto-Detection
+
+Owner and repository are automatically detected from the git remote:
+
+```text
+git remote get-url origin
+→ https://github.com/owner/repo.git  → owner="owner", repo="repo"
+→ git@github.com:owner/repo.git      → owner="owner", repo="repo"
+```
+
+Falls back to explicit `--owner` and `--repo` parameters if detection fails.
 
 ### 3.4 Session Management
 
@@ -987,6 +1102,71 @@ ragent serve --port 8080  # Custom port
 | `GET` | `/journal/{id}` | Get entry by ID |
 | `POST` | `/journal/search` | Search journal entries |
 
+#### Orchestrator API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/orchestrate` | Submit a job to the orchestrator |
+| `GET` | `/orchestrate/{job_id}` | Get job status and results |
+| `DELETE` | `/orchestrate/{job_id}` | Cancel a running orchestration job |
+
+#### Response Types
+
+**BlockResponse (Memory blocks):**
+
+```json
+{
+  "scope": "project",
+  "label": "conventions",
+  "content": "Use snake_case...",
+  "read_only": false,
+  "created_at": "2025-01-15T10:30:00Z",
+  "updated_at": "2025-01-15T12:00:00Z"
+}
+```
+
+**MemoryResponse (Structured memories):**
+
+```json
+{
+  "id": "mem_abc123",
+  "content": "The project uses PostgreSQL...",
+  "category": "tech_stack",
+  "confidence": 0.85,
+  "tags": ["database", "infrastructure"],
+  "created_at": "2025-01-15T10:30:00Z",
+  "last_accessed": "2025-01-16T08:00:00Z"
+}
+```
+
+**JournalEntryResponse:**
+
+```json
+{
+  "id": "j_xyz789",
+  "session_id": "sess_001",
+  "entry_type": "decision",
+  "title": "Chose PostgreSQL over MySQL",
+  "content": "After comparing performance benchmarks...",
+  "tags": ["database", "architecture"],
+  "created_at": "2025-01-15T10:30:00Z"
+}
+```
+
+**Search Request Body (`/memory/search`, `/journal/search`):**
+
+```json
+{
+  "query": "database configuration",
+  "limit": 10,
+  "semantic": true,
+  "filters": {
+    "category": "tech_stack",
+    "min_confidence": 0.5
+  }
+}
+```
+
 ### 5.3 Authentication
 
 - Bearer token generated on server startup
@@ -1400,7 +1580,187 @@ Call codeindex_symbols with:
 - SQLite connections are thread-local (no global lock contention)
 - Tree-sitter parsing runs in parallel via Rayon
 - Tantivy uses `IndexWriter` with `try_commit` every 50 documents
-- File watcher queue has 100ms debounce
+- File watcher queue has 500ms debounce (configurable)
+
+### 6.11 File Watcher (`watcher.rs`)
+
+The file watcher provides real-time filesystem monitoring using the `notify`
+crate (v7.0+), feeding incremental updates into the code index without
+manual re-scanning.
+
+#### Architecture
+
+```text
+notify::RecommendedWatcher
+   ↓ filesystem events (Create, Modify, Remove, Rename)
+CodeIndexWatcher
+   ├── event_tx: Sender<WatchEvent>      — bounded channel to worker
+   ├── debounce_ms: u64                  — default 500ms
+   └── ignored_dirs: HashSet<String>     — directories to skip
+```
+
+#### Ignored Directories (12 Built-in)
+
+The following directories are never watched:
+
+| Directory | Reason |
+|-----------|--------|
+| `target/` | Rust build output |
+| `node_modules/` | npm dependencies |
+| `.git/` | Git internals |
+| `dist/` | Build output |
+| `build/` | Build output |
+| `.next/` | Next.js build |
+| `__pycache__/` | Python bytecode |
+| `.venv/` | Python virtual environment |
+| `vendor/` | Vendored dependencies |
+| `.cargo/` | Cargo cache |
+| `.tox/` | Python tox |
+| `coverage/` | Test coverage output |
+
+#### Event Flow
+
+1. `notify::Watcher` delivers raw filesystem events
+2. `CodeIndexWatcher` deduplicates and debounces (500ms window)
+3. Debounced events are sent via bounded channel to the background worker
+4. On drop, the watcher gracefully shuts down via `stop()` signal
+
+#### Starting the Watcher
+
+```rust
+let watch_session = code_index.start_watching(root_path)?;
+// Returns WatchSession which stops on drop
+```
+
+### 6.12 Background Worker (`worker.rs`)
+
+The background worker processes file change events from the watcher in a
+dedicated thread, performing incremental index updates without blocking the
+main session.
+
+#### Processing Pipeline
+
+```text
+WatchEvent received
+   ↓
+Batch accumulation (max 50 events or 500ms timeout)
+   ↓
+For each file in batch:
+   ├── Read file contents
+   ├── Compute Blake3 hash → compare with stored hash
+   ├── If changed: re-parse with tree-sitter → update SQLite + FTS
+   └── If unchanged: skip (dedup by content hash)
+   ↓
+Commit Tantivy index (try_commit)
+```
+
+#### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `batch_size` | 50 | Max events per batch before flush |
+| `debounce_ms` | 500 | Debounce window for event coalescing |
+| `max_queue_size` | 10,000 | Bounded channel capacity |
+
+#### Worker Lifecycle
+
+- **Started** by `start_watching()` via `tokio::spawn`
+- **Receives** `WatchEvent` variants: `Created(path)`, `Modified(path)`,
+  `Removed(path)`, `Renamed(old, new)`
+- **Graceful shutdown** on channel close (watcher dropped) or explicit
+  poison pill
+- **Error resilience:** Individual file failures are logged but do not stop
+  batch processing
+
+### 6.13 Tree Cache (`tree_cache.rs`)
+
+An LRU cache of parsed tree-sitter syntax trees to avoid repeated parsing
+of frequently accessed files.
+
+#### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `capacity` | 1,000 | Maximum cached parse trees |
+| `eviction` | LRU | Least Recently Used eviction policy |
+
+#### Cache Operations
+
+| Method | Description |
+|--------|-------------|
+| `get(path)` | Return cached tree if present and file unchanged |
+| `insert(path, tree, hash)` | Store parsed tree with content hash |
+| `invalidate(path)` | Remove entry (called on file change) |
+| `clear()` | Drop all cached entries |
+
+Cache validity is checked by comparing the stored Blake3 hash against the
+current file hash. If the hash differs, the cache entry is invalidated and
+the file is re-parsed.
+
+### 6.14 Full-Text Search (`search.rs`)
+
+The code index uses Tantivy (a Rust full-text search engine) for fast
+symbol and content search across indexed files.
+
+#### Index Schema
+
+| Field | Type | Stored | Indexed | Tokenizer |
+|-------|------|--------|---------|-----------|
+| `path` | text | yes | yes | raw (exact) |
+| `name` | text | yes | yes | default (tokenized) |
+| `kind` | text | yes | yes | raw |
+| `language` | text | yes | yes | raw |
+| `content` | text | no | yes | default |
+| `line` | u64 | yes | yes | — |
+| `parent` | text | yes | yes | raw |
+
+#### Search Scoring
+
+Tantivy uses BM25 scoring by default, ranking results by term frequency and
+inverse document frequency. The `FtsIndex` provides:
+
+| Method | Description |
+|--------|-------------|
+| `search(query, limit)` | Full-text search with BM25 ranking |
+| `search_by_kind(query, kind, limit)` | Filter by symbol kind |
+| `search_in_file(query, path)` | Scope search to a specific file |
+| `rebuild_from_store(store)` | Rehydrate FTS from SQLite data |
+
+#### FTS Lifecycle
+
+1. **Build:** During full indexing, symbols are written to both SQLite and
+   Tantivy
+2. **Incremental:** On file change, old entries are deleted by path and new
+   entries added
+3. **Rebuild:** `rebuild_fts()` reconstructs the entire Tantivy index from
+   SQLite (used on corruption or mismatch detection)
+4. **Validation:** `full_reindex()` auto-detects FTS/SQLite count mismatch
+   and triggers rebuild
+
+### 6.15 Content Hashing (Blake3)
+
+All indexed files are hashed using Blake3 for fast content-based change
+detection. Blake3 is chosen for its performance (3-4x faster than SHA-256)
+and streaming capability.
+
+**Usage in the index:**
+
+| Location | Purpose |
+|----------|---------|
+| `scanner.rs` | Hash computed during initial file scan |
+| `worker.rs` | Hash compared before re-parsing on file change |
+| `tree_cache.rs` | Hash used to validate cache freshness |
+| `store.rs` | Hash stored in SQLite `files` table |
+
+**Hash comparison flow:**
+
+```text
+File changed event → Read file → Compute Blake3 hash
+   ↓
+Compare with stored hash in SQLite
+   ├── Same → Skip (no actual change)
+   └── Different → Re-parse → Update SQLite + FTS + Cache
+```
 
 ---
 
@@ -1587,32 +1947,94 @@ The `mode` parameter accepts `"append"` (default) or `"overwrite"`. The
 ### 7.6 Semantic Search (Embeddings)
 
 Optional embedding-based semantic search enables natural language queries
-across all memory types. This requires the `embeddings` Cargo feature and
-ONNX Runtime.
+across all memory types. Unlike FTS5 keyword search, semantic search finds
+memories by _meaning_ — a query for "authentication flow" will match a
+memory about "JWT token login process" even though they share no keywords.
 
-#### 7.6.1 Embedding Provider
+Embeddings require two things:
 
-The `EmbeddingProvider` trait defines the interface:
+1. The `embeddings` **Cargo feature** compiled in (see §7.6.4).
+2. The `memory.semantic.enabled` **configuration flag** set to `true` (see §7.6.5).
 
-| Method | Description |
-|--------|-------------|
-| `embed(text)` | Generate embedding vector for a single text |
-| `embed_batch(texts)` | Generate embeddings for multiple texts |
-| `dimensions()` | Vector dimensionality (0 = disabled) |
-| `name()` | Provider name |
-| `is_available()` | Whether embeddings are active |
+When either condition is missing the system falls back silently to FTS5.
 
-**Implementations:**
+#### 7.6.1 Architecture
 
-| Provider | Description | Dimensions |
-|----------|-------------|------------|
-| `NoOpEmbedding` | Returns empty vectors (disabled mode, always available) | 0 |
-| `LocalEmbeddingProvider` | ONNX-based sentence-transformer model | 384 |
+```text
+┌──────────────────────────┐
+│   EmbeddingProvider      │  (trait)
+│   - embed(text)          │
+│   - embed_batch(texts)   │
+│   - dimensions()         │
+│   - name()               │
+│   - is_available()       │
+└──────┬───────────────────┘
+       │
+  ┌────┴─────┐
+  │          │
+  ▼          ▼
+NoOp     Local (ort)
+(empty)  (ONNX Runtime)
+```
 
-The default model is `all-MiniLM-L6-v2`, a lightweight sentence-transformer
-that produces 384-dimensional vectors.
+The `EmbeddingProvider` trait abstracts all embedding generation behind a
+common interface. Two implementations ship with ragent:
 
-#### 7.6.2 Search Behaviour
+| Provider | Name | Description | Dimensions | External Deps |
+|----------|------|-------------|------------|---------------|
+| `NoOpEmbedding` | `"noop"` | Returns empty vectors; signals that semantic search is unavailable | 0 | None |
+| `LocalEmbeddingProvider` | `"ort-local"` | Runs a sentence-transformer ONNX model locally via ONNX Runtime | 384 (default) | `ort`, `tokenizers`, `ndarray` |
+
+**Trait methods:**
+
+| Method | Return | Description |
+|--------|--------|-------------|
+| `embed(text)` | `Result<Vec<f32>>` | Generate an embedding vector for a single text string |
+| `embed_batch(texts)` | `Result<Vec<Vec<f32>>>` | Generate embeddings for multiple texts (default: sequential; override for GPU batching) |
+| `dimensions()` | `usize` | Vector dimensionality; `0` means disabled |
+| `name()` | `&str` | Human-readable provider name (e.g. `"noop"`, `"ort-local"`) |
+| `is_available()` | `bool` | `true` when the provider can produce real embeddings (`dimensions() > 0`) |
+
+#### 7.6.2 Default Model — `all-MiniLM-L6-v2`
+
+The default (and currently only supported) model is
+[`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2),
+a lightweight sentence-transformer that produces **384-dimensional** vectors.
+
+| Property | Value |
+|----------|-------|
+| Model name | `all-MiniLM-L6-v2` |
+| Source | HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`) |
+| Dimensions | 384 |
+| Pooling | Mean pooling with attention-mask weighting |
+| Normalisation | L2-normalised output vectors |
+| Runtime | ONNX Runtime (via the `ort` crate) |
+| Tokeniser | HuggingFace `tokenizers` crate (`tokenizer.json`) |
+
+**Required model files** (downloaded automatically on first use):
+
+| File | Purpose |
+|------|---------|
+| `model.onnx` | ONNX model weights |
+| `tokenizer.json` | Tokeniser vocabulary and configuration |
+| `config.json` | Model configuration metadata |
+
+**Model storage location:**
+
+```
+~/.local/share/ragent/models/all-MiniLM-L6-v2/
+├── model.onnx
+├── tokenizer.json
+└── config.json
+```
+
+On first call to `embed()`, the provider checks for these files locally. Any
+missing files are downloaded from HuggingFace (`https://huggingface.co/
+sentence-transformers/all-MiniLM-L6-v2/resolve/main/<file>`). Downloads are
+atomic (write to `.tmp`, then rename) to prevent corruption. Subsequent calls
+reuse the cached files with no network access.
+
+#### 7.6.3 Search Behaviour
 
 The `memory_search` tool adapts based on embedding availability:
 
@@ -1621,23 +2043,147 @@ The `memory_search` tool adapts based on embedding availability:
   similarity score.
 - **Embeddings disabled:** falls back to FTS5 keyword search.
 
-Embeddings are computed lazily — memories are embedded on first semantic
-search, not at insert time. Vectors are stored as little-endian `f32` arrays
-in SQLite BLOB columns.
+**Lazy embedding:** Memories are _not_ embedded at insert time. Instead,
+embeddings are computed on first semantic search — any memories without an
+embedding vector are embedded on the fly and their vectors stored for future
+queries. This keeps inserts fast and avoids embedding memories that may never
+be searched.
 
-#### 7.6.3 Configuration
+**Vector storage:** Embedding vectors are serialised as little-endian IEEE 754
+`f32` arrays (4 bytes per dimension) and stored in SQLite BLOB columns. For
+the default 384-dim model, each embedding occupies **1536 bytes**.
+
+**Similarity scoring:** Retrieval uses cosine similarity with a configurable
+minimum threshold (default `0.3`). Results are ranked from highest to lowest
+similarity.
+
+**`memory_search` parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | _(required)_ | Natural language description of what to find |
+| `scope` | `"memories"` \| `"blocks"` \| `"all"` | `"memories"` | Which store to search |
+| `limit` | integer | 5 | Maximum number of results |
+| `min_similarity` | float | 0.3 | Cosine similarity threshold (0.0–1.0, only used with embeddings) |
+
+#### 7.6.4 Enabling Embeddings — Build Step
+
+Embeddings are gated behind the `embeddings` Cargo feature flag on the
+`ragent-core` crate. This keeps the binary small when semantic search is not
+needed (ONNX Runtime and tokeniser add significant size).
+
+**Feature flag definition** (`crates/ragent-core/Cargo.toml`):
+
+```toml
+[features]
+embeddings = ["ort", "tokenizers", "ndarray"]
+```
+
+**Dependencies pulled in by the feature:**
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `ort` | 2.0.0-rc.12 | ONNX Runtime bindings (with `download-binaries` and `load-dynamic` features) |
+| `tokenizers` | latest | HuggingFace tokeniser for text → token conversion |
+| `ndarray` | latest | N-dimensional array operations for tensor I/O |
+
+**Build with embeddings enabled:**
+
+```bash
+# Build the ragent-core crate with embeddings
+cargo build -p ragent-core --features embeddings
+
+# Build the full workspace with embeddings
+cargo build --features ragent-core/embeddings
+
+# Run tests including embedding tests
+cargo test -p ragent-core --features embeddings
+```
+
+When the `embeddings` feature is **not** compiled in, the
+`LocalEmbeddingProvider` type is absent entirely. Only `NoOpEmbedding` is
+available, and `memory_search` / `journal_search` always use FTS5 regardless
+of configuration.
+
+#### 7.6.5 Enabling Embeddings — Configuration Step
+
+After building with the feature flag, enable semantic search in
+`ragent.json`:
 
 ```jsonc
 {
   "memory": {
+    "enabled": true,
+    "tier": "semantic",            // must be "semantic" to activate embeddings
     "semantic": {
-      "enabled": true,
-      "model": "all-MiniLM-L6-v2",
-      "dimensions": 384
+      "enabled": true,             // enable the embedding provider
+      "model": "all-MiniLM-L6-v2", // model name (only supported value currently)
+      "dimensions": 384            // must match model output (384 for all-MiniLM-L6-v2)
     }
   }
 }
 ```
+
+**Configuration fields (`memory.semantic`):**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable/disable semantic search. When `false`, FTS5 keyword search is used. |
+| `model` | string | `"all-MiniLM-L6-v2"` | Name of the ONNX sentence-transformer model. Currently only `all-MiniLM-L6-v2` is supported. |
+| `dimensions` | integer | `384` | Embedding vector dimensions. Must match the model output (384 for `all-MiniLM-L6-v2`). |
+
+**Memory tier levels** (`memory.tier`):
+
+| Tier | Components Enabled |
+|------|-------------------|
+| `"core"` | File-based memory blocks only (default) |
+| `"structured"` | File blocks + SQLite structured store + journal + knowledge graph |
+| `"semantic"` | All of the above + embedding vectors + cosine-similarity search |
+
+**Minimal configuration** — add just these lines to enable embeddings with
+all defaults:
+
+```jsonc
+{
+  "memory": {
+    "tier": "semantic",
+    "semantic": {
+      "enabled": true
+    }
+  }
+}
+```
+
+#### 7.6.6 Embedding Lifecycle
+
+```text
+1. Build with `--features embeddings`
+2. Set `memory.tier = "semantic"` and `memory.semantic.enabled = true`
+3. On first `memory_search` call:
+   a. LocalEmbeddingProvider lazily initialises
+   b. Model files downloaded to ~/.local/share/ragent/models/ (if missing)
+   c. ONNX session and tokeniser loaded (Mutex-protected, thread-safe)
+   d. Query text embedded → 384-dim f32 vector
+   e. Un-embedded memories are batch-embedded and vectors stored
+   f. Cosine similarity computed against all stored vectors
+   g. Results returned ranked by similarity score
+4. Subsequent searches reuse the loaded model and stored vectors
+```
+
+**Error handling:** If model initialisation fails (download error, corrupt
+model file, OOM), the provider transitions to a `Failed` state and will not
+retry on subsequent calls. The error message is preserved for diagnostics.
+`memory_search` falls back to FTS5 when the provider is unavailable.
+
+#### 7.6.7 Utility Functions
+
+The embedding module exports helper functions for working with vectors:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `cosine_similarity(a, b)` | `(&[f32], &[f32]) → f32` | Cosine similarity in `[-1.0, 1.0]`; panics if lengths differ; returns `0.0` for zero-magnitude vectors |
+| `serialise_embedding(vec)` | `(&[f32]) → Vec<u8>` | Serialise to little-endian byte blob for SQLite BLOB storage |
+| `deserialise_embedding(blob, dims)` | `(&[u8], usize) → Result<Vec<f32>>` | Deserialise byte blob back to vector; validates length matches dimensions |
 
 ### 7.7 Automatic Memory Extraction
 
@@ -1948,6 +2494,188 @@ Complete memory configuration in `ragent.json`:
 | **Knowledge graph** | SQLite | Project | Read/Write | Entity/relationship queries |
 | **Embeddings** | SQLite BLOB | Per-entry | Read/Write | Cosine similarity |
 
+### 7.16 Import/Export
+
+The memory system supports importing and exporting data in multiple formats
+for migration, backup, and interoperability.
+
+#### Export Formats
+
+| Format | Command | Description |
+|--------|---------|-------------|
+| **ragent** | `ragent memory export --format ragent` | Native JSON format with full metadata |
+| **markdown** | `ragent memory export --format markdown` | Human-readable Markdown blocks |
+
+**ragent JSON export structure:**
+
+```json
+{
+  "version": "1",
+  "exported_at": "2025-01-15T10:30:00Z",
+  "blocks": [
+    {
+      "scope": "project",
+      "label": "conventions",
+      "content": "...",
+      "read_only": false,
+      "metadata": {}
+    }
+  ],
+  "memories": [
+    {
+      "id": "mem_abc",
+      "content": "...",
+      "category": "tech_stack",
+      "confidence": 0.85,
+      "tags": ["database"],
+      "created_at": "...",
+      "last_accessed": "..."
+    }
+  ],
+  "journal": [
+    {
+      "id": "j_xyz",
+      "entry_type": "decision",
+      "title": "...",
+      "content": "...",
+      "tags": []
+    }
+  ]
+}
+```
+
+#### Import Formats
+
+| Format | Command | Description |
+|--------|---------|-------------|
+| **ragent** | `ragent memory import --format ragent <file>` | Native format (full fidelity) |
+| **cline** | `ragent memory import --format cline <file>` | Cline memory format |
+| **claude-code** | `ragent memory import --format claude-code <file>` | Claude Code CLAUDE.md format |
+
+**Import from Cline:**
+
+Parses Cline's memory bank files (typically `cline_docs/` directory) and
+converts them to ragent memory blocks. Section headers become block labels,
+content is preserved.
+
+**Import from Claude Code:**
+
+Parses `CLAUDE.md` files (project root or `~/.claude/CLAUDE.md`). Each
+section is imported as a separate memory block with appropriate scope
+(project or user based on file location).
+
+#### Import Conflict Resolution
+
+When importing data that conflicts with existing memories:
+
+| Strategy | Behaviour |
+|----------|-----------|
+| **Skip** | Keep existing, skip import (default) |
+| **Overwrite** | Replace existing with imported data |
+| **Merge** | Append imported content to existing blocks |
+
+### 7.17 Cross-Project Memory Sharing
+
+Memories can be shared across projects to enable knowledge transfer and
+reuse of common patterns.
+
+#### Configuration
+
+```jsonc
+{
+  "memory": {
+    "cross_project": {
+      "enabled": true,
+      "shared_scopes": ["user"],
+      "resolve_strategy": "shadow"
+    }
+  }
+}
+```
+
+#### Block Resolution
+
+When a memory block is requested, the system resolves it using a layered
+lookup:
+
+```text
+1. Project-scope block (highest priority)
+2. User-scope block (cross-project)
+3. Global-scope block (lowest priority)
+```
+
+**Shadowing:** A project-scope block with the same label as a user-scope
+block "shadows" it — the project version is returned. The user-scope block
+still exists and is returned in other project contexts.
+
+#### resolve_block() Algorithm
+
+```text
+resolve_block(scope, label):
+  1. Check project scope → return if found
+  2. If cross_project.enabled:
+     a. Check user scope → return if found
+     b. Check global scope → return if found
+  3. Return None
+```
+
+### 7.18 Knowledge Graph
+
+The knowledge graph provides entity-relationship storage for structured
+project knowledge that goes beyond flat text memories.
+
+#### Entity Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `Function` | Named function or method | `parse_config()` |
+| `Type` | Struct, enum, trait, class | `AppConfig` |
+| `File` | Source file | `src/main.rs` |
+| `Module` | Module or package | `ragent_core::memory` |
+| `Concept` | Abstract concept | "authentication flow" |
+| `Tool` | External tool or dependency | `PostgreSQL` |
+
+#### Relation Types
+
+| Relation | Description | Example |
+|----------|-------------|---------|
+| `calls` | Function calls another | `main() → calls → parse_config()` |
+| `uses` | Entity uses another | `AppConfig → uses → serde` |
+| `contains` | Containment relationship | `mod.rs → contains → parse_config()` |
+| `depends_on` | Dependency relationship | `ragent-tui → depends_on → ragent-core` |
+| `implements` | Implementation of trait/interface | `OllamaProvider → implements → Provider` |
+
+#### Graph Operations
+
+| Operation | Description |
+|-----------|-------------|
+| `add_entity(type, name, metadata)` | Create an entity node |
+| `add_relation(from, to, relation)` | Create a relationship edge |
+| `query_entity(name)` | Get entity with all relations |
+| `query_relations(entity, direction)` | Get inbound or outbound relations |
+| `query_path(from, to, max_depth)` | Find shortest path between entities |
+| `remove_entity(name)` | Remove entity and all its relations |
+
+#### Language Support (33 Languages)
+
+The knowledge graph parser recognizes entities from the following languages:
+
+Rust, TypeScript, JavaScript, Python, Go, Java, C, C++, C#, Ruby, PHP,
+Swift, Kotlin, Scala, Lua, R, Dart, Elixir, Haskell, OCaml, Clojure,
+Erlang, F#, Julia, Perl, Shell/Bash, SQL, HTML, CSS, YAML, TOML, JSON,
+Markdown
+
+#### Tool Recognition (40+ Tools)
+
+The knowledge graph automatically recognizes references to common tools and
+frameworks and creates `Tool` entities for them, including:
+
+- **Databases:** PostgreSQL, MySQL, SQLite, MongoDB, Redis, DynamoDB
+- **Frameworks:** React, Vue, Angular, Django, Flask, Express, Spring
+- **Infrastructure:** Docker, Kubernetes, Terraform, AWS, GCP, Azure
+- **Build tools:** Cargo, npm, pip, Maven, Gradle, Make
+- **CI/CD:** GitHub Actions, Jenkins, CircleCI, GitLab CI
+
 ---
 
 ## 8. Teams
@@ -2126,6 +2854,103 @@ Settings in `ragent.json`:
 - Split-pane display (tmux/iTerm2) is out of scope
 - Per-teammate permission modes inherit lead permissions
 - Teammate context windows are independent; no shared memory beyond tasks/mailbox
+
+### 8.13 Member Status States
+
+Team members transition through the following status states:
+
+```text
+[spawned] → Initializing → Ready → Working → Done
+                                  ↘ Error
+                                  ↘ Blocked → Working (unblocked)
+                         → PlanPending → PlanApproved → Working
+                                       → PlanRejected → PlanPending (revised)
+```
+
+| Status | Description |
+|--------|-------------|
+| `Initializing` | Session being created, agent loading |
+| `Ready` | Idle, waiting for task assignment |
+| `Working` | Actively executing a task |
+| `PlanPending` | Submitted plan, awaiting lead approval |
+| `PlanApproved` | Plan approved, resuming execution |
+| `PlanRejected` | Plan rejected with feedback, must revise |
+| `Blocked` | Cannot proceed (missing dependency, etc.) |
+| `Done` | Completed all assigned tasks |
+| `Error` | Unrecoverable error during execution |
+
+### 8.14 Broadcast Messaging
+
+The lead can send broadcast messages to all active teammates simultaneously:
+
+```
+/team broadcast "Focus on error handling paths first"
+```
+
+**Broadcast behaviour:**
+- Message delivered to every teammate's mailbox
+- Teammates receive the message on their next mailbox poll
+- Does not interrupt active tool execution
+- Broadcast messages have type `broadcast` in the mailbox
+
+### 8.15 Memory Scopes
+
+Each teammate can be configured with a memory scope that controls which
+memories are available during execution:
+
+| Scope | Description |
+|-------|-------------|
+| `None` | No memory access (stateless execution) |
+| `User` | Access user-level memories only |
+| `Project` | Access project-level memories (default for most tasks) |
+
+Memory scope is set per team member in the team configuration:
+
+```jsonc
+{
+  "teams": {
+    "members": [
+      {
+        "name": "reviewer",
+        "agent": "code-review",
+        "memory_scope": "project"
+      }
+    ]
+  }
+}
+```
+
+### 8.16 Task Dependencies
+
+Tasks support dependency edges to enforce execution order:
+
+```text
+Task A (setup) ──→ Task B (implement) ──→ Task C (test)
+                ↘ Task D (docs)
+```
+
+- A task with unmet dependencies has status `Blocked`
+- When a dependency completes, blocked tasks are automatically unblocked
+- Circular dependencies are detected at creation time and rejected
+- The lead can override blocked status with `/team unblock <task_id>`
+
+### 8.17 Hook Events
+
+Teams emit hook events for quality gate integration:
+
+| Event | Trigger |
+|-------|---------|
+| `team_member_spawned` | New teammate created |
+| `team_member_done` | Teammate completed all tasks |
+| `team_member_error` | Teammate encountered fatal error |
+| `team_plan_submitted` | Teammate submitted plan for review |
+| `team_plan_approved` | Lead approved teammate's plan |
+| `team_plan_rejected` | Lead rejected teammate's plan |
+| `team_task_claimed` | Teammate claimed a task |
+| `team_task_completed` | Task completed successfully |
+
+These events can trigger hooks for external CI/CD integration, logging, or
+notification systems.
 
 ---
 
@@ -2927,31 +3752,146 @@ EOF
 
 ### 12.1 Overview
 
-Transform plain prompts into structured frameworks using `/opt` command or `POST /opt` endpoint.
+Transform plain prompts into structured frameworks using the `/opt` command
+or `POST /opt` endpoint. The prompt optimization module provides 12
+LLM-powered prompt engineering frameworks via an async `optimize` function
+in the `prompt_opt` crate. It is decoupled from any specific LLM backend
+through a `Completer` trait that callers implement.
 
-### 12.2 Optimization Methods
+### 12.2 Architecture
 
-| Method | Description |
-|--------|-------------|
-| `co_star` | Context, Objective, Scope, Task, Action, Result |
-| `crispe` | Context, Role, Intent, Steps, Persona, Examples |
-| `cot` | Chain-of-Thought step-by-step reasoning |
-| `draw` | Image prompt: subject, style, details, negatives |
-| `rise` | Role, Intent, Scope, Examples |
-| `o1_style` | Stylized creative tokens and constraints |
-| `meta` | Meta Prompting — generate internal prompt |
-| `variational` | VARI — multiple prompt candidates |
-| `q_star` | Q* — iterative query refinement |
-| `openai` | OpenAI/GPT system+user adapter |
-| `claude` | Anthropic Claude adapter |
-| `microsoft` | Microsoft Azure AI adapter |
+```rust
+#[async_trait]
+pub trait Completer: Send + Sync {
+    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String>;
+}
 
-### 12.3 Usage
+pub async fn optimize(
+    method: OptMethod,
+    input: &str,
+    completer: &dyn Completer,
+) -> anyhow::Result<String>
+```
+
+Each method has a static `system_prompt(method)` that returns the
+meta-prompt, a `name()` for CLI usage, and a `description()` for help text.
+The method enum supports case-insensitive parsing with aliases (e.g. `"cot"`
+→ `ChainOfThought`, `"o1"` → `O1Style`, `"q*"` → `QStar`).
+
+### 12.3 Optimization Methods
+
+| Method | Name | Framework | Purpose | When to Use |
+|--------|------|-----------|---------|-------------|
+| **CO-STAR** | `co_star` | Context, Objective, Style/Identity, Tone, Audience, Result | Comprehensive structured role assignment | Tasks requiring multiple well-defined dimensions |
+| **CRISPE** | `crispe` | Capacity/Role, Request, Intent, Steps, Persona, Examples | Detailed role-based workflow with skill enumeration | Workflows needing explicit skill and step definitions |
+| **Chain-of-Thought** | `cot` | Step-by-step reasoning scaffold with self-checks | Encourage intermediate thinking steps | Reasoning-heavy problems; math, logic, analysis |
+| **DRAW** | `draw` | Professional AI image/drawing prompt optimizer | Reframe text-to-image prompts for diffusion models | Stable Diffusion / DALL-E prompt generation |
+| **RISE** | `rise` | Recursive Introspection for iterative self-improvement | Multi-turn self-checking refinement loops | Iterative refinement where quality improves per pass |
+| **O1-STYLE** | `o1_style` | `<thinking>`, `<step>`, `<reflection>`, `<reward>` tag scaffold | Reward-driven extended thinking | Deep reasoning; OpenAI o1-style structured thought |
+| **Meta Prompting** | `meta` | Distill to concise, high-signal meta-prompt | Strip filler; compress instructions | Simplifying verbose prompts; reducing token count |
+| **Variational** | `variational` | Template-based planning with `[placeholders]` for task content | Planning-based generation with structured output | Template-driven workflows; document generation |
+| **Q-STAR** | `q_star` | XML-structured Q\*/A\* iterative optimizer | Reasoning chains with reward-modelled selection | Complex queries needing iterative quality checks |
+| **OpenAI** | `openai` | Detailed GPT-style system prompt with guidelines | Extensive role description + constraints | GPT models; system prompts for chat completions |
+| **Claude** | `claude` | Anthropic-style XML instruction generator with examples | XML tags for clarity + reasoning scaffolding | Claude / Anthropic models; structured XML prompts |
+| **Microsoft** | `microsoft` | Azure AI optimized prompt with quality targets | SLA-aware quality metrics and validation | Azure OpenAI; enterprise quality requirements |
+
+### 12.4 Method Details
+
+#### CO-STAR
+
+Generates structured sections for **C**ontext, **O**bjective,
+**S**tyle/Identity, **T**one, **A**udience, and **R**esult. Best for
+comprehensive tasks where the model needs to adopt a specific persona and
+produce output tailored to a defined audience.
+
+#### CRISPE
+
+Creates a role profile with **C**apacity/Role, **R**equest, **I**ntent,
+**S**teps, **P**ersona, and **E**xamples. Particularly effective when the
+task benefits from explicitly listing the agent's skills and providing
+step-by-step workflows.
+
+#### Chain-of-Thought (CoT)
+
+Adds explicit step-by-step reasoning scaffolding with self-checks before
+the final answer. The model is instructed to show its work, verify each
+step, and only then produce the conclusion.
+
+#### DRAW
+
+A specialised image prompt optimizer that transforms natural language
+descriptions into detailed text-to-image prompts. Handles subject
+composition, artistic style, lighting, camera angle, and negative prompts.
+
+#### RISE
+
+Implements **R**ecursive **I**ntrospection: the model produces an initial
+attempt, introspects on its quality, refines the output, reflects on the
+improvement, and iterates. Useful when quality improves with revision.
+
+#### O1-STYLE
+
+Scaffolds the response with XML tags — `<thinking>`, `<step>`,
+`<reflection>`, `<reward>` — mimicking OpenAI o1's extended thinking
+behaviour. A numeric reward score guides the model to continue refining
+until a threshold is met.
+
+#### Meta Prompting
+
+Distils verbose user instructions into a minimal, high-signal meta-prompt.
+Strips filler words, redundancy, and unnecessary context while preserving
+all actionable requirements.
+
+#### Variational
+
+Creates a planning template with bracketed `[placeholders]` that map to
+specific task content. Useful for generating structured documents or
+repeatable workflow templates.
+
+#### Q-STAR
+
+Uses XML-structured reasoning chains (`<system-instruction>`, `<task>`,
+`<reasoning>`) with iterative refinement. Inspired by the Q\* / A\*
+search paradigm for exploring multiple solution paths.
+
+#### OpenAI
+
+Generates a comprehensive GPT-style system prompt with explicit guidelines,
+constraints, output format specifications, and quality criteria. Optimised
+for `gpt-4` and `gpt-3.5-turbo` system message conventions.
+
+#### Claude
+
+Creates Anthropic-style prompts using XML tags (`<task>`, `<document>`,
+`<answer>`, `<thinking>`) with inline examples. Designed for Claude's
+preference for structured XML input.
+
+#### Microsoft
+
+Produces Azure AI optimised prompts with SLA compliance targets, quality
+validation checkpoints, and structured output criteria. Suited for
+enterprise deployments with measurable quality requirements.
+
+### 12.5 Usage
 
 ```bash
-/opt help                           # Show method table
+/opt help                           # Show method table with descriptions
 /opt co_star Explain Rust lifetimes
 /opt cot Solve the two-sum problem
+/opt draw A cyberpunk cityscape at sunset
+/opt claude Build a REST API with error handling
+```
+
+**HTTP API:**
+
+```
+POST /opt
+Content-Type: application/json
+
+{
+  "method": "co_star",
+  "input": "Explain Rust lifetimes to a beginner"
+}
 ```
 
 ---
@@ -3349,18 +4289,20 @@ agent-specific rules override global rules, which override built-in defaults.
 ### 13.9 Hooks System
 
 Lifecycle hooks allow running shell commands at key session points for
-auditing, logging, and custom permission logic.
+auditing, logging, and custom permission logic. Hooks are synchronous for
+pre-tool-use (can block or modify execution) and fire-and-forget for all
+other triggers.
 
 #### Triggers
 
-| Trigger | Description |
-|---------|-------------|
-| `on_session_start` | Fired when session receives first user message |
-| `on_session_end` | Fired after session completes processing |
-| `on_error` | Fired when LLM call or tool execution errors |
-| `on_permission_denied` | Fired when tool rejected by permission rule |
-| `pre_tool_use` | Fired before tool execution (can approve/deny/modify) |
-| `post_tool_use` | Fired after tool execution (can inspect/modify results) |
+| Trigger | Description | Execution Model |
+|---------|-------------|-----------------|
+| `on_session_start` | Fired when session receives first user message | Fire-and-forget |
+| `on_session_end` | Fired after session completes processing | Fire-and-forget |
+| `on_error` | Fired when LLM call or tool execution errors | Fire-and-forget |
+| `on_permission_denied` | Fired when tool rejected by permission rule | Fire-and-forget |
+| `pre_tool_use` | Fired before tool execution (can approve/deny/modify) | Synchronous (blocks) |
+| `post_tool_use` | Fired after tool execution (can inspect/modify results) | Async spawned |
 
 #### Configuration
 
@@ -3369,12 +4311,13 @@ auditing, logging, and custom permission logic.
   "hooks": [
     {
       "trigger": "on_session_start",
-      "command": "echo 'Session started' >> ~/.ragent/session.log"
+      "command": "echo 'Session started' >> ~/.ragent/session.log",
+      "timeout_secs": 30
     },
     {
       "trigger": "pre_tool_use",
       "command": "./check_tool.sh",
-      "timeout_secs": 30
+      "timeout_secs": 10
     },
     {
       "trigger": "on_permission_denied",
@@ -3390,26 +4333,79 @@ auditing, logging, and custom permission logic.
 
 #### Environment Variables
 
-| Variable | Triggers | Description |
-|----------|----------|-------------|
-| `RAGENT_TRIGGER` | All | The trigger name |
-| `RAGENT_WORKING_DIR` | All | Session working directory |
-| `RAGENT_ERROR` | `on_error` | Error message |
-| `RAGENT_TOOL_NAME` | `pre_tool_use`, `post_tool_use` | Tool being invoked |
-| `RAGENT_TOOL_INPUT` | `pre_tool_use`, `post_tool_use` | JSON tool arguments |
-| `RAGENT_TOOL_OUTPUT` | `post_tool_use` | JSON tool output |
-| `RAGENT_TOOL_SUCCESS` | `post_tool_use` | `"true"` or `"false"` |
+All hooks receive a base set of environment variables. Additional variables
+are provided depending on the trigger type:
+
+**Base variables (all hooks):**
+
+| Variable | Description |
+|----------|-------------|
+| `RAGENT_TRIGGER` | The trigger name (e.g., `on_session_start`, `pre_tool_use`) |
+| `RAGENT_WORKING_DIR` | Session working directory |
+
+**Error hooks (`on_error`):**
+
+| Variable | Description |
+|----------|-------------|
+| `RAGENT_ERROR` | Error message text |
+
+**Tool hooks (`pre_tool_use`, `post_tool_use`):**
+
+| Variable | Description |
+|----------|-------------|
+| `RAGENT_TOOL_NAME` | Name of the tool being invoked |
+| `RAGENT_TOOL_INPUT` | JSON string of the tool arguments |
+
+**Post-tool hooks only (`post_tool_use`):**
+
+| Variable | Description |
+|----------|-------------|
+| `RAGENT_TOOL_OUTPUT` | JSON string of the tool output |
+| `RAGENT_TOOL_SUCCESS` | `"true"` or `"false"` |
 
 #### Pre-tool-use Hook Results
 
-Hooks can return JSON to control execution:
+`pre_tool_use` hooks run synchronously before tool execution and can
+control the outcome by writing JSON to stdout:
 
-| Result | Effect |
-|--------|--------|
+```rust
+pub enum PreToolUseResult {
+    Allow,                          // Execute without UI prompt
+    Deny { reason: String },        // Block execution with reason
+    ModifiedInput { input: Value }, // Modified tool arguments
+    NoDecision,                     // Use normal permission flow
+}
+```
+
+| stdout JSON | Effect |
+|-------------|--------|
 | `{"decision": "allow"}` | Skip UI prompt, allow tool |
 | `{"decision": "deny", "reason": "..."}` | Deny with reason |
-| `{"modified_input": {...}}` | Modify tool arguments before execution |
-| Empty/invalid output | Normal permission flow continues |
+| `{"modified_input": {...}}` | Replace tool arguments before execution |
+| Empty/invalid output | Normal permission flow continues (`NoDecision`) |
+
+#### Post-tool-use Hook Results
+
+`post_tool_use` hooks run asynchronously after tool execution and can
+modify the output returned to the LLM:
+
+| stdout JSON | Effect |
+|-------------|--------|
+| `{"modified_output": {"content": "...", ...}}` | Replace tool output |
+| Empty/invalid output | Original output passed through unchanged |
+
+#### Execution Model
+
+| Type | Function | Behaviour |
+|------|----------|-----------|
+| **Synchronous** | `run_pre_tool_use_hooks()` | Blocks tool execution; can modify/deny |
+| **Async spawned** | `run_post_tool_use_hooks()` | Spawned tasks; can inspect/modify output |
+| **Fire-and-forget** | `fire_hooks()` | Spawned tasks; never block execution |
+
+**Default timeout:** 30 seconds per hook (configurable via `timeout_secs`).
+
+**Error handling:** Hook errors are logged but never fatal. Failures do not
+block tool execution or session processing.
 
 ### 13.10 HTTP & Network Security
 
@@ -3659,20 +4655,128 @@ Your custom instructions here...
 
 Location: Same directories as above
 
+The OASF (Open Agent Schema Format) provides a structured JSON format for
+defining agents with fine-grained control over capabilities.
+
+#### Full Schema
+
 ```json
 {
   "schema_version": "oasf/agntcy.org/agent/1.0.0",
   "name": "my-agent",
   "description": "Custom agent description",
-  "model": { "provider": "anthropic", "id": "claude-sonnet-4-20250514" },
-  "ragent": {
-    "version": "1",
-    "system_prompt": "Your instructions...",
-    "memory_scope": "project",
-    "permissions": []
-  }
+  "version": "1.0.0",
+  "modules": [
+    {
+      "name": "core",
+      "type": "ragent",
+      "payload": {
+        "version": "1",
+        "system_prompt": "Your instructions...",
+        "model": "anthropic/claude-sonnet-4-20250514",
+        "memory_scope": "project",
+        "temperature": 0.7,
+        "max_tokens": 4096,
+        "skills": ["code-review", "testing"],
+        "tools": {
+          "allowed": ["read_file", "write_file", "bash"],
+          "denied": ["delete_file"]
+        },
+        "permissions": [
+          {
+            "path": "src/**/*.rs",
+            "allow": ["read", "write"]
+          },
+          {
+            "path": "*.env",
+            "allow": ["read"],
+            "deny": ["write"]
+          }
+        ]
+      }
+    }
+  ]
 }
 ```
+
+#### OasfAgentRecord Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `schema_version` | string | yes | Must be `"oasf/agntcy.org/agent/1.0.0"` |
+| `name` | string | yes | Unique agent identifier |
+| `description` | string | no | Human-readable description |
+| `version` | string | no | Agent version |
+| `modules` | array | yes | Agent capability modules |
+
+#### RagentAgentPayload Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | `"1"` | Payload schema version |
+| `system_prompt` | string | _(required)_ | Agent's system prompt |
+| `model` | string | config default | LLM model identifier |
+| `memory_scope` | string | `"none"` | Memory scope: `none`, `user`, `project` |
+| `temperature` | f64 | `0.7` | LLM temperature parameter |
+| `max_tokens` | u32 | model default | Max response tokens |
+| `skills` | string[] | `[]` | Named skill sets to activate |
+| `tools.allowed` | string[] | all | Whitelist of permitted tools |
+| `tools.denied` | string[] | `[]` | Blacklist of denied tools |
+| `permissions` | array | `[]` | File/path permission rules |
+
+#### Permission Rules
+
+Permission rules use glob patterns to control file access per agent:
+
+```json
+{
+  "permissions": [
+    {
+      "path": "src/**/*.rs",
+      "allow": ["read", "write"]
+    },
+    {
+      "path": "secrets/**",
+      "deny": ["read", "write"]
+    },
+    {
+      "path": "tests/**",
+      "allow": ["read", "write", "execute"]
+    }
+  ]
+}
+```
+
+**Rule evaluation order:**
+1. Deny rules checked first (explicit deny always wins)
+2. Allow rules checked next
+3. If no rule matches, falls back to session-level permissions
+
+**Supported permissions:**
+
+| Permission | Description |
+|------------|-------------|
+| `read` | Read file contents |
+| `write` | Create or modify files |
+| `execute` | Run as shell command |
+
+### 15.2.1 Built-in Agents (8)
+
+ragent ships with 8 built-in agents that handle internal operations:
+
+| Agent | Purpose | Used By |
+|-------|---------|---------|
+| `ask` | Answer questions without tool use | `/ask` command |
+| `general` | General-purpose coding assistant | Default agent |
+| `build` | Build and fix compilation errors | `/build` command |
+| `plan` | Create implementation plans | `/plan` command |
+| `explore` | Codebase exploration and research | Sub-agent spawning |
+| `title` | Generate conversation titles | Session management |
+| `summary` | Summarize conversations | Export, compaction |
+| `compaction` | Compress context windows | Automatic compaction |
+
+**Built-in agents cannot be overridden** by custom agents with the same
+name. Custom agents must use unique names.
 
 ### 15.3 System Prompt Best Practices
 
@@ -4362,9 +5466,38 @@ if original_checksum != current_checksum {
 
 ### 19.1 Overview
 
-Language Server Protocol integration providing semantic code intelligence directly within ragent's tool system.
+Language Server Protocol integration provides semantic code intelligence
+directly within ragent's tool system. The `LspManager` coordinates multiple
+language servers in parallel, auto-discovers installed servers from the
+system PATH and VS Code extension directories, and dispatches queries to the
+appropriate server based on file extension.
 
-### 19.2 LSP Tools Available
+### 19.2 Architecture
+
+```text
+LspManager (Arc<RwLock<SharedLspManager>>)
+├── servers: Vec<LspServer>        — All registered servers (connected, disabled, failed)
+├── clients: HashMap<String, Arc<LspClient>>  — Active connections only
+├── root_path: PathBuf             — Workspace root passed to servers
+└── event_bus: Arc<EventBus>       — Publishes LspStatusChanged events
+
+LspServer
+├── id: String                     — Unique server identifier
+├── language: String               — Language served
+├── config: LspServerConfig        — Command, args, extensions, timeout
+├── status: LspStatus              — Starting | Connected | Disabled | Failed
+└── capabilities_summary: Option<String>  — "hover, definition, references, ..."
+```
+
+**Status Lifecycle:**
+
+```text
+[new] → Starting → Connected
+                 ↘ Failed { error }
+      (disabled) → Disabled
+```
+
+### 19.3 LSP Tools Available
 
 | Tool | Purpose |
 |------|---------|
@@ -4374,33 +5507,157 @@ Language Server Protocol integration providing semantic code intelligence direct
 | `lsp_symbols` | List all symbols in a source file |
 | `lsp_diagnostics` | Show compiler errors and warnings |
 
-### 19.3 Configuration
+### 19.4 LspManager API
 
-LSP servers are auto-discovered and configured in `ragent.json`:
+| Method | Description |
+|--------|-------------|
+| `connect(id, language, config)` | Establish connection to a server |
+| `connect_all(configs)` | Connect all configured servers |
+| `disconnect(id)` | Shut down a single server |
+| `disconnect_all()` | Shut down all servers |
+| `client_for_extension(ext)` | Look up active client by file extension |
+| `client_for_path(path)` | Look up active client by file path |
+| `diagnostics_for(path)` | Aggregate diagnostics from all connected servers |
+| `discover()` | Auto-discover installed language servers |
+
+### 19.5 Auto-Discovery
+
+The discovery system scans the local environment for installed language
+servers without requiring manual configuration.
+
+#### Discovery Methods
+
+**1. PATH scanning:**
+
+For each known executable name, checks if it exists on the system PATH.
+Returns the first match per language.
+
+**2. VS Code extension scanning:**
+
+Scans the following directories for bundled language servers:
+
+- `~/.vscode/extensions/`
+- `~/.vscode-server/extensions/`
+- `~/.vscode-insiders/extensions/`
+
+Parses extension directory names
+(`<publisher>.<name>-<version>[-<platform>]`) and resolves relative paths
+to bundled server binaries. For each language, keeps the highest-versioned
+extension and deduplicates across directories.
+
+#### Known Language Servers (13 Built-in)
+
+| Language | Executable Candidates | Args | File Extensions |
+|----------|----------------------|------|-----------------|
+| **Rust** | `rust-analyzer` | _(none)_ | `rs` |
+| **TypeScript** | `typescript-language-server`, `tsserver` | `--stdio` | `ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs` |
+| **Python** | `pyright-langserver`, `pylsp`, `jedi-language-server` | `--stdio` | `py`, `pyi` |
+| **Go** | `gopls` | _(none)_ | `go` |
+| **C/C++** | `clangd` | _(none)_ | `c`, `h`, `cpp`, `hpp`, `cc`, `cxx` |
+| **Java** | `jdtls`, `java-language-server` | _(none)_ | `java` |
+| **Lua** | `lua-language-server` | _(none)_ | `lua` |
+| **Ruby** | `solargraph` | `stdio` | `rb`, `gemspec` |
+| **C#** | `OmniSharp`, `csharp-ls` | `--languageserver` | `cs` |
+| **HTML** | `vscode-html-language-server` | `--stdio` | `html`, `htm` |
+| **CSS** | `vscode-css-language-server` | `--stdio` | `css`, `scss`, `less` |
+| **JSON** | `vscode-json-language-server` | `--stdio` | `json`, `jsonc` |
+
+#### Discovery Result
+
+```rust
+pub struct DiscoveredServer {
+    pub language: String,
+    pub id: String,
+    pub executable: PathBuf,
+    pub args: Vec<String>,
+    pub extensions: Vec<String>,
+    pub source: DiscoverySource,      // SystemPath or VsCodeExtension
+    pub version: Option<String>,
+}
+```
+
+Each `DiscoveredServer` can be converted to an `LspServerConfig` for
+insertion into `ragent.json` via `to_config()`.
+
+### 19.6 Configuration
+
+LSP servers are configured in `ragent.json`:
 
 ```jsonc
 {
   "lsp": {
-    "servers": [
-      {
-        "language": "rust",
-        "command": "rust-analyzer",
-        "args": []
-      }
-    ],
-    "auto_discover": true
+    "rust": {
+      "command": "rust-analyzer",
+      "extensions": ["rs"],
+      "timeout_ms": 15000
+    },
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "extensions": ["ts", "tsx", "js", "jsx"],
+      "disabled": false
+    },
+    "python": {
+      "command": "pyright-langserver",
+      "args": ["--stdio"],
+      "extensions": ["py"],
+      "env": { "PYTHONPATH": "/custom/path" }
+    }
   }
 }
 ```
 
-### 19.4 Usage Guidelines
+**Configuration fields (`LspServerConfig`):**
 
-- **Use LSP tools instead of grep** when looking for code symbols (functions, types, variables)
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `command` | string | _(required)_ | Executable name or path |
+| `args` | string[] | `[]` | Startup arguments |
+| `env` | map | `{}` | Environment variable overrides |
+| `extensions` | string[] | _(required)_ | Handled file extensions |
+| `disabled` | bool | `false` | Skip startup if true |
+| `timeout_ms` | u64 | `10000` | Response timeout in milliseconds |
+
+### 19.7 Capabilities Detection
+
+After a server connects and completes the LSP `initialize` handshake, the
+manager inspects `ServerCapabilities` and builds a human-readable summary
+string listing supported features:
+
+- Hover support
+- Definition / references
+- Document symbols / workspace symbols
+- Diagnostics
+- Formatting / rename
+- Code actions
+
+Example: `"hover, definition, references, symbols, workspace-symbols, diagnostics, formatting"`
+
+### 19.8 Event Publishing
+
+Status changes are published to the `EventBus`:
+
+```rust
+Event::LspStatusChanged {
+    server_id: String,
+    status: LspStatus,     // Starting | Connected | Disabled | Failed { error }
+}
+```
+
+The TUI subscribes to these events to display server health in the status
+bar. Other components can also subscribe to coordinate dependent operations
+(e.g. waiting for servers before indexing).
+
+### 19.9 Usage Guidelines
+
+- **Use LSP tools instead of grep** when looking for code symbols
+  (functions, types, variables)
 - **Connected servers** shown in `/lsp status`
 - **File analysis triggered** on file open
 - **Diagnostics updated** automatically on file changes
+- **Multiple servers** can run in parallel for polyglot projects
 
-### 19.5 Integration Approaches
+### 19.10 Integration Approaches
 
 | Approach | Description |
 |----------|-------------|
@@ -4544,6 +5801,806 @@ On startup, ragent automatically migrates credentials from the legacy file-based
 - `~/.ragent/gitlab_config.json` → settings table
 
 Legacy files are deleted after successful migration.
+
+---
+
+## 21. MCP Integration (Model Context Protocol)
+
+### 21.1 Overview
+
+ragent implements the Model Context Protocol (MCP) client, enabling
+connection to external tool servers that expose capabilities via the
+standardised MCP specification. This allows ragent to dynamically discover
+and invoke tools from any MCP-compatible server.
+
+### 21.2 Architecture
+
+```text
+McpManager
+├── clients: Vec<McpClient>           — Active connections
+├── max_concurrent: usize             — Default 8
+├── discovery: McpDiscovery           — Auto-discovery system
+└── event_bus: Arc<EventBus>          — Status change events
+
+McpClient
+├── server: McpServer                 — Server configuration
+├── transport: McpTransport           — Stdio or HTTP/SSE
+├── status: McpStatus                 — Connecting | Connected | Failed | Disconnected
+├── tools: Vec<McpToolDef>            — Discovered tools from server
+└── timeout: Duration                 — Default 120s per tool call
+```
+
+### 21.3 Transport Types
+
+| Transport | Protocol | Use Case |
+|-----------|----------|----------|
+| **Stdio** | stdin/stdout JSON-RPC | Local processes (most common) |
+| **HTTP/SSE** | HTTP POST + Server-Sent Events | Remote servers, network services |
+
+**Stdio transport:**
+- Spawns the server process as a child
+- Communicates via stdin (requests) and stdout (responses)
+- stderr is captured for error logging
+- Process lifecycle managed by McpClient (killed on disconnect)
+
+**HTTP/SSE transport:**
+- Connects to a running HTTP server
+- Sends requests via HTTP POST
+- Receives streaming responses via SSE
+- Supports reconnection on connection loss
+
+### 21.4 Server Discovery
+
+MCP servers can be discovered automatically from multiple sources:
+
+#### Discovery Sources
+
+| Source | Method | Priority |
+|--------|--------|----------|
+| **Configuration** | `ragent.json` `mcp.servers[]` | Highest |
+| **PATH scanning** | Known executable names on PATH | Medium |
+| **npm global** | `npm list -g` for known MCP packages | Medium |
+| **Registry** | MCP server registry lookup | Lowest |
+
+#### Known MCP Servers (18 Built-in)
+
+The discovery system recognizes the following MCP server executables:
+
+| Server | Package/Binary | Description |
+|--------|---------------|-------------|
+| `filesystem` | `@modelcontextprotocol/server-filesystem` | File operations |
+| `github` | `@modelcontextprotocol/server-github` | GitHub API |
+| `gitlab` | `@modelcontextprotocol/server-gitlab` | GitLab API |
+| `slack` | `@modelcontextprotocol/server-slack` | Slack messaging |
+| `google-drive` | `@modelcontextprotocol/server-gdrive` | Google Drive |
+| `postgres` | `@modelcontextprotocol/server-postgres` | PostgreSQL |
+| `sqlite` | `@modelcontextprotocol/server-sqlite` | SQLite |
+| `puppeteer` | `@modelcontextprotocol/server-puppeteer` | Browser automation |
+| `brave-search` | `@modelcontextprotocol/server-brave-search` | Brave Search |
+| `fetch` | `@modelcontextprotocol/server-fetch` | HTTP fetching |
+| `memory` | `@modelcontextprotocol/server-memory` | Persistent memory |
+| `sequential-thinking` | `@modelcontextprotocol/server-sequential-thinking` | Chain-of-thought |
+| `everything` | `@modelcontextprotocol/server-everything` | Test/demo server |
+| `docker` | `mcp-server-docker` | Docker management |
+| `kubernetes` | `mcp-server-kubernetes` | Kubernetes |
+| `aws` | `mcp-server-aws` | AWS services |
+| `azure` | `mcp-server-azure` | Azure services |
+| `gcp` | `mcp-server-gcp` | Google Cloud |
+
+### 21.5 Security
+
+#### Shell Metacharacter Validation
+
+Before spawning any MCP server process, the command string is validated
+against shell metacharacters to prevent command injection:
+
+**Blocked characters:** `` ` ``, `$`, `|`, `&`, `;`, `>`, `<`, `(`, `)`,
+`{`, `}`, `\n`, `\r`
+
+If any blocked character is found, the server connection is rejected with
+an error.
+
+#### Sandboxing
+
+- Stdio servers run as child processes with inherited environment
+- No additional filesystem sandboxing beyond OS-level permissions
+- Environment variables can be restricted per server via configuration
+
+### 21.6 Configuration
+
+```jsonc
+{
+  "mcp": {
+    "servers": [
+      {
+        "name": "filesystem",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"],
+        "transport": "stdio",
+        "timeout_secs": 120,
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=512"
+        }
+      },
+      {
+        "name": "github",
+        "url": "http://localhost:3100/sse",
+        "transport": "sse",
+        "timeout_secs": 60
+      }
+    ],
+    "auto_discover": true,
+    "max_concurrent_connections": 8
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | _(required)_ | Unique server identifier |
+| `command` | string | _(stdio)_ | Executable to spawn |
+| `args` | string[] | `[]` | Command arguments |
+| `url` | string | _(sse)_ | HTTP/SSE server URL |
+| `transport` | string | `"stdio"` | `"stdio"` or `"sse"` |
+| `timeout_secs` | u64 | `120` | Per-tool-call timeout |
+| `env` | map | `{}` | Environment variable overrides |
+| `auto_discover` | bool | `true` | Enable auto-discovery |
+| `max_concurrent_connections` | usize | `8` | Max simultaneous servers |
+
+### 21.7 Tool Integration
+
+MCP tools are registered alongside native ragent tools and are available
+to the LLM with the prefix `mcp_<server>_<tool>`:
+
+```text
+MCP server "github" exposes tools:
+  → mcp_github_create_issue
+  → mcp_github_list_repos
+  → mcp_github_search_code
+```
+
+**Tool call flow:**
+
+```text
+LLM selects mcp_github_create_issue
+   → McpManager routes to "github" client
+   → McpClient sends JSON-RPC request
+   → Server processes and responds
+   → Result returned to LLM as tool output
+```
+
+### 21.8 Status Events
+
+```rust
+Event::McpStatusChanged {
+    server_name: String,
+    status: McpStatus,  // Connecting | Connected | Failed { error } | Disconnected
+}
+```
+
+Status changes are published to the EventBus and displayed in the TUI
+status bar.
+
+---
+
+## 22. Orchestrator & Multi-Agent Coordination
+
+### 22.1 Overview
+
+The orchestrator provides a framework for coordinating multiple agents to
+work on complex tasks. It supports various job execution modes, conflict
+resolution policies, and leader election for distributed scenarios.
+
+### 22.2 Architecture
+
+```text
+Coordinator
+├── registry: AgentRegistry          — Available agents and capabilities
+├── router: RouterComposite          — Message routing (in-process + HTTP)
+├── leader: LeaderElector            — Vote-based leader election
+├── jobs: HashMap<JobId, Job>        — Active and completed jobs
+├── metrics: MetricsSnapshot         — Performance counters
+└── event_tx: Sender<JobEvent>       — Job lifecycle events
+
+AgentRegistry
+├── agents: Vec<RegisteredAgent>     — Agent metadata + capabilities
+└── capability_index: HashMap<String, Vec<AgentId>>  — Capability → agents lookup
+```
+
+### 22.3 Agent Registry
+
+Agents register with the orchestrator declaring their capabilities:
+
+```rust
+pub struct RegisteredAgent {
+    pub id: AgentId,
+    pub name: String,
+    pub capabilities: Vec<String>,   // e.g., ["code-review", "testing", "rust"]
+    pub status: AgentStatus,         // Available | Busy | Offline
+    pub max_concurrent: usize,       // Max simultaneous jobs
+}
+```
+
+**Capability matching:** When a job requires specific capabilities, the
+registry returns all agents that declare those capabilities, sorted by
+availability and load.
+
+### 22.4 Job Execution Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `Sync` | Wait for all agents to complete | Comprehensive analysis |
+| `Async` | Fire and forget, collect results later | Background processing |
+| `FirstSuccess` | Return first successful result | Fast path with fallbacks |
+
+#### JobDescriptor
+
+```rust
+pub struct JobDescriptor {
+    pub id: JobId,
+    pub prompt: String,
+    pub required_capabilities: Vec<String>,
+    pub mode: JobMode,               // Sync | Async | FirstSuccess
+    pub conflict_policy: ConflictPolicy,
+    pub timeout: Duration,
+    pub max_agents: Option<usize>,
+}
+```
+
+### 22.5 Conflict Resolution
+
+When multiple agents produce results for the same job, conflicts are
+resolved according to the configured policy:
+
+| Policy | Description |
+|--------|-------------|
+| `Concat` | Concatenate all results in order |
+| `FirstSuccess` | Use the first non-error result |
+| `LastResponse` | Use the most recent response |
+| `Consensus` | Select the result that appears most frequently |
+| `HumanReview` | Present all results to the user for selection |
+
+### 22.6 Leader Election
+
+For distributed orchestration scenarios, the `LeaderElector` implements
+vote-based leader election:
+
+```text
+Candidate → Voting → Leader / Follower
+              ↓
+         Vote collection (majority wins)
+              ↓
+         Leader heartbeat (keep-alive)
+              ↓
+         Re-election on leader timeout
+```
+
+**Election parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `election_timeout_ms` | 5000 | Max wait for votes |
+| `heartbeat_interval_ms` | 1000 | Leader heartbeat period |
+| `min_votes` | majority | Minimum votes to win |
+
+### 22.7 Message Routing
+
+Messages between agents are routed through a composite router:
+
+| Router | Transport | Use Case |
+|--------|-----------|----------|
+| `InProcessRouter` | Direct function calls | Same-process agents |
+| `HttpRouter` | HTTP POST | Remote agents |
+| `RouterComposite` | Delegates to above | Unified routing layer |
+
+**Routing flow:**
+
+```text
+Agent A sends message to Agent B
+   → RouterComposite checks if B is local
+   ├── Local → InProcessRouter (direct call)
+   └── Remote → HttpRouter (HTTP POST to B's endpoint)
+```
+
+### 22.8 Metrics
+
+The orchestrator tracks operational metrics:
+
+```rust
+pub struct MetricsSnapshot {
+    pub jobs_submitted: u64,
+    pub jobs_completed: u64,
+    pub jobs_failed: u64,
+    pub avg_completion_time_ms: f64,
+    pub active_agents: usize,
+    pub pending_jobs: usize,
+}
+```
+
+### 22.9 Job Events
+
+Job lifecycle events are broadcast for monitoring:
+
+| Event | Description |
+|-------|-------------|
+| `JobSubmitted` | New job entered the queue |
+| `JobAssigned { agent_id }` | Job assigned to an agent |
+| `JobProgress { percent }` | Agent reports progress |
+| `JobCompleted { result }` | Job finished successfully |
+| `JobFailed { error }` | Job failed with error |
+| `JobCancelled` | Job was cancelled |
+
+---
+
+## 23. Event Bus Architecture
+
+### 23.1 Overview
+
+The event bus is the central nervous system of ragent, providing
+publish-subscribe messaging between all components. It uses a broadcast
+channel with a capacity of 256 events.
+
+### 23.2 Implementation
+
+```rust
+pub struct EventBus {
+    tx: broadcast::Sender<Event>,    // Capacity: 256
+}
+
+impl EventBus {
+    pub fn publish(&self, event: Event) { ... }
+    pub fn subscribe(&self) -> broadcast::Receiver<Event> { ... }
+}
+```
+
+**Characteristics:**
+- **Non-blocking:** Publishing never blocks the sender
+- **Lossy:** If a subscriber falls behind by >256 events, oldest events
+  are dropped (with a `Lagged` error on next receive)
+- **Clone-safe:** Multiple subscribers can listen independently
+- **Thread-safe:** `Arc<EventBus>` shared across all components
+
+### 23.3 Event Categories (~40+ Variants)
+
+#### Session Events
+
+| Event | Description |
+|-------|-------------|
+| `SessionStarted { session_id }` | New session created |
+| `SessionEnded { session_id }` | Session terminated |
+| `SessionPaused` | Session paused (background) |
+| `SessionResumed` | Session resumed from pause |
+| `StepStarted { session_id, step }` | New processing step |
+| `StepCompleted { session_id, step }` | Step finished |
+
+#### Streaming Events
+
+| Event | Description |
+|-------|-------------|
+| `StreamToken { token }` | Single token from LLM stream |
+| `StreamStarted` | LLM response stream began |
+| `StreamCompleted { finish_reason }` | Stream finished |
+| `StreamError { error }` | Stream error occurred |
+
+**FinishReason enum:**
+
+| Variant | Description |
+|---------|-------------|
+| `Stop` | Normal completion |
+| `Length` | Max tokens reached |
+| `ToolUse` | Model wants to use a tool |
+| `ContentFilter` | Content filtered by provider |
+
+#### Tool Events
+
+| Event | Description |
+|-------|-------------|
+| `ToolCallStarted { name, input }` | Tool invocation began |
+| `ToolCallCompleted { name, output }` | Tool finished |
+| `ToolCallFailed { name, error }` | Tool error |
+| `PermissionRequested { tool, req_id }` | Permission needed |
+| `PermissionGranted { req_id }` | Permission approved |
+| `PermissionDenied { req_id, reason }` | Permission rejected |
+
+#### Agent Events
+
+| Event | Description |
+|-------|-------------|
+| `AgentChanged { from, to }` | Active agent switched |
+| `SubAgentSpawned { id, agent_type }` | Sub-agent created |
+| `SubAgentCompleted { id, result }` | Sub-agent finished |
+| `SubAgentFailed { id, error }` | Sub-agent error |
+
+#### Team Events
+
+| Event | Description |
+|-------|-------------|
+| `TeamCreated { blueprint }` | Team spawned |
+| `TeammateSpawned { name }` | Teammate created |
+| `TeammateCompleted { name }` | Teammate finished |
+| `TaskClaimed { task_id, member }` | Task assigned |
+| `TaskCompleted { task_id }` | Task finished |
+| `MailboxMessage { from, to }` | Message sent |
+
+#### Memory Events
+
+| Event | Description |
+|-------|-------------|
+| `MemoryStored { id, category }` | New memory created |
+| `MemoryAccessed { id }` | Memory retrieved |
+| `MemoryEvicted { id, reason }` | Memory removed |
+| `JournalEntryCreated { id }` | Journal entry added |
+
+#### Infrastructure Events
+
+| Event | Description |
+|-------|-------------|
+| `LspStatusChanged { server, status }` | LSP server status change |
+| `McpStatusChanged { server, status }` | MCP server status change |
+| `CodeIndexProgress { phase, percent }` | Index build progress |
+| `UpdateAvailable { version }` | New version detected |
+
+#### OAuth Events
+
+| Event | Description |
+|-------|-------------|
+| `OAuthFlowStarted { provider }` | OAuth flow initiated |
+| `OAuthFlowCompleted { provider }` | OAuth completed |
+| `OAuthFlowFailed { provider, error }` | OAuth failed |
+
+### 23.4 Step Counters
+
+Each session maintains a monotonic step counter, incremented for each
+processing step (LLM call + tool execution cycle). Steps are formatted
+as `[session_id:step_number]` for traceability in logs and UI.
+
+### 23.5 Subscribers
+
+| Component | Events Consumed | Purpose |
+|-----------|----------------|---------|
+| **TUI** | All | Display updates, status bar |
+| **Server (SSE)** | All | Stream to HTTP clients |
+| **Hooks** | Tool, Permission | Trigger hook execution |
+| **Metrics** | Job, Agent | Performance tracking |
+| **Logger** | All (filtered) | Structured logging |
+
+---
+
+## 24. Auto-Update Mechanism
+
+### 24.1 Overview
+
+ragent includes a self-update mechanism that checks for new releases on
+GitHub and performs atomic binary replacement.
+
+### 24.2 Update Check Flow
+
+```text
+On startup (background task)
+   ↓
+GET https://api.github.com/repos/{owner}/{repo}/releases/latest
+   ↓
+Parse release tag as semver
+   ↓
+Compare with current version (including prerelease)
+   ├── Newer available → Notify user
+   └── Current or newer → No action
+```
+
+### 24.3 Platform Detection
+
+The updater detects the current platform and selects the appropriate
+release asset:
+
+| Platform | Architecture | Asset Pattern |
+|----------|-------------|---------------|
+| Linux | x86_64 | `ragent-linux-x86_64` |
+| Linux | aarch64 | `ragent-linux-aarch64` |
+| macOS | x86_64 | `ragent-darwin-x86_64` |
+| macOS | aarch64 | `ragent-darwin-aarch64` |
+| Windows | x86_64 | `ragent-windows-x86_64.exe` |
+
+### 24.4 Atomic Binary Replacement
+
+The update process ensures no corruption or partial writes:
+
+```text
+1. Download new binary to temporary file (in same directory)
+2. Verify download integrity (size check)
+3. Set executable permissions (chmod +x on Unix)
+4. Atomic rename: temp file → current binary path
+5. Log success and suggest restart
+```
+
+**Failure handling:**
+- If download fails, temp file is cleaned up
+- If rename fails, original binary is preserved
+- User is never left without a working binary
+
+### 24.5 Version Comparison
+
+Version comparison uses full semver with prerelease support:
+
+```text
+0.1.0-alpha < 0.1.0-beta < 0.1.0 < 0.1.1-alpha < 0.1.1
+```
+
+**Rules:**
+- Prerelease versions are always less than release versions
+- Prerelease identifiers are compared lexicographically
+- Build metadata is ignored in comparisons
+
+### 24.6 Configuration
+
+```jsonc
+{
+  "auto_update": {
+    "enabled": true,
+    "check_on_startup": true,
+    "channel": "stable"
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable auto-update checks |
+| `check_on_startup` | bool | `true` | Check for updates on launch |
+| `channel` | string | `"stable"` | Release channel (`stable` or `prerelease`) |
+
+---
+
+## 25. CLI Command Reference
+
+### 25.1 Overview
+
+ragent uses Clap for command-line argument parsing, providing a structured
+CLI with global flags and subcommands.
+
+### 25.2 Global Flags
+
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--model` | `-m` | string | config default | Override LLM model |
+| `--agent` | `-a` | string | `"general"` | Select agent profile |
+| `--log-level` | | string | `"info"` | Log verbosity (trace/debug/info/warn/error) |
+| `--no-tui` | | flag | `false` | Run in non-interactive mode |
+| `--yes` | `-y` | flag | `false` | Auto-approve all permission requests |
+| `--log` | | path | | Write logs to file |
+| `--config` | `-c` | path | `ragent.json` | Configuration file path |
+| `--maxsteps` | | u32 | `100` | Maximum processing steps per turn |
+| `--no-git-context` | | flag | `false` | Disable git context in system prompt |
+| `--no-readme-context` | | flag | `false` | Disable README injection in system prompt |
+
+### 25.3 Subcommands
+
+#### `ragent` (default)
+
+Start an interactive TUI session:
+
+```bash
+ragent                           # Default agent, default model
+ragent -m openai/gpt-4o         # Override model
+ragent -a coder                  # Select agent
+ragent --no-tui                  # Non-interactive mode
+```
+
+#### `ragent run`
+
+Execute a single prompt and exit:
+
+```bash
+ragent run "Explain this codebase"
+ragent run -m anthropic/claude-sonnet-4-20250514 "Write tests for auth.rs"
+```
+
+#### `ragent serve`
+
+Start the HTTP server:
+
+```bash
+ragent serve                     # Default port (from config)
+ragent serve --port 8080         # Custom port
+ragent serve --host 0.0.0.0     # Bind to all interfaces
+```
+
+#### `ragent orchestrate`
+
+Run in orchestrator mode:
+
+```bash
+ragent orchestrate               # Start orchestrator
+ragent orchestrate --agents 4    # Max concurrent agents
+```
+
+#### `ragent session`
+
+Session management commands:
+
+```bash
+ragent session list              # List all sessions
+ragent session resume <id>       # Resume a previous session
+ragent session export <id>       # Export session to JSON
+ragent session import <file>     # Import session from JSON
+```
+
+#### `ragent memory`
+
+Memory management commands:
+
+```bash
+ragent memory list               # List memory blocks
+ragent memory export             # Export all memories
+ragent memory export --format markdown  # Export as Markdown
+ragent memory import <file>      # Import memories
+ragent memory import --format cline <file>  # Import from Cline
+```
+
+#### `ragent auth`
+
+Authentication management:
+
+```bash
+ragent auth                      # Show auth status
+ragent auth login <provider>     # Login to provider
+ragent auth logout <provider>    # Logout from provider
+```
+
+#### `ragent models`
+
+List available models:
+
+```bash
+ragent models                    # List all configured models
+ragent models --provider openai  # Filter by provider
+```
+
+#### `ragent config`
+
+Configuration management:
+
+```bash
+ragent config                    # Show current config
+ragent config --init             # Create default ragent.json
+```
+
+### 25.4 Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `RAGENT_CONFIG` | Override config file path |
+| `RAGENT_LOG_LEVEL` | Override log level |
+| `RAGENT_MODEL` | Override default model |
+| `RAGENT_API_KEY_<PROVIDER>` | Provider API key (e.g., `RAGENT_API_KEY_OPENAI`) |
+| `OPENAI_API_KEY` | OpenAI API key (standard) |
+| `ANTHROPIC_API_KEY` | Anthropic API key (standard) |
+
+---
+
+## 26. Testing & CI/CD
+
+### 26.1 Overview
+
+ragent maintains a comprehensive test suite across all crates with
+continuous integration via GitHub Actions.
+
+### 26.2 Test Organization
+
+Tests are organized in `tests/` directories within each crate, following
+the project convention of external test files rather than inline tests:
+
+```text
+crates/
+├── ragent-core/
+│   ├── src/          — Source code (no inline #[test])
+│   └── tests/        — Integration and unit tests
+├── ragent-tui/
+│   ├── src/
+│   └── tests/
+├── ragent-server/
+│   ├── src/
+│   └── tests/
+├── ragent-code/
+│   ├── src/
+│   └── tests/
+└── prompt_opt/
+    ├── src/
+    └── tests/
+tests/                — Root-level integration tests
+```
+
+### 26.3 Test Commands
+
+| Command | Description |
+|---------|-------------|
+| `cargo test` | Run all tests across all crates |
+| `cargo test -p ragent-core` | Test a specific crate |
+| `cargo test <name>` | Run tests matching a name |
+| `cargo test -- --nocapture` | Show test output |
+| `cargo test --lib` | Library tests only (skip integration) |
+| `timeout 600 cargo test` | Run with 10-minute timeout |
+
+### 26.4 Benchmarks (Criterion)
+
+Performance benchmarks use the Criterion framework:
+
+| Crate | Benchmark File | What It Measures |
+|-------|---------------|-----------------|
+| `ragent-tui` | `bench_markdown.rs` | Markdown rendering performance |
+| `ragent-server` | `bench_sse.rs` | SSE event throughput |
+| `ragent-core` | `bench_file_ops.rs` | File operation performance |
+| `ragent-code` | `bench_index.rs` | Code indexing throughput |
+
+**Running benchmarks:**
+
+```bash
+cargo bench                      # All benchmarks
+cargo bench -p ragent-tui        # Single crate
+cargo bench -- markdown          # Filter by name
+```
+
+### 26.5 CI Workflows (GitHub Actions)
+
+#### `ci.yml` — Primary CI
+
+Runs on every push and pull request:
+
+| Step | Description |
+|------|-------------|
+| `cargo fmt --check` | Formatting validation |
+| `cargo clippy -- -D warnings` | Lint checks (warnings = errors) |
+| `cargo build` | Debug build |
+| `cargo test` | Full test suite |
+
+**Matrix:**
+- Rust: stable, nightly
+- OS: Ubuntu, macOS
+
+#### `ci_benchmarks.yml` — Benchmark CI
+
+Runs on pushes to `main` to track performance regressions:
+
+| Step | Description |
+|------|-------------|
+| `cargo bench` | Run all Criterion benchmarks |
+| Compare | Compare with baseline (previous run) |
+| Alert | Comment on PR if regression detected |
+
+#### `security-audit.yml` — Security Audit
+
+Runs on schedule and PRs modifying `Cargo.lock`:
+
+| Step | Description |
+|------|-------------|
+| `cargo audit` | Check for known vulnerabilities |
+| `cargo deny check` | License and advisory compliance |
+
+### 26.6 Pre-Flight Script (`pre-flight.sh`)
+
+A local mirror of CI checks that developers can run before pushing:
+
+```bash
+./pre-flight.sh
+```
+
+**What it runs:**
+
+1. `cargo fmt --check` — Formatting
+2. `cargo clippy -- -D warnings` — Linting
+3. `cargo build` — Build check
+4. `cargo test` — Full test suite
+5. `cargo doc --no-deps` — Documentation build
+
+### 26.7 Dependency Management
+
+**`deny.toml`** — Configuration for `cargo deny`:
+
+| Check | Description |
+|-------|-------------|
+| `advisories` | RUSTSEC advisory database |
+| `licenses` | Allowed license list |
+| `bans` | Banned crates/versions |
+| `sources` | Allowed registry sources |
 
 ---
 

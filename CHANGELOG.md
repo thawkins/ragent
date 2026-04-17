@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0-alpha.42] - 2026-04-15
+
+### Added
+- **Gemini provider** — Google Gemini API support as a first-class LLM provider
+- **Hugging Face provider** — Hugging Face Inference API support as a first-class LLM provider
+- **Unfinished goal detection** — Session processor now detects when the agent's stated goals have not been fully achieved
+
+### Fixed
+- Various fixes across provider implementations and session processing
+
+## [0.1.0-alpha.41] - 2026-04-15
 
 ### Changed
 - **Model picker now displays models in a tabular format with metadata** — The model selection dialog now shows a table with columns for Model name, Context window size, Cost (input/output per million tokens), and Features (Reasoning, Vision, Tool-use). Models are now sorted alphabetically by name for all providers.

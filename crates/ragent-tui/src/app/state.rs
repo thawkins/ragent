@@ -262,6 +262,8 @@ pub enum ScreenMode {
 pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("anthropic", "Anthropic (Claude)"),
     ("openai", "OpenAI (GPT)"),
+    ("gemini", "Google Gemini"),
+    ("huggingface", "Hugging Face"),
     ("generic_openai", "Generic OpenAI API"),
     ("copilot", "GitHub Copilot"),
     ("ollama_cloud", "Ollama Cloud"),

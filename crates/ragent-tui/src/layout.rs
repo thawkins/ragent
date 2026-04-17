@@ -1009,6 +1009,58 @@ fn char_wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// Build wrapped content lines from `Line`s that matches Paragraph word-wrapping.
+///
+/// This produces the same line breaks as ratatui's `Paragraph::wrap(Wrap { trim: false })`
+/// so that mouse selection coordinates map correctly to content lines.
+fn build_wrapped_content_lines(lines: &[Line<'_>], inner_width: usize) -> Vec<String> {
+    let mut result = Vec::new();
+    for line in lines {
+        let text = line
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>();
+        if text.is_empty() {
+            result.push(String::new());
+            continue;
+        }
+        // Word-wrap: split at word boundaries, breaking long words
+        let mut line_start = 0usize;
+        let chars: Vec<char> = text.chars().collect();
+        while line_start < chars.len() {
+            let remaining = chars.len() - line_start;
+            if remaining <= inner_width {
+                result.push(chars[line_start..].iter().collect::<String>());
+                break;
+            }
+            // Find the best break point: try to break at whitespace
+            let search_end = (line_start + inner_width).min(chars.len());
+            let mut break_pos = search_end;
+            // Look backwards for a whitespace character to break at
+            for i in (line_start..search_end).rev() {
+                if chars[i].is_whitespace() {
+                    break_pos = i + 1; // Include the space at end of line
+                    break;
+                }
+            }
+            // If no whitespace found, hard break at width
+            if break_pos == search_end && break_pos == line_start + inner_width {
+                // No whitespace in this chunk, hard break
+                break_pos = line_start + inner_width;
+            }
+            // If break_pos didn't move (no whitespace and we're at start), just take width chars
+            if break_pos <= line_start {
+                break_pos = (line_start + inner_width).min(chars.len());
+            }
+            result.push(chars[line_start..break_pos].iter().collect::<String>());
+            // Advance past any whitespace at the start of next line (like Paragraph does with trim=false)
+            line_start = break_pos;
+        }
+    }
+    result
+}
+
 fn input_cursor_display_pos(
     input: &str,
     cursor_chars: usize,
@@ -1463,15 +1515,9 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     // Cache plain-text content for text selection copy
-    app.log_content_lines = lines
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect();
+    // Must match the word-wrapped display that Paragraph renders
+    let log_inner_width = log_inner.width as usize;
+    app.log_content_lines = build_wrapped_content_lines(&lines, log_inner_width);
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
 
@@ -2268,15 +2314,9 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         &app.cwd,
     );
     // Cache plain-text content for text selection copy
-    app.message_content_lines = lines
-        .iter()
-        .map(|l| {
-            l.spans
-                .iter()
-                .map(|s| s.content.as_ref())
-                .collect::<String>()
-        })
-        .collect();
+    // Must match the word-wrapped display that Paragraph renders
+    let inner_width = area.width.saturating_sub(2) as usize;
+    app.message_content_lines = build_wrapped_content_lines(&lines, inner_width);
 
     // Build the paragraph with wrapping so we can measure the true rendered height.
     let session_display = app
