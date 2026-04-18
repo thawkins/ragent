@@ -11,6 +11,15 @@
 pub mod mcp_tool;
 pub use mcp_tool::McpToolWrapper;
 
+pub mod aiwiki_ingest;
+/// AIWiki export tool for agents.
+pub mod aiwiki_export;
+/// AIWiki import tool for agents.
+pub mod aiwiki_import;
+/// AIWiki search tool for agents.
+pub mod aiwiki_search;
+/// AIWiki status tool for agents.
+pub mod aiwiki_status;
 /// Alias tools that map commonly hallucinated tool names to canonical implementations.
 pub mod aliases;
 /// File append tool.
@@ -615,5 +624,11 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(aliases::RunCodeTool));
     registry.register(Arc::new(aliases::AskUserTool));
     registry.register(Arc::new(aliases::OpenFileTool));
+    // AIWiki tools for agent integration
+    registry.register(Arc::new(aiwiki_search::AiwikiSearchTool));
+    registry.register(Arc::new(aiwiki_ingest::AiwikiIngestTool));
+    registry.register(Arc::new(aiwiki_status::AiwikiStatusTool));
+    registry.register(Arc::new(aiwiki_export::AiwikiExportTool));
+    registry.register(Arc::new(aiwiki_import::AiwikiImportTool));
     registry
 }

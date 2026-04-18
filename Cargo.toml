@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.42"
+version = "0.1.0-alpha.43"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -213,6 +213,9 @@ url = "2"
 dashmap = "6"
 lru = "0.12"
 rayon = "1"
+
+# ── Encoding ───────────────────────────────────────────────────────────
+hex = "0.4"
 
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }

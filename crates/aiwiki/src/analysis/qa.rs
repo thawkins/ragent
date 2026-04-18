@@ -1,0 +1,280 @@
+//! Wiki Q&A system - query wiki content via LLM with source citations.
+
+use crate::Aiwiki;
+use serde::{Deserialize, Serialize};
+use tokio::fs;
+
+/// Result of a wiki Q&A query.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QaResult {
+    /// The answer text.
+    pub answer: String,
+    /// Sources cited in the answer.
+    pub citations: Vec<Citation>,
+    /// Confidence score (0.0 to 1.0).
+    pub confidence: f32,
+}
+
+/// Citation to a wiki source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Citation {
+    /// Source page path.
+    pub source: String,
+    /// Relevant excerpt.
+    pub excerpt: String,
+    /// Page title.
+    pub title: String,
+}
+
+/// Query the wiki for an answer.
+///
+/// # Arguments
+/// * `wiki` - The AIWiki instance
+/// * `question` - The question to answer
+/// * `context_pages` - Optional specific pages to search (if empty, searches all)
+///
+/// # Returns
+/// The Q&A result with answer and citations.
+pub async fn ask_wiki(
+    wiki: &Aiwiki,
+    question: &str,
+    context_pages: Option<Vec<String>>,
+) -> crate::Result<QaResult> {
+    if !wiki.config.enabled {
+        return Err(crate::AiwikiError::Config(
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+        ));
+    }
+
+    // Gather relevant content
+    let relevant_pages = if let Some(pages) = context_pages {
+        load_specific_pages(wiki, &pages).await?
+    } else {
+        search_relevant_pages(wiki, question).await?
+    };
+
+    if relevant_pages.is_empty() {
+        return Ok(QaResult {
+            answer: "I couldn't find any relevant information in the wiki to answer this question.".to_string(),
+            citations: Vec::new(),
+            confidence: 0.0,
+        });
+    }
+
+    // TODO: In a full implementation, this would call an LLM
+    // For now, return a stub response with citations
+    generate_qa_response(question, &relevant_pages).await
+}
+
+/// Page content for Q&A processing.
+#[derive(Debug, Clone)]
+struct PageContent {
+    path: String,
+    title: String,
+    content: String,
+}
+
+/// Load specific pages for Q&A context.
+async fn load_specific_pages(
+    wiki: &Aiwiki,
+    pages: &[ String ],
+) -> crate::Result<Vec<PageContent>> {
+    let mut contents = Vec::new();
+
+    for page_path in pages {
+        let full_path = wiki.path("wiki").join(page_path);
+        if full_path.exists() {
+            let content = fs::read_to_string(&full_path).await?;
+            let title = extract_title(&content)
+                .unwrap_or_else(|| page_path.clone());
+            
+            contents.push(PageContent {
+                path: page_path.clone(),
+                title,
+                content,
+            });
+        }
+    }
+
+    Ok(contents)
+}
+
+/// Search for pages relevant to the question.
+async fn search_relevant_pages(
+    wiki: &Aiwiki,
+    question: &str,
+) -> crate::Result<Vec<PageContent>> {
+    let mut relevant = Vec::new();
+    let wiki_dir = wiki.path("wiki");
+    
+    if !wiki_dir.exists() {
+        return Ok(relevant);
+    }
+
+    // Simple keyword search
+    let keywords: Vec<String> = question
+        .to_lowercase()
+        .split_whitespace()
+        .filter(|w| w.len() > 3)
+        .map(|w| w.to_string())
+        .collect();
+
+    let mut files = Vec::new();
+    scan_markdown_files(&wiki_dir, &mut files).await?;
+
+    for file_path in files {
+        let content = fs::read_to_string(&file_path).await?;
+        let content_lower = content.to_lowercase();
+        
+        // Score based on keyword matches
+        let score: usize = keywords
+            .iter()
+            .filter(|k| content_lower.contains(*k))
+            .count();
+        
+        if score > 0 {
+            let relative_path = file_path
+                .strip_prefix(&wiki_dir)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            
+            let title = extract_title(&content)
+                .unwrap_or_else(|| relative_path.clone());
+            
+            relevant.push(PageContent {
+                path: relative_path,
+                title,
+                content,
+            });
+        }
+    }
+
+    // Sort by relevance (simple count)
+    relevant.truncate(5); // Limit to top 5
+    Ok(relevant)
+}
+
+/// Generate Q&A response (stub for LLM integration).
+async fn generate_qa_response(
+    question: &str,
+    pages: &[PageContent],
+) -> crate::Result<QaResult> {
+    // TODO: In a full implementation, this would:
+    // 1. Call an LLM with the question and context
+    // 2. Extract citations from the response
+    // 3. Return structured answer
+
+    let mut answer = format!(
+        "Based on the wiki content, here's what I found regarding \"{}\":\n\n",
+        question
+    );
+
+    answer.push_str("_Note: This is a stub response. In the full implementation, this would be generated by an LLM based on the wiki content._\n\n");
+
+    // Create citations from pages
+    let citations: Vec<Citation> = pages
+        .iter()
+        .map(|p| Citation {
+            source: p.path.clone(),
+            title: p.title.clone(),
+            excerpt: p.content.chars().take(200).collect(),
+        })
+        .collect();
+
+    // Add stub content from first page
+    if let Some(first) = pages.first() {
+        answer.push_str(&format!(
+            "According to **{}**, there is relevant information about this topic. ",
+            first.title
+        ));
+        answer.push_str("The wiki contains details that may help answer your question.\n\n");
+    }
+
+    answer.push_str("### Relevant Sources\n\n");
+    for citation in &citations {
+        answer.push_str(&format!("- [{}]({})\n", citation.title, citation.source));
+    }
+
+    Ok(QaResult {
+        answer,
+        citations,
+        confidence: 0.7, // Placeholder
+    })
+}
+
+/// Extract title from page content.
+fn extract_title(content: &str) -> Option<String> {
+    if content.starts_with("---") {
+        if let Some(end) = content.find("\n---\n") {
+            let frontmatter = &content[4..end];
+            for line in frontmatter.lines() {
+                if let Some(value) = line.strip_prefix("title:") {
+                    let value = value.trim();
+                    if (value.starts_with('"') && value.ends_with('"'))
+                        || (value.starts_with('\'') && value.ends_with('\'')) {
+                        return Some(value[1..value.len()-1].to_string());
+                    }
+                    return Some(value.to_string());
+                }
+            }
+        }
+    }
+
+    // Fall back to first H1
+    for line in content.lines() {
+        if line.starts_with("# ") {
+            return Some(line[2..].to_string());
+        }
+    }
+
+    None
+}
+
+/// Recursively scan for markdown files.
+async fn scan_markdown_files(
+    dir: &std::path::Path,
+    files: &mut Vec<std::path::PathBuf>,
+) -> crate::Result<()> {
+    let mut entries = fs::read_dir(dir).await?;
+    
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        let metadata = entry.metadata().await?;
+        
+        if metadata.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "md" || ext == "markdown" {
+                    files.push(path);
+                }
+            }
+        } else if metadata.is_dir() {
+            let mut sub_files = Vec::new();
+            Box::pin(scan_markdown_files(&path, &mut sub_files)).await?;
+            files.extend(sub_files);
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_title_from_frontmatter() {
+        let content = r#"---
+title: "My Page"
+---
+
+Content.
+"#;
+        assert_eq!(extract_title(content), Some("My Page".to_string()));
+    }
+
+    #[test]
+    fn test_extract_title_from_heading() {
+        let content = "# Page Title\n\nContent.";
+        assert_eq!(extract_title(content), Some("Page Title".to_string()));
+    }
+}

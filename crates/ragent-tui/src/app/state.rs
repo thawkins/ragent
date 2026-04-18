@@ -23,7 +23,7 @@ use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
 use ragent_core::team::{TeamConfig, TeamMember};
 
-use crate::theme::{StatusCategory, StatusHistory, StatusMessage, ThemeMode};
+use crate::theme::StatusHistory;
 
 // Pending confirmation field is stored on App (defined in app.rs) as Option<PendingForceCleanup>.
 
@@ -595,29 +595,33 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
-          SlashCommandDef {
-              trigger: "codeindex",
-              description: "Manage codebase index: /codeindex on|off|show|reindex|help",
-          },
-          SlashCommandDef {
-              trigger: "theme",
-              description: "Switch theme: /theme default|high-contrast",
-          },
-                                  SlashCommandDef {
-                                      trigger: "journal",
-                                      description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
-                                  },
-                                  SlashCommandDef {
-                                      trigger: "status",
-                                      description: "Show status message history: /status [clear]",
-                                  },                      SlashCommandDef {
+                SlashCommandDef {
+                    trigger: "codeindex",
+                    description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+                },
+                SlashCommandDef {
+                    trigger: "theme",
+                    description: "Switch theme: /theme default|high-contrast",
+                },
+                SlashCommandDef {
+                    trigger: "journal",
+                    description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
+                },
+                SlashCommandDef {
+                    trigger: "status",
+                    description: "Show status message history: /status [clear]",
+                },
+                      SlashCommandDef {
                           trigger: "mouse",
                           description: "Toggle mouse support: /mouse on | off",
                       },
-                                  ];/// A single entry in the slash-command autocomplete menu.
-                #[derive(Debug, Clone)]
-                pub struct SlashMenuEntry {
-                    /// The trigger word (without the leading `/`).
+                                              SlashCommandDef {
+                                                  trigger: "aiwiki",
+                                                  description: "AIWiki: /aiwiki init | on | off | ingest [path] | sync [--force] | status | help",
+                                              },                ];
+                
+                /// A single entry in the slash-command autocomplete menu.
+                #[derive(Debug, Clone)]                pub struct SlashMenuEntry {                    /// The trigger word (without the leading `/`).
                     pub trigger: String,
                     /// Short description shown in the menu.
                     pub description: String,
@@ -998,6 +1002,8 @@ pub struct App {
     pub agents_button_area: Rect,
     /// Cached area of the Teams button beside chat input.
     pub teams_button_area: Rect,
+    /// Cached area of the AIWiki status indicator (for click-to-open-browser).
+    pub aiwiki_status_area: Rect,
     /// Whether the Agents popup window is visible.
     pub show_agents_window: bool,
     /// Whether the Teams popup window is visible.
@@ -1022,10 +1028,26 @@ pub struct App {
     pub code_index_stats_last_refresh: std::time::Instant,
     /// True when the background indexer holds the store/FTS locks.
     pub code_index_busy: bool,
-    /// Active file watcher + background worker session for the code index.
-    pub code_index_watch_session: Option<ragent_code::WatchSession>,
-    /// Active LSP discovery dialog, if any.
-    pub lsp_discover: Option<LspDiscoverState>,
+          /// Active file watcher + background worker session for the code index.
+        pub code_index_watch_session: Option<ragent_code::WatchSession>,
+        /// Optional AIWiki instance for project knowledge base.
+        pub aiwiki: Option<aiwiki::Aiwiki>,
+        /// Whether AIWiki is enabled for the current project.
+        pub aiwiki_enabled: bool,
+        /// Cached AIWiki stats for the status bar.
+        pub aiwiki_stats_cache: Option<(usize, usize)>, // (sources, pages)
+        /// When the cached AIWiki stats were last refreshed.
+        pub aiwiki_stats_last_refresh: std::time::Instant,
+        /// Handle for the spawned AIWiki web server task.
+        pub aiwiki_web_server: Option<tokio::task::JoinHandle<()>>,
+        /// Port the AIWiki web server is listening on.
+        pub aiwiki_web_port: u16,
+        /// Handle for a background AIWiki sync task.
+        pub aiwiki_sync_handle: Option<tokio::task::JoinHandle<super::AiwikiSyncOutcome>>,
+        /// Shared progress counter for the active sync, if any.
+        pub aiwiki_sync_progress: Option<std::sync::Arc<aiwiki::sync::SyncProgress>>,
+        /// Active LSP discovery dialog, if any.
+        pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.
     pub lsp_edit: Option<LspEditState>,
     /// Active MCP discovery dialog, if any.

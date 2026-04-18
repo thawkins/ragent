@@ -2,6 +2,118 @@
 
 ## [Unreleased]
 
+## [0.1.0-alpha.43] - 2026-04-16
+
+### Added
+- **AIWiki Milestone 1-6: Complete Knowledge Base System** — An embedded, project-scoped knowledge base for ragent
+  - New `aiwiki` crate with full knowledge base infrastructure
+  - Directory initialization (`/aiwiki init`), enable/disable system (`/aiwiki on|off`)
+  - Document ingestion pipeline supporting Markdown, Plain Text, PDF, DOCX, ODT
+  - Sync & auto-update with file watcher, broken link detection
+  - Web interface integrated with ragent-server (HTML templates, search, graph visualization)
+  - AI-powered analysis, Q&A, and contradiction detection
+  - Agent tools: `aiwiki_search`, `aiwiki_ingest`, `aiwiki_status`
+  - Export/Import: Single markdown export, Obsidian vault export, markdown import
+
+- **TUI Milestone 3.1 & 3.2: Dialog & Button Component System** — Unified dialog and button system
+  - Extended `Dialog` with `with_buttons()`, `with_footer_hint()`, and factory methods
+  - New `Button` component with variants (Primary, Secondary, Danger, Success)
+  - `ButtonBar` for horizontal button arrangement
+  - Theme-aware styling throughout
+
+### Changed
+- Updated workspace version to 0.1.0-alpha.43
+
+## [0.1.0-alpha.42] - 2026-04-15
+
+### Added
+- **AIWiki Milestone 1: Core Infrastructure** — An embedded, project-scoped knowledge base system for ragent
+  - New `aiwiki` crate with core infrastructure for knowledge base management
+  - Directory initialization (`/aiwiki init`): Creates `aiwiki/` directory structure with config, state tracking, and organized subdirectories
+  - Configuration management: `config.json` with wiki name, sync mode, LLM model, extraction settings, and ignore patterns
+  - **Enable/Disable system**: `enabled` field in config.json controls AIWiki activation
+    - `/aiwiki init` auto-enables the wiki (sets `enabled: true`)
+    - `/aiwiki on` - Enable AIWiki system
+    - `/aiwiki off` - Disable AIWiki system (zero performance impact)
+    - When disabled: no indexing, no file watching, no background processes
+    - When disabled: only `/aiwiki on` command works (others show disabled message)
+    - State persists across sessions via config.json
+  - State tracking: `state.json` with SHA-256 file hashing for incremental updates, detecting new/modified/deleted source files
+  - Slash commands: `/aiwiki init`, `/aiwiki on`, `/aiwiki off`, `/aiwiki status`, `/aiwiki help` integrated into TUI
+  - Generated directory structure:
+    - `aiwiki/raw/` — Source documents (PDFs, MD, images) - gitignored
+    - `aiwiki/wiki/` — Generated markdown pages (tracked in git)
+      - `entities/` — People, places, organizations
+      - `concepts/` — Ideas, topics, theories
+      - `sources/` — One summary per source file
+      - `analyses/` — Derived content
+    - `aiwiki/static/` — Web UI assets (CSS, JS, images)
+  - Initial log.md with initialization timestamp and configuration summary
+
+- **AIWiki Milestone 2: Ingestion Pipeline** — Document ingestion system
+  - File type detection: Markdown, Plain Text, PDF, DOCX, ODT
+  - Text extraction: Native text files, PDF via pdf-extract, stubs for DOCX/ODT
+  - `/aiwiki ingest` command variants:
+    - `/aiwiki ingest` - Scans `aiwiki/raw/` directory for documents
+    - `/aiwiki ingest <file>` - Ingests a single file into `aiwiki/raw/`
+    - `/aiwiki ingest <directory>` - Recursively ingests all supported files
+  - Directory scanning with recursive subdirectory support
+  - File size limits and validation (configured via `max_file_size`)
+  - Copy or move files with options
+  - Progress reporting in TUI with file counts and metadata
+  - Disabled state blocking (ingestion commands blocked when wiki disabled)
+
+- **AIWiki Milestone 3: Sync & Auto-Update** — Automatic wiki synchronization
+  - Sync orchestration with `sync()`, `preview_sync()`, and `needs_sync()` functions
+  - Detect stale pages by comparing source hashes from state.json
+  - Process new, modified, and deleted source files
+  - `/aiwiki sync` command with preview and force options
+  - Sync report with counts (new/updated/deleted sources, pages affected)
+  - Broken link detection and validation across wiki pages
+  - File watcher with debounced change detection
+  - `WatcherConfig` for customizable sync behavior (interval, debounce)
+  - `SyncResult` and `SyncPreview` for detailed sync reporting
+
+- **AIWiki Milestone 4: Web Interface (ragent-server Integration)** — Web-based wiki browsing
+  - HTML templates for wiki pages, search results, graph visualization, and status dashboard
+  - CSS and JavaScript for responsive dark/light theme and interactivity
+  - HTTP routes: `/aiwiki/`, `/aiwiki/page/:path`, `/aiwiki/edit/:path`, `/aiwiki/search`, `/aiwiki/graph`, `/aiwiki/status`
+  - Page editing with frontmatter preservation
+  - Full-text search with keyword matching and relevance scoring
+  - Interactive graph visualization with D3.js
+  - Status dashboard with wiki statistics
+  - Static asset serving (CSS, JS)
+
+- **AIWiki Milestone 5: Analysis & Derived Content** — AI-powered analysis and Q&A
+  - Analysis generation: Compare multiple sources, generate analysis/<slug>.md pages
+  - Analysis types: Comparison, Synthesis, Trade-offs, Custom
+  - Wiki Q&A: Query wiki content with source citations (`ask_wiki()`)
+  - Contradiction detection: Review wiki for potential contradictions
+  - TUI help updated with analysis, ask, and review commands
+  - Source attribution and provenance tracking
+  - Analysis reports with suggested resolutions
+
+- **AIWiki Milestone 6: Integration & Polish** — Agent tools, export/import, and documentation
+    - **Wiki-aware tool calls** for agent integration:
+      - `aiwiki_search` — Search wiki content with filtering by page type
+      - `aiwiki_ingest` — Ingest files, directories, or scan raw/ folder
+      - `aiwiki_status` — Show comprehensive wiki statistics
+    - **Export/Import functionality**:
+      - Export wiki as single combined markdown file (`export_single_markdown`)
+      - Export as Obsidian-compatible vault with `.obsidian/` config (`export_obsidian_vault`)
+      - Import external markdown files and directories (`import_markdown`)
+      - `aiwiki_export` and `aiwiki_import` tools for agents
+    - **Enhanced status monitoring**:
+      - Token usage tracking in `state.json`
+      - Storage usage display (wiki and raw directory sizes)
+      - Detailed statistics by page category (entities, concepts, sources, analyses)
+      - Sync status with pending changes count
+    - **Documentation**:
+      - User guide: `docs/userdocs/aiwiki.md`
+      - Example workflow: `examples/aiwiki/README.md`
+      - Updated QUICKSTART.md with AIWiki section
+    - Note: T6.1 (Session context injection) is pending as a future enhancement
+
 ### Changed
 - **TUI Milestone 3.2: Button Component Standardization** — Unified button system for consistent UI interactions
   - Completely rewritten `widgets/button.rs` with theme-aware Button component

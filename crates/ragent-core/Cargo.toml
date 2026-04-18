@@ -55,6 +55,7 @@ ignore = { workspace = true }
 dashmap = { workspace = true }
 lru = { workspace = true }
 rayon = { workspace = true }
+aiwiki = { path = "../aiwiki" }
 ragent-code = { path = "../ragent-code" }
 
 [features]

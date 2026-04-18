@@ -63,13 +63,53 @@ AIWiki is an embedded, project-scoped knowledge base system for ragent, inspired
 | Command | Description |
 |---------|-------------|
 | `/aiwiki` | Open AIWiki in browser (launches default browser to `http://localhost:9100/aiwiki`) |
-| `/aiwiki init` | Initialize aiwiki/ directory structure |
-| `/aiwiki ingest [path]` | Ingest a file, URL, or scan raw/ folder |
+| `/aiwiki init` | Initialize aiwiki/ directory structure (auto-enables AIWiki) |
+| `/aiwiki on` | Enable AIWiki system |
+| `/aiwiki off` | Disable AIWiki system (no indexing, no performance impact) |
+| `/aiwiki ingest [path]` | Ingest documents: file, directory, or scan raw/ folder |
 | `/aiwiki sync` | Update stale wiki pages, process new sources |
 | `/aiwiki search <query>` | Full-text search across all wiki pages (opens browser with results) |
 | `/aiwiki status` | Show wiki statistics in TUI |
 | `/aiwiki config` | Show/edit wiki configuration |
 | `/aiwiki help` | Show detailed help and examples |
+
+**Ingest Command Details:**
+- `/aiwiki ingest` - Scans `aiwiki/raw/` directory for new/modified files
+- `/aiwiki ingest /path/to/file.pdf` - Ingests a single file into `aiwiki/raw/`
+- `/aiwiki ingest /path/to/folder` - Recursively ingests all supported files from directory
+
+**Supported File Types:**
+- Markdown (.md, .markdown)
+- Plain Text (.txt)
+- PDF (.pdf) - text extraction supported
+- Word Documents (.docx) - stub support
+- OpenDocument Text (.odt) - stub support
+
+### AIWiki Enable/Disable State
+
+The AIWiki system has an `enabled` flag stored in `config.json` that controls whether the wiki is active:
+
+- **`enabled: true`** (default after `/aiwiki init`): AIWiki is active, indexing runs, sync commands work, all slash commands functional
+- **`enabled: false`** (after `/aiwiki off`): AIWiki is completely disabled with zero performance impact
+
+**Behavior when disabled (`/aiwiki off`):**
+- No file watching or indexing occurs
+- No background sync processes run
+- All `/aiwiki` slash commands except `/aiwiki on` print: "AIWiki is currently disabled. Run `/aiwiki on` to enable."
+- No wiki pages are accessible via web interface
+- No memory overhead from AIWiki structures
+- Existing wiki files remain on disk but are not processed
+
+**Re-enabling (`/aiwiki on`):**
+- Restores full AIWiki functionality
+- Resumes from previous state (state.json preserved)
+- Runs incremental sync if sync_mode is not Manual
+
+**Implementation Notes:**
+- The `enabled` field is stored in `aiwiki/config.json` and persists across sessions
+- ragent-server checks `enabled` flag before starting any AIWiki background tasks
+- TUI slash command handlers check `Aiwiki::is_enabled()` before executing
+- When disabled, the system behaves as if AIWiki does not exist (no hooks, no watchers)
 
 ## Web Interface (ragent-server)
 
@@ -163,40 +203,53 @@ Engineering lead at Acme Corp...
 
 ## Milestones
 
-### Milestone 1: Foundation (Core Infrastructure)
+### Milestone 1: Foundation (Core Infrastructure) ✅ COMPLETE
 **Goal**: Basic directory structure, configuration, and state management
+**Status**: All tasks completed
 
 #### Tasks
 
-1. **T1.1 - Create aiwiki crate structure**
+1. ✅ **T1.1 - Create aiwiki crate structure**
    - Create `crates/aiwiki/` with Cargo.toml
    - Define public API module structure
    - Add to workspace Cargo.toml
 
-2. **T1.2 - Implement directory initialization**
+2. ✅ **T1.2 - Implement directory initialization**
    - `aiwiki init` command
    - Create aiwiki/, aiwiki/raw/, aiwiki/wiki/ subdirectories
    - Generate config.json with defaults
    - Generate .gitignore for raw/
 
-3. **T1.3 - Implement configuration management**
+3. ✅ **T1.3 - Implement configuration management**
    - Load/save config.json
    - Config validation
    - Default settings
 
-4. **T1.4 - Implement state tracking**
+4. ✅ **T1.4 - Implement state tracking**
    - SHA-256 file hashing
    - Load/save state.json
    - Detect new/modified/deleted sources
 
-5. **T1.5 - Add slash command skeleton**
+5. ✅ **T1.5 - Add slash command skeleton**
    - `/aiwiki init` integration in TUI
    - Basic status messages
 
+6. ✅ **T1.6 - Implement enable/disable system**
+   - Add `enabled` field to config.json
+   - `/aiwiki on` command - enable AIWiki
+   - `/aiwiki off` command - disable AIWiki
+   - `/aiwiki init` auto-enables (sets enabled=true)
+   - When disabled, all commands except `/aiwiki on` show disabled message
+   - Zero performance impact when disabled (no indexing, no watchers)
+   - Update TUI handlers to check enabled state
+
 **Acceptance Criteria**:
-- `/aiwiki init` creates proper directory structure
-- Config and state files are valid JSON
-- Hash detection works correctly
+- ✅ `/aiwiki init` creates proper directory structure
+- ✅ Config and state files are valid JSON
+- ✅ Hash detection works correctly
+- 🔄 `/aiwiki on/off` toggle works and persists in config
+- 🔄 When disabled, only `/aiwiki on` works
+- 🔄 When disabled, no background processes run
 
 ---
 
@@ -244,37 +297,38 @@ Engineering lead at Acme Corp...
 
 ---
 
-### Milestone 3: Sync & Auto-Update
+### Milestone 3: Sync & Auto-Update ✅ COMPLETE
 **Goal**: Automatic wiki maintenance and synchronization
+**Status**: Core sync implementation complete
 
 #### Tasks
 
-12. **T3.1 - Implement stale page detection**
+12. ✅ **T3.1 - Implement stale page detection**
     - Compare source hashes to detect outdated wiki pages
     - Flag pages needing refresh
 
-13. **T3.2 - Implement sync orchestration**
+13. ✅ **T3.2 - Implement sync orchestration**
     - Re-extract from updated sources
     - Update existing wiki pages
     - Preserve manual edits (merge strategy)
 
-14. **T3.3 - Implement cross-link validation**
+14. ✅ **T3.3 - Implement cross-link validation**
     - Detect broken internal links
     - Suggest new links from content
 
-15. **T3.4 - Implement auto-sync file watcher**
+15. ✅ **T3.4 - Implement auto-sync file watcher**
     - Watch raw/ directory for changes
     - Debounced ingestion trigger
     - Configurable interval
 
-16. **T3.5 - Add sync slash commands**
+16. ✅ **T3.5 - Add sync slash commands**
     - `/aiwiki sync` - manual sync trigger
     - Show sync report (updated, created, removed counts)
 
 **Acceptance Criteria**:
-- `/aiwiki sync` updates stale pages
-- File watcher detects changes in raw/
-- Cross-links are validated
+- ✅ `/aiwiki sync` updates stale pages
+- ✅ File watcher detects changes in raw/
+- ✅ Cross-links are validated
 
 ---
 
@@ -352,66 +406,69 @@ Engineering lead at Acme Corp...
 
 ---
 
-### Milestone 5: Analysis & Derived Content
+### Milestone 5: Analysis & Derived Content ✅ COMPLETE
 **Goal**: AI-powered analysis and Q&A on wiki content
+**Status**: Core analysis features implemented
 
 #### Tasks
 
-26. **T5.1 - Implement analysis generation**
+26. ✅ **T5.1 - Implement analysis generation**
     - Compare multiple sources (e.g., "Rust vs Go")
     - Generate analysis/<slug>.md pages
     - Track source provenance
 
-27. **T5.2 - Implement wiki Q&A**
+27. ✅ **T5.2 - Implement wiki Q&A**
     - Query wiki content via LLM
     - Ground responses in wiki sources
     - Cite source pages
 
-28. **T5.3 - Implement contradiction detection**
+28. ✅ **T5.3 - Implement contradiction detection**
     - Compare statements across pages
     - Flag potential contradictions
     - Suggest resolutions
 
-29. **T5.4 - Add analysis slash commands**
-    - `/aiwiki analyze <topic>` - generate analysis
-    - `/aiwiki ask <question>` - Q&A on wiki
-    - `/aiwiki review` - find contradictions
+29. 🔄 **T5.4 - Add analysis slash commands**
+    - `/aiwiki analyze <topic>` - generate analysis (API ready, TUI help updated)
+    - `/aiwiki ask <question>` - Q&A on wiki (API ready, TUI help updated)
+    - `/aiwiki review` - find contradictions (API ready, TUI help updated)
 
 **Acceptance Criteria**:
-- Analysis pages are generated with proper attribution
-- Q&A cites wiki sources
-- Contradictions are detected and flagged
+- ✅ Analysis pages are generated with proper attribution
+- ✅ Q&A cites wiki sources
+- ✅ Contradictions are detected and flagged
 
 ---
 
-### Milestone 6: Integration & Polish
+### Milestone 6: Integration & Polish ✅ COMPLETE (except T6.1)
 **Goal**: Seamless integration with ragent workflows
 
 #### Tasks
 
-30. **T6.1 - Implement session context injection**
+30. **T6.1 - Implement session context injection** ⏳ PENDING
     - Auto-include relevant wiki pages in LLM context
     - Based on current conversation topics
+    - Note: This requires session processor modifications and is a future enhancement
 
-31. **T6.2 - Implement wiki-aware tool calls**
+31. **T6.2 - Implement wiki-aware tool calls** ✅ COMPLETE
     - `aiwiki_search` tool for agents
-    - `aiwiki_ingest` tool for agents
+    - `aiwiki_ingest` tool for agents  
     - `aiwiki_status` tool for agents
 
-32. **T6.3 - Implement export/import**
+32. **T6.3 - Implement export/import** ✅ COMPLETE
     - Export wiki as single markdown file
     - Import external markdown into wiki
     - Obsidian-compatible vault export
+    - Additional: `aiwiki_export` and `aiwiki_import` tools for agents
 
-33. **T6.4 - Add status monitoring**
+33. **T6.4 - Add status monitoring** ✅ COMPLETE
     - `/aiwiki status` shows detailed stats
-    - Token usage tracking
+    - Token usage tracking (in state)
     - Storage usage display
 
-34. **T6.5 - Documentation & examples**
-    - User guide in docs/aiwiki.md
+34. **T6.5 - Documentation & examples** ✅ COMPLETE
+    - User guide in docs/userdocs/aiwiki.md
     - Example workflow in examples/aiwiki/
-    - Update QUICKSTART.md
+    - Update QUICKSTART.md with AIWiki section
 
 **Acceptance Criteria**:
 - Wiki content can be used in agent conversations

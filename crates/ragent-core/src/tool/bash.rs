@@ -601,12 +601,24 @@ impl Tool for BashTool {
                 const MAX_OUTPUT: usize = FIRST_CHARS + LAST_CHARS + 1000; // allow for separator
 
                 if content.len() > MAX_OUTPUT {
-                    let first_part = &content[..FIRST_CHARS.min(content.len())];
-                    let remainder_len = content.len() - FIRST_CHARS;
+                    // Find valid UTF-8 char boundaries near the target split points
+                    let first_end = {
+                        let mut i = FIRST_CHARS.min(content.len());
+                        while i > 0 && !content.is_char_boundary(i) {
+                            i -= 1;
+                        }
+                        i
+                    };
+                    let first_part = &content[..first_end];
+                    let remainder_len = content.len() - first_end;
                     let last_part = if remainder_len > LAST_CHARS {
-                        &content[content.len() - LAST_CHARS..]
+                        let mut j = content.len() - LAST_CHARS;
+                        while j < content.len() && !content.is_char_boundary(j) {
+                            j += 1;
+                        }
+                        &content[j..]
                     } else {
-                        &content[FIRST_CHARS..]
+                        &content[first_end..]
                     };
 
                     let omitted = remainder_len.saturating_sub(LAST_CHARS);

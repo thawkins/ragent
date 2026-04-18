@@ -107,6 +107,89 @@ impl Completer for RagentCompleter {
     }
 }
 
+/// Implements `aiwiki::LlmExtractor` using the TUI's active LLM provider.
+///
+/// Bridges the aiwiki extraction pipeline to the ragent-core provider system.
+struct TuiLlmExtractor {
+    registry: Arc<ragent_core::provider::ProviderRegistry>,
+    storage: Arc<ragent_core::storage::Storage>,
+    provider_id: String,
+    model_id: String,
+}
+
+#[async_trait::async_trait]
+impl aiwiki::LlmExtractor for TuiLlmExtractor {
+    async fn complete(
+        &self,
+        system: &str,
+        user: &str,
+        _max_tokens: u32,
+        temperature: f32,
+    ) -> Result<String, String> {
+        use futures::StreamExt as _;
+        use ragent_core::llm::{ChatContent, ChatMessage, ChatRequest, StreamEvent};
+
+        let api_key = self
+            .storage
+            .get_provider_auth(&self.provider_id)
+            .map_err(|e| format!("reading API key: {e}"))?
+            .unwrap_or_default();
+
+        let provider = self
+            .registry
+            .get(&self.provider_id)
+            .ok_or_else(|| format!("provider '{}' not found", self.provider_id))?;
+
+        let client = provider
+            .create_client(&api_key, None, &Default::default())
+            .await
+            .map_err(|e| format!("creating LLM client: {e}"))?;
+
+        // Build options — disable thinking for extraction, set num_predict
+        let mut options: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+        options.insert(
+            "thinking".to_string(),
+            serde_json::Value::String("disabled".to_string()),
+        );
+
+        let request = ChatRequest {
+            model: self.model_id.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text(user.to_string()),
+            }],
+            tools: vec![],
+            temperature: if temperature > 0.0 { Some(temperature) } else { None },
+            top_p: None,
+            max_tokens: None,
+            system: Some(system.to_string()),
+            options,
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: Some(120),
+        };
+
+        let mut stream = client.chat(request).await
+            .map_err(|e| format!("starting LLM stream: {e}"))?;
+        let mut result = String::new();
+        while let Some(event) = stream.next().await {
+            match event {
+                StreamEvent::TextDelta { text } => result.push_str(&text),
+                StreamEvent::Error { message } => return Err(message),
+                _ => {}
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+/// Result of a background AIWiki sync operation, delivered via `JoinHandle`.
+pub struct AiwikiSyncOutcome {
+    pub result: Result<aiwiki::sync::SyncResult, String>,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct MentionSpan {
     at_start: usize,
@@ -430,10 +513,10 @@ impl App {
             input_area: Rect::default(),
             teams_area: Rect::default(),
             output_view_area: Rect::default(),
-            agents_button_area: Rect::default(),
-            teams_button_area: Rect::default(),
-            show_agents_window: false,
-            show_teams_window: false,
+                          agents_button_area: Rect::default(),
+                          teams_button_area: Rect::default(),
+                          aiwiki_status_area: Rect::default(),
+                          show_agents_window: false,            show_teams_window: false,
             agents_close_button_area: Rect::default(),
             teams_close_button_area: Rect::default(),
             mcp_servers: Vec::new(),
@@ -510,15 +593,26 @@ impl App {
                           theme_mode: crate::theme::ThemeMode::Default,
                           mouse_enabled: true,
                           status_history: StatusHistory::new(),
-                          needs_redraw: true,
-                          code_index: None,
-                          code_index_enabled: ragent_core::config::Config::load()
-                              .map(|c| c.code_index.enabled)
-                              .unwrap_or(false),            code_index_stats_cache: None,
-            code_index_stats_last_refresh: std::time::Instant::now(),
-            code_index_busy: false,
-            code_index_watch_session: None,
-        }; // Log any warnings from custom agent loading into the log panel
+                                                      needs_redraw: true,
+                                                      code_index: None,
+                                                      code_index_enabled: ragent_core::config::Config::load()
+                                                          .map(|c| c.code_index.enabled)
+                                                          .unwrap_or(false),
+                                                      code_index_stats_cache: None,
+                                                      code_index_stats_last_refresh: std::time::Instant::now(),
+                                                      code_index_busy: false,
+                                                      code_index_watch_session: None,
+                                                      aiwiki: None,
+                                                      aiwiki_enabled: false,
+                                                      aiwiki_stats_cache: None,
+                                                      aiwiki_stats_last_refresh: std::time::Instant::now() - std::time::Duration::from_secs(10),
+                                                      aiwiki_web_server: None,
+                                                      aiwiki_web_port: 0,
+                                                      aiwiki_sync_handle: None,
+                                                      aiwiki_sync_progress: None,
+                                                  }; // end Self { ... }
+
+        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -1776,8 +1870,247 @@ impl App {
         }
     }
 
-    /// Refresh cached memory/journal counts for the status bar.
-    ///
+          /// Refresh cached AIWiki stats for the status bar.
+        ///
+        /// Polls every 5 seconds to check if AIWiki is enabled and get page counts.
+        pub fn refresh_aiwiki_stats(&mut self) {
+            let interval = std::time::Duration::from_secs(5);
+            if self.aiwiki_stats_last_refresh.elapsed() < interval {
+                return;
+            }
+    
+            let current_dir = std::env::current_dir().unwrap_or_default();
+            
+            if aiwiki::Aiwiki::exists(&current_dir) {
+                let rt = tokio::runtime::Handle::try_current();
+                if let Ok(runtime) = rt {
+                    let wiki_result = tokio::task::block_in_place(|| runtime.block_on(aiwiki::Aiwiki::new(&current_dir)));
+                    match wiki_result {
+                        Ok(wiki) => {
+                            // Count sources from disk if state has none tracked.
+                            let src_count = {
+                                let from_state = wiki.state.files.len();
+                                if from_state > 0 {
+                                    from_state
+                                } else {
+                                    Self::count_raw_sources_sync(&wiki.path("raw"))
+                                }
+                            };
+                            // Count pages from disk to stay accurate even if
+                            // state.json page_count is stale.
+                            let pg_count = Self::count_wiki_pages_sync(
+                                &wiki.path("wiki"),
+                            );
+                            self.aiwiki_enabled = wiki.config.enabled;
+                            self.aiwiki_stats_cache = Some((src_count, pg_count));
+                        }
+                        Err(_) => {
+                            self.aiwiki_enabled = false;
+                            self.aiwiki_stats_cache = None;
+                        }
+                    }
+                }
+            } else {
+                self.aiwiki_enabled = false;
+                self.aiwiki_stats_cache = None;
+            }
+            
+            self.aiwiki_stats_last_refresh = std::time::Instant::now();
+        }
+
+        /// Count .md files in the wiki directory (sync, non-recursive walkdir).
+        fn count_wiki_pages_sync(wiki_dir: &std::path::Path) -> usize {
+            let mut count = 0usize;
+            let mut stack = vec![wiki_dir.to_path_buf()];
+            while let Some(current) = stack.pop() {
+                let entries = match std::fs::read_dir(&current) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                        if path.file_name().and_then(|n| n.to_str()) != Some("log.md") {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            count
+        }
+
+        /// Count files in aiwiki/raw/ (sync, for fallback when state is empty).
+        fn count_raw_sources_sync(raw_dir: &std::path::Path) -> usize {
+            match std::fs::read_dir(raw_dir) {
+                Ok(entries) => entries
+                    .flatten()
+                    .filter(|e| e.path().is_file())
+                    .count(),
+                Err(_) => 0,
+            }
+        }
+
+        /// Poll for completion of a background AIWiki sync task.
+        ///
+        /// Called from the main event loop each tick. If the sync task
+        /// has finished, consumes the result and displays it in the chat.
+        pub fn poll_aiwiki_sync(&mut self) {
+            let handle = match self.aiwiki_sync_handle.as_mut() {
+                Some(h) => h,
+                None => return,
+            };
+
+            // Check without blocking — is it done?
+            if !handle.is_finished() {
+                return;
+            }
+
+            // Take the handle out so we only process it once.
+            let handle = self.aiwiki_sync_handle.take().unwrap();
+            self.aiwiki_sync_progress = None;
+            match tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(handle)
+            }) {
+                Ok(outcome) => match outcome.result {
+                    Ok(result) => {
+                        let summary = result.summary();
+                        let mut report = format!("\n\n✅ **{}**", summary);
+
+                        if !result.errors.is_empty() {
+                            report.push_str("\n\n⚠️ Errors encountered:");
+                            for error in &result.errors[..result.errors.len().min(5)] {
+                                report.push_str(&format!("\n  • {}", error));
+                            }
+                        }
+
+                        if !result.broken_links.is_empty() {
+                            report.push_str("\n\n🔗 Broken links found:");
+                            for link in &result.broken_links[..result.broken_links.len().min(5)] {
+                                report.push_str(&format!(
+                                    "\n  • {} → {}",
+                                    link.source_file
+                                        .file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy(),
+                                    link.target
+                                ));
+                            }
+                        }
+
+                        self.append_assistant_text(&report);
+                        self.status = format!("aiwiki: {}", summary);
+                        // Force immediate stats refresh
+                        self.aiwiki_stats_last_refresh =
+                            std::time::Instant::now() - std::time::Duration::from_secs(10);
+                        self.refresh_aiwiki_stats();
+                    }
+                    Err(e) => {
+                        self.append_assistant_text(&format!("\n\n❌ **Sync failed:** {}", e));
+                        self.status = "aiwiki: sync failed".to_string();
+                    }
+                },
+                Err(e) => {
+                    self.append_assistant_text(
+                        &format!("\n\n❌ **Sync task panicked:** {}", e),
+                    );
+                    self.status = "aiwiki: sync error".to_string();
+                }
+            }
+            self.needs_redraw = true;
+        }
+
+        /// Build a model label string from the active global provider/model
+        /// for use as the aiwiki `llm_model` config value.
+        fn aiwiki_model_label(&self) -> String {
+            // selected_model is already stored as "provider/model"
+            if let Some(m) = self.selected_model.as_deref() {
+                return m.to_string();
+            }
+            if let Some(p) = self.configured_provider.as_ref() {
+                return p.id.clone();
+            }
+            aiwiki::config::DEFAULT_LLM_MODEL.to_string()
+        }
+
+        /// Start the AIWiki web server (if not already running) and open a browser.
+        pub fn open_aiwiki_browser(&mut self) {
+            // Already running — just open the browser.
+            if self.aiwiki_web_server.is_some() {
+                let url = format!("http://127.0.0.1:{}/aiwiki", self.aiwiki_web_port);
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&url)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                return;
+            }
+
+            // Pick an available port by binding to :0, then keep the listener.
+            let std_listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+                Ok(l) => l,
+                Err(e) => {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("AIWiki web: failed to bind port: {e}"),
+                    );
+                    return;
+                }
+            };
+            let port = match std_listener.local_addr() {
+                Ok(addr) => addr.port(),
+                Err(e) => {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("AIWiki web: failed to get port: {e}"),
+                    );
+                    return;
+                }
+            };
+            std_listener.set_nonblocking(true).ok();
+            let tcp = match tokio::net::TcpListener::from_std(std_listener) {
+                Ok(l) => l,
+                Err(e) => {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("AIWiki web: failed to convert listener: {e}"),
+                    );
+                    return;
+                }
+            };
+
+            let project_root = std::env::current_dir().unwrap_or_default();
+            let wiki_router = aiwiki::web::create_router(&project_root);
+            let app_router = axum::Router::new()
+                .nest("/aiwiki", wiki_router)
+                .route("/", axum::routing::get(|| async {
+                    axum::response::Redirect::permanent("/aiwiki")
+                }));
+
+            self.aiwiki_web_port = port;
+
+            let handle = tokio::spawn(async move {
+                tracing::info!("AIWiki web server listening on http://127.0.0.1:{port}/aiwiki");
+                if let Err(e) = axum::serve(tcp, app_router).await {
+                    tracing::error!("AIWiki web server error: {e}");
+                }
+            });
+            self.aiwiki_web_server = Some(handle);
+
+            let url = format!("http://127.0.0.1:{port}/aiwiki");
+            self.push_log_no_agent(LogLevel::Info, format!("AIWiki web: {url}"));
+
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&url)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+        }
+    
+        /// Refresh cached memory/journal counts for the status bar.    ///
     /// Debounced to run at most once per 5 seconds to avoid unnecessary I/O.
     pub fn refresh_memory_stats(&mut self) {
         // Load memory block count
@@ -6885,17 +7218,444 @@ Type `/swarm help` for more info.\n";
                                     } else {
                                         "disabled"
                                     };
-                                    self.append_assistant_text(&format!(
-                                        "From: /mouse\n\nMouse support is currently **{}**.\n\nUsage: `/mouse on` | `/mouse off`",
-                                        status
-                                    ));
-                                    self.status = format!("mouse: {}", status);
-                                }
-                            }
-                        }
-            
-                          "codeindex" => {                let sub = args.split_whitespace().next().unwrap_or("");
-                match sub {
+                                                                          self.append_assistant_text(&format!(
+                                                                              "From: /mouse\n\nMouse support is currently **{}**.\n\nUsage: `/mouse on` | `/mouse off`",
+                                                                              status
+                                                                          ));
+                                                                          self.status = format!("mouse: {}", status);
+                                                                      }
+                                                                  }
+                                                              }
+                                    
+                                                              "aiwiki" => {
+                                                                  use aiwiki::init::Initializer;
+                                                                  use aiwiki::Aiwiki;
+                                                                  use aiwiki::sync::{sync, preview_sync};
+                                                                  
+                                                                  let sub = args.split_whitespace().next().unwrap_or("");
+                                                                  let sub_args = args.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+                                                                  
+                                                                  match sub {
+                                                                      "on" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+                                                                          
+                                                                          if !Aiwiki::exists(&current_dir) {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki on\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first to create the wiki structure."
+                                                                              );
+                                                                              self.status = "aiwiki: not initialized".to_string();
+                                                                          } else {
+                                                                              let rt = tokio::runtime::Handle::current();
+                                                                              match tokio::task::block_in_place(|| rt.block_on(Aiwiki::new(&current_dir))) {
+                                                                                  Ok(mut wiki) => {
+                                                                                      if wiki.config.enabled {
+                                                                                          self.append_assistant_text(
+                                                                                              "From: /aiwiki on\n\n✅ **AIWiki is already enabled.**"
+                                                                                          );
+                                                                                          self.status = "aiwiki: already enabled".to_string();
+                                                                                      } else {
+                                                                                          match tokio::task::block_in_place(|| rt.block_on(wiki.set_enabled(true))) {
+                                                                                              Ok(()) => {
+                                                                                                  self.append_assistant_text(
+                                                                                                      "From: /aiwiki on\n\n✅ **AIWiki enabled.**\n\nThe wiki is now active. All AIWiki features are available."
+                                                                                                  );
+                                                                                                  self.aiwiki_enabled = true;
+                                                                                                  self.status = "aiwiki: enabled".to_string();
+                                                                                              }
+                                                                                              Err(e) => {
+                                                                                                  self.append_assistant_text(
+                                                                                                      &format!("From: /aiwiki on\n\n❌ **Failed to enable:** {}", e)
+                                                                                                  );
+                                                                                                  self.status = "aiwiki: enable failed".to_string();
+                                                                                              }
+                                                                                          }
+                                                                                      }
+                                                                                  }
+                                                                                  Err(e) => {
+                                                                                      self.append_assistant_text(
+                                                                                          &format!("From: /aiwiki on\n\n❌ **Error loading wiki:** {}", e)
+                                                                                      );
+                                                                                      self.status = "aiwiki: error".to_string();
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                      "off" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+                                                                          
+                                                                          if !Aiwiki::exists(&current_dir) {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki off\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first to create the wiki structure."
+                                                                              );
+                                                                              self.status = "aiwiki: not initialized".to_string();
+                                                                          } else {
+                                                                              let rt = tokio::runtime::Handle::current();
+                                                                              match tokio::task::block_in_place(|| rt.block_on(Aiwiki::new(&current_dir))) {
+                                                                                  Ok(mut wiki) => {
+                                                                                      if !wiki.config.enabled {
+                                                                                          self.append_assistant_text(
+                                                                                              "From: /aiwiki off\n\n✅ **AIWiki is already disabled.**"
+                                                                                          );
+                                                                                          self.status = "aiwiki: already disabled".to_string();
+                                                                                      } else {
+                                                                                          match tokio::task::block_in_place(|| rt.block_on(wiki.set_enabled(false))) {
+                                                                                              Ok(()) => {
+                                                                                                  self.append_assistant_text(
+                                                                                                      "From: /aiwiki off\n\n✅ **AIWiki disabled.**\n\nThe wiki is now inactive. No indexing or syncing will occur. All AIWiki features are disabled.\n\nRun `/aiwiki on` to re-enable."
+                                                                                                  );
+                                                                                                  self.aiwiki_enabled = false;
+                                                                                                  self.status = "aiwiki: disabled".to_string();
+                                                                                              }
+                                                                                              Err(e) => {
+                                                                                                  self.append_assistant_text(
+                                                                                                      &format!("From: /aiwiki off\n\n❌ **Failed to disable:** {}", e)
+                                                                                                  );
+                                                                                                  self.status = "aiwiki: disable failed".to_string();
+                                                                                              }
+                                                                                          }
+                                                                                      }
+                                                                                  }
+                                                                                  Err(e) => {
+                                                                                      self.append_assistant_text(
+                                                                                          &format!("From: /aiwiki off\n\n❌ **Error loading wiki:** {}", e)
+                                                                                      );
+                                                                                      self.status = "aiwiki: error".to_string();
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                      "init" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+                                                                          
+                                                                          match Initializer::new(&current_dir) {
+                                                                              Ok(initializer) => {
+                                                                                  if initializer.exists() {
+                                                                                      self.append_assistant_text(
+                                                                                          "From: /aiwiki init\n\n⚠️ **AIWiki already initialized.**\n\nUse `/aiwiki status` to check wiki status."
+                                                                                      );
+                                                                                      self.status = "aiwiki: already initialized".to_string();
+                                                                                  } else {
+                                                                                      // Use the global provider/model for aiwiki
+                                                                                      let mut cfg = aiwiki::AiwikiConfig::default();
+                                                                                      let model_label = self.aiwiki_model_label();
+                                                                                      cfg.llm_model = model_label;
+                                                                                      let rt = tokio::runtime::Handle::current();
+                                                                                      match tokio::task::block_in_place(|| rt.block_on(initializer.init(Some(cfg)))) {
+                                                                                          Ok(()) => {
+                                                                                              self.append_assistant_text(
+                                                                                                  "From: /aiwiki init\n\n✅ **AIWiki initialized and enabled!**\n\nCreated directory structure:\n• aiwiki/raw/ — place source documents here\n• aiwiki/wiki/ — generated markdown pages\n• aiwiki/static/ — web UI assets\n\nThe wiki is now active and ready.\n\nNext steps:\n• Add documents to aiwiki/raw/\n• Run `/aiwiki sync` to process them"
+                                                                                              );
+                                                                                              self.aiwiki_enabled = true;
+                                                                                              self.status = "aiwiki: initialized and enabled".to_string();
+                                                                                          }
+                                                                                          Err(e) => {
+                                                                                              self.append_assistant_text(
+                                                                                                  &format!("From: /aiwiki init\n\n❌ **Initialization failed:** {}", e)
+                                                                                              );
+                                                                                              self.status = "aiwiki: init failed".to_string();
+                                                                                          }
+                                                                                      }
+                                                                                  }
+                                                                              }
+                                                                              Err(e) => {
+                                                                                  self.append_assistant_text(
+                                                                                      &format!("From: /aiwiki init\n\n❌ **Error:** {}", e)
+                                                                                  );
+                                                                                  self.status = "aiwiki: error".to_string();
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                      "status" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+                                                                          
+                                                                          if !Aiwiki::exists(&current_dir) {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki status\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` to create the wiki structure."
+                                                                              );
+                                                                              self.status = "aiwiki: not initialized".to_string();
+                                                                          } else {
+                                                                              let rt = tokio::runtime::Handle::current();
+                                                                              match tokio::task::block_in_place(|| rt.block_on(Aiwiki::new(&current_dir))) {
+                                                                                  Ok(wiki) => {
+                                                                                      let stats = wiki.state.stats();
+                                                                                      let enabled_status = if wiki.config.enabled {
+                                                                                          "✅ Enabled"
+                                                                                      } else {
+                                                                                          "⛔ Disabled"
+                                                                                      };
+                                                                                      let status_text = format!(
+                                                                                          "From: /aiwiki status\n\n📚 **{}**\n\nStatus: {}\nVersion: {}\nSync Mode: {:?}\nLLM Model: {}\n\n--- Statistics ---\nTracked Sources: {}\nGenerated Pages: {}\nLast Sync: {}\n\nDirectories:\n• raw: {:?}\n• wiki: {:?}\n• static: {:?}",
+                                                                                          wiki.config.name,
+                                                                                          enabled_status,
+                                                                                          wiki.config.version,
+                                                                                          wiki.config.sync_mode,
+                                                                                          wiki.config.llm_model,
+                                                                                          stats.total_sources,
+                                                                                          stats.total_pages,
+                                                                                          stats.last_sync.map(|t| t.to_rfc3339()).unwrap_or_else(|| "never".to_string()),
+                                                                                          wiki.path("raw"),
+                                                                                          wiki.path("wiki"),
+                                                                                          wiki.path("static")
+                                                                                      );
+                                                                                      self.append_assistant_text(&status_text);
+                                                                                      self.status = "aiwiki: status shown".to_string();
+                                                                                  }
+                                                                                  Err(e) => {
+                                                                                      self.append_assistant_text(
+                                                                                          &format!("From: /aiwiki status\n\n❌ **Error loading wiki:** {}", e)
+                                                                                      );
+                                                                                      self.status = "aiwiki: error".to_string();
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                      "sync" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+                                                                          
+                                                                          if !Aiwiki::exists(&current_dir) {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki sync\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first to create the wiki structure."
+                                                                              );
+                                                                              self.status = "aiwiki: not initialized".to_string();
+                                                                          } else {
+                                                                              let rt = tokio::runtime::Handle::current();
+                                                                              match tokio::task::block_in_place(|| rt.block_on(Aiwiki::new(&current_dir))) {
+                                                                                  Ok(wiki) => {
+                                                                                      if !wiki.config.enabled {
+                                                                                          self.append_assistant_text(
+                                                                                              "From: /aiwiki sync\n\n⛔ **AIWiki is currently disabled.**\n\nRun `/aiwiki on` to enable."
+                                                                                          );
+                                                                                          self.status = "aiwiki: disabled".to_string();
+                                                                                      } else {
+                                                                                          // Check for --force flag
+                                                                                          let force = sub_args.contains("--force") || sub_args.contains("-f");
+                                                                                          
+                                                                                          // Show preview first
+                                                                                          match tokio::task::block_in_place(|| rt.block_on(preview_sync(&wiki))) {
+                                                                                              Ok(preview) => {
+                                                                                                  if preview.is_empty() && !force {
+                                                                                                      self.append_assistant_text(
+                                                                                                          "From: /aiwiki sync\n\n✅ **Wiki is up to date.**\n\nNo changes detected in raw/ directory.\n\nUse `/aiwiki sync --force` to re-process all files."
+                                                                                                      );
+                                                                                                      self.status = "aiwiki: up to date".to_string();
+                                                                                                  } else {
+                                                                                                      if !preview.is_empty() {
+                                                                                                          let preview_text = preview.to_string();
+                                                                                                          self.append_assistant_text(
+                                                                                                              &format!("From: /aiwiki sync\n\n{}", preview_text)
+                                                                                                          );
+                                                                                                      }
+                                                                                                      
+                                                                                                      self.append_assistant_text("\n\n🔄 Running sync in background...");
+                                                                                                      self.status = "aiwiki: syncing...".to_string();
+                                                                                                      
+                                                                                                      // Build LLM extractor from current provider/model
+                                                                                                      let model_label = self.aiwiki_model_label();
+                                                                                                      let (pid, mid) = model_label.split_once('/')
+                                                                                                          .unwrap_or(("", &model_label));
+                                                                                                      let extractor = TuiLlmExtractor {
+                                                                                                          registry: Arc::clone(&self.provider_registry),
+                                                                                                          storage: Arc::clone(&self.storage),
+                                                                                                          provider_id: pid.to_string(),
+                                                                                                          model_id: mid.to_string(),
+                                                                                                      };
+                                                                                                      
+                                                                                                      // Spawn sync as a background task so the TUI stays responsive
+                                                                                                      let progress = std::sync::Arc::new(aiwiki::sync::SyncProgress::new());
+                                                                                                      let progress_clone = std::sync::Arc::clone(&progress);
+                                                                                                      let handle = tokio::spawn(async move {
+                                                                                                          let outcome = sync(&wiki, force, Some(&extractor), Some(&progress_clone)).await;
+                                                                                                          AiwikiSyncOutcome {
+                                                                                                              result: outcome.map_err(|e| e.to_string()),
+                                                                                                          }
+                                                                                                      });
+                                                                                                      self.aiwiki_sync_progress = Some(progress);
+                                                                                                      self.aiwiki_sync_handle = Some(handle);
+                                                                                                  }
+                                                                                              }
+                                                                                              Err(e) => {
+                                                                                                  self.append_assistant_text(
+                                                                                                      &format!("From: /aiwiki sync\n\n❌ **Preview failed:** {}", e)
+                                                                                                  );
+                                                                                                  self.status = "aiwiki: preview failed".to_string();
+                                                                                              }
+                                                                                          }
+                                                                                      }
+                                                                                  }
+                                                                                  Err(e) => {
+                                                                                      self.append_assistant_text(
+                                                                                          &format!("From: /aiwiki sync\n\n❌ **Error loading wiki:** {}", e)
+                                                                                      );
+                                                                                      self.status = "aiwiki: error".to_string();
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                      "ingest" => {
+                                                                          let current_dir = std::env::current_dir()
+                                                                              .map_err(|e| e.to_string())
+                                                                              .unwrap_or_default();
+
+                                                                          if !Aiwiki::exists(&current_dir) {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki ingest\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first."
+                                                                              );
+                                                                          } else if sub_args.is_empty() {
+                                                                              self.append_assistant_text(
+                                                                                  "From: /aiwiki ingest\n\n⚠️ **Missing path.**\n\nUsage: `/aiwiki ingest <path>` — ingest a file or directory\n\nExamples:\n• `/aiwiki ingest docs` — ingest all supported files from docs/\n• `/aiwiki ingest README.md` — ingest a single file"
+                                                                              );
+                                                                          } else {
+                                                                              let rt = tokio::runtime::Handle::current();
+                                                                              match tokio::task::block_in_place(|| rt.block_on(Aiwiki::new(&current_dir))) {
+                                                                                  Ok(wiki) => {
+                                                                                      if !wiki.config.enabled {
+                                                                                          self.append_assistant_text(
+                                                                                              "From: /aiwiki ingest\n\n⛔ **AIWiki is currently disabled.**\n\nRun `/aiwiki on` to enable."
+                                                                                          );
+                                                                                      } else {
+                                                                                          use aiwiki::ingest::{IngestOptions, scan_directory, ingest_file};
+
+                                                                                          let target = std::path::PathBuf::from(sub_args.trim());
+                                                                                          let target = if target.is_relative() {
+                                                                                              current_dir.join(&target)
+                                                                                          } else {
+                                                                                              target
+                                                                                          };
+
+                                                                                          let opts = IngestOptions::default();
+
+                                                                                          if target.is_dir() {
+                                                                                              self.append_assistant_text(
+                                                                                                  &format!("From: /aiwiki ingest\n\n🔄 Ingesting files from `{}`...", sub_args.trim())
+                                                                                              );
+                                                                                              match tokio::task::block_in_place(|| rt.block_on(scan_directory(&wiki, &target, opts, true))) {
+                                                                                                  Ok(results) => {
+                                                                                                      if results.is_empty() {
+                                                                                                          self.append_assistant_text(
+                                                                                                              "\n\n⚠️ **No supported files found.**\n\nSupported types: .md, .txt, .pdf, .docx, .odt, .rs, .py, .ts, .js, .go, .c, .cpp, .java, and more."
+                                                                                                          );
+                                                                                                      } else {
+                                                                                                          let mut report = format!("\n\n✅ **Ingested {} file(s) into aiwiki/raw/**\n", results.len());
+                                                                                                          for r in &results {
+                                                                                                              let name = r.source_path.file_name()
+                                                                                                                  .unwrap_or_default()
+                                                                                                                  .to_string_lossy();
+                                                                                                              report.push_str(&format!("\n• {} ({:?})", name, r.doc_type));
+                                                                                                          }
+                                                                                                          report.push_str("\n\nRun `/aiwiki sync` to process the ingested files.");
+                                                                                                          self.append_assistant_text(&report);
+                                                                                                      }
+                                                                                                      self.aiwiki_stats_last_refresh =
+                                                                                                          std::time::Instant::now() - std::time::Duration::from_secs(10);
+                                                                                                      self.refresh_aiwiki_stats();
+                                                                                                  }
+                                                                                                  Err(e) => {
+                                                                                                      self.append_assistant_text(
+                                                                                                          &format!("\n\n❌ **Ingest failed:** {}", e)
+                                                                                                      );
+                                                                                                  }
+                                                                                              }
+                                                                                          } else if target.is_file() {
+                                                                                              match tokio::task::block_in_place(|| rt.block_on(ingest_file(&wiki, &target, opts))) {
+                                                                                                  Ok(r) => {
+                                                                                                      let name = r.source_path.file_name()
+                                                                                                          .unwrap_or_default()
+                                                                                                          .to_string_lossy();
+                                                                                                      self.append_assistant_text(
+                                                                                                          &format!("From: /aiwiki ingest\n\n✅ **Ingested** `{}` ({:?})\n\nRun `/aiwiki sync` to process it.", name, r.doc_type)
+                                                                                                      );
+                                                                                                      self.aiwiki_stats_last_refresh =
+                                                                                                          std::time::Instant::now() - std::time::Duration::from_secs(10);
+                                                                                                      self.refresh_aiwiki_stats();
+                                                                                                  }
+                                                                                                  Err(e) => {
+                                                                                                      self.append_assistant_text(
+                                                                                                          &format!("From: /aiwiki ingest\n\n❌ **Ingest failed:** {}", e)
+                                                                                                      );
+                                                                                                  }
+                                                                                              }
+                                                                                          } else {
+                                                                                              self.append_assistant_text(
+                                                                                                  &format!("From: /aiwiki ingest\n\n❌ **Path not found:** `{}`", sub_args.trim())
+                                                                                              );
+                                                                                          }
+                                                                                      }
+                                                                                  }
+                                                                                  Err(e) => {
+                                                                                      self.append_assistant_text(
+                                                                                          &format!("From: /aiwiki ingest\n\n❌ **Error loading wiki:** {}", e)
+                                                                                      );
+                                                                                  }
+                                                                              }
+                                                                          }
+                                                                      }
+                                                                                                                                              "help" | _ => {
+                                                                                                                                                  let help_text = r#"From: /aiwiki help
+                                                                      
+                                                                      📚 **AIWiki Commands**
+                                                                      
+                                                                      AIWiki is an embedded, project-scoped knowledge base system.
+                                                                      
+                                                                      **Commands:**
+                                                                      • `/aiwiki init` — Initialize the wiki directory structure (auto-enables)
+                                                                      • `/aiwiki on` — Enable AIWiki system
+                                                                      • `/aiwiki off` — Disable AIWiki system (no performance impact)
+                                                                      • `/aiwiki sync [--force]` — Sync wiki with changes in raw/ folder
+                                                                      • `/aiwiki ingest <path>` — Copy files from a directory or file into raw/
+                                                                      • `/aiwiki analyze <topic> <sources...` |" — Generate analysis from sources
+                                                                      • `/aiwiki ask <question>` — Query wiki content with citations
+                                                                      • `/aiwiki review` — Review wiki for contradictions
+                                                                      • `/aiwiki status` — Show wiki statistics and configuration
+                                                                      • `/aiwiki help` — Show this help message
+                                                                      
+                                                                      **Analysis Command:**
+                                                                      • `/aiwiki analyze "Rust vs Go" sources/concept-rust.md sources/concept-go.md` — Compare sources
+                                                                      • `/aiwiki analyze "Microservices Benefits" sources/*.md` — Synthesize multiple sources
+                                                                      
+                                                                      **Ask Command:**
+                                                                      • `/aiwiki ask "What are the key differences between Rust and Go?"` — Q&A with citations
+                                                                      • `/aiwiki ask "What deployment patterns are documented?"`
+                                                                      
+                                                                      **Review Command:**
+                                                                      • `/aiwiki review` — Scan all pages for contradictions
+                                                                      
+                                                                      **Sync Command:**
+                                                                      • `/aiwiki sync` — Check for changes and sync wiki
+                                                                      • `/aiwiki sync --force` — Re-process all files (ignore hash check)
+                                                                      
+                                                                      **Enable/Disable:**
+                                                                      When AIWiki is disabled (`/aiwiki off`):
+                                                                      • No file watching or indexing occurs
+                                                                      • All `/aiwiki` commands except `/aiwiki on` are unavailable
+                                                                      • Zero performance impact on ragent
+                                                                      • Run `/aiwiki on` to re-enable
+                                                                      
+                                                                      **Getting Started:**
+                                                                      1. Run `/aiwiki init` to create the wiki structure
+                                                                      2. Add documents with `/aiwiki ingest docs` or manually to `aiwiki/raw/`
+                                                                      3. Run `/aiwiki sync` to process documents
+                                                                      4. Use `/aiwiki ask` to query your knowledge base
+                                                                      
+                                                                      **Ingest Command:**
+                                                                      • `/aiwiki ingest docs` — Copy all supported files from docs/ into raw/
+                                                                      • `/aiwiki ingest README.md` — Ingest a single file
+                                                                      "#;
+                                                                                                                                                  self.append_assistant_text(help_text);
+                                                                                                                                                  self.status = "aiwiki: help shown".to_string();
+                                                                                                                                              }                                                                  }
+                                                              }
+                                    
+                                                                "codeindex" => {                let sub = args.split_whitespace().next().unwrap_or("");                match sub {
                     "on" | "enable" => {
                         self.code_index_enabled = true;
                         if self.code_index.is_some() {
@@ -7448,6 +8208,11 @@ Type `/swarm help` for more info.\n";
                     if self.show_teams_window {
                         self.show_agents_window = false;
                     }
+                    return;
+                }
+                // AIWiki status area — open browser if enabled
+                if self.aiwiki_status_area.contains(pos.into()) && self.aiwiki_enabled {
+                    self.open_aiwiki_browser();
                     return;
                 }
                                   if self.agents_close_button_area.contains(pos.into()) {
@@ -8431,20 +9196,19 @@ Type `/swarm help` for more info.\n";
                 InputAction::FocusPrevTeammate => {
                     self.cycle_focused_teammate(false);
                 }
-                                                    // InsertNewline is handled directly in handle_key (returns None),
-                                                    // so this arm should not be reached in normal operation.
-                                                    InputAction::InsertNewline => {
-                                                        self.insert_char_at_cursor('\n');
-                                                    }
-                                                    InputAction::ClearLine => {
-                                                        self.input.clear();
-                                                        self.input_cursor = 0;
-                                                        self.kb_select_anchor = None;
-                                                    }
-                                                }
-                                            }
-                                            self.assert_ui_invariants();
-                                            self.debug_log_input_transition("key", &before_input, before_cursor);    }
+                InputAction::InsertNewline => {
+                    self.insert_char_at_cursor('\n');
+                }
+                InputAction::ClearLine => {
+                    self.input.clear();
+                    self.input_cursor = 0;
+                    self.kb_select_anchor = None;
+                }
+            }
+        }
+        self.assert_ui_invariants();
+        self.debug_log_input_transition("key", &before_input, before_cursor);
+    }
 
     /// Execute a plan agent delegation.
     ///

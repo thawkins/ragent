@@ -429,6 +429,12 @@ pub async fn run_tui(
         // Refresh cached memory/journal stats for the status bar.
         app.refresh_memory_stats();
 
+        // Refresh cached AIWiki stats for the status bar.
+        app.refresh_aiwiki_stats();
+
+        // Check if background AIWiki sync has completed.
+        app.poll_aiwiki_sync();
+
         // Only draw when UI dirty or periodic refresh
         if app.needs_redraw {
             terminal.draw(|frame| layout::render(frame, &mut app))?;

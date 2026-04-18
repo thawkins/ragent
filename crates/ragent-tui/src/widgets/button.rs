@@ -220,7 +220,7 @@ impl<'a> Button<'a> {
     /// Calculate the content width
     fn content_width(&self) -> u16 {
         let label_width = self.label.chars().count() as u16;
-        if let Some(shortcut) = self.shortcut {
+        if let Some(_shortcut) = self.shortcut {
             // [X]Label format
             4 + label_width // "[X]" + label
         } else {

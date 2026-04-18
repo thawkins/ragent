@@ -1838,7 +1838,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
-fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     // Split area into 2 lines
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -2072,44 +2072,96 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // ── Memory indicator ────────────────────────────────────────────────────
-    {
-        let block_count = app.memory_block_count;
-        let entry_count = app.memory_entry_count;
-        let journal_count = app.journal_entry_count;
-        if block_count > 0 || entry_count > 0 || journal_count > 0 {
-            let mem_label = if entry_count > 0 {
-                format!("│ MEM: {}blk, {}mem", block_count, entry_count)
-            } else {
-                format!("│ MEM: {}blk", block_count)
-            };
-            row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
-            if journal_count > 0 {
-                row2_left.push(Span::styled(
-                    format!(", {}j", journal_count),
-                    Style::default().fg(Color::Magenta),
-                ));
-            }
-            row2_left.push(Span::raw(" "));
+          // ── Memory indicator ────────────────────────────────────────────────────
+          {
+              let block_count = app.memory_block_count;
+              let entry_count = app.memory_entry_count;
+              let journal_count = app.journal_entry_count;
+              if block_count > 0 || entry_count > 0 || journal_count > 0 {
+                  let mem_label = if entry_count > 0 {
+                      format!("│ MEM: {}blk, {}mem", block_count, entry_count)
+                  } else {
+                      format!("│ MEM: {}blk", block_count)
+                  };
+                  row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
+                  if journal_count > 0 {
+                      row2_left.push(Span::styled(
+                          format!(", {}j", journal_count),
+                          Style::default().fg(Color::Magenta),
+                      ));
+                  }
+                  row2_left.push(Span::raw(" "));
+    
+                  // Relative time of last update
+                  if let Some(updated) = app.memory_last_updated {
+                      let elapsed = updated.elapsed();
+                      let time_str = if elapsed.as_secs() < 60 {
+                          format!("{}s ago", elapsed.as_secs())
+                      } else if elapsed.as_secs() < 3600 {
+                          format!("{}m ago", elapsed.as_secs() / 60)
+                      } else {
+                          format!("{}h ago", elapsed.as_secs() / 3600)
+                      };
+                      row2_left.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
+                      row2_left.push(Span::raw(" "));
+                  }
+              }
+          }
+    
+          // ── AIWiki indicator ────────────────────────────────────────────────────
+          {
+              // Record x-offset before adding AIWiki spans for click detection.
+              let aiwiki_x_offset: u16 = row2_left.iter().map(|s| s.width() as u16).sum();
 
-            // Relative time of last update
-            if let Some(updated) = app.memory_last_updated {
-                let elapsed = updated.elapsed();
-                let time_str = if elapsed.as_secs() < 60 {
-                    format!("{}s ago", elapsed.as_secs())
-                } else if elapsed.as_secs() < 3600 {
-                    format!("{}m ago", elapsed.as_secs() / 60)
-                } else {
-                    format!("{}h ago", elapsed.as_secs() / 3600)
-                };
-                row2_left.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
-                row2_left.push(Span::raw(" "));
-            }
-        }
-    }
+              let (tick, tick_color) = if app.aiwiki_enabled {
+                  ("✓", Color::Green)
+              } else {
+                  ("✗", Color::Red)
+              };
+              row2_left.push(Span::styled(
+                  "│ AIWiki: ",
+                  Style::default().fg(Color::DarkGray),
+              ));
+              row2_left.push(Span::styled(
+                  format!("{tick} "),
+                  Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
+              ));
+              if app.aiwiki_enabled {
+                  let (sources, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0));
+                  let label = format!("{}src/{}pg", sources, pages);
+                  row2_left.push(Span::styled(label, Style::default().fg(Color::Cyan)));
+                  // Show sync progress indicator while sync is active
+                  if let Some(ref progress) = app.aiwiki_sync_progress {
+                      let current = progress.current.load(std::sync::atomic::Ordering::Relaxed);
+                      let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
+                      if total > 0 {
+                          row2_left.push(Span::styled(
+                              format!(" {}/{}", current, total),
+                              Style::default().fg(Color::Yellow),
+                          ));
+                      } else {
+                          row2_left.push(Span::styled(
+                              " ...",
+                              Style::default().fg(Color::Yellow),
+                          ));
+                      }
+                  }
+                  row2_left.push(Span::raw(" "));
+              }
 
-    let line2 = Line::from(row2_left);
-    frame.render_widget(Paragraph::new(line2), rows[1]);
+              // Width of the AIWiki spans we just added.
+              let aiwiki_w: u16 = row2_left.iter().map(|s| s.width() as u16).sum::<u16>()
+                  .saturating_sub(aiwiki_x_offset);
+              app.aiwiki_status_area = Rect::new(
+                  rows[1].x + aiwiki_x_offset,
+                  rows[1].y,
+                  aiwiki_w,
+                  1,
+              );
+          }
+    
+        let line2 = Line::from(row2_left);
+        frame.render_widget(Paragraph::new(line2), rows[1]);
 }
 
 /// Render a slice of messages into formatted lines using the rich format

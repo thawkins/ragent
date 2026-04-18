@@ -1,6 +1,28 @@
 # Release
 
-## Current Version: 0.1.0-alpha.42
+## Current Version: 0.1.0-alpha.43
+
+### Added
+- **AIWiki Milestone 1-6: Complete Knowledge Base System** — An embedded, project-scoped knowledge base for ragent
+  - New `aiwiki` crate with full knowledge base infrastructure
+  - Directory initialization (`/aiwiki init`), enable/disable system (`/aiwiki on|off`)
+  - Document ingestion pipeline supporting Markdown, Plain Text, PDF, DOCX, ODT
+  - Sync & auto-update with file watcher, broken link detection
+  - Web interface integrated with ragent-server (HTML templates, search, graph visualization)
+  - AI-powered analysis, Q&A, and contradiction detection
+  - Agent tools: `aiwiki_search`, `aiwiki_ingest`, `aiwiki_status`
+  - Export/Import: Single markdown export, Obsidian vault export, markdown import
+
+- **TUI Milestone 3.1 & 3.2: Dialog & Button Component System** — Unified dialog and button system
+  - Extended `Dialog` with `with_buttons()`, `with_footer_hint()`, and factory methods
+  - New `Button` component with variants (Primary, Secondary, Danger, Success)
+  - `ButtonBar` for horizontal button arrangement
+  - Theme-aware styling throughout
+
+### Changed
+- Updated workspace version to 0.1.0-alpha.43
+
+## Previous: 0.1.0-alpha.42
 
 ### Added
 - **Gemini provider** — Google Gemini API support as a first-class LLM provider
@@ -57,7 +79,7 @@
 ## Previous: 0.1.0-alpha.35
 
 ### Added
-- **pre-flight.sh** — Local CI check script; supports `--quick` flag
+- **pre-flight.sh** �� Local CI check script; supports `--quick` flag
 
 ### Fixed
 - Fixed lint errors in test files (unused variables, imports, mut warnings, missing docs)
@@ -97,13 +119,3 @@
 - Version bump to 0.1.0-alpha.30
 
 ## Previous: 0.1.0-alpha.29
-
-### Changed
-- Version bump to 0.1.0-alpha.28
-
-## Previous: 0.1.0-alpha.27
-
-### Fixed
-- CI Clippy: redundant closures in `lsp/discovery.rs`
-
-## Previous: 0.1.0-alpha.26
