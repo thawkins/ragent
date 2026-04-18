@@ -23,6 +23,8 @@ use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
 use ragent_core::team::{TeamConfig, TeamMember};
 
+use crate::theme::{StatusCategory, StatusHistory, StatusMessage, ThemeMode};
+
 // Pending confirmation field is stored on App (defined in app.rs) as Option<PendingForceCleanup>.
 
 /// Atomically update a JSON config file with file locking.
@@ -601,22 +603,31 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
               trigger: "theme",
               description: "Switch theme: /theme default|high-contrast",
           },
-          SlashCommandDef {
-              trigger: "journal",
-              description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
-          },
-    ];
-/// A single entry in the slash-command autocomplete menu.
-#[derive(Debug, Clone)]
-pub struct SlashMenuEntry {
-    /// The trigger word (without the leading `/`).
-    pub trigger: String,
-    /// Short description shown in the menu.
-    pub description: String,
-    /// Whether this entry is a skill (vs. a builtin command).
-    pub is_skill: bool,
-}
-
+                                  SlashCommandDef {
+                                      trigger: "journal",
+                                      description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
+                                  },
+                                  SlashCommandDef {
+                                      trigger: "status",
+                                      description: "Show status message history: /status [clear]",
+                                  },                      SlashCommandDef {
+                          trigger: "mouse",
+                          description: "Toggle mouse support: /mouse on | off",
+                      },
+                                  ];/// A single entry in the slash-command autocomplete menu.
+                #[derive(Debug, Clone)]
+                pub struct SlashMenuEntry {
+                    /// The trigger word (without the leading `/`).
+                    pub trigger: String,
+                    /// Short description shown in the menu.
+                    pub description: String,
+                    /// Whether this entry is a skill (vs. a builtin command).
+                    pub is_skill: bool,
+                    /// Suggested completions for this command (e.g., team names, agent names).
+                    pub suggestions: Vec<String>,
+                    /// Parameter hint shown after command (e.g., "<query>" or "[clear]").
+                    pub parameter_hint: Option<String>,
+                }
 /// State of the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
 pub struct SlashMenuState {
@@ -1181,11 +1192,14 @@ pub struct App {
     /// Timestamp of the last memory update event (for relative time display).
     pub memory_last_updated: Option<std::time::Instant>,
 
-    /// Current theme mode (default or high-contrast for accessibility)
-    pub theme_mode: crate::theme::ThemeMode,
-}
-
-/// State held while waiting for the user to approve or reject a plan.
+                      /// Current theme mode (default or high-contrast for accessibility)
+                      pub theme_mode: crate::theme::ThemeMode,
+                      /// Whether mouse input is enabled (default: true). Set to false for
+                      /// keyboard-only accessibility mode.
+                      pub mouse_enabled: bool,
+                      /// Status message history for tracking recent status messages
+                      pub status_history: StatusHistory,
+                  }/// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {
     /// The plan text produced by the plan agent.

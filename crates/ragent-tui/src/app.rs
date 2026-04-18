@@ -41,6 +41,9 @@ use prompt_opt::{Completer, OptMethod, optimize};
 mod state;
 pub use self::state::*;
 
+// Re-export status types from theme for use in app
+pub use crate::theme::{StatusCategory, StatusHistory, StatusMessage};
+
 /// Connects the `prompt_opt` crate to the session's active LLM provider.
 ///
 /// `RagentCompleter` implements [`Completer`] by building an [`LlmClient`] from
@@ -497,19 +500,21 @@ impl App {
             memory_browser: None,
             memory_browser_close_area: Rect::default(),
             memory_browser_area: Rect::default(),
-            journal_viewer: None,
-            journal_viewer_close_area: Rect::default(),
-            journal_viewer_area: Rect::default(),
+                          journal_viewer: None,
+                          journal_viewer_close_area: Rect::default(),
+                          journal_viewer_area: Rect::default(),
                           memory_block_count: 0,
                           memory_entry_count: 0,
                           journal_entry_count: 0,
                           memory_last_updated: None,
                           theme_mode: crate::theme::ThemeMode::Default,
-                          needs_redraw: true,            code_index: None,
-            code_index_enabled: ragent_core::config::Config::load()
-                .map(|c| c.code_index.enabled)
-                .unwrap_or(false),
-            code_index_stats_cache: None,
+                          mouse_enabled: true,
+                          status_history: StatusHistory::new(),
+                          needs_redraw: true,
+                          code_index: None,
+                          code_index_enabled: ragent_core::config::Config::load()
+                              .map(|c| c.code_index.enabled)
+                              .unwrap_or(false),            code_index_stats_cache: None,
             code_index_stats_last_refresh: std::time::Instant::now(),
             code_index_busy: false,
             code_index_watch_session: None,
@@ -830,7 +835,7 @@ impl App {
         self.input.clear();
         self.input_cursor = 0;
         self.file_menu = None;
-        self.status = "processing...".to_string();
+        self.set_status_working("processing");
         self.stream_bytes = 0;
 
         let has_refs = !ragent_core::reference::parse::parse_refs(&text).is_empty();
@@ -1108,25 +1113,59 @@ impl App {
         None
     }
 
-    /// Refresh the configured-provider detection (e.g. after storing a new key).
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// # use ragent_tui::App;
-    /// # fn example(app: &mut App) {
-    /// app.refresh_provider();
-    /// # }
-    /// ```
-    pub fn refresh_provider(&mut self) {
-        self.configured_provider = Self::detect_provider(&self.storage);
-    }
-
-    /// Return the current input length in characters.
-    pub fn input_len_chars(&self) -> usize {
-        self.input.chars().count()
-    }
-
+          /// Refresh the configured-provider detection (e.g. after storing a new key).
+          ///
+          /// # Examples
+          ///
+          /// ```rust,no_run
+          /// # use ragent_tui::App;
+          /// # fn example(app: &mut App) {
+          /// app.refresh_provider();
+          /// # }
+          /// ```
+          pub fn refresh_provider(&mut self) {
+              self.configured_provider = Self::detect_provider(&self.storage);
+          }
+    
+          /// Set status with Info category (cyan)
+          pub fn set_status_info(&mut self, message: impl Into<String>) {
+              let msg = message.into();
+              self.status = StatusCategory::Info.format(&msg);
+              self.status_history.push(StatusMessage::info(msg));
+          }
+    
+          /// Set status with Success category (green)
+          pub fn set_status_success(&mut self, message: impl Into<String>) {
+              let msg = message.into();
+              self.status = StatusCategory::Success.format(&msg);
+              self.status_history.push(StatusMessage::success(msg));
+          }
+    
+          /// Set status with Warning category (yellow)
+          pub fn set_status_warning(&mut self, message: impl Into<String>) {
+              let msg = message.into();
+              self.status = StatusCategory::Warning.format(&msg);
+              self.status_history.push(StatusMessage::warning(msg));
+          }
+    
+          /// Set status with Error category (red)
+          pub fn set_status_error(&mut self, message: impl Into<String>) {
+              let msg = message.into();
+              self.status = StatusCategory::Error.format(&msg);
+              self.status_history.push(StatusMessage::error(msg));
+          }
+    
+          /// Set status with Working category (cyan with bold, includes spinner indicator)
+          pub fn set_status_working(&mut self, message: impl Into<String>) {
+              let msg = message.into();
+              self.status = StatusCategory::Working.format(&msg);
+              self.status_history.push(StatusMessage::working(msg));
+          }
+    
+          /// Return the current input length in characters.
+          pub fn input_len_chars(&self) -> usize {
+              self.input.chars().count()
+          }
     #[inline]
     fn assert_input_cursor_invariant(&self) {
         debug_assert!(self.input_cursor <= self.input_len_chars());
@@ -1186,20 +1225,98 @@ impl App {
         self.assert_input_cursor_invariant();
     }
 
-    /// Refresh slash/file menus based on current input.
-    pub(crate) fn refresh_input_menus(&mut self) {
-        if self.input.starts_with('/') {
-            self.update_slash_menu();
-        } else {
-            self.slash_menu = None;
-        }
-        if self.input.contains('@') {
-            self.update_file_menu();
-        } else {
-            self.file_menu = None;
-        }
-    }
-
+          /// Refresh slash/file menus based on current input.
+          pub(crate) fn refresh_input_menus(&mut self) {
+              if self.input.starts_with('/') {
+                  self.update_slash_menu();
+              } else {
+                  self.slash_menu = None;
+              }
+              if self.input.contains('@') {
+                  self.update_file_menu();
+              } else {
+                  self.file_menu = None;
+              }
+          }
+    
+                /// Get context-aware suggestions for a command trigger.
+                fn get_command_suggestions(&self, trigger: &str) -> Vec<String> {
+                    match trigger {
+                        "team" | "teams" => {
+                            // Suggest team-related subcommands
+                            vec![
+                                "create".to_string(),
+                                "open".to_string(),
+                                "close".to_string(),
+                                "delete".to_string(),
+                                "list".to_string(),
+                                "spawn".to_string(),
+                                "message".to_string(),
+                                "tasks".to_string(),
+                                "cleanup".to_string(),
+                            ]
+                        }
+                        "memory" => {
+                            // Suggest memory categories
+                            vec![
+                                "search".to_string(),
+                                "add".to_string(),
+                                "forget".to_string(),
+                                "config".to_string(),
+                            ]
+                        }
+                        "agent" | "agents" => {
+                            // Suggest agent-related subcommands
+                            vec![
+                                "list".to_string(),
+                                "switch".to_string(),
+                            ]
+                        }
+                        "codeindex" => {
+                            vec!["on".to_string(), "off".to_string(), "sync".to_string()]
+                        }
+                        "theme" => {
+                            vec!["toggle".to_string(), "light".to_string(), "dark".to_string()]
+                        }
+                        "mouse" => {
+                            vec!["on".to_string(), "off".to_string()]
+                        }
+                        "status" => {
+                            vec!["clear".to_string()]
+                        }
+                        "help" => {
+                            vec![
+                                "team".to_string(),
+                                "memory".to_string(),
+                                "agent".to_string(),
+                                "ui".to_string(),
+                                "accessibility".to_string(),
+                            ]
+                        }
+                        _ => Vec::new(),
+                    }
+                }    
+          /// Get parameter hint for a command trigger.
+          fn get_parameter_hint(&self, trigger: &str) -> Option<String> {
+              match trigger {
+                  "team" => Some("<subcommand>".to_string()),
+                  "memory" => Some("<subcommand> [<arg>]".to_string()),
+                  "agent" => Some("[<name>]".to_string()),
+                  "codeindex" => Some("[on|off|sync]".to_string()),
+                  "theme" => Some("[toggle|light|dark]".to_string()),
+                  "mouse" => Some("[on|off]".to_string()),
+                  "status" => Some("[clear]".to_string()),
+                  "help" => Some("[<command>]".to_string()),
+                  "quit" | "exit" => None,
+                  "clear" => None,
+                  "undo" => None,
+                  "redo" => None,
+                  "compact" => None,
+                  "halt" => None,
+                  "resume" => None,
+                  _ => Some("<arg>".to_string()),
+              }
+          }
     fn refresh_project_files_cache(&mut self) {
         let wd = std::env::current_dir().unwrap_or_default();
         let files = ragent_core::reference::fuzzy::collect_project_files(&wd, 10_000);
@@ -2661,21 +2778,28 @@ impl App {
 
             let needle = filter.to_lowercase();
 
-            // Collect builtin command matches
-            let mut matches: Vec<SlashMenuEntry> = SLASH_COMMANDS
-                .iter()
-                .filter(|cmd| {
-                    needle.is_empty()
-                        || cmd.trigger.starts_with(&needle)
-                        || cmd.description.to_lowercase().contains(&needle)
-                })
-                .map(|cmd| SlashMenuEntry {
-                    trigger: cmd.trigger.to_string(),
-                    description: cmd.description.to_string(),
-                    is_skill: false,
-                })
-                .collect();
-
+                          // Collect builtin command matches
+                          let mut matches: Vec<SlashMenuEntry> = SLASH_COMMANDS
+                              .iter()
+                              .filter(|cmd| {
+                                  needle.is_empty()
+                                      || cmd.trigger.starts_with(&needle)
+                                      || cmd.description.to_lowercase().contains(&needle)
+                              })
+                              .map(|cmd| {
+                                  // Build context-aware suggestions based on command type
+                                  let suggestions = self.get_command_suggestions(cmd.trigger);
+                                  let parameter_hint = self.get_parameter_hint(cmd.trigger);
+                                  
+                                  SlashMenuEntry {
+                                      trigger: cmd.trigger.to_string(),
+                                      description: cmd.description.to_string(),
+                                      is_skill: false,
+                                      suggestions,
+                                      parameter_hint,
+                                  }
+                              })
+                              .collect();
             // Collect user-invocable skill matches
             let working_dir = std::env::current_dir().unwrap_or_default();
             let skill_dirs = ragent_core::config::Config::load()
@@ -2699,17 +2823,18 @@ impl App {
                     continue;
                 }
 
-                if needle.is_empty()
-                    || skill.name.starts_with(&needle)
-                    || desc.to_lowercase().contains(&needle)
-                {
-                    matches.push(SlashMenuEntry {
-                        trigger: skill.name.clone(),
-                        description: format!("{desc}{hint}"),
-                        is_skill: true,
-                    });
-                }
-            }
+                                  if needle.is_empty()
+                                      || skill.name.starts_with(&needle)
+                                      || desc.to_lowercase().contains(&needle)
+                                  {
+                                      matches.push(SlashMenuEntry {
+                                          trigger: skill.name.clone(),
+                                          description: format!("{desc}{hint}"),
+                                          is_skill: true,
+                                          suggestions: Vec::new(),
+                                          parameter_hint: skill.argument_hint.clone(),
+                                      });
+                                  }            }
 
             // Sort alphabetically by trigger so the list is predictable.
             matches.sort_by(|a, b| a.trigger.cmp(&b.trigger));
@@ -3786,7 +3911,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 let resume_text = "You were previously interrupted by the user. Continue the task from where you left off.";
                 let msg = Message::user_text(&sid, resume_text);
                 self.messages.push(msg);
-                self.status = "processing...".to_string();
+                self.set_status_working("processing");
                 self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
                 let mut agent = self.agent_info.clone();
@@ -6654,91 +6779,122 @@ Type `/swarm help` for more info.\n";
                 }
             },
 
-            "journal" => {
-                let sub = args.split_whitespace().next().unwrap_or("");
-                let rest = args.trim_start().strip_prefix(sub).unwrap_or("").trim();
-                match sub {
-                    "" | "show" => {
-                        // Open the journal viewer panel
-                        self.journal_viewer = Some(crate::panels::JournalViewerState::load(&self.storage));
-                        self.status = "journal: viewer opened".to_string();
-                    }
-                    "search" => {
-                        if rest.is_empty() {
-                            self.append_assistant_text(
-                                "From: /journal\nUsage: `/journal search <query>`",
-                            );
-                            return;
-                        }
-                        // Open viewer and perform search
-                        let mut viewer = crate::panels::JournalViewerState::load(&self.storage);
-                        viewer.search_query = rest.to_string();
-                        viewer.search(&self.storage);
-                        self.journal_viewer = Some(viewer);
-                        self.status = format!("journal: searching for '{}'", rest);
-                    }
-                    "add" => {
-                        if rest.is_empty() {
-                            self.append_assistant_text(
-                                "From: /journal\nUsage: `/journal add <title>`",
-                            );
-                            return;
-                        }
-                        // Add a new journal entry
-                        // Generate a unique ID for the journal entry
-                        let id = format!("je-{}", ragent_core::id::SessionId::new());
-                        let project = std::env::current_dir()
-                            .ok()
-                            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-                            .unwrap_or_else(|| "ragent".to_string());
-                        let session_id = self.session_id.clone().unwrap_or_default();
-
-                        match self.storage.create_journal_entry(
-                            &id,
-                            rest,
-                            "",
-                            &project,
-                            &session_id,
-                            &[] as &[String]
-                        ) {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /journal add\n✅ Created journal entry: {} (id: {})",
-                                    rest, id
-                                ));
-                                // Refresh cached stats
-                                self.refresh_memory_stats();
+                          "journal" => {
+                              let sub = args.split_whitespace().next().unwrap_or("");
+                              let rest = args.trim_start().strip_prefix(sub).unwrap_or("").trim();
+                              match sub {
+                                  "" | "show" => {
+                                      // Open the journal viewer panel
+                                      self.journal_viewer = Some(crate::panels::JournalViewerState::load(&self.storage));
+                                      self.status = "journal: viewer opened".to_string();
+                                  }
+                                  "search" => {
+                                      if rest.is_empty() {
+                                          self.append_assistant_text(
+                                              "From: /journal\nUsage: `/journal search <query>`",
+                                          );
+                                          return;
+                                      }
+                                      // Open viewer and perform search
+                                      let mut viewer = crate::panels::JournalViewerState::load(&self.storage);
+                                      viewer.search_query = rest.to_string();
+                                      viewer.search(&self.storage);
+                                      self.journal_viewer = Some(viewer);
+                                      self.status = format!("journal: searching for '{}'", rest);
+                                  }
+                                  "add" => {
+                                      if rest.is_empty() {
+                                          self.append_assistant_text(
+                                              "From: /journal\nUsage: `/journal add <title>`",
+                                          );
+                                          return;
+                                      }
+                                      // Add a new journal entry
+                                      // Generate a unique ID for the journal entry
+                                      let id = format!("je-{}", ragent_core::id::SessionId::new());
+                                      let project = std::env::current_dir()
+                                          .ok()
+                                          .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                                          .unwrap_or_else(|| "ragent".to_string());
+                                      let session_id = self.session_id.clone().unwrap_or_default();
+            
+                                      match self.storage.create_journal_entry(
+                                          &id,
+                                          rest,
+                                          "",
+                                          &project,
+                                          &session_id,
+                                          &[] as &[String]
+                                      ) {
+                                          Ok(()) => {
+                                              self.append_assistant_text(&format!(
+                                                  "From: /journal add\n✅ Created journal entry: {} (id: {})",
+                                                  rest, id
+                                              ));
+                                              // Refresh cached stats
+                                              self.refresh_memory_stats();
+                                          }
+                                          Err(e) => {
+                                              self.append_assistant_text(&format!(
+                                                  "From: /journal add\n❌ Failed to create entry: {}",
+                                                  e
+                                              ));
+                                          }
+                                      }
+                                  }
+                                  "help" => {
+                                      self.append_assistant_text(
+                                          "## /journal — Journal Viewer\n\n\
+                                           | Sub-command | Description |\n\
+                                           |-------------|-------------|\n\
+                                           | `/journal` | Open the journal viewer panel |\n\
+                                           | `/journal search <query>` | Search journal entries |\n\
+                                           | `/journal add <title>` | Add a new journal entry |\n\
+                                           | `/journal help` | Show this help |",
+                                      );
+                                      self.status = "journal: help".to_string();
+                                  }
+                                  _ => {
+                                      self.append_assistant_text(
+                                          "From: /journal\nUsage: `/journal` | `/journal search <query>` | `/journal add <title>` | `/journal help`",
+                                      );
+                                  }
+                              }
+                          }
+            
+                        "mouse" => {
+                            let sub = args.split_whitespace().next().unwrap_or("");
+                            match sub {
+                                "on" => {
+                                    self.mouse_enabled = true;
+                                    self.append_assistant_text(
+                                        "From: /mouse on\n✅ **Mouse support enabled.**\n\nYou can now use the mouse for scrolling, clicking, and selection."
+                                    );
+                                    self.status = "mouse: enabled".to_string();
+                                }
+                                "off" => {
+                                    self.mouse_enabled = false;
+                                    self.append_assistant_text(
+                                        "From: /mouse off\n✅ **Mouse support disabled.**\n\nKeyboard-only mode active. All mouse interactions are now disabled.\n\nKeyboard shortcuts:\n• Alt+Up/Down: Focus teammates\n• Tab: Navigate UI elements\n• Enter: Select/activate\n• Esc: Close dialogs\n• Ctrl+C: Copy selection\n• Ctrl+V: Paste"
+                                    );
+                                    self.status = "mouse: disabled (keyboard-only mode)".to_string();
+                                }
+                                _ => {
+                                    let status = if self.mouse_enabled {
+                                        "enabled"
+                                    } else {
+                                        "disabled"
+                                    };
+                                    self.append_assistant_text(&format!(
+                                        "From: /mouse\n\nMouse support is currently **{}**.\n\nUsage: `/mouse on` | `/mouse off`",
+                                        status
+                                    ));
+                                    self.status = format!("mouse: {}", status);
+                                }
                             }
-                            Err(e) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /journal add\n❌ Failed to create entry: {}",
-                                    e
-                                ));
-                            }
                         }
-                    }
-                    "help" => {
-                        self.append_assistant_text(
-                            "## /journal — Journal Viewer\n\n\
-                             | Sub-command | Description |\n\
-                             |-------------|-------------|\n\
-                             | `/journal` | Open the journal viewer panel |\n\
-                             | `/journal search <query>` | Search journal entries |\n\
-                             | `/journal add <title>` | Add a new journal entry |\n\
-                             | `/journal help` | Show this help |",
-                        );
-                        self.status = "journal: help".to_string();
-                    }
-                    _ => {
-                        self.append_assistant_text(
-                            "From: /journal\nUsage: `/journal` | `/journal search <query>` | `/journal add <title>` | `/journal help`",
-                        );
-                    }
-                }
-            }
-
-            "codeindex" => {
-                let sub = args.split_whitespace().next().unwrap_or("");
+            
+                          "codeindex" => {                let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
                     "on" | "enable" => {
                         self.code_index_enabled = true;
@@ -8501,16 +8657,15 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             }
-            Event::ToolCallEnd {
-                ref session_id,
-                ref call_id,
-                ref tool,
-                ref error,
-                duration_ms,
-            } => {
-                if self.is_current_session(session_id) {
-                    self.update_tool_call_status(call_id, error.is_none(), error.as_deref());
-                    self.status = "processing...".to_string();
+                          Event::ToolCallEnd {
+                              ref session_id,
+                              ref call_id,
+                              ref tool,
+                              ref error,
+                              duration_ms,
+                          } => {
+                              if self.is_current_session(session_id) {
+                                  self.update_tool_call_status(call_id, error.is_none(), error.as_deref(), duration_ms);                    self.set_status_working("processing");
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
@@ -8546,7 +8701,7 @@ Type `/swarm help` for more info.\n";
                 if self.is_current_session(session_id) {
                     self.is_processing = true;
                     self.agent_halted = false;
-                    self.status = "processing...".to_string();
+                    self.set_status_working("processing");
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!(
@@ -8742,7 +8897,7 @@ Type `/swarm help` for more info.\n";
                         .retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
                     if self.permission_queue.is_empty() {
-                        self.status = "processing...".to_string();
+                        self.set_status_working("processing");
                     }
                     self.push_log_no_agent(
                         LogLevel::Info,
@@ -9341,7 +9496,7 @@ Type `/swarm help` for more info.\n";
                         .retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
                     if self.permission_queue.is_empty() {
-                        self.status = "processing...".to_string();
+                        self.set_status_working("processing");
                     }
                 }
             }
@@ -10386,32 +10541,38 @@ Type `/swarm help` for more info.\n";
         }
     }
 
-    fn update_tool_call_status(&mut self, call_id: &str, success: bool, error: Option<&str>) {
-        use ragent_core::message::ToolCallStatus;
-
-        for msg in self.messages.iter_mut().rev() {
-            for part in msg.parts.iter_mut() {
-                if let MessagePart::ToolCall {
-                    call_id: cid,
-                    state,
-                    ..
-                } = part
-                    && cid == call_id
-                {
-                    state.status = if success {
-                        ToolCallStatus::Completed
-                    } else {
-                        ToolCallStatus::Error
-                    };
-                    if let Some(err) = error {
-                        state.error = Some(err.to_string());
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
+          fn update_tool_call_status(
+              &mut self,
+              call_id: &str,
+              success: bool,
+              error: Option<&str>,
+              duration_ms: u64,
+          ) {
+              use ragent_core::message::ToolCallStatus;
+    
+              for msg in self.messages.iter_mut().rev() {
+                  for part in msg.parts.iter_mut() {
+                      if let MessagePart::ToolCall {
+                          call_id: cid,
+                          state,
+                          ..
+                      } = part
+                          && cid == call_id
+                      {
+                          state.status = if success {
+                              ToolCallStatus::Completed
+                          } else {
+                              ToolCallStatus::Error
+                          };
+                          if let Some(err) = error {
+                              state.error = Some(err.to_string());
+                          }
+                          state.duration_ms = Some(duration_ms);
+                          return;
+                      }
+                  }
+              }
+          }
     fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) {
         if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
             for msg in self.messages.iter_mut().rev() {

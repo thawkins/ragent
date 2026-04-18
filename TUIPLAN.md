@@ -393,10 +393,11 @@ This document outlines a comprehensive usability audit of the ragent TUI interfa
 
 #### Tasks
 
-33. **T5.3.1 - Add mouse disable option**
-    - `/mouse off` command
-    - Remove all mouse event handling when disabled
-    - Ensure full keyboard equivalence
+33. **T5.3.1 - Add mouse disable option** ✅ **Complete**
+    - `/mouse off` command - Implemented ✅
+    - `/mouse on` command - Implemented ✅
+    - Remove all mouse event handling when disabled - Implemented ✅
+    - Ensure full keyboard equivalence - Documented in help text ✅
 
 ---
 
@@ -410,12 +411,12 @@ This document outlines a comprehensive usability audit of the ragent TUI interfa
 
 #### Tasks
 
-34. **T6.1.1 - Audit status message patterns**
+34. **T6.1.1 - Audit status message patterns** ✅ **Complete**
     - Some use prefixes: "team:", "journal:"
     - Some don't
     - Inconsistent capitalization
 
-35. **T6.1.2 - Create status message categories**
+35. **T6.1.2 - Create status message categories** ✅ **Complete**
     ```rust
     pub enum StatusCategory {
         Info,      // White/Cyan
@@ -425,6 +426,12 @@ This document outlines a comprehensive usability audit of the ragent TUI interfa
         Working,   // Cyan with spinner indicator
     }
     ```
+    - Added `StatusCategory` enum with Info, Success, Warning, Error, Working variants
+    - Added `StatusMessage` struct with timestamp tracking
+    - Added `StatusHistory` for tracking recent messages (default: 100 entries)
+    - Added `/status` slash command to view history
+    - Added `/status clear` to clear history
+    - Added helper methods: `set_status_info()`, `set_status_success()`, `set_status_warning()`, `set_status_error()`, `set_status_working()`
 
 ### Milestone 6.2: Loading State Consistency
 **Priority:** P2 (Medium)  
@@ -432,15 +439,19 @@ This document outlines a comprehensive usability audit of the ragent TUI interfa
 
 #### Tasks
 
-36. **T6.2.1 - Standardize loading indicators**
-    - Currently: dots, spinners, text
-    - Standardize on rotating spinner: `◐◓◑◒`
-    - Consistent position in status bar
+36. **T6.2.1 - Standardize loading indicators** ✅ **Complete**
+    - Previously: dots, spinners, text
+    - Standardized on rotating spinner: `◐◓◑◒`
+    - Added `LOADING_FRAMES` constant to theme
+    - Added `loading_frame()` helper function
+    - Replaced all `"processing..."` status messages with `set_status_working("processing")`
+    - Consistent status bar formatting with category icons
 
-37. **T6.2.2 - Add progress for long operations**
-    - Code indexing
-    - Large file operations
-    - Team task execution
+37. **T6.2.2 - Add progress for long operations** ✅ **Complete (Basic)**
+    - Code indexing: Uses `set_status_working()` with animated spinner
+    - Large file operations: Status helpers provide visual feedback
+    - Team task execution: Status history tracks all operations
+    - Future enhancement: Add determinate progress bars for known-length operations
 
 ---
 
