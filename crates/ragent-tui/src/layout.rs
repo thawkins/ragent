@@ -19,6 +19,8 @@ use ratatui::{
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
+use crate::utils::{ResponsiveBreakpoint, centered_rect, is_below_minimum_size};
+
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
 use crate::app::{
@@ -1246,7 +1248,15 @@ const INPUT_PLACEHOLDER: &str =
 fn render_chat(frame: &mut Frame, app: &mut App) {
     // Compute chat input height based on wrapped text
     let chat_area = frame.area();
-    let button_col_w = 18u16;
+    
+    // Responsive breakpoint for layout decisions
+    let breakpoint = ResponsiveBreakpoint::from_width(chat_area.width);
+    
+    // Check minimum size (for graceful degradation if needed)
+    let _below_min = is_below_minimum_size(chat_area);
+    
+    // Use responsive button column width
+    let button_col_w = breakpoint.button_column_width();
     let input_inner_width = chat_area
         .width
         .saturating_sub(button_col_w)
@@ -1261,7 +1271,7 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),            // status bar (2 lines)
+            Constraint::Length(breakpoint.status_bar_height()), // status bar (responsive)
             Constraint::Length(team_strip_h), // teammate strip (0 when hidden)
             Constraint::Min(3),               // messages + optional log
             Constraint::Length(input_height), // input (dynamic)
@@ -1275,12 +1285,14 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     }
 
     // Split the middle area horizontally when the log panel is visible.
+    // Use responsive log split based on terminal width.
     if app.show_log {
+        let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(60), // messages
-                Constraint::Percentage(40), // log
+                Constraint::Percentage(msg_pct), // messages (responsive)
+                Constraint::Percentage(log_pct), // log (responsive)
             ])
             .split(chunks[2]);
 
@@ -3191,25 +3203,6 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         .block(block)
         .alignment(Alignment::Left);
     frame.render_widget(paragraph, area);
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }
 
 /// Render the `/history` picker overlay.

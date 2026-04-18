@@ -70,6 +70,8 @@ pub enum InputAction {
     DeletePrevWord,
     /// Delete from cursor to end of line.
     DeleteToLineEnd,
+    /// Clear entire line.
+    ClearLine,
     /// Cycle to the next configured agent.
     SwitchAgent,
     /// Execute a `/`-prefixed command.
@@ -453,6 +455,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(InputAction::DeleteToLineEnd);
             }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(InputAction::ClearLine);
+            }
             KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(InputAction::MoveCursorWordLeft);
             }
@@ -618,6 +623,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Some(InputAction::DeleteToLineEnd)
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Some(InputAction::ClearLine)
         }
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleLog)
@@ -1130,9 +1138,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     // Persist the user's explicit provider choice so it survives restarts.
                     let _ = app.storage.set_setting("preferred_provider", &provider_id);
                     // Persist the context window so the status bar can show usage %.
-                    let _ = app
-                        .storage
-                        .set_setting("selected_model_ctx_window", &entry.context_window.to_string());
+                    let _ = app.storage.set_setting(
+                        "selected_model_ctx_window",
+                        &entry.context_window.to_string(),
+                    );
                     app.selected_model = Some(model_value);
                     app.selected_model_ctx_window = Some(entry.context_window);
                     // Ensure the UI reflects the provider the user just chose.
@@ -1421,7 +1430,7 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     token,
                 });
             }
-        },
+        }
     }
 }
 

@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **TUI Milestone 3.2: Button Component Standardization** — Unified button system for consistent UI interactions
+  - Completely rewritten `widgets/button.rs` with theme-aware Button component
+    - Added `Button::new()` and `Button::with_shortcut()` constructors
+    - Added `ButtonVariant` enum: Primary (focus color), Secondary (primary color), Danger (danger color), Success (success color)
+    - Added `ButtonState` enum: Enabled, Disabled, Active for different interaction modes
+    - Added configurable width/height, borders, keyboard shortcuts
+    - All colors now sourced from theme system (no hardcoded values)
+  - Added `ButtonBar` component for horizontal button arrangement
+    - Configurable spacing between buttons (default: 2 chars)
+    - Supports Left/Center/Right alignment
+    - Automatic width calculation based on button content
+  - Extended `DialogButton` with `to_button()` method for Button widget conversion
+  - Updated `widgets/permission_dialog.rs` to use theme colors:
+    - `Color::Yellow` → `theme::colors::DIALOG_WARNING`
+    - `Color::Cyan` → `theme::colors::PRIMARY`
+  - Added theme constants to support button system:
+    - `theme::colors::BORDER_INACTIVE` for disabled button borders
+    - `theme::colors::TEXT_PRIMARY` for button text
+
+- **TUI Milestone 3.1: Dialog Component Refactoring** — Unified dialog system for consistent UX across the TUI
+  - Extended `widgets/dialog.rs` with `Dialog::with_buttons()` for standardized action buttons
+  - Added `Dialog::with_footer_hint()` for consistent action hints across all dialogs
+  - Added `DialogAction` enum for standard dialog actions (Confirm, Cancel, Yes, No, Always, Custom)
+  - Added `DialogButton` struct with keyboard shortcut support and primary button styling
+  - Extended `DialogSize` enum with Small (60x30), Medium (70x40), Large (90x70), and Fullscreen variants
+  - Added factory methods: `Dialog::confirm()`, `Dialog::alert()`, `Dialog::error()`, `Dialog::success()`
+  - Added `DialogWidget` for rendering dialogs as ratatui Widgets
+  - Added helper function `centered_rect()` for consistent dialog positioning
+  - All dialogs now use theme colors via `DialogVariant` (Info, Warning, Danger, Success)
+
 ## [0.1.0-alpha.42] - 2026-04-15
 
 ### Added

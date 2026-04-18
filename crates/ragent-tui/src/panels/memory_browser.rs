@@ -16,6 +16,7 @@ use ragent_core::memory::{BlockScope, FileBlockStorage, MemoryBlock, load_all_bl
 use ragent_core::storage::Storage;
 
 use crate::app::App;
+use crate::utils::centered_rect;
 
 /// State for the memory browser overlay panel.
 #[derive(Debug, Clone)]
@@ -455,22 +456,3 @@ fn truncate_preview(content: &str, max_chars: usize) -> String {
     }
 }
 
-/// Centered rectangle helper (same pattern as other overlays).
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}

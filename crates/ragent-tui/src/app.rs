@@ -500,12 +500,12 @@ impl App {
             journal_viewer: None,
             journal_viewer_close_area: Rect::default(),
             journal_viewer_area: Rect::default(),
-            memory_block_count: 0,
-            memory_entry_count: 0,
-            journal_entry_count: 0,
-            memory_last_updated: None,
-            needs_redraw: true,
-            code_index: None,
+                          memory_block_count: 0,
+                          memory_entry_count: 0,
+                          journal_entry_count: 0,
+                          memory_last_updated: None,
+                          theme_mode: crate::theme::ThemeMode::Default,
+                          needs_redraw: true,            code_index: None,
             code_index_enabled: ragent_core::config::Config::load()
                 .map(|c| c.code_index.enabled)
                 .unwrap_or(false),
@@ -8275,16 +8275,20 @@ Type `/swarm help` for more info.\n";
                 InputAction::FocusPrevTeammate => {
                     self.cycle_focused_teammate(false);
                 }
-                // InsertNewline is handled directly in handle_key (returns None),
-                // so this arm should not be reached in normal operation.
-                InputAction::InsertNewline => {
-                    self.insert_char_at_cursor('\n');
-                }
-            }
-        }
-        self.assert_ui_invariants();
-        self.debug_log_input_transition("key", &before_input, before_cursor);
-    }
+                                                    // InsertNewline is handled directly in handle_key (returns None),
+                                                    // so this arm should not be reached in normal operation.
+                                                    InputAction::InsertNewline => {
+                                                        self.insert_char_at_cursor('\n');
+                                                    }
+                                                    InputAction::ClearLine => {
+                                                        self.input.clear();
+                                                        self.input_cursor = 0;
+                                                        self.kb_select_anchor = None;
+                                                    }
+                                                }
+                                            }
+                                            self.assert_ui_invariants();
+                                            self.debug_log_input_transition("key", &before_input, before_cursor);    }
 
     /// Execute a plan agent delegation.
     ///

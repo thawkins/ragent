@@ -593,16 +593,19 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
-    SlashCommandDef {
-        trigger: "codeindex",
-        description: "Manage codebase index: /codeindex on|off|show|reindex|help",
-    },
-    SlashCommandDef {
-        trigger: "journal",
-        description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
-    },
-];
-
+          SlashCommandDef {
+              trigger: "codeindex",
+              description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+          },
+          SlashCommandDef {
+              trigger: "theme",
+              description: "Switch theme: /theme default|high-contrast",
+          },
+          SlashCommandDef {
+              trigger: "journal",
+              description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
+          },
+    ];
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
 pub struct SlashMenuEntry {
@@ -1177,6 +1180,9 @@ pub struct App {
     pub journal_entry_count: u64,
     /// Timestamp of the last memory update event (for relative time display).
     pub memory_last_updated: Option<std::time::Instant>,
+
+    /// Current theme mode (default or high-contrast for accessibility)
+    pub theme_mode: crate::theme::ThemeMode,
 }
 
 /// State held while waiting for the user to approve or reject a plan.

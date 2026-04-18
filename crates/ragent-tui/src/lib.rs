@@ -75,17 +75,19 @@ impl TerminalGuard {
         // Disable mouse capture first to stop generating escape sequences
         let _ = execute!(std::io::stdout(), DisableMouseCapture);
 
-        // Drain any buffered events so they don't leak into the shell
-        while ct_event::poll(std::time::Duration::ZERO).unwrap_or(false) {
-            let _ = ct_event::read();
-        }
-
         if self.keyboard_enhanced {
             let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
         }
 
+        // Leave alternate screen and disable raw mode
         let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
+
+        // Drain any buffered terminal events AFTER leaving raw mode
+        // so they don't leak into the shell as garbage characters
+        while ct_event::poll(std::time::Duration::from_millis(10)).unwrap_or(false) {
+            let _ = ct_event::read();
+        }
     }
 }
 
@@ -159,23 +161,17 @@ pub async fn run_tui(
     std::panic::set_hook(Box::new(move |info| {
         // Restore terminal state before printing panic message
         // This is best-effort; ignore errors
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::DisableMouseCapture
-        );
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen
-        );
-        
-              // Call the default panic hook to print the backtrace
-                  default_panic_hook(info);
-              }));
-          
-              // Create the terminal guard - it will automatically restore terminal state on drop
-              // We don't need to reference it after creation - Drop handles cleanup
-              let _terminal_guard = TerminalGuard::new()?;
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+
+        // Call the default panic hook to print the backtrace
+        default_panic_hook(info);
+    }));
+
+    // Create the terminal guard - it will automatically restore terminal state on drop
+    // We don't need to reference it after creation - Drop handles cleanup
+    let _terminal_guard = TerminalGuard::new()?;
     // Now create the ratatui terminal
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
@@ -438,46 +434,47 @@ pub async fn run_tui(
             terminal.draw(|frame| layout::render(frame, &mut app))?;
             app.needs_redraw = false;
         }
-                  tokio::select! {
-                      // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
-                      _ = sigint.recv() => {
-                          tracing::info!("SIGINT received, initiating graceful shutdown");
-                          app.is_running = false;
-                      }
-                      // Handle SIGTERM - initiate graceful shutdown
-                      _ = sigterm.recv() => {
-                          tracing::info!("SIGTERM received, initiating graceful shutdown");
-                          app.is_running = false;
-                      }
-                      // Terminal key/mouse events (polled at 50ms intervals)
-                      _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
-                          let mut got_input = false;
-                          while ct_event::poll(std::time::Duration::ZERO)? {
-                              match ct_event::read()? {
-                                  CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                                  CtEvent::Mouse(mouse) => { app.handle_mouse_event(mouse); got_input = true; }
-                                  _ => {}
-                              }
-                          }
-                          if got_input {
-                              app.needs_redraw = true;
-                          }
-                      }
-                      // Wake up when a new bus event arrives (handled in drain loop above)
-                      result = bus_rx.recv() => {
-                          match result {
-                              Ok(event) => app.handle_event(event),
-                              Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                  app.push_log(
-                                      app::LogLevel::Warn,
-                                      format!("{n} events dropped (event bus lag)"),
-                                      None,
-                                  );
-                              }
-                              Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
-                          }
-                      }
-                  }    }
+        tokio::select! {
+            // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
+            _ = sigint.recv() => {
+                tracing::info!("SIGINT received, initiating graceful shutdown");
+                app.is_running = false;
+            }
+            // Handle SIGTERM - initiate graceful shutdown
+            _ = sigterm.recv() => {
+                tracing::info!("SIGTERM received, initiating graceful shutdown");
+                app.is_running = false;
+            }
+            // Terminal key/mouse events (polled at 50ms intervals)
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                let mut got_input = false;
+                while ct_event::poll(std::time::Duration::ZERO)? {
+                    match ct_event::read()? {
+                        CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                        CtEvent::Mouse(mouse) => { app.handle_mouse_event(mouse); got_input = true; }
+                        _ => {}
+                    }
+                }
+                if got_input {
+                    app.needs_redraw = true;
+                }
+            }
+            // Wake up when a new bus event arrives (handled in drain loop above)
+            result = bus_rx.recv() => {
+                match result {
+                    Ok(event) => app.handle_event(event),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        app.push_log(
+                            app::LogLevel::Warn,
+                            format!("{n} events dropped (event bus lag)"),
+                            None,
+                        );
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                }
+            }
+        }
+    }
 
     // Final synchronous save if history was modified since last flush.
     if app.history_dirty {
@@ -486,41 +483,47 @@ pub async fn run_tui(
         }
     }
 
+    // -- Signal cancellation to abort any active LLM streams --
+    if let Some(ref flag) = app.cancel_flag {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    // -- Restore terminal FIRST so the user gets a clean shell immediately --
+    // Drop the terminal guard now (before slow cleanup) to leave alternate screen
+    // and disable raw mode. This prevents the "stuck in TUI" appearance.
+    drop(_terminal_guard);
+
+    // -- Safety-net: force exit after 3 seconds if cleanup hangs --
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        std::process::exit(0);
+    });
+
     // -- Graceful shutdown of background resources --
     // Stop code index watcher (if running) - this has a Drop impl that calls stop()
     if let Some(session) = app.code_index_watch_session.take() {
         drop(session);
-        tracing::debug!("Code index watch session stopped");
     }
 
-    // Disconnect LSP servers gracefully
+    // Disconnect LSP servers gracefully (with timeout)
     if let Some(mgr) = app.lsp_manager.take() {
-        // Clone the manager to get a lock and call disconnect_all
         let mgr_clone = mgr.clone();
-        if let Ok(mut guard) = mgr_clone.try_write() {
-            guard.disconnect_all().await;
-            tracing::debug!("LSP manager disconnected");
-        }
+        let lsp_shutdown = async {
+            if let Ok(mut guard) = mgr_clone.try_write() {
+                guard.disconnect_all().await;
+            }
+        };
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), lsp_shutdown).await;
     }
 
-    // Wait for fallback reindex thread to complete (if spawned)
+    // Wait for fallback reindex thread to complete (with timeout)
     if let Some(handle) = code_index_fallback_thread.take() {
-        // Give it a reasonable timeout before giving up
-        let join_result = tokio::task::spawn_blocking(move || {
-            handle.join().ok()
-        })
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            tokio::task::spawn_blocking(move || handle.join().ok()),
+        )
         .await;
-        if join_result.is_ok() {
-            tracing::debug!("Code index fallback thread joined");
-        } else {
-            tracing::warn!("Code index fallback thread did not join in time");
-        }
     }
-
-    // Terminal restoration is handled by TerminalGuard's Drop implementation
-    // when `terminal_guard` goes out of scope at the end of this function.
-    // This ensures the terminal is restored even if the function returns early
-    // or panics (via the panic handler set up at the start).
 
     Ok(())
 }

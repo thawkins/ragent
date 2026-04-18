@@ -3,7 +3,7 @@
 //! Renders the active team as a compact table with lead + teammates, including
 //! status, elapsed time, step count, and tasks claimed/completed.
 
-use crate::theme::colors;
+use crate::theme::{colors, SPACING_SM};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -339,7 +339,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         )]));
     }
     let total_lines = lines.len() as u16;
-    let visible_lines = area.height.saturating_sub(2); // 2 for border
+    let visible_lines = area.height.saturating_sub(SPACING_SM); // border space
     app.teams_max_scroll = total_lines.saturating_sub(visible_lines);
     app.teams_scroll_offset = app.teams_scroll_offset.min(app.teams_max_scroll);
 
