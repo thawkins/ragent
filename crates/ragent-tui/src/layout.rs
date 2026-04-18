@@ -2256,6 +2256,20 @@ fn messages_to_lines<'a>(
                         ));
                         spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
                     }
+                    // Add duration_ms display for completed tool calls
+                    if state.status == ToolCallStatus::Completed {
+                        if let Some(duration_ms) = state.duration_ms {
+                            let duration_str = if duration_ms < 1000 {
+                                format!(" ({}ms)", duration_ms)
+                            } else {
+                                format!(" ({:.1}s)", duration_ms as f64 / 1000.0)
+                            };
+                            spans.push(Span::styled(
+                                duration_str,
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        }
+                    }
                     lines.push(Line::from(spans));
 
                     if state.status == ToolCallStatus::Completed && tool != "edit" {
