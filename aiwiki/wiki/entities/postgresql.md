@@ -20,3 +20,7 @@ Database system mentioned as example MCP use case for database queries
 ### From: claude_code_research
 
 Open-source database supported via MCP connector in Claude Code
+
+### From: roocode_research
+
+Database system supported through MCP integrations

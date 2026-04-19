@@ -2,32 +2,31 @@
 title: "AIWiki Analysis Module (mod.rs)"
 source: "mod"
 type: source
-tags: [rust, aiwiki, analysis, markdown, yaml-frontmatter, tokio, async, llm-integration, knowledge-management, text-processing]
-generated: "2026-04-18T14:51:53.266206600+00:00"
+tags: [rust, aiwiki, content-analysis, markdown-processing, yaml-frontmatter, wiki, llm-integration, text-processing, async-rust, serde]
+generated: "2026-04-18T15:16:13.987264438+00:00"
 ---
 
 # AIWiki Analysis Module (mod.rs)
 
-This Rust source file implements the core analysis and derived content generation capabilities for AIWiki, a knowledge management system with AI-powered features. The module provides functionality for generating multi-source comparisons, synthesizing common themes, evaluating trade-offs, and creating custom analyses. It includes public modules for question-answering (qa) and contradiction detection, along with data structures for analysis requests and results.
+This Rust source code defines the analysis module for AIWiki, a system that provides AI-powered content generation and analysis capabilities for wiki documents. The module implements functionality for generating comparative analyses between multiple wiki sources, including support for different analysis types such as comparisons, synthesis, trade-off evaluations, and custom analyses. The code includes public APIs for generating analyses and listing existing ones, with internal implementations for content generation, slug conversion, and YAML frontmatter parsing.
 
-The implementation features asynchronous file operations using tokio::fs for reading wiki sources and writing generated analyses to markdown files with YAML frontmatter. The code includes utilities for slug generation, frontmatter parsing, and source extraction. While the current implementation uses template-based content generation with placeholders for LLM integration, the architecture is designed to support future AI-powered analysis generation. The module also provides comprehensive test coverage for its core utility functions.
+The module is structured with two public submodules: `qa` for question-answering with source citations, and `contradiction` for detecting contradictions across wiki pages. The main functionality revolves around the `generate_analysis` function, which orchestrates reading source content, generating analysis output with YAML frontmatter metadata, and writing results to markdown files. While the current implementation uses template-based content generation, the architecture is designed to accommodate future LLM integration for fully automated analysis generation.
 
 ## Related
 
 ### Entities
 
 - [AIWiki](../entities/aiwiki.md) — product
-- [tokio](../entities/tokio.md) — technology
-- [serde](../entities/serde.md) — technology
-- [chrono](../entities/chrono.md) — technology
+- [Rust](../entities/rust.md) — technology
+- [Serde](../entities/serde.md) — technology
+- [Tokio](../entities/tokio.md) — technology
+- [Chrono](../entities/chrono.md) — technology
 
 ### Concepts
 
-- [Multi-source Comparison](../concepts/multi-source-comparison.md)
-- [Synthesis](../concepts/synthesis.md)
-- [Trade-off Analysis](../concepts/trade-off-analysis.md)
-- [YAML Frontmatter](../concepts/yaml-frontmatter.md)
 - [Slug Generation](../concepts/slug-generation.md)
-- [Asynchronous I/O](../concepts/asynchronous-i-o.md)
-- [Contradiction Detection](../concepts/contradiction-detection.md)
+- [YAML Frontmatter](../concepts/yaml-frontmatter.md)
+- [Multi-Source Analysis](../concepts/multi-source-analysis.md)
+- [Async/Await Pattern](../concepts/async-await-pattern.md)
+- [LLM Integration Stub](../concepts/llm-integration-stub.md)
 

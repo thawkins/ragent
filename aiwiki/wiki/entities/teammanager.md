@@ -2,7 +2,7 @@
 title: "TeamManager"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:14.936689122+00:00"
+generated: "2026-04-18T15:17:02.937636978+00:00"
 ---
 
 # TeamManager
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:14.936689122+00:00"
 
 ### From: TEAMS
 
-Runtime component that spawns, tracks, and cleans up teammate sessions with mailbox polling and hook execution
+Runtime component that spawns, tracks, and cleans up teammate agent sessions
 
 ## Sources
 

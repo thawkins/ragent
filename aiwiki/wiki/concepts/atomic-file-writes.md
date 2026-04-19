@@ -1,14 +1,14 @@
 ---
-title: "Atomic File Writes"
+title: "atomic file writes"
 type: concept
-generated: "2026-04-18T14:48:15.735695635+00:00"
+generated: "2026-04-18T15:19:56.508567210+00:00"
 ---
 
-# Atomic File Writes
+# atomic file writes
 
 ### From: FASTFILE
 
-A write strategy ensuring file modifications are all-or-nothing operations, implemented via write-to-temp-file-then-rename pattern to prevent partial writes
+Strategy of writing to temporary files and renaming to ensure all-or-nothing file updates, preventing partial writes and data corruption
 
 ## Sources
 

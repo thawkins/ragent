@@ -16,3 +16,7 @@ Text-based User Interface providing command-line interaction with Teams function
 ## Sources
 
 - [howto_teams](../sources/howto-teams.md)
+
+### From: tool_metadata_schema
+
+Terminal User Interface layer that consumes metadata for display formatting

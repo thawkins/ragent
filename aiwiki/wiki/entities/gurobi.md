@@ -1,17 +1,17 @@
 ---
 title: "Gurobi"
-entity_type: "product"
+entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.068306657+00:00"
+generated: "2026-04-18T15:17:50.962854287+00:00"
 ---
 
 # Gurobi
 
-**Type:** product
+**Type:** technology
 
 ### From: AGENT_TEAMS
 
-Commercial MILP solver, considered fastest in many benchmarks for mixed-integer linear programming problems
+Commercial MILP solver noted as fastest in many benchmarks
 
 ## Sources
 

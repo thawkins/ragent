@@ -20,3 +20,7 @@ IDE platform mentioned as target for Ragent's competitive IDE integration
 ### From: claude_code_research
 
 IDE vendor (IntelliJ, PyCharm, WebStorm) with native Claude Code extension support
+
+### From: ClaudeCode_Feature_Analysis
+
+IDE vendor (IntelliJ IDEA, PyCharm, WebStorm) with ClaudeCode plugin for interactive diff viewing

@@ -1,16 +1,16 @@
 ---
-title: "Cloudflare Browser Rendering Crawl API Beta Release"
+title: "Cloudflare Browser Rendering Website Crawl API"
 source: "testword1"
 type: source
-tags: [API, web crawling, browser rendering, Cloudflare, beta, automation, web scraping, RAG, machine learning, Workers]
-generated: "2026-04-18T14:49:00.994798969+00:00"
+tags: [API, web crawling, Cloudflare, Browser Rendering, headless browser, RAG, machine learning, automation, beta, Workers]
+generated: "2026-04-18T15:21:21.190786822+00:00"
 ---
 
-# Cloudflare Browser Rendering Crawl API Beta Release
+# Cloudflare Browser Rendering Website Crawl API
 
-Cloudflare has introduced a new crawl endpoint for its Browser Rendering service, currently available in open beta. This API allows users to crawl entire websites with a single API call by submitting a starting URL, which then triggers automatic page discovery, headless browser rendering, and content extraction in multiple formats including HTML, Markdown, and structured JSON. The service is designed for use cases such as training machine learning models, building RAG (Retrieval-Augmented Generation) pipelines, and monitoring website content.
+Cloudflare has introduced a new website crawling endpoint in open beta as part of their Browser Rendering service. This API allows developers to crawl entire websites with a single API call by submitting a starting URL, after which pages are automatically discovered, rendered in a headless browser, and returned in multiple formats including HTML, Markdown, and structured JSON. The service operates asynchronously—users submit a URL, receive a job ID, and retrieve results as pages are processed.
 
-The crawl jobs operate asynchronously, returning a job ID upon submission that users can poll for results. Key features include multiple output formats powered by Workers AI, configurable crawl scope with depth and page limits, automatic URL discovery from sitemaps and links, incremental crawling with modifiedSince and maxAge parameters, a static mode for faster crawling without browser rendering, and compliance with robots.txt directives including crawl-delay. The service is available on both Workers Free and Paid plans.
+The crawl endpoint includes several advanced features: multiple output formats powered by Workers AI, configurable crawl scope controls (depth, page limits, wildcard patterns), automatic page discovery via sitemaps and links, incremental crawling with modifiedSince and maxAge parameters to skip unchanged pages, a static mode for faster crawling without browser rendering, and compliance with robots.txt directives including crawl-delay. The service is available on both Workers Free and Paid plans, making it accessible for various use cases including training machine learning models, building RAG (Retrieval-Augmented Generation) pipelines, and content research or monitoring across websites.
 
 ## Related
 
@@ -20,14 +20,14 @@ The crawl jobs operate asynchronously, returning a job ID upon submission that u
 - [Browser Rendering](../entities/browser-rendering.md) — product
 - [Workers AI](../entities/workers-ai.md) — technology
 - [Workers](../entities/workers.md) — product
-- [crawl endpoint](../entities/crawl-endpoint.md) — technology
 
 ### Concepts
 
 - [web crawling](../concepts/web-crawling.md)
-- [headless browser rendering](../concepts/headless-browser-rendering.md)
+- [headless browser](../concepts/headless-browser.md)
 - [RAG pipelines](../concepts/rag-pipelines.md)
-- [asynchronous job processing](../concepts/asynchronous-job-processing.md)
+- [asynchronous processing](../concepts/asynchronous-processing.md)
 - [incremental crawling](../concepts/incremental-crawling.md)
 - [robots.txt compliance](../concepts/robots-txt-compliance.md)
+- [static vs dynamic rendering](../concepts/static-vs-dynamic-rendering.md)
 

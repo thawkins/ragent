@@ -2,7 +2,7 @@
 title: "fs2"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:14.937119116+00:00"
+generated: "2026-04-18T15:17:02.938733082+00:00"
 ---
 
 # fs2

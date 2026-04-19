@@ -2,7 +2,7 @@
 title: "/simplify"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:48:15.734613523+00:00"
+generated: "2026-04-18T15:19:56.506794338+00:00"
 ---
 
 # /simplify
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:48:15.734613523+00:00"
 
 ### From: FASTFILE
 
-An existing skill/tool in the codebase that will be integrated with the new parallel file operations via wrapper APIs
+Existing skill/tool that will be integrated with new parallel file operations via feature flags
 
 ## Sources
 

@@ -16,3 +16,7 @@ Error monitoring service accessible through MCP
 ## Sources
 
 - [claude_code_research](../sources/claude-code-research.md)
+
+### From: claude-code-analysis
+
+Error tracking and crash reporting service integrated into ClaudeCode

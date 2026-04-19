@@ -2,17 +2,17 @@
 title: "AIWiki"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:51:53.267516790+00:00"
+generated: "2026-04-18T15:20:20.979071208+00:00"
 ---
 
 # AIWiki
 
 **Type:** product
 
-### From: mod
+### From: contradiction
 
-A knowledge management system with AI-powered analysis capabilities including multi-source comparison, Q&A with citations, and contradiction detection
+AI-powered wiki system that includes contradiction detection capabilities
 
 ## Sources
 
-- [mod](../sources/mod.md)
+- [contradiction](../sources/contradiction.md)

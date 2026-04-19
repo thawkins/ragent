@@ -1,14 +1,14 @@
 ---
-title: "Optimistic Concurrency Control"
+title: "optimistic concurrency control"
 type: concept
-generated: "2026-04-18T14:48:15.735995412+00:00"
+generated: "2026-04-18T15:19:56.508853399+00:00"
 ---
 
-# Optimistic Concurrency Control
+# optimistic concurrency control
 
 ### From: FASTFILE
 
-A concurrency approach where operations proceed without locking, with validation at commit time using checksums to detect conflicts
+Concurrency strategy that allows operations to proceed without locks, validating success at commit time via checksums; preferred over pessimistic locking to avoid deadlocks
 
 ## Sources
 

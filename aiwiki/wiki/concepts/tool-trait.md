@@ -18,3 +18,7 @@ Rust trait that defines the interface for ragent tools, which the Office tools m
 ## Sources
 
 - [O365_TOOL](../sources/o365-tool.md)
+
+### From: adding_new_tools
+
+A Rust async trait that defines the interface all tools must implement, including name, description, parameters schema, permission category, and execute methods

@@ -1,14 +1,19 @@
 ---
 title: "Permission Gating"
 type: concept
-generated: "2026-04-18T14:47:32.741525190+00:00"
+generated: "2026-04-18T15:19:32.036166151+00:00"
 ---
 
 # Permission Gating
 
 ### From: README_LSP_EXPLORATION
 
-Security mechanism where each tool declares permission_category(). PermissionChecker publishes PermissionRequested event, TUI intercepts user y/n/a keys, and Permission reply event enables or denies execution before tool runs.
+Security mechanism where tools declare permission categories, PermissionChecker publishes PermissionRequested events, TUI intercepts user responses, and execution proceeds or is denied based on reply
+
+## Related
+
+- [Tool System](tool-system.md)
+- [Event-Driven Architecture](event-driven-architecture.md)
 
 ## Sources
 

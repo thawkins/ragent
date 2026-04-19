@@ -1,14 +1,14 @@
 ---
 title: "instruction tuning"
 type: concept
-generated: "2026-04-18T14:50:40.942050478+00:00"
+generated: "2026-04-18T15:16:37.748718400+00:00"
 ---
 
 # instruction tuning
 
 ### From: SYSTEM_PROMPT
 
-Fine-tuning approach where models are trained on diverse instruction formats to improve generalization to new tasks and instruction following
+Training methodology where models are fine-tuned on diverse instruction formats to improve their ability to follow new instructions and generalize across tasks
 
 ## Sources
 

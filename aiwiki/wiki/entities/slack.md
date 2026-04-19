@@ -24,3 +24,7 @@ Communication platform integrated with Roo Code Cloud for agent notifications an
 ### From: claude_code_research
 
 Communication platform with unique Claude Code integration allowing task assignment from threads
+
+### From: ClaudeCode_Feature_Analysis
+
+Team communication platform with ClaudeCode integration for task routing via @Claude mentions

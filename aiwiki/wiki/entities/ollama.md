@@ -2,7 +2,7 @@
 title: "Ollama"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:49:50.867688376+00:00"
+generated: "2026-04-18T15:21:01.228991947+00:00"
 ---
 
 # Ollama
@@ -11,12 +11,8 @@ generated: "2026-04-18T14:49:50.867688376+00:00"
 
 ### From: introduction
 
-Local LLM runtime with native integration in ragent
+Local LLM service with native integration in ragent
 
 ## Sources
 
 - [introduction](../sources/introduction.md)
-
-### From: roo_code_research
-
-Framework for running open-weight language models locally

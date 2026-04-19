@@ -16,3 +16,7 @@ Open-source AI coding assistant from which Roo Code forked; characterized as mor
 ## Sources
 
 - [roo_code_research](../sources/roo-code-research.md)
+
+### From: roocode_research
+
+Original project from which Roocode was forked

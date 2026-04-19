@@ -1,17 +1,18 @@
 ---
-title: "Staging Area Abstraction"
+title: "staging area abstraction"
 type: concept
-generated: "2026-04-18T14:48:15.736251964+00:00"
+generated: "2026-04-18T15:19:56.509115875+00:00"
 ---
 
-# Staging Area Abstraction
+# staging area abstraction
 
 ### From: FASTFILE
 
-An in-memory intermediate layer holding proposed edits with original checksums, enabling dry-run mode and conflict validation before disk writes
+In-memory buffer for proposed file edits that enables dry-run mode, checksum tracking, and conflict detection before committing changes to disk
 
 ## Related
 
+- [atomic file writes](atomic-file-writes.md)
 - [dry-run mode](dry-run-mode.md)
 
 ## Sources

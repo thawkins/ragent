@@ -2,7 +2,7 @@
 title: "Obsidian"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:51:03.974328869+00:00"
+generated: "2026-04-18T15:17:23.621965093+00:00"
 ---
 
 # Obsidian
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:51:03.974328869+00:00"
 
 ### From: aiwiki
 
-A knowledge base application that AIWiki can export compatible vaults for
+A markdown-based note-taking application; AIWiki can export to Obsidian-compatible vault format
 
 ## Sources
 

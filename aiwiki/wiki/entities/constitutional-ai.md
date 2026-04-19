@@ -2,7 +2,7 @@
 title: "Constitutional AI"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:40.940967503+00:00"
+generated: "2026-04-18T15:16:37.747991397+00:00"
 ---
 
 # Constitutional AI
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:40.940967503+00:00"
 
 ### From: SYSTEM_PROMPT
 
-Anthropic's method for training AI systems with high-level principles and self-revision
+Anthropic's methodology for training AI systems using high-level principles and self-critique
 
 ## Sources
 

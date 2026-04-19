@@ -2,7 +2,7 @@
 title: "Boost Graph Library"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.079129831+00:00"
+generated: "2026-04-18T15:17:50.964798693+00:00"
 ---
 
 # Boost Graph Library
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.079129831+00:00"
 
 ### From: AGENT_TEAMS
 
-C++ library providing generic graph algorithms and data structures
+C++ library for graph algorithms
 
 ## Sources
 

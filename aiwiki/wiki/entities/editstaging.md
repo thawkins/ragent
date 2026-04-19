@@ -2,7 +2,7 @@
 title: "EditStaging"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:48:15.734878440+00:00"
+generated: "2026-04-18T15:19:56.507085642+00:00"
 ---
 
 # EditStaging
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:48:15.734878440+00:00"
 
 ### From: FASTFILE
 
-A core struct for the staging area abstraction containing file path, original checksum, proposed content, and status
+Core struct for staging file edits with path, original checksum, proposed content, and status tracking
 
 ## Sources
 

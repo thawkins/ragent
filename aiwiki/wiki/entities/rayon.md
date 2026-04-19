@@ -2,7 +2,7 @@
 title: "Rayon"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:48:15.734006212+00:00"
+generated: "2026-04-18T15:19:56.506087169+00:00"
 ---
 
 # Rayon
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:48:15.734006212+00:00"
 
 ### From: FASTFILE
 
-A data parallelism library for Rust, candidate for sync CPU-heavy tasks in the concurrent file reader implementation
+Data parallelism library for Rust, candidate for CPU-heavy synchronous file operations
 
 ## Sources
 

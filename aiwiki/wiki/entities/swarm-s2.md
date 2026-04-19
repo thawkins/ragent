@@ -16,3 +16,7 @@ Researcher who prepared this competitive analysis document for the ragent projec
 ## Sources
 
 - [claude_code_research](../sources/claude-code-research.md)
+
+### From: claude-code-analysis
+
+Analyst who performed this competitive analysis

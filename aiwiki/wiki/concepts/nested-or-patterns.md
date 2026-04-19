@@ -1,14 +1,14 @@
 ---
 title: "Nested Or-Patterns"
 type: concept
-generated: "2026-04-18T14:48:38.367871622+00:00"
+generated: "2026-04-18T15:18:59.266972002+00:00"
 ---
 
 # Nested Or-Patterns
 
 ### From: SIMP_RAGENT
 
-A Rust syntax feature allowing grouped alternatives within patterns (e.g., Some('docx' | 'xlsx' | 'pptx')), recommended as cleaner than unnested alternatives
+A Rust syntax optimization where nested alternatives are grouped within a single pattern: Some('docx' | 'xlsx' | 'pptx') instead of Some('docx') | Some('xlsx') | Some('pptx')
 
 ## Sources
 

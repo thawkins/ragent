@@ -2,7 +2,7 @@
 title: "ratatui"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:49:50.867922066+00:00"
+generated: "2026-04-18T15:21:01.229303216+00:00"
 ---
 
 # ratatui

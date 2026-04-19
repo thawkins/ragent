@@ -1,14 +1,14 @@
 ---
 title: "Slash Command System"
 type: concept
-generated: "2026-04-18T14:47:32.740619511+00:00"
+generated: "2026-04-18T15:19:32.035944230+00:00"
 ---
 
 # Slash Command System
 
 ### From: README_LSP_EXPLORATION
 
-Command system using SLASH_COMMANDS array at app.rs line 159 with execute_slash_command() at line 1158. Commands include /about, /agent, /clear, /compact, /help, /log, /model, /provider, /quit, /resume, /system, /tools, /skills, /cancel with auto-complete menu.
+User command interface with SLASH_COMMANDS array, auto-complete menu, and routing logic. Current commands include /about, /agent, /clear, /compact, /help, /log, /model, /provider, /quit, /resume, /system, /tools, /skills, /cancel
 
 ## Sources
 

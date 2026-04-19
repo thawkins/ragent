@@ -2,7 +2,7 @@
 title: "Cloudflare"
 entity_type: "organization"
 type: entity
-generated: "2026-04-18T14:49:00.995145075+00:00"
+generated: "2026-04-18T15:21:21.191355961+00:00"
 ---
 
 # Cloudflare
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:00.995145075+00:00"
 
 ### From: testword1
 
-Cloud computing company providing content delivery network, security, and edge computing services
+Cloud computing company providing CDN, security, and edge computing services
 
 ## Sources
 

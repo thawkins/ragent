@@ -2,7 +2,7 @@
 title: "NetworkX"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.075209743+00:00"
+generated: "2026-04-18T15:17:50.964354716+00:00"
 ---
 
 # NetworkX
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.075209743+00:00"
 
 ### From: AGENT_TEAMS
 
-Python library for graph algorithms, convenient but not optimized for large-scale flow problems
+Python library for graph algorithms, convenient but not optimized for large-scale flows
 
 ## Sources
 

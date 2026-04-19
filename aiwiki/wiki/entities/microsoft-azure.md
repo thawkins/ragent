@@ -2,7 +2,7 @@
 title: "Microsoft Azure"
 entity_type: "organization"
 type: entity
-generated: "2026-04-18T14:50:40.939940718+00:00"
+generated: "2026-04-18T15:16:37.746603130+00:00"
 ---
 
 # Microsoft Azure
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:40.939940718+00:00"
 
 ### From: SYSTEM_PROMPT
 
-Cloud computing platform offering OpenAI-powered AI services
+Cloud computing platform offering OpenAI services with prompt design guidance
 
 ## Sources
 

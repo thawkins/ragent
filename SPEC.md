@@ -1,6 +1,6 @@
 # Ragent Specification
 
-> **Version:** 0.1.0-alpha.39  
+> **Version:** 0.1.0-alpha.43  
 > **Last Updated:** 2026-04-16
 
 ---
@@ -100,8 +100,8 @@ of all subsystems.
 4. [Terminal User Interface (TUI)](#4-terminal-user-interface-tui)
 5. [HTTP Server & API](#5-http-server--api)
 6. [Code Index](#6-code-index)
-7. [Memory System](#7-memory-system)
-8. [Teams](#8-teams)
+  7. [AIWiki Knowledge Base](#7-aiwiki-knowledge-base)
+  8. [Memory System](#8-memory-system)8. [Teams](#8-teams)
 9. [Swarm Mode](#9-swarm-mode)
 10. [Autopilot Mode](#10-autopilot-mode)
 11. [Skills System](#11-skills-system)
@@ -1764,7 +1764,231 @@ Compare with stored hash in SQLite
 
 ---
 
-## 7. Memory System
+## 7. AIWiki Knowledge Base
+
+### 7.1 Overview
+
+AIWiki is an embedded, project-scoped knowledge base system that provides agents with structured, searchable knowledge about concepts, entities, and analysis from ingested documents. Unlike the Memory System (personal notes and preferences) and the Code Index (code symbols), AIWiki stores domain knowledge extracted from external documents.
+
+**Key Features:**
+- **Project-scoped** — Each project has its own isolated knowledge base
+- **Multi-format support** — Markdown (.md), Plain text (.txt), PDF (.pdf), Word (.docx), OpenDocument (.odt)
+- **Conceptual linking** — Automatic cross-linking between related concepts
+- **AI-powered analysis** — Fact extraction, Q&A generation, contradiction detection
+- **Web interface** — Built-in web UI integrated with ragent-server
+- **Export/Import** — Single markdown export, Obsidian vault export, markdown import
+- **Agent integration** — Available via `aiwiki_search`, `aiwiki_ingest`, `aiwiki_status` tools
+
+### 7.2 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        AIWiki System                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
+│  │   Document   │───▶│   Ingest     │───▶│   Knowledge  │     │
+│  │   Sources    │    │   Pipeline   │    │   Graph      │     │
+│  └──────────────┘    └──────────────┘    └──────┬───────┘     │
+│         │                                          │             │
+│         ▼                                          ▼             │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                    AIWiki Store                          │   │
+│  │  ┌────────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ │   │
+│  │  │   pages    │ │ sources │ │concepts │ │  entities  │ │   │
+│  │  └────────────┘ └─────────┘ └─────────┘ └────────────┘ │   │
+│  │  ┌────────────┐ ┌─────────┐ ┌──────────────────────┐    │   │
+│  │  │  analyses  │ │  links  │ │  link graph (JSON) │    │   │
+│  │  └────────────┘ └─────────┘ └──────────────────────┘    │   │
+│  └───────────────────────────────────────────────────���─────┘   │
+│                              │                                    │
+│                              ▼                                    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                     Query Interface                       │   │
+│  │   aiwiki_search     aiwiki_ingest     aiwiki_status     │   │
+│  │   aiwiki_export     aiwiki_import                        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                              │                                    │
+│                              ▼                                    │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Web Interface                         │   │
+│  │   /aiwiki (serve)  - Search, browse, graph visualization │   │
+│  │   HTML templates, HTMX for interactivity                  │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Components:**
+| Component | Purpose |
+|-----------|---------|
+| **Document Sources** | Original files in supported formats |
+| **Ingest Pipeline** | Extract text, parse structure, identify concepts |
+| **Knowledge Graph** | SQLite-based storage with JSON link graph |
+| **AI Analysis** | LLM-powered extraction of facts, Q&A pairs, contradictions |
+| **Web UI** | HTML templates served via ragent-server |
+| **Agent Tools** | Full-text search, status, ingestion, export/import |
+
+### 7.3 Directory Structure
+
+Each project with AIWiki enabled contains:
+
+```
+project_root/
+└── aiwiki/
+    ├── config.json          # AIWiki configuration
+    ├── state.json           # Runtime state (watcher, etc.)
+    ├── raw/                 # Ingested source documents
+    │   ├── documents/
+    │   └── references/
+    ├── wiki/                # Parsed wiki pages
+    │   ├── concepts/        # Concept pages
+    │   ├── entities/        # Entity pages
+    │   ├── analyses/        # Analysis pages
+    │   └── *.md             # Root pages
+    └── static/              # Web UI assets (CSS, JS)
+```
+
+### 7.4 Page Types
+
+AIWiki organizes knowledge into four page types:
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Concepts** | Abstract ideas, patterns, methodologies | `asynchronous-programming.md`, `builder-pattern.md` |
+| **Entities** | Concrete things: people, organizations, tools | `anthropic.md`, `tokio.md`, `github.md` |
+| **Sources** | Document metadata with links to raw files | Source attribution for ingested documents |
+| **Analyses** | AI-generated analysis: Q&A, contradictions | `qa-results.md`, `contradiction-report.md` |
+
+### 7.5 Slash Commands
+
+```bash
+/aiwiki init            # Initialize AIWiki for current project
+/aiwiki on              # Enable AIWiki
+/aiwiki off             # Disable AIWiki
+/aiwiki status          # Show AIWiki status
+/aiwiki ingest <path>   # Ingest document(s) into AIWiki
+/aiwiki sync            # Sync wiki with raw/ folder
+/aiwiki clear           # Clear all AIWiki data
+```
+
+### 7.6 AIWiki Tools
+
+All tools are available to agents and can be called directly.
+
+#### `aiwiki_search`
+
+Search the AIWiki knowledge base for pages matching a query.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query` | string | Search keywords or phrase |
+| `page_type` | string? | Filter by type: concepts, entities, sources, analyses |
+| `max_results` | integer? | Maximum results (default: 10, max: 50) |
+
+**Example:**
+```json
+{
+  "query": "async programming patterns",
+  "page_type": "concepts",
+  "max_results": 10
+}
+```
+
+**Returns:** Matching pages with titles, paths, and content excerpts.
+
+---
+
+#### `aiwiki_ingest`
+
+Ingest documents into the AIWiki knowledge base.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string? | Path to file or directory to ingest |
+| `subdirectory` | string? | Store in subdirectory within raw/ |
+| `move_file` | boolean? | Move source file instead of copying |
+
+**Example:**
+```json
+{
+  "path": "docs/architecture.pdf",
+  "subdirectory": "references"
+}
+```
+
+**Supports:** Markdown, Plain text, PDF, DOCX, ODT
+
+---
+
+#### `aiwiki_status`
+
+Show current status and statistics of the AIWiki knowledge base.
+
+**No parameters.**
+
+**Returns:**
+- Pages count by type
+- Sources count
+- Storage usage
+- Sync status
+- Configuration
+
+---
+
+#### `aiwiki_export`
+
+Export the AIWiki knowledge base to various formats.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `format` | string | Export format: single_markdown, obsidian |
+| `output_path` | string? | Output file or directory path |
+
+---
+
+#### `aiwiki_import`
+
+Import external markdown files into AIWiki.
+
+**Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Path to markdown file or directory |
+| `target_subdir` | string? | Subdirectory in wiki/ to place imported files |
+
+### 7.7 AI-Powered Analysis
+
+AIWiki leverages LLMs to provide intelligent analysis:
+
+| Analysis Type | Description |
+|---------------|-------------|
+| **Fact Extraction** | Pull key facts from documents into structured form |
+| **Q&A Generation** | Generate questions and answers from content |
+| **Contradiction Detection** | Identify conflicting statements across documents |
+| **Concept Linking** | Automatically suggest related concepts |
+
+### 7.8 Web Interface
+
+The AIWiki web UI is served at `/aiwiki` when the ragent-server is running:
+
+- **Search page** (`/aiwiki`) — Full-text search with filters
+- **Page browser** — Browse concepts, entities, sources, analyses
+- **Graph visualization** — Interactive knowledge graph with D3.js
+- **Page view** �� Rendered markdown with cross-links
+
+The web interface uses:
+- **Askama** templates (compiled, type-safe)
+- **HTMX** for dynamic interactivity
+- **Tailwind CSS** for styling
+- **D3.js** for graph visualization
+
+---
+
+## 8. Memory System
 
 ### 7.1 Overview
 

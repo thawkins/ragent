@@ -2,30 +2,31 @@
 title: "contradiction.rs - Wiki Contradiction Detection Module"
 source: "contradiction"
 type: source
-tags: [rust, contradiction-detection, wiki, markdown-parsing, knowledge-management, ai, fact-extraction, static-analysis, documentation]
-generated: "2026-04-18T14:47:52.807385949+00:00"
+tags: [rust, wiki, contradiction-detection, markdown-parsing, fact-extraction, content-analysis, async, serde]
+generated: "2026-04-18T15:20:20.978460687+00:00"
 ---
 
 # contradiction.rs - Wiki Contradiction Detection Module
 
-This Rust source file implements a contradiction detection system for an AI-powered wiki platform. The module provides functionality to review wiki pages, extract factual claims, and identify potential contradictions between different pages. The main entry point is the `review_contradictions` function, which loads wiki pages within an optional scope, extracts factual statements from markdown content, and returns a structured review result. The system uses heuristics to identify potential factual claims by looking for declarative sentences containing specific verbs like "is a", "has", "supports", "requires", "uses", and "provides". The module includes comprehensive data structures for representing contradictions, including severity levels, conflicting statements, involved pages, and suggested resolutions. It also provides markdown report generation for human-readable output of review results. Currently, the full LLM-based contradiction detection is marked as TODO, with the implementation returning empty results after loading and analyzing page content.
+This Rust source file implements contradiction detection functionality for the AIWiki system. The module provides automated analysis of wiki pages to identify potential factual inconsistencies across different documents. The core functionality is encapsulated in the `review_contradictions` function, which loads wiki pages, extracts factual claims, and generates a report of detected contradictions. The implementation includes structs for representing contradictions (`Contradiction`) and review results (`ReviewResult`), along with helper functions for parsing markdown content, extracting titles from frontmatter, and identifying declarative sentences that may contain factual claims.
+
+The current implementation serves as a foundation with TODO comments indicating future integration with LLM-based comparison for more sophisticated contradiction detection. The module handles markdown file scanning, frontmatter parsing, and report generation in markdown format. It includes comprehensive test coverage for the fact extraction and report generation functions. The code demonstrates async/await patterns for file I/O operations and uses serde for serialization of contradiction data.
 
 ## Related
 
 ### Entities
 
-- [Aiwiki](../entities/aiwiki.md) — product
-- [Contradiction](../entities/contradiction.md) — technology
-- [ReviewResult](../entities/reviewresult.md) — technology
-- [PageData](../entities/pagedata.md) — technology
+- [AIWiki](../entities/aiwiki.md) — product
 - [serde](../entities/serde.md) — technology
 - [tokio](../entities/tokio.md) — technology
+- [chrono](../entities/chrono.md) — technology
 
 ### Concepts
 
 - [Contradiction Detection](../concepts/contradiction-detection.md)
 - [Fact Extraction](../concepts/fact-extraction.md)
 - [Frontmatter Parsing](../concepts/frontmatter-parsing.md)
+- [Async File I/O](../concepts/async-file-i-o.md)
 - [Recursive Directory Scanning](../concepts/recursive-directory-scanning.md)
-- [Markdown Analysis](../concepts/markdown-analysis.md)
+- [Report Generation](../concepts/report-generation.md)
 

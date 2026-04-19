@@ -2,7 +2,7 @@
 title: "cargo"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:49:22.397097334+00:00"
+generated: "2026-04-18T15:18:13.389132620+00:00"
 ---
 
 # cargo
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:22.397097334+00:00"
 
 ### From: SKILL_TEST_README
 
-Rust build system and package manager used for running tests
+Rust build system and package manager used for running tests with commands like 'cargo test' and 'cargo tarpaulin'
 
 ## Sources
 

@@ -24,3 +24,19 @@ Code hosting platform integrated with Roo Code for repository operations and web
 ### From: claude_code_research
 
 Git platform with deep Claude Code integration including PR submission and cloud auto-fix
+
+### From: ClaudeCode_Feature_Analysis
+
+Code hosting platform with Actions integration for automated PR reviews and CI/CD
+
+### From: copilot-cli-feature-analysis
+
+Microsoft-owned platform providing Git repository hosting and AI coding assistant tools, including Copilot CLI
+
+### From: copilot-cli-roocode-research
+
+Microsoft-owned platform for version control and collaboration, integrated deeply with Copilot CLI
+
+### From: PRES_SPEC
+
+Platform where the RAgent project is hosted and where contributors are sought

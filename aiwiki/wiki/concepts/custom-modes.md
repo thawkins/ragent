@@ -17,3 +17,7 @@ User-defined agent configurations with specialized prompts, tool restrictions, a
 ## Sources
 
 - [roo_code_research](../sources/roo-code-research.md)
+
+### From: roocode_research
+
+User-defined or team-shared AI configurations for specialized workflows and domain-specific tasks

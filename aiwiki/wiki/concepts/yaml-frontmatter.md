@@ -1,14 +1,14 @@
 ---
 title: "YAML Frontmatter"
 type: concept
-generated: "2026-04-18T14:51:53.271212009+00:00"
+generated: "2026-04-18T15:16:13.990574516+00:00"
 ---
 
 # YAML Frontmatter
 
 ### From: mod
 
-Metadata format embedded at the beginning of markdown files using triple-dash delimiters, containing structured data like title, type, date, and sources
+Metadata format using YAML between triple-dash delimiters at the start of markdown files, used to store analysis metadata like title, type, date, and sources
 
 ## Sources
 

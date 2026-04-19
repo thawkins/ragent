@@ -2,7 +2,7 @@
 title: "Lemon"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.078033391+00:00"
+generated: "2026-04-18T15:17:50.964590777+00:00"
 ---
 
 # Lemon
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.078033391+00:00"
 
 ### From: AGENT_TEAMS
 
-C++ library for efficient graph algorithms and network optimization
+C++ library for graph and network flow algorithms
 
 ## Sources
 

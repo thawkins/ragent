@@ -13,3 +13,7 @@ Process of building contextual prompts for LLM including: agent role, working di
 ## Sources
 
 - [LSP_QUICK_REFERENCE](../sources/lsp-quick-reference.md)
+
+### From: TEAMS
+
+Dynamic augmentation of agent prompts with team context variables (TEAM NAME, TEAMMATE NAME) at session startup

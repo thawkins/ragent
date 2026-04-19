@@ -2,7 +2,7 @@
 title: "Browser Rendering"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:49:00.995325664+00:00"
+generated: "2026-04-18T15:21:21.191879448+00:00"
 ---
 
 # Browser Rendering
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:00.995325664+00:00"
 
 ### From: testword1
 
-Cloudflare service that provides headless browser rendering capabilities
+Cloudflare service for headless browser operations and web page rendering
 
 ## Sources
 

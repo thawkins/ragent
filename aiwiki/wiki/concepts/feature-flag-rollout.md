@@ -1,14 +1,14 @@
 ---
-title: "Feature Flag Rollout"
+title: "feature flag rollout"
 type: concept
-generated: "2026-04-18T14:48:15.736795661+00:00"
+generated: "2026-04-18T15:19:56.509701688+00:00"
 ---
 
-# Feature Flag Rollout
+# feature flag rollout
 
 ### From: FASTFILE
 
-Incremental deployment strategy enabling quick reversal if issues arise, with opt-in behavior via crate-level features
+Incremental deployment strategy enabling quick reversal of changes if issues are discovered in production
 
 ## Sources
 

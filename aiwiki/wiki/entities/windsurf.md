@@ -16,3 +16,7 @@ Proprietary AI coding assistant competitor with limited model control
 ## Sources
 
 - [roo_code_research](../sources/roo-code-research.md)
+
+### From: roocode_research
+
+Competing AI coding tool often compared to Roocode

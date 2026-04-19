@@ -2,7 +2,7 @@
 title: "ragent-server"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:47:32.727256008+00:00"
+generated: "2026-04-18T15:19:32.032803200+00:00"
 ---
 
 # ragent-server
@@ -11,16 +11,8 @@ generated: "2026-04-18T14:47:32.727256008+00:00"
 
 ### From: README_LSP_EXPLORATION
 
-HTTP API crate providing routes for external access
+HTTP API crate providing REST endpoints for the agent system
 
 ## Sources
 
 - [README_LSP_EXPLORATION](../sources/readme-lsp-exploration.md)
-
-### From: LSP_INTEGRATION_GUIDE
-
-Server crate providing HTTP API endpoints
-
-### From: LSP_QUICK_REFERENCE
-
-HTTP API server crate for remote access

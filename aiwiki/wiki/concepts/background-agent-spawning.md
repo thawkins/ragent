@@ -1,18 +1,14 @@
 ---
-title: "Background Agent Spawning"
+title: "background agent spawning"
 type: concept
-generated: "2026-04-18T14:49:50.869884056+00:00"
+generated: "2026-04-18T15:21:01.232706134+00:00"
 ---
 
-# Background Agent Spawning
+# background agent spawning
 
 ### From: introduction
 
-Capability to execute agents in parallel for concurrent task processing and improved efficiency
-
-## Related
-
-- [Real-time Event Bus](real-time-event-bus.md)
+Capability to execute parallel tasks through spawned background agents
 
 ## Sources
 

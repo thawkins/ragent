@@ -1,14 +1,14 @@
 ---
 title: "Embedded Resources vs External Files"
 type: concept
-generated: "2026-04-18T14:48:38.368490968+00:00"
+generated: "2026-04-18T15:18:59.267458319+00:00"
 ---
 
 # Embedded Resources vs External Files
 
 ### From: SIMP_RAGENT
 
-Trade-off between embedding content as string constants versus loading from external files using include_str!, evaluated for skill bodies in bundled.rs
+Trade-off between self-contained code with hardcoded strings versus loading content from external files using include_str! macro
 
 ## Sources
 

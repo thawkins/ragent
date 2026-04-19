@@ -2,7 +2,7 @@
 title: "Super-NaturalInstructions"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:40.940767300+00:00"
+generated: "2026-04-18T15:16:37.747700789+00:00"
 ---
 
 # Super-NaturalInstructions
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:40.940767300+00:00"
 
 ### From: SYSTEM_PROMPT
 
-Large-scale benchmark for diverse natural language instruction tasks
+Large-scale benchmark of diverse natural language instructions for model training
 
 ## Sources
 

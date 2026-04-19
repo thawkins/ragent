@@ -1,18 +1,22 @@
 ---
-title: "chrono"
+title: "Chrono"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:51:53.269544628+00:00"
+generated: "2026-04-18T15:16:13.989532396+00:00"
 ---
 
-# chrono
+# Chrono
 
 **Type:** technology
 
 ### From: mod
 
-Date and time library used for timestamp generation in analysis frontmatter
+Date and time library for Rust, used for timestamp generation
 
 ## Sources
 
 - [mod](../sources/mod.md)
+
+### From: contradiction
+
+Date and time library for Rust used for timestamp generation

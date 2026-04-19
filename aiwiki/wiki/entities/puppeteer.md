@@ -16,3 +16,7 @@ Browser automation framework used for web testing in Roo Code
 ## Sources
 
 - [roo_code_analysis](../sources/roo-code-analysis.md)
+
+### From: ClaudeCode_Feature_Analysis
+
+Browser control library available through MCP for automated web testing

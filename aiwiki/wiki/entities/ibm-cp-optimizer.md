@@ -1,17 +1,17 @@
 ---
 title: "IBM CP Optimizer"
-entity_type: "product"
+entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.074306495+00:00"
+generated: "2026-04-18T15:17:50.964094495+00:00"
 ---
 
 # IBM CP Optimizer
 
-**Type:** product
+**Type:** technology
 
 ### From: AGENT_TEAMS
 
-Commercial constraint programming solver for scheduling with rich temporal and resource constraint support
+Commercial constraint programming solver
 
 ## Sources
 

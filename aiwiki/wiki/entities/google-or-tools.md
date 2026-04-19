@@ -2,7 +2,7 @@
 title: "Google OR-Tools"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.072000779+00:00"
+generated: "2026-04-18T15:17:50.962446863+00:00"
 ---
 
 # Google OR-Tools
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.072000779+00:00"
 
 ### From: AGENT_TEAMS
 
-Open-source optimization suite providing CP-SAT solver, scheduling primitives, min-cost flow, and local search frameworks
+Open-source software suite for optimization, including CP-SAT solver, constraint programming, and min-cost flow implementations
 
 ## Sources
 

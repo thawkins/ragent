@@ -1,17 +1,17 @@
 ---
 title: "CBC"
-entity_type: "product"
+entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.073505245+00:00"
+generated: "2026-04-18T15:17:50.963828028+00:00"
 ---
 
 # CBC
 
-**Type:** product
+**Type:** technology
 
 ### From: AGENT_TEAMS
 
-Open-source branch-and-cut MILP solver, slower than commercial alternatives but freely available
+Open-source MILP solver, noted as slower than commercial alternatives
 
 ## Sources
 

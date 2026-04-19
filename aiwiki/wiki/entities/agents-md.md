@@ -2,7 +2,7 @@
 title: "AGENTS.md"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:49:50.868703112+00:00"
+generated: "2026-04-18T15:21:01.229884415+00:00"
 ---
 
 # AGENTS.md

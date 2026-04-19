@@ -2,7 +2,7 @@
 title: "Mailbox"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:14.936978605+00:00"
+generated: "2026-04-18T15:17:02.938379705+00:00"
 ---
 
 # Mailbox
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:14.936978605+00:00"
 
 ### From: TEAMS
 
-Agent-to-agent message queue system with per-agent JSON files for inbound messages
+Agent-to-agent message queue system for inter-teammate communication
 
 ## Sources
 

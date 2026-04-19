@@ -16,3 +16,11 @@ Git platform with robust Claude Code support matching GitHub features
 ## Sources
 
 - [claude_code_research](../sources/claude-code-research.md)
+
+### From: ClaudeCode_Feature_Analysis
+
+DevOps platform with CI/CD integration for ClaudeCode automation
+
+### From: opencode-analysis
+
+Code repository platform with built-in plugin support in OpenCode

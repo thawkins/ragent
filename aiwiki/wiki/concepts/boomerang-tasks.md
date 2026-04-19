@@ -17,3 +17,11 @@ Pattern where sub-tasks return to parent agents upon completion with results and
 ## Sources
 
 - [roo_code_research](../sources/roo-code-research.md)
+
+### From: roocode_research
+
+Feature for orchestrating complex workflows by breaking them into subtasks that can be processed and returned
+
+### From: copilot-cli-roocode-research
+
+RooCode's orchestration pattern for reusable task templates with automated delegation and multi-agent coordination in Orchestrator mode

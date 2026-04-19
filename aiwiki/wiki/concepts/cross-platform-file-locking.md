@@ -1,14 +1,19 @@
 ---
-title: "Cross-Platform File Locking"
+title: "cross-platform file locking"
 type: concept
-generated: "2026-04-18T14:48:15.736545085+00:00"
+generated: "2026-04-18T15:19:56.509425362+00:00"
 ---
 
-# Cross-Platform File Locking
+# cross-platform file locking
 
 ### From: FASTFILE
 
-Synchronization mechanism with platform-specific semantics limited to POSIX and Windows supported behaviors, documented with known limitations
+Platform-specific implementation of file locks for POSIX and Windows systems with documented limitations
+
+## Related
+
+- [atomic file writes](atomic-file-writes.md)
+- [optimistic concurrency control](optimistic-concurrency-control.md)
 
 ## Sources
 

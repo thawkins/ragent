@@ -1,14 +1,18 @@
 ---
-title: "Dry-Run Mode"
+title: "dry-run mode"
 type: concept
-generated: "2026-04-18T14:48:15.737066298+00:00"
+generated: "2026-04-18T15:19:56.510047591+00:00"
 ---
 
-# Dry-Run Mode
+# dry-run mode
 
 ### From: FASTFILE
 
-Execution mode that simulates operations without performing actual disk writes, used for validation and testing multi-file edits
+Execution mode that simulates file operations without persisting changes, used for validation and testing
+
+## Related
+
+- [staging area abstraction](staging-area-abstraction.md)
 
 ## Sources
 

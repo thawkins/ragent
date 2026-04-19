@@ -1,15 +1,19 @@
 ---
 title: "Contradiction Detection"
 type: concept
-generated: "2026-04-18T14:51:53.272152055+00:00"
+generated: "2026-04-18T15:20:20.981153668+00:00"
 ---
 
 # Contradiction Detection
 
-### From: mod
+### From: contradiction
 
-Feature (in contradiction submodule) for identifying inconsistent or conflicting information across wiki pages
+Automated process of identifying conflicting factual claims across multiple documents in a wiki system
+
+## Related
+
+- [Fact Extraction](fact-extraction.md)
 
 ## Sources
 
-- [mod](../sources/mod.md)
+- [contradiction](../sources/contradiction.md)

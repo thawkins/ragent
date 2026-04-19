@@ -2,7 +2,7 @@
 title: "PuLP"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.081493541+00:00"
+generated: "2026-04-18T15:17:50.965213378+00:00"
 ---
 
 # PuLP
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.081493541+00:00"
 
 ### From: AGENT_TEAMS
 
-Python linear programming modeling framework for MILP problems
+Python linear programming modeling library
 
 ## Sources
 

@@ -13,3 +13,11 @@ Industry-standard protocol enabling Roo Code to connect to external tools and se
 ## Sources
 
 - [roo_code_analysis](../sources/roo-code-analysis.md)
+
+### From: opencode-analysis
+
+Protocol for connecting AI agents to external data sources, tools, and services through standardized servers with OAuth authentication support
+
+### From: GAP_ANALYSIS_AND_RECOMMENDATIONS
+
+Industry standard protocol enabling AI agents to discover and use tools from external servers via stdio, SSE, or HTTP transports

@@ -16,3 +16,11 @@ Analyst who authored this competitive research document
 ## Sources
 
 - [roo_code_analysis](../sources/roo-code-analysis.md)
+
+### From: roocode_research
+
+Researcher who authored this competitive analysis
+
+### From: copilot-cli-roocode-research
+
+Researcher who authored this competitive analysis document dated April 1, 2026

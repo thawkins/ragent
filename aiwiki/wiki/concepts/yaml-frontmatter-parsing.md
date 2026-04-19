@@ -1,14 +1,14 @@
 ---
-title: "YAML frontmatter parsing"
+title: "YAML Frontmatter Parsing"
 type: concept
-generated: "2026-04-18T14:51:31.016785193+00:00"
+generated: "2026-04-18T15:18:35.509139848+00:00"
 ---
 
-# YAML frontmatter parsing
+# YAML Frontmatter Parsing
 
 ### From: qa
 
-Extraction of metadata from markdown files using --- delimited frontmatter sections, specifically parsing title fields
+Extracting metadata from markdown files with --- delimited frontmatter, specifically title fields
 
 ## Sources
 

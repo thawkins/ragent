@@ -16,3 +16,7 @@ Creator of the Office document formats (Word, Excel, PowerPoint) supported by th
 ## Sources
 
 - [O365_TOOL](../sources/o365-tool.md)
+
+### From: embedding-evaluation
+
+Company backing ONNX Runtime as a production-grade inference engine

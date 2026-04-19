@@ -2,17 +2,17 @@
 title: "serde"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:51:53.268482122+00:00"
+generated: "2026-04-18T15:20:20.979529367+00:00"
 ---
 
 # serde
 
 **Type:** technology
 
-### From: mod
+### From: contradiction
 
-Rust serialization framework used for Deserialize and Serialize derive macros
+Serialization framework for Rust used for JSON handling
 
 ## Sources
 
-- [mod](../sources/mod.md)
+- [contradiction](../sources/contradiction.md)

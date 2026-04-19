@@ -2,7 +2,7 @@
 title: "JuMP"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.082416315+00:00"
+generated: "2026-04-18T15:17:50.965413776+00:00"
 ---
 
 # JuMP
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.082416315+00:00"
 
 ### From: AGENT_TEAMS
 
-Algebraic modeling language for optimization in Julia programming language
+Domain-specific modeling language for optimization in Julia
 
 ## Sources
 

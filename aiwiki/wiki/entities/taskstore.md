@@ -2,7 +2,7 @@
 title: "TaskStore"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:50:14.936848315+00:00"
+generated: "2026-04-18T15:17:02.937987998+00:00"
 ---
 
 # TaskStore
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:50:14.936848315+00:00"
 
 ### From: TEAMS
 
-Shared task list component with file-locked write access for safe concurrent task claiming
+Shared task list with file-based locking for safe concurrent access
 
 ## Sources
 

@@ -1,17 +1,17 @@
 ---
 title: "crates/ragent-tui"
-entity_type: "organization"
+entity_type: "product"
 type: entity
-generated: "2026-04-18T14:48:38.366792821+00:00"
+generated: "2026-04-18T15:18:59.264139273+00:00"
 ---
 
 # crates/ragent-tui
 
-**Type:** organization
+**Type:** product
 
 ### From: SIMP_RAGENT
 
-A crate within the Ragent project containing TUI (Terminal User Interface) widgets and components
+A crate in the ragent project containing TUI widgets including the message widget
 
 ## Sources
 

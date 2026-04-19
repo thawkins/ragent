@@ -16,3 +16,7 @@ Registry system where new tools are registered alongside existing tools like rea
 ## Sources
 
 - [O365_TOOL](../sources/o365-tool.md)
+
+### From: adding_new_tools
+
+A registry system where new tools are registered for use within the agent system

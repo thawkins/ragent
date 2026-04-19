@@ -2,15 +2,15 @@
 title: "Ragent LSP Integration Exploration Summary"
 source: "README_LSP_EXPLORATION"
 type: source
-tags: [LSP, Language Server Protocol, Ragent, AI coding agent, code exploration, architecture analysis, tool system, event-driven architecture, MCP, integration planning, rust]
-generated: "2026-04-18T14:47:32.725680268+00:00"
+tags: [LSP, Language Server Protocol, code analysis, integration planning, AI agent, tool system, event-driven architecture, rust, documentation]
+generated: "2026-04-18T15:19:32.030976177+00:00"
 ---
 
 # Ragent LSP Integration Exploration Summary
 
-This document summarizes a comprehensive exploration of the Ragent codebase to plan Language Server Protocol (LSP) integration. It describes three detailed reference documents created to guide implementation: a comprehensive integration guide (1100+ lines), a quick reference with code examples (400+ lines), and a structural overview with directory trees and data flows (500+ lines). The exploration covers Ragent's three-crate architecture (ragent-core for business logic, ragent-tui for terminal UI, and ragent-server for HTTP API), with deep analysis of the tool system, event system with 30+ event types, slash command system, system prompt building with 7-section assembly, and session processing loop.
+This document provides a comprehensive summary of the exploration conducted on the Ragent codebase for Language Server Protocol (LSP) integration planning. Ragent is an AI coding agent project consisting of three main crates: ragent-core (business logic), ragent-tui (terminal UI), and ragent-server (HTTP API). The exploration produced three detailed reference documents totaling over 2,000 lines: LSP INTEGRATION GUIDE.md for deep implementation guidance, LSP QUICK REFERENCE.md for fast lookup and code examples, and STRUCTURE OVERVIEW.txt for navigation and file organization.
 
-The recommended integration approach follows a hybrid model: Phase 1 implements a native LspTool providing core LSP capabilities (goto definition, find references, hover, completion, diagnostics, document/workspace symbols), Phase 2 optionally wraps external LSP servers as MCP servers, and Phase 3 adds agent awareness through system prompt updates and LSP-specific agents. Key technical patterns include async/tokio throughout, permission gating by category, event-driven architecture with audit trails, flexible multi-server configuration with precedence rules, and message composition with multiple parts. Implementation follows a consistent pattern across all integration points: define tool, register in default registry, add slash command, handle execution, with events published automatically by the processor loop.
+The analysis reveals a well-architected system with a powerful tool system centered around the Tool trait and ToolRegistry, an event-driven architecture using tokio broadcast channels with 30+ event types, and a slash command system for user interaction. The session processor implements an agentic loop that streams LLM responses, handles tool calls with permission gating, and maintains complete conversation history. The recommended LSP integration approach is a hybrid method beginning with a native Tool implementation, optionally followed by an MCP wrapper and agent awareness enhancements. Implementation involves creating a new LspTool struct, registering it in the default registry, adding slash commands, and updating configuration structures.
 
 ## Related
 
@@ -20,22 +20,20 @@ The recommended integration approach follows a hybrid model: Phase 1 implements 
 - [ragent-core](../entities/ragent-core.md) — technology
 - [ragent-tui](../entities/ragent-tui.md) — technology
 - [ragent-server](../entities/ragent-server.md) — technology
-- [LSP INTEGRATION GUIDE.md](../entities/lsp-integration-guide-md.md) — product
-- [LSP QUICK REFERENCE.md](../entities/lsp-quick-reference-md.md) — product
-- [STRUCTURE OVERVIEW.txt](../entities/structure-overview-txt.md) — product
 - [rust-analyzer](../entities/rust-analyzer.md) — technology
 - [pylsp](../entities/pylsp.md) — technology
-- [tokio](../entities/tokio.md) — technology
+- [Tokio](../entities/tokio.md) — technology
+- [MCP](../entities/mcp.md) — technology
 
 ### Concepts
 
-- [Tool System Architecture](../concepts/tool-system-architecture.md)
+- [Tool System](../concepts/tool-system.md)
 - [Event-Driven Architecture](../concepts/event-driven-architecture.md)
-- [Agentic Session Processing Loop](../concepts/agentic-session-processing-loop.md)
-- [System Prompt Assembly](../concepts/system-prompt-assembly.md)
+- [Agentic Loop](../concepts/agentic-loop.md)
+- [System Prompt Building](../concepts/system-prompt-building.md)
 - [Slash Command System](../concepts/slash-command-system.md)
+- [Permission Gating](../concepts/permission-gating.md)
 - [Configuration Precedence](../concepts/configuration-precedence.md)
 - [Hybrid LSP Integration](../concepts/hybrid-lsp-integration.md)
-- [Permission Gating](../concepts/permission-gating.md)
 - [Message Composition](../concepts/message-composition.md)
 

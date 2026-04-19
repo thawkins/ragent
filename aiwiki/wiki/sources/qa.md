@@ -1,18 +1,16 @@
 ---
-title: "Wiki Q&A System (qa.rs)"
+title: "Wiki Q&A System - Rust Implementation"
 source: "qa"
 type: source
-tags: [rust, wiki, qa, llm, search, markdown, async, tokio, serde, citations, knowledge-base]
-generated: "2026-04-18T14:51:31.013749850+00:00"
+tags: [rust, qa-system, wiki, llm-integration, markdown-processing, ai, search, citations, async-rust, tokio]
+generated: "2026-04-18T15:18:35.506009987+00:00"
 ---
 
-# Wiki Q&A System (qa.rs)
+# Wiki Q&A System - Rust Implementation
 
-This Rust source file implements a Q&A system for querying wiki content via LLM with source citations. The module provides functionality to search wiki pages based on user questions, extract relevant content, and generate answers with proper citations to source materials. The current implementation includes a stub for LLM integration, with a simple keyword-based search mechanism and frontmatter/heading extraction for page titles.
+This Rust source code implements a wiki Q&A (question-answering) system that allows users to query wiki content and receive AI-generated answers with source citations. The module `qa.rs` provides functionality to search through markdown wiki files, extract relevant content based on keyword matching, and generate structured responses. The current implementation serves as a foundation with stub LLM integration, preparing for future expansion where an actual language model would process the queries.
 
-The core components include the `ask_wiki` function as the main entry point, which accepts a question and optional context pages. If no specific pages are provided, the system performs a keyword search across all markdown files in the wiki directory. Results are ranked by keyword match count and limited to the top 5 most relevant pages. The `generate_qa_response` function currently returns a placeholder response with formatted citations, noting that full LLM integration is pending. Supporting utilities handle recursive directory scanning, markdown file discovery, and title extraction from YAML frontmatter or H1 headings.
-
-The module is designed with async/await patterns using Tokio for file system operations, and integrates with a larger AIWiki system. It includes comprehensive test coverage for title extraction functionality, demonstrating support for both frontmatter-defined titles and fallback to markdown H1 headings.
+The system is built around several key components: the `QaResult` struct which encapsulates the answer text, citations, and confidence score; the `Citation` struct for tracking sources; and the `PageContent` struct for internal processing. The main entry point is the `ask_wiki` async function, which coordinates between loading specific pages or searching across the entire wiki, then generating a response. The implementation includes a simple keyword-based relevance scoring system that limits results to the top 5 most relevant pages, along with utilities for extracting titles from YAML frontmatter or Markdown H1 headings.
 
 ## Related
 
@@ -21,16 +19,16 @@ The module is designed with async/await patterns using Tokio for file system ope
 - [Aiwiki](../entities/aiwiki.md) — product
 - [serde](../entities/serde.md) — technology
 - [tokio](../entities/tokio.md) — technology
-- [QaResult](../entities/qaresult.md) — product
-- [Citation](../entities/citation.md) — product
+- [LLM](../entities/llm.md) — technology
 
 ### Concepts
 
-- [Retrieval-Augmented Generation (RAG)](../concepts/retrieval-augmented-generation-rag.md)
-- [Keyword-based search](../concepts/keyword-based-search.md)
-- [YAML frontmatter parsing](../concepts/yaml-frontmatter-parsing.md)
-- [Async file system operations](../concepts/async-file-system-operations.md)
-- [Source attribution](../concepts/source-attribution.md)
-- [Confidence scoring](../concepts/confidence-scoring.md)
-- [Graceful degradation](../concepts/graceful-degradation.md)
+- [Retrieval-Augmented Generation](../concepts/retrieval-augmented-generation.md)
+- [Keyword-based Search](../concepts/keyword-based-search.md)
+- [Relevance Scoring](../concepts/relevance-scoring.md)
+- [Source Citation](../concepts/source-citation.md)
+- [YAML Frontmatter Parsing](../concepts/yaml-frontmatter-parsing.md)
+- [Asynchronous File Operations](../concepts/asynchronous-file-operations.md)
+- [Recursive Directory Scanning](../concepts/recursive-directory-scanning.md)
+- [Feature Flag / Enablement Check](../concepts/feature-flag--enablement-check.md)
 

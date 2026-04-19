@@ -16,3 +16,7 @@ Database system mentioned as example MCP use case for database queries
 ## Sources
 
 - [roo_code_analysis](../sources/roo-code-analysis.md)
+
+### From: roocode_research
+
+Database system supported through MCP integrations

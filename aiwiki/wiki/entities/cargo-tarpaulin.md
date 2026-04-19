@@ -2,7 +2,7 @@
 title: "cargo tarpaulin"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:49:22.397258779+00:00"
+generated: "2026-04-18T15:18:13.389454648+00:00"
 ---
 
 # cargo tarpaulin
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:22.397258779+00:00"
 
 ### From: SKILL_TEST_README
 
-Code coverage tool for Rust projects mentioned for checking test coverage
+Code coverage tool for Rust used to generate HTML coverage reports for the skill module
 
 ## Sources
 

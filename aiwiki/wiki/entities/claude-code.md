@@ -16,3 +16,7 @@ Anthropic's agentic AI coding assistant with multi-agent orchestration, terminal
 ## Sources
 
 - [claude_code_research](../sources/claude-code-research.md)
+
+### From: opencode-analysis
+
+Proprietary AI coding assistant by Anthropic, mentioned as a competitor locked to Anthropic models

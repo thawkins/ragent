@@ -1,18 +1,14 @@
 ---
 title: "steerability"
 type: concept
-generated: "2026-04-18T14:50:40.942878125+00:00"
+generated: "2026-04-18T15:16:37.749645560+00:00"
 ---
 
 # steerability
 
 ### From: SYSTEM_PROMPT
 
-The degree to which model behavior can be directed through prompts; balanced against robustness to adversarial inputs
-
-## Related
-
-- [adversarial testing](adversarial-testing.md)
+The degree to which model behavior can be directed and controlled through prompting, balanced against robustness to adversarial inputs
 
 ## Sources
 

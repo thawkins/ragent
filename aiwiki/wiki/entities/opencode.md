@@ -2,7 +2,7 @@
 title: "OpenCode"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:49:50.865990040+00:00"
+generated: "2026-04-18T15:21:01.227515518+00:00"
 ---
 
 # OpenCode
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:50.865990040+00:00"
 
 ### From: introduction
 
-Inspiration source for ragent's design and functionality
+The inspiration for ragent's design
 
 ## Sources
 

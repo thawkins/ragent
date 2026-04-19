@@ -24,3 +24,15 @@ Proprietary AI coding assistant competitor with subscription-based pricing ($20-
 ### From: claude_code_research
 
 AI-native IDE competitor with premium pricing ($40/seat/month) and strong PR automation features
+
+### From: ClaudeCode_Feature_Analysis
+
+AI-first code editor that works with the ClaudeCode VS Code extension
+
+### From: roocode_research
+
+Competing AI-powered IDE often compared to Roocode, described as more polished but less configurable
+
+### From: claude-code-analysis
+
+IDE-based AI coding assistant, competitor to ClaudeCode

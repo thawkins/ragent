@@ -1,14 +1,14 @@
 ---
 title: "Big-M Formulations"
 type: concept
-generated: "2026-04-18T14:52:20.101243838+00:00"
+generated: "2026-04-18T15:17:50.968843291+00:00"
 ---
 
 # Big-M Formulations
 
 ### From: AGENT_TEAMS
 
-MILP modeling technique using large constant values to enforce logical constraints; prone to weak LP relaxations and numerical issues if bounds are not tight
+Common MILP modeling technique for disjunctive constraints that can cause numerical and performance issues; document recommends tight bounds and problem-specific reductions
 
 ## Sources
 

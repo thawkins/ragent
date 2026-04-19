@@ -1,18 +1,14 @@
 ---
-title: "Agent Presets"
+title: "agent presets"
 type: concept
-generated: "2026-04-18T14:49:50.869618087+00:00"
+generated: "2026-04-18T15:21:01.231239252+00:00"
 ---
 
-# Agent Presets
+# agent presets
 
 ### From: introduction
 
-Pre-configured agent modes (coder, task, architect, ask, debug, code-review) for different development scenarios
-
-## Related
-
-- [Agent Cycling](agent-cycling.md)
+Customizable operational modes including coder, task, architect, ask, debug, and code-review configurations
 
 ## Sources
 

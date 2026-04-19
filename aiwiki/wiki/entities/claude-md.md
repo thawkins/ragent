@@ -16,3 +16,7 @@ Plain text configuration file storing project-specific guidance and persistent c
 ## Sources
 
 - [claude_code_research](../sources/claude-code-research.md)
+
+### From: claude-code-analysis
+
+Project memory file pattern for persistent context across sessions

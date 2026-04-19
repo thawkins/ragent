@@ -1,14 +1,14 @@
 ---
-title: "Multi-Provider LLM Orchestration"
+title: "multi-provider LLM orchestration"
 type: concept
-generated: "2026-04-18T14:49:50.869021277+00:00"
+generated: "2026-04-18T15:21:01.230930545+00:00"
 ---
 
-# Multi-Provider LLM Orchestration
+# multi-provider LLM orchestration
 
 ### From: introduction
 
-System for managing and switching between multiple large language model providers with automatic model compatibility handling
+System for coordinating and switching between multiple large language model providers with automatic model compatibility handling
 
 ## Sources
 

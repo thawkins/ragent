@@ -2,7 +2,7 @@
 title: "Workers AI"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:49:00.995603882+00:00"
+generated: "2026-04-18T15:21:21.192256386+00:00"
 ---
 
 # Workers AI
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:00.995603882+00:00"
 
 ### From: testword1
 
-Cloudflare's AI inference platform powering structured JSON output
+Cloudflare's AI platform for running AI models at the edge
 
 ## Sources
 

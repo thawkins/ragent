@@ -1,14 +1,18 @@
 ---
-title: "Keyword-based search"
+title: "Keyword-based Search"
 type: concept
-generated: "2026-04-18T14:51:31.016505423+00:00"
+generated: "2026-04-18T15:18:35.508354272+00:00"
 ---
 
-# Keyword-based search
+# Keyword-based Search
 
 ### From: qa
 
-Simple text search implementation that tokenizes questions and counts keyword matches in document content, filtering words longer than 3 characters
+Simple text search filtering words longer than 3 characters and scoring pages by match count
+
+## Related
+
+- [relevance-scoring](relevance-scoring.md)
 
 ## Sources
 

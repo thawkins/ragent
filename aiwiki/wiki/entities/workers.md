@@ -2,7 +2,7 @@
 title: "Workers"
 entity_type: "product"
 type: entity
-generated: "2026-04-18T14:49:00.995811192+00:00"
+generated: "2026-04-18T15:21:21.192667032+00:00"
 ---
 
 # Workers
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:49:00.995811192+00:00"
 
 ### From: testword1
 
-Cloudflare's serverless computing platform available in Free and Paid plans
+Cloudflare's serverless computing platform
 
 ## Sources
 

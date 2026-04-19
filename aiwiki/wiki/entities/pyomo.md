@@ -2,7 +2,7 @@
 title: "Pyomo"
 entity_type: "technology"
 type: entity
-generated: "2026-04-18T14:52:20.080559655+00:00"
+generated: "2026-04-18T15:17:50.965016191+00:00"
 ---
 
 # Pyomo
@@ -11,7 +11,7 @@ generated: "2026-04-18T14:52:20.080559655+00:00"
 
 ### From: AGENT_TEAMS
 
-Python-based algebraic modeling language for optimization problems
+Python-based algebraic modeling language for optimization
 
 ## Sources
 
