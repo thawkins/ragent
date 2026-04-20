@@ -111,9 +111,13 @@ impl Completer for RagentCompleter {
 ///
 /// Bridges the aiwiki extraction pipeline to the ragent-core provider system.
 pub struct TuiLlmExtractor {
+    /// Provider registry for LLM access.
     pub registry: Arc<ragent_core::provider::ProviderRegistry>,
+    /// Storage instance for context.
     pub storage: Arc<ragent_core::storage::Storage>,
+    /// Selected provider ID.
     pub provider_id: String,
+    /// Selected model ID.
     pub model_id: String,
 }
 
@@ -193,6 +197,7 @@ impl aiwiki::LlmExtractor for TuiLlmExtractor {
 
 /// Result of a background AIWiki sync operation, delivered via `JoinHandle`.
 pub struct AiwikiSyncOutcome {
+    /// The sync result or error message.
     pub result: Result<aiwiki::sync::SyncResult, String>,
 }
 
@@ -2010,6 +2015,7 @@ impl App {
     }
 
     /// Count files in aiwiki/raw/ (sync, for fallback when state is empty).
+    #[allow(dead_code)]
     fn count_raw_sources_sync(raw_dir: &std::path::Path) -> usize {
         match std::fs::read_dir(raw_dir) {
             Ok(entries) => entries.flatten().filter(|e| e.path().is_file()).count(),
@@ -2103,7 +2109,7 @@ impl App {
         // Build LLM extractor
         let model_label = self.aiwiki_model_label();
         let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-        let extractor: Arc<(dyn aiwiki::extraction::LlmExtractor + Send + Sync)> =
+        let extractor: Arc<dyn aiwiki::extraction::LlmExtractor + Send + Sync> =
             Arc::new(TuiLlmExtractor {
                 registry: Arc::clone(&self.provider_registry),
                 storage: Arc::clone(&self.storage),
@@ -2686,10 +2692,11 @@ impl App {
                         tool_use: m.capabilities.tool_use,
                         cost_tier,
                         cost_multiplier,
-                    }
-                }    
-          pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
-              let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
+                                          }
+                                      }
+                    
+                        /// Get models available for a given provider.
+                        pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {              let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
                   if let Ok(handle) = tokio::runtime::Handle::try_current() {
                       let result = tokio::task::block_in_place(|| {
                           handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))

@@ -79,14 +79,17 @@ pub fn create_router(project_root: impl Into<std::path::PathBuf>) -> axum::Route
 /// Query parameters for search.
 #[derive(Debug, serde::Deserialize)]
 pub struct SearchQuery {
+    /// Optional search query string.
     pub q: Option<String>,
     #[serde(rename = "type")]
+    /// Optional page type filter.
     pub page_type: Option<String>,
 }
 
 /// Query parameters for graph.
 #[derive(Debug, serde::Deserialize)]
 pub struct GraphQuery {
+    /// Optional filter for graph display.
     pub filter: Option<String>,
 }
 

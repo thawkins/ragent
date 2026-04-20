@@ -181,25 +181,23 @@ fn extract_docx_text(path: &Path) -> crate::Result<String> {
                     text.push('\n');
                 }
             }
-            docx_rust::document::BodyContent::Table(table) => {
-                for row in &table.rows {
-                    for cell_content in &row.cells {
-                        if let docx_rust::document::TableRowContent::TableCell(tc) = cell_content {
-                            for item in &tc.content {
-                                if let docx_rust::document::TableCellContent::Paragraph(p) = item {
-                                    let cell_text = p.text();
-                                    if !cell_text.is_empty() {
-                                        text.push_str(&cell_text);
-                                        text.push('\t');
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    text.push('\n');
-                }
-            }
-            _ => {}
+                          docx_rust::document::BodyContent::Table(table) => {
+                              for row in &table.rows {
+                                  for cell_content in &row.cells {
+                                      if let docx_rust::document::TableRowContent::TableCell(tc) = cell_content {
+                                          for item in &tc.content {
+                                              let docx_rust::document::TableCellContent::Paragraph(p) = item;
+                                              let cell_text = p.text();
+                                              if !cell_text.is_empty() {
+                                                  text.push_str(&cell_text);
+                                                  text.push('\t');
+                                              }
+                                          }
+                                      }
+                                  }
+                                  text.push('\n');
+                              }
+                          }            _ => {}
         }
     }
     Ok(text)

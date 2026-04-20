@@ -65,12 +65,16 @@ pub struct FileWatcher {
 #[derive(Debug, Clone)]
 pub enum FileEvent {
     /// A file was created.
+    #[allow(dead_code)]
     Created(PathBuf),
     /// A file was modified.
+    #[allow(dead_code)]
     Modified(PathBuf),
     /// A file was deleted.
+    #[allow(dead_code)]
     Deleted(PathBuf),
     /// A file was renamed (old path, new path).
+    #[allow(dead_code)]
     Renamed(PathBuf, PathBuf),
     /// Request manual sync.
     SyncRequested,
@@ -220,6 +224,7 @@ fn detect_changes(
 ///
 /// This spawns a background task that watches for changes
 /// and triggers sync operations.
+#[allow(dead_code)]
 pub async fn run_auto_sync(
     wiki: &Aiwiki,
     config: WatcherConfig,

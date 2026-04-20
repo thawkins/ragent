@@ -77,6 +77,7 @@ pub async fn review_contradictions(
 
 /// Page content for contradiction detection.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PageData {
     path: String,
     title: String,

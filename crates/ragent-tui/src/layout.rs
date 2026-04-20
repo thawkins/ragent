@@ -1844,6 +1844,8 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(bar, area);
 }
 
+/// Render status bar (deprecated - use render_status_bar_v2 instead).
+#[allow(dead_code)]
 fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     // Split area into 2 lines
     let rows = Layout::default()

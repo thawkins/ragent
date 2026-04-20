@@ -108,13 +108,16 @@ pub mod high_contrast {
 
     /// Selection uses white on blue (high contrast)
     pub const SELECTION_BG: Color = Color::Rgb(0, 100, 255);
+    /// Selection foreground color.
     pub const SELECTION_FG: Color = Color::White;
 
     /// Focus uses bright yellow with bold borders
     pub const FOCUS_COLOR: Color = Color::Rgb(255, 255, 0);
+    /// Focus border color.
     pub const FOCUS_BORDER: Color = Color::Rgb(255, 255, 0);
     /// Inactive borders use medium gray
     pub const BORDER_INACTIVE: Color = Color::Rgb(128, 128, 128);
+    /// Primary text color.
     pub const TEXT_PRIMARY: Color = Color::White;
 }
 

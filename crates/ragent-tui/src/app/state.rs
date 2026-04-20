@@ -1043,7 +1043,8 @@ pub struct App {
     /// Whether AIWiki is enabled for the current project.
     pub aiwiki_enabled: bool,
     /// Cached AIWiki stats for the status bar.
-    pub aiwiki_stats_cache: Option<(usize, usize, usize)>, // (raw_sources, ref_sources, pages)        /// When the cached AIWiki stats were last refreshed.
+    pub aiwiki_stats_cache: Option<(usize, usize, usize)>, // (raw_sources, ref_sources, pages)
+    /// When the cached AIWiki stats were last refreshed.
     pub aiwiki_stats_last_refresh: std::time::Instant,
     /// Handle for the spawned AIWiki web server task.
     pub aiwiki_web_server: Option<tokio::task::JoinHandle<()>>,

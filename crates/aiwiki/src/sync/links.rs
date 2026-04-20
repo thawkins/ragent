@@ -180,6 +180,7 @@ fn resolve_internal_link(wiki_dir: &Path, source: &Path, target: &str) -> PathBu
 /// Generate a wiki slug from a title.
 ///
 /// Converts "My Page Title" to "my-page-title".
+#[allow(dead_code)]
 pub fn slugify(title: &str) -> String {
     title
         .to_lowercase()
@@ -191,6 +192,7 @@ pub fn slugify(title: &str) -> String {
 }
 
 /// Find orphaned pages (pages with no incoming links).
+#[allow(dead_code)]
 pub async fn find_orphaned_pages(wiki: &Aiwiki) -> Result<Vec<PathBuf>> {
     let validation = validate_wiki_links(wiki).await?;
     let all_pages = scan_wiki_pages(&wiki.path("wiki")).await?;
@@ -208,6 +210,7 @@ pub async fn find_orphaned_pages(wiki: &Aiwiki) -> Result<Vec<PathBuf>> {
 /// Generate link suggestions for a page based on content.
 ///
 /// Scans the content for potential links to existing wiki pages.
+#[allow(dead_code)]
 pub async fn suggest_links(wiki: &Aiwiki, content: &str) -> Result<Vec<LinkSuggestion>> {
     let existing_pages = scan_wiki_pages(&wiki.path("wiki")).await?;
 
@@ -257,6 +260,7 @@ pub async fn suggest_links(wiki: &Aiwiki, content: &str) -> Result<Vec<LinkSugge
 
 /// Suggestion for a new link.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LinkSuggestion {
     /// The text in the content that could be linked.
     pub text: String,
@@ -267,6 +271,7 @@ pub struct LinkSuggestion {
 }
 
 /// Extract title from YAML frontmatter.
+#[allow(dead_code)]
 fn extract_title_from_frontmatter(content: &str) -> Option<String> {
     if !content.starts_with("---") {
         return None;

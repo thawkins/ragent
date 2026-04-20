@@ -1,45 +1,129 @@
 {
-  "lsp": {
-    "c-vscode": {
-      "args": [
-        "--stdio"
-      ],
-      "command": "/home/thawkins/.vscode/extensions/ms-vscode.cpptools-1.29.3-linux-x64/bin/cpptools",
-      "disabled": false,
-      "extensions": [
-        "c",
-        "h",
-        "cpp",
-        "hpp"
-      ]
-    },
-    "rust": {
-      "args": [],
-      "command": "/home/thawkins/.cargo/bin/rust-analyzer",
-      "disabled": false,
-      "extensions": [
-        "rs"
-      ]
-    },
-    "rust-vscode": {
-      "args": [
-        "--stdio"
-      ],
-      "command": "/home/thawkins/.vscode/extensions/rust-lang.rust-analyzer-0.3.2845-linux-x64/server/rust-analyzer",
-      "disabled": true,
-      "extensions": [
-        "rs"
-      ]
-    }
-  },
+  "username": null,
+  "default_agent": "",
   "provider": {
     "tavily": {
       "env": [
         "TAVILY_API_KEY"
       ],
+      "api": null,
+      "models": {},
       "options": {
         "api_key": "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"
       }
     }
-  }
+  },
+  "permission": [],
+  "agent": {},
+  "command": {},
+  "mcp": {},
+  "lsp": {
+    "rust-vscode": {
+      "command": "/home/thawkins/.vscode/extensions/rust-lang.rust-analyzer-0.3.2845-linux-x64/server/rust-analyzer",
+      "args": [
+        "--stdio"
+      ],
+      "env": {},
+      "extensions": [
+        "rs"
+      ],
+      "disabled": true,
+      "timeout_ms": 10000
+    },
+    "c-vscode": {
+      "command": "/home/thawkins/.vscode/extensions/ms-vscode.cpptools-1.29.3-linux-x64/bin/cpptools",
+      "args": [
+        "--stdio"
+      ],
+      "env": {},
+      "extensions": [
+        "c",
+        "h",
+        "cpp",
+        "hpp"
+      ],
+      "disabled": false,
+      "timeout_ms": 10000
+    },
+    "rust": {
+      "command": "/home/thawkins/.cargo/bin/rust-analyzer",
+      "args": [],
+      "env": {},
+      "extensions": [
+        "rs"
+      ],
+      "disabled": false,
+      "timeout_ms": 10000
+    }
+  },
+  "instructions": [],
+  "skill_dirs": [],
+  "experimental": {
+    "open_telemetry": false,
+    "max_background_agents": 4,
+    "background_agent_timeout": 3600
+  },
+  "hooks": [],
+  "bash": {
+    "allowlist": [],
+    "denylist": []
+  },
+  "code_index": {
+    "enabled": true,
+    "max_file_size": 1048576,
+    "extra_exclude_dirs": [],
+    "extra_exclude_patterns": []
+  },
+  "stream": {
+    "timeout_secs": 600,
+    "max_retries": 4,
+    "retry_backoff_secs": 2
+  },
+  "memory": {
+    "enabled": true,
+    "tier": "core",
+    "structured": {
+      "enabled": true
+    },
+    "retrieval": {
+      "max_memories_per_prompt": 5,
+      "recency_weight": 0.3,
+      "relevance_weight": 0.7
+    },
+    "semantic": {
+      "enabled": false,
+      "model": "all-MiniLM-L6-v2",
+      "dimensions": 384
+    },
+    "auto_extract": {
+      "enabled": false,
+      "require_confirmation": true
+    },
+    "decay": {
+      "factor": 0.95,
+      "min_confidence": 0.1
+    },
+    "compaction": {
+      "enabled": true,
+      "block_size_limit": 4096,
+      "memory_count_threshold": 500,
+      "min_interval_hours": 24
+    },
+    "eviction": {
+      "auto": false,
+      "stale_days": 30,
+      "min_confidence": 0.1
+    },
+    "cross_project": {
+      "enabled": false,
+      "search_global": true,
+      "project_override": true
+    }
+  },
+  "gitlab": {
+    "instance_url": null,
+    "token": null,
+    "username": null
+  },
+  "aiwiki_autosync": false
 }

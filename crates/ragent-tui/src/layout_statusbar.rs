@@ -293,14 +293,14 @@ fn build_line1_left(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
-    let path = match mode {
-        ResponsiveMode::Full => app.cwd.clone(),
-        ResponsiveMode::Compact => shorten_path(&app.cwd, 20),
-        ResponsiveMode::Minimal => shorten_path(&app.cwd, 15),
+    let (path, pad_width) = match mode {
+        ResponsiveMode::Full => (app.cwd.clone(), 25),
+        ResponsiveMode::Compact => (shorten_path(&app.cwd, 20), 15),
+        ResponsiveMode::Minimal => (shorten_path(&app.cwd, 15), 10),
     };
 
     spans.push(Span::styled(
-        format!(" {:<25} ", path),
+        format!(" {:<width$} ", path, width = pad_width),
         Style::default().fg(colors::TEXT),
     ));
 
@@ -422,36 +422,82 @@ fn build_line2_center(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
-    let (used, total) = app.token_usage;
-    let percent = if total > 0 {
-        ((used as f32 / total as f32) * 100.0) as u32
+    // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
+    let display_text = if let Some(quota) = app.quota_percent {
+        // Rate limit quota percentage (from provider headers)
+        let percent = quota as u32;
+        let color = if percent >= 95 {
+            colors::ERROR
+        } else if percent >= 80 {
+            colors::WARNING
+        } else {
+            colors::HEALTHY
+        };
+
+        // Progress bar: 10 chars with filled and empty blocks
+        let filled = (percent / 10) as usize;
+        let empty = 10_usize.saturating_sub(filled);
+        let bar = format!(
+            "{}{}",
+            indicators::FILLED.repeat(filled),
+            indicators::EMPTY.repeat(empty)
+        );
+
+        let label = match mode {
+            ResponsiveMode::Full => format!("quota: {}% {}", percent, bar),
+            ResponsiveMode::Compact => format!("{}% {}", percent, bar),
+            ResponsiveMode::Minimal => format!("{}%", percent),
+        };
+
+        (label, color)
+    } else {
+        // Fallback: show cumulative token usage count
+        let (input_total, output_total) = app.token_usage;
+        let total = input_total.saturating_add(output_total);
+
+        let label = match mode {
+            ResponsiveMode::Full => format!("tokens: {}", total),
+            ResponsiveMode::Compact => format!("{}", total),
+            ResponsiveMode::Minimal => format!("{}", total),
+        };
+
+        (label, colors::TEXT)
+    };
+
+    spans.push(Span::styled(
+        display_text.0,
+        Style::default().fg(display_text.1).add_modifier(Modifier::BOLD),
+    ));
+
+    // Context window percentage (after token usage)
+    let ctx_pct = if let Some(ctx_window) = app.selected_model_ctx_window {
+        let (input_tokens, _output_tokens) = app.token_usage;
+        if ctx_window > 0 {
+            ((input_tokens as f32 / ctx_window as f32) * 100.0) as u32
+        } else {
+            0
+        }
     } else {
         0
     };
 
-    // Determine color based on percentage
-    let color = if percent >= 95 {
+    let ctx_color = if ctx_pct >= 95 {
         colors::ERROR
-    } else if percent >= 80 {
+    } else if ctx_pct >= 80 {
         colors::WARNING
     } else {
         colors::HEALTHY
     };
 
-    // Progress bar: 10 chars with filled and empty blocks
-    let filled = (percent / 10) as usize;
-    let empty = 10_usize.saturating_sub(filled);
-    let bar = format!("{}{}", indicators::FILLED.repeat(filled), indicators::EMPTY.repeat(empty));
-
-    let label = match mode {
-        ResponsiveMode::Full => format!("tokens: {}% {}", percent, bar),
-        ResponsiveMode::Compact => format!("{}% {}", percent, bar),
-        ResponsiveMode::Minimal => format!("{}%", percent),
+    let ctx_label = match mode {
+        ResponsiveMode::Full => format!(" | ctx: {}%", ctx_pct),
+        ResponsiveMode::Compact => format!(" | {}%", ctx_pct),
+        ResponsiveMode::Minimal => format!(" {}%", ctx_pct),
     };
 
     spans.push(Span::styled(
-        format!("{:<25} ", label),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ctx_label,
+        Style::default().fg(ctx_color),
     ));
 
     spans
@@ -509,48 +555,60 @@ fn build_line2_right(
         ));
     }
 
-    // AIWiki status
-    {
-        let (icon, color) = if app.aiwiki_enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
-        } else {
-            (indicators::ERROR, colors::ERROR)
-        };
-
-        spans.push(Span::styled(
-            format!("AIWiki:{icon} "),
-            Style::default().fg(color),
-        ));
-    }
-
-    spans
-}
+          // AIWiki status
+          {
+              let (icon, color) = if app.aiwiki_enabled {
+                  (indicators::SUCCESS, colors::HEALTHY)
+              } else {
+                  (indicators::ERROR, colors::ERROR)
+              };
+    
+              spans.push(Span::styled(
+                  format!("AIWiki:{icon} "),
+                  Style::default().fg(color),
+              ));
+          }
+    
+                                      // AIWiki autosync status - only show when enabled
+                                      if app.aiwiki_autosync {
+                                          let (icon, color) = (indicators::SUCCESS, colors::HEALTHY);
+                              
+                                          spans.push(Span::styled(
+                                              format!("AutoSync:{icon}"),
+                                              Style::default().fg(color),
+                                          ));
+                                      }          spans}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styling Helper Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Create a healthy (green) style.
+#[allow(dead_code)]
 fn style_healthy() -> Style {
     Style::default().fg(colors::HEALTHY)
 }
 
 /// Create a warning (yellow) style.
+#[allow(dead_code)]
 fn style_warning() -> Style {
     Style::default().fg(colors::WARNING)
 }
 
 /// Create an error (red) style.
+#[allow(dead_code)]
 fn style_error() -> Style {
     Style::default().fg(colors::ERROR)
 }
 
 /// Create an info/progress (cyan) style.
+#[allow(dead_code)]
 fn style_info() -> Style {
     Style::default().fg(colors::IN_PROGRESS)
 }
 
 /// Create a bold healthy style.
+#[allow(dead_code)]
 fn style_healthy_bold() -> Style {
     Style::default()
         .fg(colors::HEALTHY)
@@ -558,6 +616,7 @@ fn style_healthy_bold() -> Style {
 }
 
 /// Create a bold warning style.
+#[allow(dead_code)]
 fn style_warning_bold() -> Style {
     Style::default()
         .fg(colors::WARNING)
@@ -565,6 +624,7 @@ fn style_warning_bold() -> Style {
 }
 
 /// Create a bold error style.
+#[allow(dead_code)]
 fn style_error_bold() -> Style {
     Style::default()
         .fg(colors::ERROR)

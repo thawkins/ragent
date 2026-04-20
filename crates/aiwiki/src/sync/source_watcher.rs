@@ -31,11 +31,26 @@ const IGNORED_DIRS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WatchEvent {
     /// A file was created.
-    Created { path: PathBuf, source: String },
+    Created {
+        /// Path to the created file.
+        path: PathBuf,
+        /// Source folder name.
+        source: String,
+    },
     /// A file's content changed.
-    Changed { path: PathBuf, source: String },
+    Changed {
+        /// Path to the changed file.
+        path: PathBuf,
+        /// Source folder name.
+        source: String,
+    },
     /// A file was deleted.
-    Deleted { path: PathBuf, source: String },
+    Deleted {
+        /// Path to the deleted file.
+        path: PathBuf,
+        /// Source folder name.
+        source: String,
+    },
 }
 
 /// Watches multiple source folders and sends [`WatchEvent`]s on a channel.

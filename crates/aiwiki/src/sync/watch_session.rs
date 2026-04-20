@@ -65,7 +65,6 @@ impl AiwikiWatchSession {
         let progress = WatcherProgress::new();
 
         // Create and spawn extraction worker
-        let worker = ExtractionWorker::new(progress.clone(), stop_flag.clone());
         let project_root_owned = project_root.to_path_buf();
         let worker_handle = tokio::spawn({
             let progress = progress.clone();
