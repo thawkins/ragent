@@ -88,9 +88,8 @@ impl Tool for GitlabListPipelinesTool {
         let (client, project) = detect(ctx)?;
 
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
-        let mut path = format!(
-            "/projects/{project}/pipelines?per_page={limit}&order_by=id&sort=desc"
-        );
+        let mut path =
+            format!("/projects/{project}/pipelines?per_page={limit}&order_by=id&sort=desc");
         if let Some(status) = input["status"].as_str() {
             path.push_str(&format!("&status={status}"));
         }
@@ -258,9 +257,7 @@ impl Tool for GitlabListJobsTool {
             .as_u64()
             .context("pipeline_id is required")?;
 
-        let mut path = format!(
-            "/projects/{project}/pipelines/{pipeline_id}/jobs?per_page=100"
-        );
+        let mut path = format!("/projects/{project}/pipelines/{pipeline_id}/jobs?per_page=100");
         if let Some(scope) = input["scope"].as_str() {
             path.push_str(&format!("&scope[]={scope}"));
         }
@@ -287,9 +284,7 @@ impl Tool for GitlabListJobsTool {
                 .as_f64()
                 .map(|d| format!("{d:.1}s"))
                 .unwrap_or_else(|| "-".to_string());
-            let runner = job["runner"]["description"]
-                .as_str()
-                .unwrap_or("no runner");
+            let runner = job["runner"]["description"].as_str().unwrap_or("no runner");
             lines.push(format!(
                 "  {} [{stage}] {name} (id:{id}) — {status}, {duration}, runner:{runner}",
                 status_icon(status)
@@ -338,9 +333,7 @@ impl Tool for GitlabGetJobTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, project) = detect(ctx)?;
-        let job_id = input["job_id"]
-            .as_u64()
-            .context("job_id is required")?;
+        let job_id = input["job_id"].as_u64().context("job_id is required")?;
 
         let job = client
             .get(&format!("/projects/{project}/jobs/{job_id}"))
@@ -358,9 +351,7 @@ impl Tool for GitlabGetJobTool {
             .map(|d| format!("{d:.1}s"))
             .unwrap_or_else(|| "N/A".to_string());
         let web_url = job["web_url"].as_str().unwrap_or("?");
-        let runner_desc = job["runner"]["description"]
-            .as_str()
-            .unwrap_or("none");
+        let runner_desc = job["runner"]["description"].as_str().unwrap_or("none");
         let pipeline_id = job["pipeline"]["id"].as_u64().unwrap_or(0);
         let failure_reason = job["failure_reason"].as_str().unwrap_or("");
         let allow_failure = job["allow_failure"].as_bool().unwrap_or(false);
@@ -452,9 +443,7 @@ impl Tool for GitlabGetJobLogTool {
         let project = GitLabClient::detect_project(&ctx.working_dir)
             .ok_or_else(|| anyhow::anyhow!("Could not detect GitLab project."))?;
 
-        let job_id = input["job_id"]
-            .as_u64()
-            .context("job_id is required")?;
+        let job_id = input["job_id"].as_u64().context("job_id is required")?;
         let tail = input["tail"].as_u64().unwrap_or(200).min(2000) as usize;
 
         // The job trace endpoint returns plain text, not JSON.
@@ -464,8 +453,10 @@ impl Tool for GitlabGetJobLogTool {
         );
         let resp = reqwest::Client::new()
             .get(&url)
-            .header("PRIVATE-TOKEN", &super::super::gitlab::auth::load_token(storage)
-                .context("No GitLab token")?)
+            .header(
+                "PRIVATE-TOKEN",
+                &super::super::gitlab::auth::load_token(storage).context("No GitLab token")?,
+            )
             .header("User-Agent", "ragent/0.1")
             .send()
             .await
@@ -540,9 +531,7 @@ impl Tool for GitlabRetryJobTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, project) = detect(ctx)?;
-        let job_id = input["job_id"]
-            .as_u64()
-            .context("job_id is required")?;
+        let job_id = input["job_id"].as_u64().context("job_id is required")?;
 
         let result = client
             .post(
@@ -556,9 +545,7 @@ impl Tool for GitlabRetryJobTool {
         let name = result["name"].as_str().unwrap_or("?");
 
         Ok(ToolOutput {
-            content: format!(
-                "Retried job '{name}': new job id={new_id}, status={status}"
-            ),
+            content: format!("Retried job '{name}': new job id={new_id}, status={status}"),
             metadata: Some(json!({"new_job_id": new_id, "status": status})),
         })
     }
@@ -598,9 +585,7 @@ impl Tool for GitlabCancelJobTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let (client, project) = detect(ctx)?;
-        let job_id = input["job_id"]
-            .as_u64()
-            .context("job_id is required")?;
+        let job_id = input["job_id"].as_u64().context("job_id is required")?;
 
         let result = client
             .post(
@@ -667,9 +652,7 @@ impl Tool for GitlabRetryPipelineTool {
         let status = result["status"].as_str().unwrap_or("?");
 
         Ok(ToolOutput {
-            content: format!(
-                "Retried failed jobs in pipeline #{pipeline_id}, status={status}"
-            ),
+            content: format!("Retried failed jobs in pipeline #{pipeline_id}, status={status}"),
             metadata: Some(json!({"pipeline_id": pipeline_id, "status": status})),
         })
     }
@@ -723,9 +706,7 @@ impl Tool for GitlabCancelPipelineTool {
         let status = result["status"].as_str().unwrap_or("?");
 
         Ok(ToolOutput {
-            content: format!(
-                "Cancelled pipeline #{pipeline_id}, status={status}"
-            ),
+            content: format!("Cancelled pipeline #{pipeline_id}, status={status}"),
             metadata: Some(json!({"pipeline_id": pipeline_id, "status": status})),
         })
     }

@@ -447,7 +447,8 @@ async fn test_add_includes_title_in_content_and_metadata() {
     );
     // Metadata should include the title
     assert_eq!(
-        result.metadata.as_ref().unwrap()["title"], "My Important Task",
+        result.metadata.as_ref().unwrap()["title"],
+        "My Important Task",
         "add metadata should include title"
     );
     assert_eq!(result.metadata.as_ref().unwrap()["action"], "add");
@@ -462,7 +463,10 @@ async fn test_update_includes_title_in_content_and_metadata() {
     let ctx = make_ctx(storage.clone());
 
     let result = TodoWriteTool
-        .execute(json!({"action": "update", "id": "t1", "status": "done"}), &ctx)
+        .execute(
+            json!({"action": "update", "id": "t1", "status": "done"}),
+            &ctx,
+        )
         .await
         .unwrap();
 
@@ -474,7 +478,8 @@ async fn test_update_includes_title_in_content_and_metadata() {
     );
     // Metadata should include the title
     assert_eq!(
-        result.metadata.as_ref().unwrap()["title"], "Original Title",
+        result.metadata.as_ref().unwrap()["title"],
+        "Original Title",
         "update metadata should include title"
     );
     assert_eq!(result.metadata.as_ref().unwrap()["action"], "update");
@@ -501,7 +506,8 @@ async fn test_complete_includes_title_in_content_and_metadata() {
     );
     // Metadata should include the title
     assert_eq!(
-        result.metadata.as_ref().unwrap()["title"], "Mark Me Done",
+        result.metadata.as_ref().unwrap()["title"],
+        "Mark Me Done",
         "complete metadata should include title"
     );
     assert_eq!(result.metadata.as_ref().unwrap()["action"], "complete");

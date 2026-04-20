@@ -52,7 +52,6 @@ impl std::fmt::Display for BlockScope {
     }
 }
 
-
 /// A named, scoped unit of persistent memory.
 ///
 /// Blocks are stored as `.md` files with YAML frontmatter. The frontmatter

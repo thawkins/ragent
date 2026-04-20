@@ -29,12 +29,12 @@ pub struct SelectableList<'a, T: 'a> {
 
 impl<'a, T> SelectableList<'a, T> {
     /// Create a new selectable list with the given items
-    /// 
+    ///
     /// Uses theme constants for accessibility-friendly selection indicators.
     /// The default selected prefix "▸ " is chosen for its visibility in screen readers.
     pub fn new(items: Vec<T>, display_fn: fn(&T) -> String) -> Self {
         use crate::theme::focus;
-        
+
         Self {
             items,
             selected: 0,
@@ -45,12 +45,12 @@ impl<'a, T> SelectableList<'a, T> {
     }
 
     /// Create a new selectable list with focus indicator prefix
-    /// 
+    ///
     /// Uses "◆ " as the selected prefix to indicate keyboard focus,
     /// which is more appropriate for focused lists in forms.
     pub fn new_focus_list(items: Vec<T>, display_fn: fn(&T) -> String) -> Self {
         use crate::theme::focus;
-        
+
         Self {
             items,
             selected: 0,
@@ -61,7 +61,7 @@ impl<'a, T> SelectableList<'a, T> {
     }
 
     /// Set the selected prefix (default: "▸ ")
-    /// 
+    ///
     /// For accessibility, consider using theme constants:
     /// - `theme::focus::SELECTED` for selected items
     /// - `theme::focus::FOCUSED` for keyboard focus

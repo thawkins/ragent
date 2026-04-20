@@ -205,9 +205,7 @@ impl GeminiClient {
                     content_parts
                         .iter()
                         .filter_map(|part| match part {
-                            ContentPart::Text { text } => {
-                                Some(json!({ "text": text }))
-                            }
+                            ContentPart::Text { text } => Some(json!({ "text": text })),
                             ContentPart::ImageUrl { url } => {
                                 // Handle data URIs for images
                                 if url.starts_with("data:") {
@@ -215,10 +213,8 @@ impl GeminiClient {
                                         .strip_prefix("data:")
                                         .and_then(|s| s.split(';').next())
                                         .unwrap_or("image/jpeg");
-                                    let base64_data = url
-                                        .find(",")
-                                        .map(|i| &url[i + 1..])
-                                        .unwrap_or(url);
+                                    let base64_data =
+                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
                                     Some(json!({
                                         "inlineData": {
                                             "mimeType": mime,
@@ -286,7 +282,11 @@ impl GeminiClient {
             generation_config["maxOutputTokens"] = json!(max_tokens);
         }
 
-        if generation_config.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+        if generation_config
+            .as_object()
+            .map(|o| !o.is_empty())
+            .unwrap_or(false)
+        {
             body["generationConfig"] = generation_config;
         }
 
@@ -319,7 +319,7 @@ impl LlmClient for GeminiClient {
         request: ChatRequest,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let body = self.build_request_body(&request);
-        
+
         // Use streaming endpoint
         let url = format!(
             "{}/v1beta/models/{}:streamGenerateContent?key={}",
@@ -383,7 +383,7 @@ impl LlmClient for GeminiClient {
 
                     // Remove trailing comma if present (JSON array formatting)
                     let line = line.trim_end_matches(',').trim();
-                    
+
                     // Remove array brackets if present
                     let line = line.trim_start_matches('[').trim_start();
                     let line = line.trim_end_matches(']').trim_end();
@@ -414,7 +414,7 @@ impl LlmClient for GeminiClient {
                     if let Some(candidates) = parsed["candidates"].as_array() {
                         for candidate in candidates {
                             let content = &candidate["content"];
-                            
+
                             // Handle finish reason
                             if let Some(finish_reason) = candidate["finishReason"].as_str() {
                                 // Emit any pending tool calls
@@ -461,7 +461,7 @@ impl LlmClient for GeminiClient {
                                             .map(|o| json!(o).to_string())
                                             .unwrap_or_else(|| "{}".to_string());
                                         let id = format!("fc_{}_{}", name, pending_tool_calls.len());
-                                        
+
                                         // Buffer tool call to emit at end
                                         pending_tool_calls.push((id, name, args));
                                     }

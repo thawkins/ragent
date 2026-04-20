@@ -295,7 +295,8 @@ impl ExtractionEngine {
         // Detect Rust source files.
         if std::path::Path::new(&rel_path)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("rs")) {
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
+        {
             tags.push("rust".to_string());
             let module_path = rel_path.replace('/', "::").replace(".rs", "");
             if module_path.contains("::") {
@@ -306,7 +307,8 @@ impl ExtractionEngine {
         // Detect Python source files.
         if std::path::Path::new(&rel_path)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("py")) {
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+        {
             tags.push("python".to_string());
         }
 
@@ -318,7 +320,8 @@ impl ExtractionEngine {
                     || ext.eq_ignore_ascii_case("tsx")
                     || ext.eq_ignore_ascii_case("js")
                     || ext.eq_ignore_ascii_case("jsx")
-            }) {
+            })
+        {
             tags.push("typescript".to_string());
         }
 
@@ -330,7 +333,8 @@ impl ExtractionEngine {
                     || ext.eq_ignore_ascii_case("json")
                     || ext.eq_ignore_ascii_case("yaml")
                     || ext.eq_ignore_ascii_case("yml")
-            }) {
+            })
+        {
             tags.push("config".to_string());
             content_parts.push(format!("Configuration file: {rel_path}"));
             confidence = 0.4;
@@ -339,7 +343,8 @@ impl ExtractionEngine {
         // Detect doc files.
         if std::path::Path::new(&rel_path)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
             tags.push("documentation".to_string());
             confidence = 0.3;
         }

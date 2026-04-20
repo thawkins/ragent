@@ -455,4 +455,3 @@ fn truncate_preview(content: &str, max_chars: usize) -> String {
         truncated
     }
 }
-

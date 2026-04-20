@@ -42,7 +42,7 @@ pub async fn ask_wiki(
 ) -> crate::Result<QaResult> {
     if !wiki.config.enabled {
         return Err(crate::AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
 
@@ -55,7 +55,8 @@ pub async fn ask_wiki(
 
     if relevant_pages.is_empty() {
         return Ok(QaResult {
-            answer: "I couldn't find any relevant information in the wiki to answer this question.".to_string(),
+            answer: "I couldn't find any relevant information in the wiki to answer this question."
+                .to_string(),
             citations: Vec::new(),
             confidence: 0.0,
         });
@@ -75,19 +76,15 @@ struct PageContent {
 }
 
 /// Load specific pages for Q&A context.
-async fn load_specific_pages(
-    wiki: &Aiwiki,
-    pages: &[ String ],
-) -> crate::Result<Vec<PageContent>> {
+async fn load_specific_pages(wiki: &Aiwiki, pages: &[String]) -> crate::Result<Vec<PageContent>> {
     let mut contents = Vec::new();
 
     for page_path in pages {
         let full_path = wiki.path("wiki").join(page_path);
         if full_path.exists() {
             let content = fs::read_to_string(&full_path).await?;
-            let title = extract_title(&content)
-                .unwrap_or_else(|| page_path.clone());
-            
+            let title = extract_title(&content).unwrap_or_else(|| page_path.clone());
+
             contents.push(PageContent {
                 path: page_path.clone(),
                 title,
@@ -100,13 +97,10 @@ async fn load_specific_pages(
 }
 
 /// Search for pages relevant to the question.
-async fn search_relevant_pages(
-    wiki: &Aiwiki,
-    question: &str,
-) -> crate::Result<Vec<PageContent>> {
+async fn search_relevant_pages(wiki: &Aiwiki, question: &str) -> crate::Result<Vec<PageContent>> {
     let mut relevant = Vec::new();
     let wiki_dir = wiki.path("wiki");
-    
+
     if !wiki_dir.exists() {
         return Ok(relevant);
     }
@@ -125,22 +119,21 @@ async fn search_relevant_pages(
     for file_path in files {
         let content = fs::read_to_string(&file_path).await?;
         let content_lower = content.to_lowercase();
-        
+
         // Score based on keyword matches
         let score: usize = keywords
             .iter()
             .filter(|k| content_lower.contains(*k))
             .count();
-        
+
         if score > 0 {
             let relative_path = file_path
                 .strip_prefix(&wiki_dir)
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
-            
-            let title = extract_title(&content)
-                .unwrap_or_else(|| relative_path.clone());
-            
+
+            let title = extract_title(&content).unwrap_or_else(|| relative_path.clone());
+
             relevant.push(PageContent {
                 path: relative_path,
                 title,
@@ -155,10 +148,7 @@ async fn search_relevant_pages(
 }
 
 /// Generate Q&A response (stub for LLM integration).
-async fn generate_qa_response(
-    question: &str,
-    pages: &[PageContent],
-) -> crate::Result<QaResult> {
+async fn generate_qa_response(question: &str, pages: &[PageContent]) -> crate::Result<QaResult> {
     // TODO: In a full implementation, this would:
     // 1. Call an LLM with the question and context
     // 2. Extract citations from the response
@@ -211,8 +201,9 @@ fn extract_title(content: &str) -> Option<String> {
                 if let Some(value) = line.strip_prefix("title:") {
                     let value = value.trim();
                     if (value.starts_with('"') && value.ends_with('"'))
-                        || (value.starts_with('\'') && value.ends_with('\'')) {
-                        return Some(value[1..value.len()-1].to_string());
+                        || (value.starts_with('\'') && value.ends_with('\''))
+                    {
+                        return Some(value[1..value.len() - 1].to_string());
                     }
                     return Some(value.to_string());
                 }
@@ -236,11 +227,11 @@ async fn scan_markdown_files(
     files: &mut Vec<std::path::PathBuf>,
 ) -> crate::Result<()> {
     let mut entries = fs::read_dir(dir).await?;
-    
+
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
         let metadata = entry.metadata().await?;
-        
+
         if metadata.is_file() {
             if let Some(ext) = path.extension() {
                 if ext == "md" || ext == "markdown" {
@@ -253,7 +244,7 @@ async fn scan_markdown_files(
             files.extend(sub_files);
         }
     }
-    
+
     Ok(())
 }
 

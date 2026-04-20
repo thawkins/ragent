@@ -46,13 +46,13 @@ pub async fn review_contradictions(
 ) -> crate::Result<ReviewResult> {
     if !wiki.config.enabled {
         return Err(crate::AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
 
     // Load all pages in scope
     let pages = load_wiki_pages(wiki, scope).await?;
-    
+
     if pages.len() < 2 {
         return Ok(ReviewResult {
             contradictions: Vec::new(),
@@ -85,10 +85,7 @@ struct PageData {
 }
 
 /// Load all wiki pages for review.
-async fn load_wiki_pages(
-    wiki: &Aiwiki,
-    scope: Option<&str>,
-) -> crate::Result<Vec<PageData>> {
+async fn load_wiki_pages(wiki: &Aiwiki, scope: Option<&str>) -> crate::Result<Vec<PageData>> {
     let mut pages = Vec::new();
     let wiki_dir = if let Some(s) = scope {
         wiki.path("wiki").join(s)
@@ -109,9 +106,8 @@ async fn load_wiki_pages(
             .strip_prefix(wiki.path("wiki"))
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        
-        let title = extract_title(&content)
-            .unwrap_or_else(|| relative_path.clone());
+
+        let title = extract_title(&content).unwrap_or_else(|| relative_path.clone());
 
         // Extract potential factual claims
         let facts = extract_facts(&content);
@@ -145,13 +141,14 @@ fn extract_facts(content: &str) -> Vec<String> {
     // Look for statements that might be factual claims
     for line in content.lines() {
         let line = line.trim();
-        
+
         // Skip headers, lists, code blocks
-        if line.starts_with('#') 
+        if line.starts_with('#')
             || line.starts_with('-')
             || line.starts_with('*')
             || line.starts_with('`')
-            || line.starts_with('|') {
+            || line.starts_with('|')
+        {
             continue;
         }
 
@@ -163,7 +160,8 @@ fn extract_facts(content: &str) -> Vec<String> {
                 || line.contains("supports")
                 || line.contains("requires")
                 || line.contains("uses")
-                || line.contains("provides") {
+                || line.contains("provides")
+            {
                 facts.push(line.to_string());
             }
         }
@@ -182,8 +180,9 @@ fn extract_title(content: &str) -> Option<String> {
                 if let Some(value) = line.strip_prefix("title:") {
                     let value = value.trim();
                     if (value.starts_with('"') && value.ends_with('"'))
-                        || (value.starts_with('\'') && value.ends_with('\'')) {
-                        return Some(value[1..value.len()-1].to_string());
+                        || (value.starts_with('\'') && value.ends_with('\''))
+                    {
+                        return Some(value[1..value.len() - 1].to_string());
                     }
                     return Some(value.to_string());
                 }
@@ -206,11 +205,11 @@ async fn scan_markdown_files(
     files: &mut Vec<std::path::PathBuf>,
 ) -> crate::Result<()> {
     let mut entries = fs::read_dir(dir).await?;
-    
+
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
         let metadata = entry.metadata().await?;
-        
+
         if metadata.is_file() {
             if let Some(ext) = path.extension() {
                 if ext == "md" || ext == "markdown" {
@@ -223,7 +222,7 @@ async fn scan_markdown_files(
             files.extend(sub_files);
         }
     }
-    
+
     Ok(())
 }
 
@@ -254,7 +253,7 @@ pages_reviewed: {}
         report.push_str("✅ No contradictions detected.\n\n");
     } else {
         report.push_str("## Detected Contradictions\n\n");
-        
+
         for (i, contradiction) in result.contradictions.iter().enumerate() {
             report.push_str(&format!(
                 "### {}. {} ({} severity)\n\n",
@@ -262,18 +261,18 @@ pages_reviewed: {}
                 contradiction.description,
                 contradiction.severity
             ));
-            
+
             report.push_str("**Conflicting Statements:**\n\n");
             for (j, statement) in contradiction.statements.iter().enumerate() {
                 report.push_str(&format!("{}. \"{}\"\n\n", j + 1, statement));
             }
-            
+
             report.push_str("**Sources:**\n");
             for page in &contradiction.pages {
                 report.push_str(&format!("- {}\n", page));
             }
             report.push('\n');
-            
+
             report.push_str("**Suggested Resolution:**\n\n");
             report.push_str(&format!("{}\n\n", contradiction.suggestion));
             report.push_str("---\n\n");
@@ -314,7 +313,7 @@ This is a paragraph with is a claim.
             pages_reviewed: 5,
             timestamp: "2024-01-01T00:00:00Z".to_string(),
         };
-        
+
         let report = generate_report(&result);
         assert!(report.contains("No contradictions detected"));
         assert!(report.contains("5"));

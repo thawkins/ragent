@@ -65,7 +65,10 @@ async fn test_ollama_cloud_empty_models_field() {
         .unwrap();
 
     server.await.unwrap();
-    assert!(models.is_empty(), "Empty models array should return empty vec");
+    assert!(
+        models.is_empty(),
+        "Empty models array should return empty vec"
+    );
 }
 
 #[tokio::test]
@@ -94,5 +97,8 @@ async fn test_ollama_cloud_missing_models_field() {
         .unwrap();
 
     server.await.unwrap();
-    assert!(models.is_empty(), "Missing models field should return empty vec");
+    assert!(
+        models.is_empty(),
+        "Missing models field should return empty vec"
+    );
 }

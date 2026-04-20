@@ -52,8 +52,14 @@ pub struct ExtractedEntity {
     pub name: String,
     /// Entity type (person, organization, place, technology, etc.).
     pub entity_type: String,
-    /// Brief description of the entity in this context.
+    /// Comprehensive description of the entity (2-5 paragraphs minimum).
     pub description: String,
+    /// External web links supporting the description (0-10 links).
+    #[serde(default)]
+    pub external_links: Vec<ExternalLink>,
+    /// Optional Mermaid diagram code to visualize the entity.
+    #[serde(default)]
+    pub diagram: Option<String>,
 }
 
 /// A concept extracted from source text.
@@ -61,16 +67,56 @@ pub struct ExtractedEntity {
 pub struct ExtractedConcept {
     /// Concept name.
     pub name: String,
-    /// Explanation of the concept.
+    /// Explanation of the concept (2-5 paragraphs minimum).
     pub description: String,
     /// Related entity or concept names for cross-linking.
     pub related: Vec<String>,
+    /// External web links supporting the description (0-10 links).
+    pub external_links: Vec<ExternalLink>,
+    /// Optional Mermaid diagram code to visualize the concept.
+    #[serde(default)]
+    pub diagram: Option<String>,
+}
+
+/// An external link supporting a concept description.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExternalLink {
+    /// URL of the external resource.
+    pub url: String,
+    /// Brief description of what the link provides.
+    pub description: String,
 }
 
 /// System prompt for the extraction LLM call.
 pub const EXTRACTION_SYSTEM_PROMPT: &str = r#"You are a knowledge extraction assistant. Your job is to analyze source documents and extract structured information for a wiki knowledge base.
 
-You MUST respond with valid JSON only. No markdown, no explanation, no commentary outside the JSON object."#;
+You MUST respond with valid JSON only. No markdown, no explanation, no commentary outside the JSON object.
+
+Content Requirements:
+- All descriptions MUST be 2-5 paragraphs (at least 3-4 sentences per paragraph)
+- Include specific details, examples, context, and depth
+- Avoid single-line or minimal descriptions
+- Add 0-10 external web links (sources, documentation, references) to support descriptions
+- Include relevant Mermaid diagrams to visualize relationships, workflows, or architectures
+  Supported diagram types: flowchart, sequence, class, state, er, gantt, pie, mindmap
+  Use proper Mermaid syntax, NOT ASCII art
+  Mermaid rules:
+  - Use simple alphanumeric node IDs (e.g. node1, wildcardStar) — never bare special characters
+  - Wrap display text containing special characters in square brackets: id["text with * or ?"]
+  - Never use *, **, ?, {}, or file paths as bare node identifiers
+  - For generics like Option<T>, use tilde notation: Option~T~
+  - Prefer flowchart over mindmap for complex diagrams
+
+For concepts:
+- Each concept needs 2-5 paragraphs with examples and context
+- Optionally include a diagram field with Mermaid code
+
+For entities:
+- Each entity needs 2-5 paragraphs describing its significance, history, and context
+- Optionally include a diagram field with Mermaid code
+
+For sources:
+- The summary must be 2-4 paragraphs with comprehensive coverage"#;
 
 /// Build the user prompt for extraction.
 ///
@@ -91,9 +137,8 @@ pub fn build_extraction_prompt(
         text
     };
 
-    let mut instructions = String::from(
-        "Analyze the following document and extract structured information.\n\n"
-    );
+    let mut instructions =
+        String::from("Analyze the following document and extract structured information.\n\n");
     instructions.push_str(&format!("Source file: {filename}\n\n"));
     instructions.push_str("Return a JSON object with these fields:\n");
     instructions.push_str("- \"title\": a concise title for this document\n");
@@ -102,19 +147,32 @@ pub fn build_extraction_prompt(
 
     if extract_entities {
         instructions.push_str(
-            "- \"entities\": array of {\"name\": str, \"entity_type\": str, \"description\": str}\n"
-        );
+                  "- \"entities\": array of {\"name\": str, \"entity_type\": str, \"description\": str, \"external_links\": [{\"url\": str, \"description\": str}], \"diagram\": str (optional)}\n"
+              );
+        instructions
+            .push_str("  Entity types: person, organization, place, technology, product, event\n");
         instructions.push_str(
-            "  Entity types: person, organization, place, technology, product, event\n"
+            "  Each entity MUST have 2-5 paragraphs (at least 3-4 sentences per paragraph).\n",
         );
+        instructions.push_str("  Include specific details, history, significance, and context.\n");
+        instructions
+            .push_str("  Optionally include 0-10 external web links and a Mermaid diagram.\n");
     }
-
     if extract_concepts {
         instructions.push_str(
-            "- \"concepts\": array of {\"name\": str, \"description\": str, \"related\": [str]}\n"
+            "- \"concepts\": array of {\"name\": str, \"description\": str, \"related\": [str], \"external_links\": [{\"url\": str, \"description\": str}]\n"
         );
         instructions.push_str(
-            "  Concepts are ideas, theories, methodologies, or abstract topics discussed.\n"
+            "  Concepts are ideas, theories, methodologies, or abstract topics discussed.\n",
+        );
+        instructions.push_str(
+            "  Each concept MUST have 2-5 paragraphs (at least 3-4 sentences per paragraph).\n",
+        );
+        instructions.push_str(
+            "  Include specific details, examples, and context - no single-line descriptions.\n",
+        );
+        instructions.push_str(
+            "  Optionally include 0-10 external web links with brief descriptions to support the content.\n"
         );
     }
 
@@ -138,10 +196,7 @@ pub fn parse_extraction_response(response: &str) -> Result<ExtractionResult, Str
         .strip_prefix("```json")
         .or_else(|| response.trim().strip_prefix("```"))
         .unwrap_or(response.trim());
-    let json_str = json_str
-        .strip_suffix("```")
-        .unwrap_or(json_str)
-        .trim();
+    let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
 
     // Try parsing the full structure
     if let Ok(result) = serde_json::from_str::<ExtractionResult>(json_str) {
@@ -152,26 +207,35 @@ pub fn parse_extraction_response(response: &str) -> Result<ExtractionResult, Str
     let value: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse LLM response as JSON: {e}\nResponse: {json_str}"))?;
 
-    let title = value.get("title")
+    let title = value
+        .get("title")
         .and_then(|v| v.as_str())
         .unwrap_or("Untitled")
         .to_string();
 
-    let summary = value.get("summary")
+    let summary = value
+        .get("summary")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
-    let tags: Vec<String> = value.get("tags")
+    let tags: Vec<String> = value
+        .get("tags")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
-    let entities: Vec<ExtractedEntity> = value.get("entities")
+    let entities: Vec<ExtractedEntity> = value
+        .get("entities")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let concepts: Vec<ExtractedConcept> = value.get("concepts")
+    let concepts: Vec<ExtractedConcept> = value
+        .get("concepts")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 

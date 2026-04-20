@@ -447,7 +447,11 @@ impl Storage {
                                                                                                               
                                                                                                                                                                     ",        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
-        for (table, col) in &[("memories", "embedding"), ("journal_entries", "embedding"), ("sessions", "format_version")] {
+        for (table, col) in &[
+            ("memories", "embedding"),
+            ("journal_entries", "embedding"),
+            ("sessions", "format_version"),
+        ] {
             let has_col: bool = conn
                 .prepare(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'",
@@ -515,19 +519,23 @@ impl Storage {
         let conn = lock_conn!(self)?;
         // Check if format_version column exists (for backward compatibility)
         let has_format_version: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'")?
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
+            )?
             .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0)
             > 0;
-        
+
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1".to_string()
+             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
+                .to_string()
         } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
-             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1".to_string()
+             created_at, updated_at, archived_at, summary FROM sessions WHERE id = ?1"
+                .to_string()
         };
-        
+
         let mut stmt = conn.prepare(&sql)?;
         let row = stmt
             .query_row(params![id], |row| {
@@ -539,10 +547,26 @@ impl Storage {
                     parent_id: row.get(4)?,
                     version: row.get(5)?,
                     format_version: if has_format_version { row.get(6)? } else { 1 },
-                    created_at: if has_format_version { row.get(7)? } else { row.get(6)? },
-                    updated_at: if has_format_version { row.get(8)? } else { row.get(7)? },
-                    archived_at: if has_format_version { row.get(9)? } else { row.get(8)? },
-                    summary: if has_format_version { row.get(10)? } else { row.get(9)? },
+                    created_at: if has_format_version {
+                        row.get(7)?
+                    } else {
+                        row.get(6)?
+                    },
+                    updated_at: if has_format_version {
+                        row.get(8)?
+                    } else {
+                        row.get(7)?
+                    },
+                    archived_at: if has_format_version {
+                        row.get(9)?
+                    } else {
+                        row.get(8)?
+                    },
+                    summary: if has_format_version {
+                        row.get(10)?
+                    } else {
+                        row.get(9)?
+                    },
                 })
             })
             .optional()?;
@@ -570,21 +594,25 @@ impl Storage {
         let conn = lock_conn!(self)?;
         // Check if format_version column exists (for backward compatibility)
         let has_format_version: bool = conn
-            .prepare("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'")?
+            .prepare(
+                "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='format_version'",
+            )?
             .query_row([], |r| r.get::<_, i64>(0))
             .unwrap_or(0)
             > 0;
-        
+
         let sql = if has_format_version {
             "SELECT id, title, project_id, directory, parent_id, version, format_version, \
              created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC".to_string()
+             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
+                .to_string()
         } else {
             "SELECT id, title, project_id, directory, parent_id, version, \
              created_at, updated_at, archived_at, summary \
-             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC".to_string()
+             FROM sessions WHERE archived_at IS NULL ORDER BY updated_at DESC"
+                .to_string()
         };
-        
+
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map([], |row| {
@@ -596,10 +624,26 @@ impl Storage {
                     parent_id: row.get(4)?,
                     version: row.get(5)?,
                     format_version: if has_format_version { row.get(6)? } else { 1 },
-                    created_at: if has_format_version { row.get(7)? } else { row.get(6)? },
-                    updated_at: if has_format_version { row.get(8)? } else { row.get(7)? },
-                    archived_at: if has_format_version { row.get(9)? } else { row.get(8)? },
-                    summary: if has_format_version { row.get(10)? } else { row.get(9)? },
+                    created_at: if has_format_version {
+                        row.get(7)?
+                    } else {
+                        row.get(6)?
+                    },
+                    updated_at: if has_format_version {
+                        row.get(8)?
+                    } else {
+                        row.get(7)?
+                    },
+                    archived_at: if has_format_version {
+                        row.get(9)?
+                    } else {
+                        row.get(8)?
+                    },
+                    summary: if has_format_version {
+                        row.get(10)?
+                    } else {
+                        row.get(9)?
+                    },
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;

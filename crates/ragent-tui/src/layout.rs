@@ -13,7 +13,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Wrap,
+        Block, Borders, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Table, Wrap,
     },
 };
 
@@ -396,93 +397,94 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-        ProviderSetupStep::SelectModel {
-            provider_name,
-            models,
-            selected,
-            ..
-        } => {
-            // Create header row
-            let header = Row::new(vec!["Model", "Context", "Cost", "Features"])
-                .style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan));
-
-            // Calculate visible rows based on available height
-            let header_height = 3; // Header + border lines
-            let footer_height = 3; // Footer hint + spacing
-            let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
-            let visible = available_rows.max(1).min(models.len());
-            let start = if *selected >= visible {
-                (*selected + 1).saturating_sub(visible)
-            } else {
-                0
-            };
-            let end = (start + visible).min(models.len());
-
-            let rows: Vec<Row> = models
-                .iter()
-                .enumerate()
-                .skip(start)
-                .take(end - start)
-                .map(|(i, entry)| {
-                    let is_selected = i == *selected;
-                    let style = if is_selected {
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::White)
-                    };
-
-                    // Format context window
-                    let ctx_str = if entry.context_window >= 1_000_000 {
-                        format!("{}M", entry.context_window / 1_000_000)
-                    } else if entry.context_window >= 1_000 {
-                        format!("{}K", entry.context_window / 1_000)
-                    } else {
-                        entry.context_window.to_string()
-                    };
-
-                    // Format cost
-                    let cost_str = if entry.cost_input == 0.0 && entry.cost_output == 0.0 {
-                        "Free".to_string()
-                    } else {
-                        format!("${:.2}/${:.2}", entry.cost_input, entry.cost_output)
-                    };
-
-                    // Format features
-                    let mut features = Vec::new();
-                    if entry.reasoning {
-                        features.push("R");
-                    }
-                    if entry.vision {
-                        features.push("V");
-                    }
-                    if entry.tool_use {
-                        features.push("T");
-                    }
-                    let features_str = if features.is_empty() {
-                        "-".to_string()
-                    } else {
-                        features.join(",")
-                    };
-
-                    // Add selection indicator
-                    let model_name = if is_selected {
-                        format!("▸ {}", entry.name)
-                    } else {
-                        format!("  {}", entry.name)
-                    };
-
-                    Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)
-                })
+                  ProviderSetupStep::SelectModel {
+                      provider_name,
+                      models,
+                      selected,
+                      ..
+                  } => {
+                      // Create header row
+                      let header = Row::new(vec!["Model", "Context", "Cost", "Features"]).style(
+                          Style::default()
+                              .add_modifier(Modifier::BOLD)
+                              .fg(Color::Cyan),
+                      );
+        
+                      // Calculate visible rows based on available height
+                      let header_height = 3; // Header + border lines
+                      let footer_height = 3; // Footer hint + spacing
+                      let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
+                      let visible = available_rows.max(1).min(models.len());
+                      let start = if *selected >= visible {
+                          (*selected + 1).saturating_sub(visible)
+                      } else {
+                          0
+                      };
+                      let end = (start + visible).min(models.len());
+        
+                      let rows: Vec<Row> = models
+                          .iter()
+                          .enumerate()
+                          .skip(start)
+                          .take(end - start)
+                          .map(|(i, entry)| {
+                              let is_selected = i == *selected;
+                              let style = if is_selected {
+                                  Style::default()
+                                      .fg(Color::Cyan)
+                                      .add_modifier(Modifier::BOLD)
+                              } else {
+                                  Style::default().fg(Color::White)
+                              };
+        
+                              // Format context window
+                              let ctx_str = if entry.context_window >= 1_000_000 {
+                                  format!("{}M", entry.context_window / 1_000_000)
+                              } else if entry.context_window >= 1_000 {
+                                  format!("{}K", entry.context_window / 1_000)
+                              } else {
+                                  entry.context_window.to_string()
+                              };
+        
+                              // Format cost: display tier (Free, Low, Medium, etc.) and multiplier (0x, 1x, 3x, etc.)
+                              let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
+        
+                              // Format features
+                              let mut features = Vec::new();
+                              if entry.reasoning {
+                                  features.push("R");
+                              }
+                              if entry.vision {
+                                  features.push("V");
+                              }
+                              if entry.tool_use {
+                                  features.push("T");
+                              }
+                              let features_str = if features.is_empty() {
+                                  "-".to_string()
+                              } else {
+                                  features.join(",")
+                              };
+        
+                              // Add selection indicator
+                              let model_name = if is_selected {
+                                  format!("▸ {}", entry.name)
+                              } else {
+                                  format!("  {}", entry.name)
+                              };
+        
+                              Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)                })
                 .collect();
 
-            let table = Table::new(rows, [
-                Constraint::Percentage(45), // Model name
-                Constraint::Percentage(15), // Context window
-                Constraint::Percentage(25), // Cost
-                Constraint::Percentage(15), // Features
-            ])
+            let table = Table::new(
+                rows,
+                [
+                    Constraint::Percentage(45), // Model name
+                    Constraint::Percentage(15), // Context window
+                    Constraint::Percentage(25), // Cost
+                    Constraint::Percentage(15), // Features
+                ],
+            )
             .header(header)
             .block(
                 Block::default()
@@ -522,7 +524,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     area.width.saturating_sub(4),
                     1,
                 );
-                frame.render_widget(Paragraph::new(showing_line).alignment(Alignment::Right), showing_area);
+                frame.render_widget(
+                    Paragraph::new(showing_line).alignment(Alignment::Right),
+                    showing_area,
+                );
             }
         }
         ProviderSetupStep::Done {
@@ -1248,13 +1253,13 @@ const INPUT_PLACEHOLDER: &str =
 fn render_chat(frame: &mut Frame, app: &mut App) {
     // Compute chat input height based on wrapped text
     let chat_area = frame.area();
-    
+
     // Responsive breakpoint for layout decisions
     let breakpoint = ResponsiveBreakpoint::from_width(chat_area.width);
-    
+
     // Check minimum size (for graceful degradation if needed)
     let _below_min = is_below_minimum_size(chat_area);
-    
+
     // Use responsive button column width
     let button_col_w = breakpoint.button_column_width();
     let input_inner_width = chat_area
@@ -1272,13 +1277,14 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(breakpoint.status_bar_height()), // status bar (responsive)
-            Constraint::Length(team_strip_h), // teammate strip (0 when hidden)
-            Constraint::Min(3),               // messages + optional log
-            Constraint::Length(input_height), // input (dynamic)
+            Constraint::Length(team_strip_h),                   // teammate strip (0 when hidden)
+            Constraint::Min(3),                                 // messages + optional log
+            Constraint::Length(input_height),                   // input (dynamic)
         ])
         .split(chat_area);
 
-    render_status_bar(frame, app, chunks[0]);
+    // Use v2 status bar with responsive design
+    crate::layout_statusbar::render_status_bar_v2(frame, app, chunks[0]);
 
     if team_strip {
         render_teammate_strip(frame, app, chunks[1]);
@@ -1872,38 +1878,113 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // Git branch
-    if let Some(ref branch) = app.git_branch {
-        row1_left.push(Span::styled(
-            format!("│ ⎇ {} ", branch),
-            Style::default().fg(Color::Green),
-        ));
-    }
-
-    // Status message on the right
-    let mut row1_right: Vec<Span<'_>> = Vec::new();
-    if !app.status.is_empty() && app.status != "Ready" {
-        row1_right.push(Span::styled(
-            format!("{} ", app.status),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let left_len: usize = row1_left.iter().map(|s| s.content.len()).sum();
-    let right_len: usize = row1_right.iter().map(|s| s.content.len()).sum();
-    let gap = rows[0]
-        .width
-        .saturating_sub(left_len as u16 + right_len as u16);
-    let gap_span = Span::raw(" ".repeat(gap as usize));
-
-    row1_left.push(gap_span);
-    row1_left.extend(row1_right);
-
-    let line1 = Line::from(row1_left);
-    frame.render_widget(Paragraph::new(line1), rows[0]);
-
+                // Git branch
+                if let Some(ref branch) = app.git_branch {
+                    row1_left.push(Span::styled(
+                        format!("│ ⎇ {} ", branch),
+                        Style::default().fg(Color::Green),
+                    ));
+                }
+          
+                // Status message and AIWiki on the right
+                let mut row1_right: Vec<Span<'_>> = Vec::new();
+          
+                // ── AIWiki indicator ────────────────────────────────────────────────────
+                {
+                    // Record x-offset before adding AIWiki spans for click detection.
+                    let aiwiki_x_offset: u16 = row1_left.iter().map(|s| s.width() as u16).sum();
+          
+                    let (tick, tick_color) = if app.aiwiki_enabled {
+                        ("✓", Color::Green)
+                    } else {
+                        ("✗", Color::Red)
+                    };
+                    row1_right.push(Span::styled(
+                        "AIWiki: ",
+                        Style::default().fg(Color::DarkGray),
+                    ));
+                    row1_right.push(Span::styled(
+                        format!("{tick} "),
+                        Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
+                    ));
+                    if app.aiwiki_enabled {
+                        let (raw_count, ref_count, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0, 0));
+                        let label = if ref_count > 0 {
+                            format!("{}src(+{}ref)/{}pg", raw_count, ref_count, pages)
+                        } else {
+                            format!("{}src/{}pg", raw_count, pages)
+                        };
+                        row1_right.push(Span::styled(label, Style::default().fg(Color::Cyan)));
+          
+                        // Sync status indicators
+                        let sync_icon = if app.aiwiki_sync_progress.is_some() {
+                            "⟳" // Sync is active
+                        } else {
+                            " "
+                        };
+          
+                        let autosync_icon = if app.aiwiki_autosync {
+                            "⊙" // Autosync enabled
+                        } else {
+                            "○" // Autosync disabled
+                        };
+          
+                        row1_right.push(Span::styled(
+                            format!("[{}{}]", sync_icon, autosync_icon),
+                            Style::default().fg(
+                                if app.aiwiki_sync_progress.is_some() {
+                                    Color::Yellow
+                                } else {
+                                    Color::DarkGray
+                                }
+                            )
+                        ));
+          
+                        // Show sync progress if active
+                        if let Some(ref progress) = app.aiwiki_sync_progress {
+                            let current =
+                                progress.current.load(std::sync::atomic::Ordering::Relaxed);
+                            let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
+                            if total > 0 {
+                                row1_right.push(Span::styled(
+                                    format!(" {}/{}", current, total),
+                                    Style::default().fg(Color::Yellow),
+                                ));
+                            } else {
+                                row1_right
+                                    .push(Span::styled(" ...", Style::default().fg(Color::Yellow)));
+                            }
+                        }
+                        row1_right.push(Span::raw(" "));
+                    } else {
+                        row1_right.push(Span::raw(" "));
+                    }
+          
+                    // Width of the AIWiki spans we just added for click detection.
+                    let aiwiki_w: u16 = row1_right.iter().map(|s| s.width() as u16).sum();
+                    app.aiwiki_status_area = Rect::new(rows[0].x + aiwiki_x_offset, rows[0].y, aiwiki_w, 1);
+                }
+          
+                if !app.status.is_empty() && app.status != "Ready" {
+                    row1_right.push(Span::styled(
+                        format!("{} ", app.status),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+          
+                let left_len: usize = row1_left.iter().map(|s| s.content.len()).sum();
+                let right_len: usize = row1_right.iter().map(|s| s.content.len()).sum();
+                let gap = rows[0]
+                    .width
+                    .saturating_sub(left_len as u16 + right_len as u16);
+                let gap_span = Span::raw(" ".repeat(gap as usize));
+          
+                row1_left.push(gap_span);
+                row1_left.extend(row1_right);          
+                let line1 = Line::from(row1_left);
+                frame.render_widget(Paragraph::new(line1), rows[0]);
     // Row 2: Resources and system state (provider, tokens, tasks, LSP, log)
     let mut row2_left: Vec<Span<'_>> = Vec::new();
 
@@ -2072,96 +2153,45 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-          // ── Memory indicator ────────────────────────────────────────────────────
-          {
-              let block_count = app.memory_block_count;
-              let entry_count = app.memory_entry_count;
-              let journal_count = app.journal_entry_count;
-              if block_count > 0 || entry_count > 0 || journal_count > 0 {
-                  let mem_label = if entry_count > 0 {
-                      format!("│ MEM: {}blk, {}mem", block_count, entry_count)
-                  } else {
-                      format!("│ MEM: {}blk", block_count)
-                  };
-                  row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
-                  if journal_count > 0 {
-                      row2_left.push(Span::styled(
-                          format!(", {}j", journal_count),
-                          Style::default().fg(Color::Magenta),
-                      ));
-                  }
-                  row2_left.push(Span::raw(" "));
-    
-                  // Relative time of last update
-                  if let Some(updated) = app.memory_last_updated {
-                      let elapsed = updated.elapsed();
-                      let time_str = if elapsed.as_secs() < 60 {
-                          format!("{}s ago", elapsed.as_secs())
-                      } else if elapsed.as_secs() < 3600 {
-                          format!("{}m ago", elapsed.as_secs() / 60)
-                      } else {
-                          format!("{}h ago", elapsed.as_secs() / 3600)
-                      };
-                      row2_left.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
-                      row2_left.push(Span::raw(" "));
-                  }
-              }
-          }
-    
-          // ── AIWiki indicator ────────────────────────────────────────────────────
-          {
-              // Record x-offset before adding AIWiki spans for click detection.
-              let aiwiki_x_offset: u16 = row2_left.iter().map(|s| s.width() as u16).sum();
+    // ── Memory indicator ────────────────────────────────────────────────────
+    {
+        let block_count = app.memory_block_count;
+        let entry_count = app.memory_entry_count;
+        let journal_count = app.journal_entry_count;
+        if block_count > 0 || entry_count > 0 || journal_count > 0 {
+            let mem_label = if entry_count > 0 {
+                format!("│ MEM: {}blk, {}mem", block_count, entry_count)
+            } else {
+                format!("│ MEM: {}blk", block_count)
+            };
+            row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
+            if journal_count > 0 {
+                row2_left.push(Span::styled(
+                    format!(", {}j", journal_count),
+                    Style::default().fg(Color::Magenta),
+                ));
+            }
+            row2_left.push(Span::raw(" "));
 
-              let (tick, tick_color) = if app.aiwiki_enabled {
-                  ("✓", Color::Green)
-              } else {
-                  ("✗", Color::Red)
-              };
-              row2_left.push(Span::styled(
-                  "│ AIWiki: ",
-                  Style::default().fg(Color::DarkGray),
-              ));
-              row2_left.push(Span::styled(
-                  format!("{tick} "),
-                  Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
-              ));
-              if app.aiwiki_enabled {
-                  let (sources, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0));
-                  let label = format!("{}src/{}pg", sources, pages);
-                  row2_left.push(Span::styled(label, Style::default().fg(Color::Cyan)));
-                  // Show sync progress indicator while sync is active
-                  if let Some(ref progress) = app.aiwiki_sync_progress {
-                      let current = progress.current.load(std::sync::atomic::Ordering::Relaxed);
-                      let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
-                      if total > 0 {
-                          row2_left.push(Span::styled(
-                              format!(" {}/{}", current, total),
-                              Style::default().fg(Color::Yellow),
-                          ));
-                      } else {
-                          row2_left.push(Span::styled(
-                              " ...",
-                              Style::default().fg(Color::Yellow),
-                          ));
-                      }
-                  }
-                  row2_left.push(Span::raw(" "));
-              }
+            // Relative time of last update
+            if let Some(updated) = app.memory_last_updated {
+                let elapsed = updated.elapsed();
+                let time_str = if elapsed.as_secs() < 60 {
+                    format!("{}s ago", elapsed.as_secs())
+                } else if elapsed.as_secs() < 3600 {
+                    format!("{}m ago", elapsed.as_secs() / 60)
+                } else {
+                    format!("{}h ago", elapsed.as_secs() / 3600)
+                };
+                row2_left.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
+                row2_left.push(Span::raw(" "));
+            }
+        }
+    }
 
-              // Width of the AIWiki spans we just added.
-              let aiwiki_w: u16 = row2_left.iter().map(|s| s.width() as u16).sum::<u16>()
-                  .saturating_sub(aiwiki_x_offset);
-              app.aiwiki_status_area = Rect::new(
-                  rows[1].x + aiwiki_x_offset,
-                  rows[1].y,
-                  aiwiki_w,
-                  1,
-              );
-          }
-    
-        let line2 = Line::from(row2_left);
-        frame.render_widget(Paragraph::new(line2), rows[1]);
+
+    let line2 = Line::from(row2_left);
+    frame.render_widget(Paragraph::new(line2), rows[1]);
 }
 
 /// Render a slice of messages into formatted lines using the rich format
@@ -2420,17 +2450,17 @@ fn render_messages(frame: &mut Frame, app: &mut App, area: Rect) {
         .block(messages_block)
         .wrap(Wrap { trim: false });
 
-          // Use line_count() which accounts for word-wrap at the inner width
-          // (area width minus left+right borders).
-          let inner_width = area.width.saturating_sub(2);
-          let total = paragraph.line_count(inner_width) as u16;
-          let visible = area.height.saturating_sub(2);
-          let max_scroll = total.saturating_sub(visible);
-          // Clamp scroll_offset when content shrinks to prevent blank timeline
-          // (C3 fix: Timeline no longer goes blank when content shrinks)
-          app.scroll_offset = app.scroll_offset.min(max_scroll);
-          app.message_max_scroll = max_scroll;
-          let scroll = max_scroll.saturating_sub(app.scroll_offset);
+    // Use line_count() which accounts for word-wrap at the inner width
+    // (area width minus left+right borders).
+    let inner_width = area.width.saturating_sub(2);
+    let total = paragraph.line_count(inner_width) as u16;
+    let visible = area.height.saturating_sub(2);
+    let max_scroll = total.saturating_sub(visible);
+    // Clamp scroll_offset when content shrinks to prevent blank timeline
+    // (C3 fix: Timeline no longer goes blank when content shrinks)
+    app.scroll_offset = app.scroll_offset.min(max_scroll);
+    app.message_max_scroll = max_scroll;
+    let scroll = max_scroll.saturating_sub(app.scroll_offset);
     let paragraph = paragraph.scroll((scroll, 0));
 
     frame.render_widget(paragraph, area);
@@ -2742,54 +2772,54 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
         return;
     }
 
-          // Standard permission dialog: y/a/n.
-          let area = centered_rect(60, 40, frame.area()); // Increased height for better visibility
-          frame.render_widget(Clear, area);
-    
-          // Wrap the dialog in a block with strong styling to make it prominent
-          let text = vec![
-              Line::from(Span::styled(
-                  "⚠️  Permission Required",
-                  Style::default()
-                      .fg(Color::Yellow)
-                      .add_modifier(Modifier::BOLD),
-              )),
-              Line::from(""),
-              Line::from(format!("Permission: {}", req.permission)),
-              Line::from(""),
-              Line::from("Details:"),
-              Line::from(Span::styled(
-                  req.patterns.first().map(|s| s.as_str()).unwrap_or(""),
-                  Style::default().fg(Color::White),
-              )),
-              Line::from(""),
-              Line::from(Span::styled(
-                  "Press [y] to allow  [a] to always allow  [n] to deny",
-                  Style::default()
-                      .fg(Color::Cyan)
-                      .add_modifier(Modifier::BOLD),
-              )),
-          ];
-    
-          let queue_depth = app.permission_queue.len();
-          let title_suffix = if queue_depth > 1 {
-              format!(" Permission: {} ({} queued) ", req.permission, queue_depth)
-          } else {
-              format!(" Permission: {} ", req.permission)
-          };
+    // Standard permission dialog: y/a/n.
+    let area = centered_rect(60, 40, frame.area()); // Increased height for better visibility
+    frame.render_widget(Clear, area);
 
-          let block = Block::default()
-              .borders(Borders::ALL)
-              .border_type(ratatui::widgets::BorderType::Double) // Double border for emphasis
-              .title(title_suffix)
-              .style(Style::default().fg(Color::Yellow).bg(Color::Black)); // Ensure contrast
-    
-          let paragraph = Paragraph::new(text)
-              .block(block)
-              .alignment(Alignment::Center);
-    
-          frame.render_widget(paragraph, area);
-      }
+    // Wrap the dialog in a block with strong styling to make it prominent
+    let text = vec![
+        Line::from(Span::styled(
+            "⚠️  Permission Required",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(format!("Permission: {}", req.permission)),
+        Line::from(""),
+        Line::from("Details:"),
+        Line::from(Span::styled(
+            req.patterns.first().map(|s| s.as_str()).unwrap_or(""),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Press [y] to allow  [a] to always allow  [n] to deny",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+    ];
+
+    let queue_depth = app.permission_queue.len();
+    let title_suffix = if queue_depth > 1 {
+        format!(" Permission: {} ({} queued) ", req.permission, queue_depth)
+    } else {
+        format!(" Permission: {} ", req.permission)
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Double) // Double border for emphasis
+        .title(title_suffix)
+        .style(Style::default().fg(Color::Yellow).bg(Color::Black)); // Ensure contrast
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, area);
+}
 fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
     let area = centered_rect(60, 40, frame.area());
     frame.render_widget(Clear, area);

@@ -115,7 +115,7 @@ where
     Fut: std::future::Future<Output = Result<reqwest::Response, reqwest::Error>>,
 {
     let mut last_error = None;
-    
+
     for attempt in 0..=max_retries {
         if attempt > 0 {
             let delay = Duration::from_millis(500 * (1 << (attempt - 1).min(4)));
@@ -127,11 +127,11 @@ where
             );
             tokio::time::sleep(delay).await;
         }
-        
+
         match request_fn().await {
             Ok(response) => {
                 let status = response.status();
-                
+
                 // Check if we should retry based on status code
                 if status.is_server_error() && attempt < max_retries {
                     let body = response.text().await.unwrap_or_default();
@@ -143,17 +143,13 @@ where
                     ));
                     continue;
                 }
-                
+
                 // For client errors, don't retry
                 if status.is_client_error() {
                     let body = response.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!(
-                        "HTTP {} (not retryable): {}",
-                        status,
-                        body
-                    ));
+                    return Err(anyhow::anyhow!("HTTP {} (not retryable): {}", status, body));
                 }
-                
+
                 return Ok(response);
             }
             Err(e) if is_retryable_error(&e) && attempt < max_retries => {
@@ -165,7 +161,7 @@ where
             }
         }
     }
-    
+
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries exhausted")))
 }
 
@@ -180,7 +176,7 @@ fn is_retryable_error(error: &reqwest::Error) -> bool {
     if error.is_timeout() {
         return true;
     }
-    
+
     if error.is_connect() {
         return true;
     }
@@ -189,7 +185,7 @@ fn is_retryable_error(error: &reqwest::Error) -> bool {
     if error.is_body() || error.is_decode() {
         return true;
     }
-    
+
     // Check for HTTP/2 protocol errors or other transient failures in the source chain
     if let Some(source) = error.source() {
         let source_str = source.to_string().to_lowercase();
@@ -201,12 +197,12 @@ fn is_retryable_error(error: &reqwest::Error) -> bool {
             return true;
         }
     }
-    
+
     // Check status code if available
     if let Some(status) = error.status() {
         return status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS;
     }
-    
+
     false
 }
 

@@ -243,7 +243,7 @@ impl<'a> Button<'a> {
     }
 
     /// Get the styled label text for rendering
-    /// 
+    ///
     /// Includes accessibility annotations for screen reader support:
     /// - ⣿ prefix indicates button role
     pub fn styled_label(&self) -> Line<'_> {
@@ -275,12 +275,12 @@ impl<'a> Button<'a> {
     }
 
     /// Get the styled label with button role indicator for accessibility
-    /// 
+    ///
     /// Includes "⣿" prefix to indicate button role for screen readers.
     /// Use this in contexts where multiple element types are displayed together.
     pub fn styled_label_with_role(&self) -> Line<'_> {
         use crate::theme::accessibility;
-        
+
         let fg = self.fg_color();
         let bg = self.bg_color();
         let role_style = Style::default().fg(fg).bg(bg);
@@ -320,10 +320,7 @@ impl<'a> Button<'a> {
             } else {
                 style
             };
-            Span::styled(
-                format!("[{}]{} ", shortcut, self.label),
-                shortcut_style,
-            )
+            Span::styled(format!("[{}]{} ", shortcut, self.label), shortcut_style)
         } else {
             Span::styled(format!("{} ", self.label), style)
         }
@@ -438,7 +435,9 @@ impl<'a> ButtonBar<'a> {
 
         for (i, button) in self.buttons.iter().enumerate() {
             // Check if we have room for this button
-            let button_width = button.total_width().min(available_width.saturating_sub(current_x - area.x));
+            let button_width = button
+                .total_width()
+                .min(available_width.saturating_sub(current_x - area.x));
             if button_width == 0 {
                 break;
             }
@@ -475,7 +474,10 @@ pub struct ButtonRender<'a, 'b> {
 impl<'a, 'b> ButtonRender<'a, 'b> {
     /// Create a new button render
     pub fn new(button: &'b Button<'a>, area: Rect) -> Self {
-        Self { button, _area: area }
+        Self {
+            button,
+            _area: area,
+        }
     }
 }
 
@@ -499,7 +501,7 @@ impl Widget for ButtonRender<'_, '_> {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(border_color));
-            
+
             // Render content inside the border
             let inner = block.clone().inner(area);
             block.clone().render(area, buf);

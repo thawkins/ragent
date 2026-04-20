@@ -7,7 +7,7 @@ use crate::{Aiwiki, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Instant};
+use tokio::time::{Instant, interval};
 use tracing;
 
 /// Configuration for the file watcher.
@@ -77,54 +77,54 @@ pub enum FileEvent {
 }
 
 impl FileWatcher {
-          /// Create a new file watcher.
-        ///
-        /// Note: This is a simplified implementation that uses periodic scanning
-        /// rather than OS-level file system events. This is more portable and
-        /// works well for the AIWiki use case where changes are relatively infrequent.
-        pub async fn new(raw_dir: PathBuf, config: WatcherConfig) -> Result<Self> {
-            let (event_tx, mut _event_rx) = mpsc::channel(100);
-    
-            // Spawn the watcher task
-            let config_clone = config.clone();
-            let event_tx_clone = event_tx.clone();
-            tokio::spawn(async move {
-                let mut _last_scan = Instant::now();
-                let mut last_state: Option<std::collections::HashMap<PathBuf, u64>> = None;
-    
-                let mut scan_interval = interval(Duration::from_secs(2));
-    
-                loop {
-                    tokio::select! {
-                        _ = scan_interval.tick() => {
-                            // Periodic scan
-                            if config_clone.auto_sync {
-                                match scan_directory_state(&raw_dir).await {
-                                    Ok(current_state) => {
-                                        if let Some(ref prev) = last_state {
-                                            let events = detect_changes(prev, &current_state);
-                                            for event in events {
-                                                let _ = event_tx_clone.send(event).await;
-                                            }
+    /// Create a new file watcher.
+    ///
+    /// Note: This is a simplified implementation that uses periodic scanning
+    /// rather than OS-level file system events. This is more portable and
+    /// works well for the AIWiki use case where changes are relatively infrequent.
+    pub async fn new(raw_dir: PathBuf, config: WatcherConfig) -> Result<Self> {
+        let (event_tx, mut _event_rx) = mpsc::channel(100);
+
+        // Spawn the watcher task
+        let config_clone = config.clone();
+        let event_tx_clone = event_tx.clone();
+        tokio::spawn(async move {
+            let mut _last_scan = Instant::now();
+            let mut last_state: Option<std::collections::HashMap<PathBuf, u64>> = None;
+
+            let mut scan_interval = interval(Duration::from_secs(2));
+
+            loop {
+                tokio::select! {
+                    _ = scan_interval.tick() => {
+                        // Periodic scan
+                        if config_clone.auto_sync {
+                            match scan_directory_state(&raw_dir).await {
+                                Ok(current_state) => {
+                                    if let Some(ref prev) = last_state {
+                                        let events = detect_changes(prev, &current_state);
+                                        for event in events {
+                                            let _ = event_tx_clone.send(event).await;
                                         }
-                                        last_state = Some(current_state);
                                     }
-                                    Err(e) => {
-                                        tracing::warn!("Failed to scan directory: {}", e);
-                                    }
+                                    last_state = Some(current_state);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Failed to scan directory: {}", e);
                                 }
                             }
                         }
                     }
                 }
-            });
-    
-            Ok(Self {
-                event_tx,
-                config,
-                last_sync: Instant::now() - Duration::from_secs(60), // Allow immediate first sync
-            })
-        }
+            }
+        });
+
+        Ok(Self {
+            event_tx,
+            config,
+            last_sync: Instant::now() - Duration::from_secs(60), // Allow immediate first sync
+        })
+    }
     /// Check if enough time has passed since last sync.
     pub fn can_sync(&self) -> bool {
         self.last_sync.elapsed() >= self.config.min_sync_interval
@@ -135,9 +135,7 @@ impl FileWatcher {
         self.event_tx
             .send(FileEvent::SyncRequested)
             .await
-            .map_err(|_| crate::AiwikiError::Config(
-                "Watcher channel closed".to_string()
-            ))?;
+            .map_err(|_| crate::AiwikiError::Config("Watcher channel closed".to_string()))?;
         Ok(())
     }
 
@@ -148,9 +146,7 @@ impl FileWatcher {
 }
 
 /// Scan the directory and get the current state.
-async fn scan_directory_state(
-    dir: &Path,
-) -> Result<std::collections::HashMap<PathBuf, u64>> {
+async fn scan_directory_state(dir: &Path) -> Result<std::collections::HashMap<PathBuf, u64>> {
     let mut state = std::collections::HashMap::new();
 
     if !dir.exists() {
@@ -187,14 +183,15 @@ async fn scan_directory_state(
         }
     }
 
-          Ok(state)
-    }
-    
-    /// Detect changes between two directory states.
-    fn detect_changes(
-        old: &std::collections::HashMap<PathBuf, u64>,
-        new: &std::collections::HashMap<PathBuf, u64>,
-    ) -> Vec<FileEvent> {    let mut events = Vec::new();
+    Ok(state)
+}
+
+/// Detect changes between two directory states.
+fn detect_changes(
+    old: &std::collections::HashMap<PathBuf, u64>,
+    new: &std::collections::HashMap<PathBuf, u64>,
+) -> Vec<FileEvent> {
+    let mut events = Vec::new();
 
     // Find new and modified files
     for (path, mtime) in new {
@@ -273,11 +270,23 @@ mod tests {
         let events = detect_changes(&old, &new);
 
         assert_eq!(events.len(), 2);
-        assert!(events.iter().any(|e| matches!(e, FileEvent::Modified(p) if p == Path::new("file2.md"))));
-        assert!(events.iter().any(|e| matches!(e, FileEvent::Created(p) if p == Path::new("file3.md"))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FileEvent::Modified(p) if p == Path::new("file2.md")))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FileEvent::Created(p) if p == Path::new("file3.md")))
+        );
 
         // Test deleted detection
         let events = detect_changes(&new, &old);
-        assert!(events.iter().any(|e| matches!(e, FileEvent::Deleted(p) if p == Path::new("file3.md"))));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, FileEvent::Deleted(p) if p == Path::new("file3.md")))
+        );
     }
 }

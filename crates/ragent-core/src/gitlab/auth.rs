@@ -63,7 +63,9 @@ pub fn load_token(storage: &Storage) -> Option<String> {
 #[must_use]
 pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
     let env_url = std::env::var("GITLAB_URL").ok().filter(|s| !s.is_empty());
-    let env_user = std::env::var("GITLAB_USERNAME").ok().filter(|s| !s.is_empty());
+    let env_user = std::env::var("GITLAB_USERNAME")
+        .ok()
+        .filter(|s| !s.is_empty());
 
     // If both env vars are set, use them directly
     if let (Some(url), Some(user)) = (env_url.clone(), env_user.clone()) {
@@ -208,10 +210,7 @@ pub fn migrate_legacy_files(storage: &Storage) {
                         .flatten()
                         .is_none()
                 {
-                    if storage
-                        .set_provider_auth(DB_PROVIDER_ID, &token)
-                        .is_ok()
-                    {
+                    if storage.set_provider_auth(DB_PROVIDER_ID, &token).is_ok() {
                         let _ = std::fs::remove_file(&path);
                     }
                 }

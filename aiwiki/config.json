@@ -1,5 +1,5 @@
 {
-  "name": "Ragent Wiki",
+  "name": "Project Wiki",
   "enabled": true,
   "sync_mode": "manual",
   "llm_model": "ollama_cloud/kimi-k2.5",
@@ -17,5 +17,44 @@
     "Thumbs.db"
   ],
   "max_file_size": 52428800,
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "sources": [
+    {
+      "path": "SPEC.md",
+      "patterns": [
+        "SPEC.md"
+      ],
+      "recursive": false,
+      "enabled": true,
+      "is_file": true
+    },
+    {
+      "path": "AGENTS.md",
+      "patterns": [
+        "AGENTS.md"
+      ],
+      "recursive": false,
+      "enabled": true,
+      "is_file": true
+    },
+    {
+      "path": "src",
+      "patterns": [
+        "**/*"
+      ],
+      "recursive": true,
+      "enabled": true,
+      "is_file": false
+    },
+    {
+      "path": "crates",
+      "patterns": [
+        "**/*"
+      ],
+      "recursive": true,
+      "enabled": true,
+      "is_file": false
+    }
+  ],
+  "watch_mode": false
 }

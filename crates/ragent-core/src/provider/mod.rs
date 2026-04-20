@@ -187,47 +187,51 @@ impl ProviderRegistry {
             .collect()
     }
 
-          /// Looks up a specific model by provider and model ID.
-          ///
-          /// The `model_id` parameter supports multiple formats:
-          /// - Exact model ID (e.g. `"gpt-4o"`)
-          /// - Display name match (e.g. `"GPT-4o"`)
-          /// - Model with vendor suffix (e.g. `"gpt-4o@azure"` or `"gpt-4o@openai"`)
-          ///
-          /// Returns `None` if the provider is not found or no matching model exists.
-          ///
-          /// # Examples
-          ///
-          /// ```
-          /// use ragent_core::provider::ProviderRegistry;
-          ///
-          /// let registry = ProviderRegistry::new();
-          /// // No providers registered, so resolution returns `None`.
-          /// assert!(registry.resolve_model("openai", "gpt-4o").is_none());
-          /// ```
-          pub fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo> {
-              let provider = self.providers.get(provider_id)?;
-              let models = provider.default_models();
-    
-              // First try exact ID match
-              if let Some(model) = models.iter().find(|m| m.id == model_id) {
-                  return Some(model.clone());
-              }
-    
-              // D2 fix: Strip vendor suffix (e.g., "gpt-4o@azure" -> "gpt-4o")
-              let model_id_without_suffix = model_id.split_once('@').map(|(base, _)| base).unwrap_or(model_id);
-              if let Some(model) = models.iter().find(|m| m.id == model_id_without_suffix) {
-                  return Some(model.clone());
-              }
-    
-              // Try display name match (case-insensitive)
-              let model_lower = model_id.to_lowercase();
-              if let Some(model) = models.iter().find(|m| m.name.to_lowercase() == model_lower) {
-                  return Some(model.clone());
-              }
-    
-              None
-          }}
+    /// Looks up a specific model by provider and model ID.
+    ///
+    /// The `model_id` parameter supports multiple formats:
+    /// - Exact model ID (e.g. `"gpt-4o"`)
+    /// - Display name match (e.g. `"GPT-4o"`)
+    /// - Model with vendor suffix (e.g. `"gpt-4o@azure"` or `"gpt-4o@openai"`)
+    ///
+    /// Returns `None` if the provider is not found or no matching model exists.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use ragent_core::provider::ProviderRegistry;
+    ///
+    /// let registry = ProviderRegistry::new();
+    /// // No providers registered, so resolution returns `None`.
+    /// assert!(registry.resolve_model("openai", "gpt-4o").is_none());
+    /// ```
+    pub fn resolve_model(&self, provider_id: &str, model_id: &str) -> Option<ModelInfo> {
+        let provider = self.providers.get(provider_id)?;
+        let models = provider.default_models();
+
+        // First try exact ID match
+        if let Some(model) = models.iter().find(|m| m.id == model_id) {
+            return Some(model.clone());
+        }
+
+        // D2 fix: Strip vendor suffix (e.g., "gpt-4o@azure" -> "gpt-4o")
+        let model_id_without_suffix = model_id
+            .split_once('@')
+            .map(|(base, _)| base)
+            .unwrap_or(model_id);
+        if let Some(model) = models.iter().find(|m| m.id == model_id_without_suffix) {
+            return Some(model.clone());
+        }
+
+        // Try display name match (case-insensitive)
+        let model_lower = model_id.to_lowercase();
+        if let Some(model) = models.iter().find(|m| m.name.to_lowercase() == model_lower) {
+            return Some(model.clone());
+        }
+
+        None
+    }
+}
 
 impl Default for ProviderRegistry {
     fn default() -> Self {

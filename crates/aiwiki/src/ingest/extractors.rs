@@ -116,11 +116,7 @@ pub async fn extract_text<P: AsRef<Path>>(
     let path = path.as_ref().to_path_buf();
 
     match doc_type {
-        DocumentType::Text => {
-            tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| e.into())
-        }
+        DocumentType::Text => tokio::fs::read_to_string(&path).await.map_err(|e| e.into()),
         DocumentType::Markdown => {
             let raw = tokio::fs::read_to_string(&path)
                 .await
@@ -131,55 +127,49 @@ pub async fn extract_text<P: AsRef<Path>>(
             let p = path.clone();
             tokio::task::spawn_blocking(move || extract_pdf_text(&p))
                 .await
-                .map_err(|e| crate::AiwikiError::Config(
-                    format!("PDF task panicked: {e}")))?
+                .map_err(|e| crate::AiwikiError::Config(format!("PDF task panicked: {e}")))?
         }
         DocumentType::Docx => {
             let p = path.clone();
             tokio::task::spawn_blocking(move || extract_docx_text(&p))
                 .await
-                .map_err(|e| crate::AiwikiError::Config(
-                    format!("DOCX task panicked: {e}")))?
+                .map_err(|e| crate::AiwikiError::Config(format!("DOCX task panicked: {e}")))?
         }
         DocumentType::Odt => {
             let p = path.clone();
             tokio::task::spawn_blocking(move || extract_odt_text(&p))
                 .await
-                .map_err(|e| crate::AiwikiError::Config(
-                    format!("ODT task panicked: {e}")))?
+                .map_err(|e| crate::AiwikiError::Config(format!("ODT task panicked: {e}")))?
         }
         DocumentType::SourceCode { language } => {
             let p = path.clone();
             let lang = language.clone();
             tokio::task::spawn_blocking(move || extract_code_text(&p, &lang))
                 .await
-                .map_err(|e| crate::AiwikiError::Config(
-                    format!("Code parse task panicked: {e}")))?
+                .map_err(|e| crate::AiwikiError::Config(format!("Code parse task panicked: {e}")))?
         }
-        DocumentType::Unknown => Err(crate::AiwikiError::Config(
-            format!("Cannot extract text from unknown file type: {}", path.display())
-        )),
+        DocumentType::Unknown => Err(crate::AiwikiError::Config(format!(
+            "Cannot extract text from unknown file type: {}",
+            path.display()
+        ))),
     }
 }
 
 /// Extract text from a PDF file using pdf-extract.
 fn extract_pdf_text(path: &Path) -> crate::Result<String> {
-    let bytes = std::fs::read(path)
-        .map_err(crate::AiwikiError::Io)?;
+    let bytes = std::fs::read(path).map_err(crate::AiwikiError::Io)?;
     let text = pdf_extract::extract_text_from_mem(&bytes)
-        .map_err(|e| crate::AiwikiError::Config(
-            format!("PDF text extraction failed: {e}")))?;
+        .map_err(|e| crate::AiwikiError::Config(format!("PDF text extraction failed: {e}")))?;
     Ok(text)
 }
 
 /// Extract text from a DOCX file using docx-rust.
 fn extract_docx_text(path: &Path) -> crate::Result<String> {
     let docx_file = docx_rust::DocxFile::from_file(path)
-        .map_err(|e| crate::AiwikiError::Config(
-            format!("Failed to open DOCX: {e}")))?;
-    let docx = docx_file.parse()
-        .map_err(|e| crate::AiwikiError::Config(
-            format!("Failed to parse DOCX: {e}")))?;
+        .map_err(|e| crate::AiwikiError::Config(format!("Failed to open DOCX: {e}")))?;
+    let docx = docx_file
+        .parse()
+        .map_err(|e| crate::AiwikiError::Config(format!("Failed to parse DOCX: {e}")))?;
 
     let mut text = String::new();
     for content in &docx.document.body.content {
@@ -217,17 +207,15 @@ fn extract_docx_text(path: &Path) -> crate::Result<String> {
 
 /// Extract text from an ODT file by reading content.xml from the ZIP archive.
 fn extract_odt_text(path: &Path) -> crate::Result<String> {
-    let file = std::fs::File::open(path)
-        .map_err(crate::AiwikiError::Io)?;
+    let file = std::fs::File::open(path).map_err(crate::AiwikiError::Io)?;
     let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| crate::AiwikiError::Config(
-            format!("Failed to open ODT as ZIP: {e}")))?;
+        .map_err(|e| crate::AiwikiError::Config(format!("Failed to open ODT as ZIP: {e}")))?;
 
     let mut content_xml = String::new();
     {
-        let mut entry = archive.by_name("content.xml")
-            .map_err(|e| crate::AiwikiError::Config(
-                format!("No content.xml in ODT: {e}")))?;
+        let mut entry = archive
+            .by_name("content.xml")
+            .map_err(|e| crate::AiwikiError::Config(format!("No content.xml in ODT: {e}")))?;
         std::io::Read::read_to_string(&mut entry, &mut content_xml)
             .map_err(crate::AiwikiError::Io)?;
     }
@@ -245,17 +233,23 @@ fn extract_code_text(path: &Path, language: &str) -> crate::Result<String> {
     use ragent_code::types::SymbolKind;
     use std::fmt::Write;
 
-    let source = std::fs::read(path)
-        .map_err(crate::AiwikiError::Io)?;
+    let source = std::fs::read(path).map_err(crate::AiwikiError::Io)?;
 
     let registry = ParserRegistry::new();
-    let parsed = registry.parse(language, &source)
-        .ok_or_else(|| crate::AiwikiError::Config(
-            format!("No tree-sitter parser for language '{language}'")))?
-        .map_err(|e| crate::AiwikiError::Config(
-            format!("Tree-sitter parse failed for {}: {e}", path.display())))?;
+    let parsed = registry
+        .parse(language, &source)
+        .ok_or_else(|| {
+            crate::AiwikiError::Config(format!("No tree-sitter parser for language '{language}'"))
+        })?
+        .map_err(|e| {
+            crate::AiwikiError::Config(format!(
+                "Tree-sitter parse failed for {}: {e}",
+                path.display()
+            ))
+        })?;
 
-    let filename = path.file_name()
+    let filename = path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
@@ -270,16 +264,14 @@ fn extract_code_text(path: &Path, language: &str) -> crate::Result<String> {
         for imp in &parsed.imports {
             if imp.alias.is_some() {
                 let _ = writeln!(
-                    out, "- {} from {} (as {})",
+                    out,
+                    "- {} from {} (as {})",
                     imp.imported_name,
                     imp.source_module,
                     imp.alias.as_deref().unwrap_or(""),
                 );
             } else {
-                let _ = writeln!(
-                    out, "- {} from {}",
-                    imp.imported_name, imp.source_module,
-                );
+                let _ = writeln!(out, "- {} from {}", imp.imported_name, imp.source_module,);
             }
         }
         let _ = writeln!(out);
@@ -303,9 +295,7 @@ fn extract_code_text(path: &Path, language: &str) -> crate::Result<String> {
     ];
 
     for kind in kinds_order {
-        let symbols: Vec<_> = parsed.symbols.iter()
-            .filter(|s| &s.kind == kind)
-            .collect();
+        let symbols: Vec<_> = parsed.symbols.iter().filter(|s| &s.kind == kind).collect();
         if symbols.is_empty() {
             continue;
         }
@@ -387,8 +377,8 @@ fn kind_label(kind: &ragent_code::types::SymbolKind) -> &'static str {
 
 /// Parse XML and extract text content, inserting newlines at paragraph boundaries.
 fn xml_to_text(xml: &str) -> String {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(xml);
     let mut text = String::new();
@@ -552,12 +542,18 @@ mod tests {
     #[test]
     fn test_document_type_from_path() {
         assert_eq!(DocumentType::from_path("file.md"), DocumentType::Markdown);
-        assert_eq!(DocumentType::from_path("file.markdown"), DocumentType::Markdown);
+        assert_eq!(
+            DocumentType::from_path("file.markdown"),
+            DocumentType::Markdown
+        );
         assert_eq!(DocumentType::from_path("file.pdf"), DocumentType::Pdf);
         assert_eq!(DocumentType::from_path("file.docx"), DocumentType::Docx);
         assert_eq!(DocumentType::from_path("file.odt"), DocumentType::Odt);
         assert_eq!(DocumentType::from_path("file.txt"), DocumentType::Text);
-        assert_eq!(DocumentType::from_path("file.unknown"), DocumentType::Unknown);
+        assert_eq!(
+            DocumentType::from_path("file.unknown"),
+            DocumentType::Unknown
+        );
     }
 
     #[test]
@@ -654,7 +650,9 @@ mod tests {
     #[test]
     fn test_detect_source_code_typescript() {
         let dt = DocumentType::from_path("app.ts");
-        assert!(matches!(dt, DocumentType::SourceCode { ref language } if language == "typescript"));
+        assert!(
+            matches!(dt, DocumentType::SourceCode { ref language } if language == "typescript")
+        );
     }
 
     #[test]

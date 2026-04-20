@@ -39,10 +39,7 @@ pub struct GraphData {
 }
 
 /// Build the page graph for visualization.
-pub async fn build_graph(
-    wiki: &Aiwiki,
-    filter: Option<&str>,
-) -> GraphData {
+pub async fn build_graph(wiki: &Aiwiki, filter: Option<&str>) -> GraphData {
     let wiki_dir = wiki.path("wiki");
     let mut nodes = Vec::new();
     let mut links = Vec::new();
@@ -125,7 +122,10 @@ async fn create_node_from_path(
     filter: Option<&str>,
 ) -> Option<GraphNode> {
     let relative_path = file_path.strip_prefix(base_dir).ok()?;
-    let id = relative_path.to_string_lossy().to_string().replace('/', "-");
+    let id = relative_path
+        .to_string_lossy()
+        .to_string()
+        .replace('/', "-");
     let path_str = relative_path.to_string_lossy().to_string();
 
     // Determine node type from path
@@ -152,15 +152,16 @@ async fn create_node_from_path(
     }
 
     // Read content to get title
-    let content = tokio::fs::read_to_string(file_path).await.unwrap_or_default();
-    let title = extract_title(&content)
-        .unwrap_or_else(|| {
-            file_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Untitled")
-                .to_string()
-        });
+    let content = tokio::fs::read_to_string(file_path)
+        .await
+        .unwrap_or_default();
+    let title = extract_title(&content).unwrap_or_else(|| {
+        file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled")
+            .to_string()
+    });
 
     // Size based on content length
     let size = (content.len() / 100).min(20).max(5) as u32;
@@ -243,7 +244,13 @@ fn extract_title(content: &str) -> Option<String> {
             let frontmatter = &content[4..end];
             for line in frontmatter.lines() {
                 if let Some(value) = line.strip_prefix("title:") {
-                    return Some(value.trim().trim_matches('"').trim_matches('\'').to_string());
+                    return Some(
+                        value
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string(),
+                    );
                 }
             }
         }

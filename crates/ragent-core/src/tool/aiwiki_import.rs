@@ -14,8 +14,9 @@ pub struct AiwikiImportTool;
 /// Build a "not initialized" response.
 fn not_initialized() -> ToolOutput {
     ToolOutput {
-        content: "AIWiki is not initialized. Run `/aiwiki init` first to create the wiki structure."
-            .to_string(),
+        content:
+            "AIWiki is not initialized. Run `/aiwiki init` first to create the wiki structure."
+                .to_string(),
         metadata: Some(json!({
             "error": "aiwiki_not_initialized",
             "initialized": false
@@ -82,7 +83,7 @@ impl Tool for AiwikiImportTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to load AIWiki: {}", e),
                     metadata: Some(json!({"error": e.to_string()})),
-                })
+                });
             }
         };
 
@@ -104,15 +105,14 @@ impl Tool for AiwikiImportTool {
 
         let target_subdir = input["target_subdir"].as_str();
 
-        match aiwiki::import_markdown(&wiki, &source_path, target_subdir
-        ).await {
+        match aiwiki::import_markdown(&wiki, &source_path, target_subdir).await {
             Ok(count) => {
                 let target_desc = if let Some(subdir) = target_subdir {
                     format!("wiki/{}/", subdir)
                 } else {
                     "wiki/".to_string()
                 };
-                
+
                 Ok(ToolOutput {
                     content: format!(
                         "## Import Complete ✅\n\n\
@@ -131,12 +131,10 @@ impl Tool for AiwikiImportTool {
                     })),
                 })
             }
-            Err(e) => {
-                Ok(ToolOutput {
-                    content: format!("Import failed: {}", e),
-                    metadata: Some(json!({"error": e.to_string()})),
-                })
-            }
+            Err(e) => Ok(ToolOutput {
+                content: format!("Import failed: {}", e),
+                metadata: Some(json!({"error": e.to_string()})),
+            }),
         }
     }
 }

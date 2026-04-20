@@ -1,32 +1,27 @@
 ---
-title: "AIWiki Analysis Module (mod.rs)"
+title: "RAgent GitLab Module: Secure API Client Architecture"
 source: "mod"
 type: source
-tags: [rust, aiwiki, content-analysis, markdown-processing, yaml-frontmatter, wiki, llm-integration, text-processing, async-rust, serde]
-generated: "2026-04-18T15:16:13.987264438+00:00"
+tags: [rust, gitlab, api-client, authentication, encryption, sqlite, modular-design, ragent, credential-management, devops]
+generated: "2026-04-19T22:04:15.984198195+00:00"
 ---
 
-# AIWiki Analysis Module (mod.rs)
+# RAgent GitLab Module: Secure API Client Architecture
 
-This Rust source code defines the analysis module for AIWiki, a system that provides AI-powered content generation and analysis capabilities for wiki documents. The module implements functionality for generating comparative analyses between multiple wiki sources, including support for different analysis types such as comparisons, synthesis, trade-off evaluations, and custom analyses. The code includes public APIs for generating analyses and listing existing ones, with internal implementations for content generation, slug conversion, and YAML frontmatter parsing.
-
-The module is structured with two public submodules: `qa` for question-answering with source citations, and `contradiction` for detecting contradictions across wiki pages. The main functionality revolves around the `generate_analysis` function, which orchestrates reading source content, generating analysis output with YAML frontmatter metadata, and writing results to markdown files. While the current implementation uses template-based content generation, the architecture is designed to accommodate future LLM integration for fully automated analysis generation.
+This document describes the GitLab module for ragent-core, a Rust-based API client designed for authenticated GitLab interactions. The module provides a secure, encrypted credential management system where authentication tokens are stored in an SQLite database, with support for configuration overrides through JSON files and environment variables. The architecture follows a modular design pattern with separate submodules for authentication handling (`auth`) and API client operations (`client`), promoting clean separation of concerns and maintainability. The public interface exposes essential functions for configuration management including token persistence, migration from legacy storage formats, and a primary `GitLabClient` struct for making authenticated API calls. This implementation demonstrates modern Rust practices for secure credential handling, offering flexibility for users who need to customize their GitLab integration while maintaining security best practices by default.
 
 ## Related
 
 ### Entities
 
-- [AIWiki](../entities/aiwiki.md) — product
-- [Rust](../entities/rust.md) — technology
-- [Serde](../entities/serde.md) — technology
-- [Tokio](../entities/tokio.md) — technology
-- [Chrono](../entities/chrono.md) — technology
+- [GitLab](../entities/gitlab.md) — product
+- [RAgent](../entities/ragent.md) — product
+- [SQLite](../entities/sqlite.md) — technology
 
 ### Concepts
 
-- [Slug Generation](../concepts/slug-generation.md)
-- [YAML Frontmatter](../concepts/yaml-frontmatter.md)
-- [Multi-Source Analysis](../concepts/multi-source-analysis.md)
-- [Async/Await Pattern](../concepts/async-await-pattern.md)
-- [LLM Integration Stub](../concepts/llm-integration-stub.md)
+- [Encrypted Credential Storage](../concepts/encrypted-credential-storage.md)
+- [Modular API Client Architecture](../concepts/modular-api-client-architecture.md)
+- [Configuration Precedence and Override](../concepts/configuration-precedence-and-override.md)
+- [Rust Documentation and Module Organization](../concepts/rust-documentation-and-module-organization.md)
 

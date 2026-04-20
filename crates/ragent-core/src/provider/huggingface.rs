@@ -228,10 +228,7 @@ impl HuggingFaceClient {
     /// Performs a simple find-and-replace for each tool name, replacing
     /// occurrences of `name` with `t_name` where they haven't already been
     /// prefixed.
-    fn rewrite_system_prompt(
-        system: &str,
-        tools: &[crate::llm::ToolDefinition],
-    ) -> String {
+    fn rewrite_system_prompt(system: &str, tools: &[crate::llm::ToolDefinition]) -> String {
         let mut result = system.to_string();
         // Sort by descending length so longer names are replaced first,
         // preventing partial matches (e.g. `write_file` before `write`).
@@ -618,9 +615,7 @@ impl LlmClient for HuggingFaceClient {
 ///
 /// HuggingFace uses the standard `X-RateLimit-Limit`, `X-RateLimit-Remaining`,
 /// and `X-RateLimit-Reset` headers.
-fn parse_hf_rate_limit_headers(
-    headers: &reqwest::header::HeaderMap,
-) -> Option<StreamEvent> {
+fn parse_hf_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> Option<StreamEvent> {
     let header_u64 = |name: &str| -> Option<u64> {
         headers
             .get(name)
@@ -709,8 +704,14 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
         .into_iter()
         .take(MAX_DISCOVERED_MODELS)
         .map(|m| {
-            let has_tool_use = m.tags.iter().any(|t| t == "tool-use" || t == "function-calling");
-            let has_vision = m.tags.iter().any(|t| t == "vision" || t == "image-text-to-text");
+            let has_tool_use = m
+                .tags
+                .iter()
+                .any(|t| t == "tool-use" || t == "function-calling");
+            let has_vision = m
+                .tags
+                .iter()
+                .any(|t| t == "vision" || t == "image-text-to-text");
 
             ModelInfo {
                 id: m.model_id.clone(),
@@ -851,10 +852,7 @@ mod tests {
             estimate_context_from_id("mistralai/Mixtral-8x7B-Instruct-v0.1"),
             32_000
         );
-        assert_eq!(
-            estimate_context_from_id("some-unknown/model-7b"),
-            32_000
-        );
+        assert_eq!(estimate_context_from_id("some-unknown/model-7b"), 32_000);
     }
 
     #[test]
@@ -1127,11 +1125,20 @@ mod tests {
     #[test]
     fn test_safe_tool_name_and_strip() {
         assert_eq!(HuggingFaceClient::safe_tool_name("search"), "t_search");
-        assert_eq!(HuggingFaceClient::safe_tool_name("write_file"), "t_write_file");
+        assert_eq!(
+            HuggingFaceClient::safe_tool_name("write_file"),
+            "t_write_file"
+        );
         assert_eq!(HuggingFaceClient::strip_tool_prefix("t_search"), "search");
-        assert_eq!(HuggingFaceClient::strip_tool_prefix("t_write_file"), "write_file");
+        assert_eq!(
+            HuggingFaceClient::strip_tool_prefix("t_write_file"),
+            "write_file"
+        );
         // If the model returns a name without prefix, pass through unchanged
-        assert_eq!(HuggingFaceClient::strip_tool_prefix("unknown_tool"), "unknown_tool");
+        assert_eq!(
+            HuggingFaceClient::strip_tool_prefix("unknown_tool"),
+            "unknown_tool"
+        );
     }
 
     #[test]

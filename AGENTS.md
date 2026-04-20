@@ -48,6 +48,7 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 - When initializing a new repo, add BUG, FEATURE, TASK and CHANGE issue templates only do this once. 
 - **CRITICAL**: Do not push changes to remote unless specifically told to. This is a strict rule.
 - Do not tag releases unless specifically told to. 
+- DO NOT use "git checkout" to rewind files, this ALWAYS results in lost work. 
 
 ## Changelog Management
 - **CHANGELOG.md**: Maintain a changelog in the root directory documenting all changes before each push to remote.

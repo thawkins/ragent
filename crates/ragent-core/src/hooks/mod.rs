@@ -104,12 +104,12 @@ pub enum PreToolUseResult {
     /// Deny the tool execution with an optional reason.
     Deny {
         /// Reason for denying the tool execution.
-        reason: String
+        reason: String,
     },
     /// Modify the tool input arguments.
     ModifiedInput {
         /// The modified tool input arguments.
-        input: serde_json::Value
+        input: serde_json::Value,
     },
     /// No decision from hook - use normal permission flow.
     NoDecision,
@@ -284,23 +284,23 @@ pub async fn run_post_tool_use_hooks(
         let command = hook.command.clone();
         let timeout = std::time::Duration::from_secs(hook.timeout_secs);
 
-                  let task = tokio::task::spawn_blocking({
-                      let tool_name = tool_name.clone();
-                      let command = command.clone();
-                      move || {
-                          std::process::Command::new("sh")
-                              .arg("-c")
-                              .arg(&command)
-                              .current_dir(&wd)
-                              .env("RAGENT_TRIGGER", "post_tool_use")
-                              .env("RAGENT_WORKING_DIR", wd.display().to_string())
-                              .env("RAGENT_TOOL_NAME", &tool_name)
-                              .env("RAGENT_TOOL_INPUT", &tool_input)
-                              .env("RAGENT_TOOL_OUTPUT", &tool_output)
-                              .env("RAGENT_TOOL_SUCCESS", &success_str)
-                              .output()
-                      }
-                  });
+        let task = tokio::task::spawn_blocking({
+            let tool_name = tool_name.clone();
+            let command = command.clone();
+            move || {
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&command)
+                    .current_dir(&wd)
+                    .env("RAGENT_TRIGGER", "post_tool_use")
+                    .env("RAGENT_WORKING_DIR", wd.display().to_string())
+                    .env("RAGENT_TOOL_NAME", &tool_name)
+                    .env("RAGENT_TOOL_INPUT", &tool_input)
+                    .env("RAGENT_TOOL_OUTPUT", &tool_output)
+                    .env("RAGENT_TOOL_SUCCESS", &success_str)
+                    .output()
+            }
+        });
         match tokio::time::timeout(timeout, task).await {
             Ok(Ok(Ok(out))) if out.status.success() => {
                 let stdout = String::from_utf8_lossy(&out.stdout);

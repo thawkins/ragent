@@ -29,7 +29,8 @@ fn not_initialized() -> ToolOutput {
 fn disabled() -> ToolOutput {
     ToolOutput {
         content: "AIWiki is initialized but currently disabled.\n\n\
-                  Run `/aiwiki on` to enable it.".to_string(),
+                  Run `/aiwiki on` to enable it."
+            .to_string(),
         metadata: Some(json!({
             "initialized": true,
             "enabled": false
@@ -73,7 +74,7 @@ impl Tool for AiwikiStatusTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to load AIWiki: {}", e),
                     metadata: Some(json!({"error": e.to_string()})),
-                })
+                });
             }
         };
 
@@ -86,7 +87,14 @@ impl Tool for AiwikiStatusTool {
 
         // Build output
         let mut output = String::from("## AIWiki Status\n\n");
-        output.push_str(&format!("**Status:** {} ✅\n\n", if wiki.config.enabled { "Enabled" } else { "Disabled" }));
+        output.push_str(&format!(
+            "**Status:** {} ✅\n\n",
+            if wiki.config.enabled {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+        ));
 
         // Page counts by category
         output.push_str("### Pages\n");
@@ -129,7 +137,10 @@ impl Tool for AiwikiStatusTool {
             aiwiki::SyncMode::Realtime => "Realtime",
         };
         output.push_str(&format!("- Auto-sync: {}\n", auto_sync_str));
-        output.push_str(&format!("- Max file size: {}\n", format_bytes(wiki.config.max_file_size as u64)));
+        output.push_str(&format!(
+            "- Max file size: {}\n",
+            format_bytes(wiki.config.max_file_size as u64)
+        ));
 
         Ok(ToolOutput {
             content: output,
@@ -209,9 +220,10 @@ async fn gather_stats(wiki: &aiwiki::Aiwiki) -> WikiStats {
     };
 
     // Get last sync time from state
-    let last_sync = wiki.state.last_sync.map(|dt| {
-        dt.format("%Y-%m-%d %H:%M UTC").to_string()
-    });
+    let last_sync = wiki
+        .state
+        .last_sync
+        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string());
 
     WikiStats {
         total_pages,

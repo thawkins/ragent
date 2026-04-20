@@ -31,9 +31,9 @@ impl ResponsiveBreakpoint {
     /// Returns (messages_percent, log_percent)
     pub fn log_split(&self) -> (u16, u16) {
         match self {
-            Self::Small => (70, 30),    // More space for messages on small screens
-            Self::Medium => (60, 40),   // Balanced split
-            Self::Large => (55, 45),    // More room for log on large screens
+            Self::Small => (70, 30),  // More space for messages on small screens
+            Self::Medium => (60, 40), // Balanced split
+            Self::Large => (55, 45),  // More room for log on large screens
         }
     }
 
@@ -49,18 +49,18 @@ impl ResponsiveBreakpoint {
     /// Get the status bar height for this breakpoint.
     pub fn status_bar_height(&self) -> u16 {
         match self {
-            Self::Small => 2,   // Compact status bar
-            Self::Medium => 2,  // Standard
-            Self::Large => 2,   // Standard (could be expanded in future)
+            Self::Small => 2,  // Compact status bar
+            Self::Medium => 2, // Standard
+            Self::Large => 2,  // Standard (could be expanded in future)
         }
     }
 
     /// Get the button column width for the input area.
     pub fn button_column_width(&self) -> u16 {
         match self {
-            Self::Small => 12,   // Narrower buttons
-            Self::Medium => 18,  // Standard
-            Self::Large => 20,   // Wider buttons
+            Self::Small => 12,  // Narrower buttons
+            Self::Medium => 18, // Standard
+            Self::Large => 20,  // Wider buttons
         }
     }
 }
@@ -107,7 +107,13 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 /// * `max_w` - Maximum width in columns
 /// * `max_h` - Maximum height in rows
 /// * `area` - The area to center within
-pub fn centered_rect_max(percent_x: u16, percent_y: u16, max_w: u16, max_h: u16, area: Rect) -> Rect {
+pub fn centered_rect_max(
+    percent_x: u16,
+    percent_y: u16,
+    max_w: u16,
+    max_h: u16,
+    area: Rect,
+) -> Rect {
     let raw = centered_rect(percent_x, percent_y, area);
     let w = raw.width.min(max_w).min(area.width);
     let h = raw.height.min(max_h).min(area.height);
@@ -127,6 +133,9 @@ pub fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
     } else if max_chars <= 1 {
         "…".to_string()
     } else {
-        text.chars().take(max_chars.saturating_sub(1)).collect::<String>() + "…"
+        text.chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>()
+            + "…"
     }
 }

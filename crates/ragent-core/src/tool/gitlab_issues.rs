@@ -13,8 +13,7 @@ fn make_client(ctx: &ToolContext) -> Result<GitLabClient> {
         .storage
         .as_ref()
         .context("Storage not available for GitLab client")?;
-    GitLabClient::new(storage)
-        .context("GitLab not configured. Run /gitlab setup to configure.")
+    GitLabClient::new(storage).context("GitLab not configured. Run /gitlab setup to configure.")
 }
 
 /// Resolve the URL-encoded project path from the working directory.
@@ -77,9 +76,7 @@ impl Tool for GitlabListIssuesTool {
         let state = input["state"].as_str().unwrap_or("opened");
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
-        let mut path = format!(
-            "/projects/{project}/issues?state={state}&per_page={limit}"
-        );
+        let mut path = format!("/projects/{project}/issues?state={state}&per_page={limit}");
         if let Some(labels) = input["labels"].as_str() {
             if !labels.is_empty() {
                 path.push_str(&format!("&labels={labels}"));
@@ -182,11 +179,7 @@ impl Tool for GitlabGetIssueTool {
 
         let assignees: Vec<&str> = issue["assignees"]
             .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|a| a["username"].as_str())
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|a| a["username"].as_str()).collect())
             .unwrap_or_default();
 
         let mut md = format!(

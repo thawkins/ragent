@@ -113,8 +113,8 @@ const SAFE_COMMANDS: &[&str] = &[
     "echo",
     "printf",
     "chmod",
-    "jq",      // JSON query/processing
-    "yq",      // YAML query/processing
+    "jq", // JSON query/processing
+    "yq", // YAML query/processing
     "sed",
     "awk",
     "sort",
@@ -359,23 +359,24 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
                 if arg.starts_with('~') || arg.starts_with("$HOME") || arg.starts_with("${HOME}") {
                     return true;
                 }
-                                  if arg.starts_with('/') {
-                                      // D1 fix: Single-segment slash-prefixed tokens (e.g., /help, /start)
-                                      // are likely commands, not file paths - exclude from directory escape check.
-                                      // Only check as path if it contains a directory separator (e.g., /etc/passwd).
-                                      if arg.len() > 1 && !arg[1..].contains('/') {
-                                          // Single segment after / - treat as command, not a file path
-                                          continue;
-                                      }
-                                      // Allow if the absolute path resolves to the working directory or a subdirectory of it
-                                      let target = std::path::Path::new(arg);
-                                      let canonical_target = target
-                                          .canonicalize()
-                                          .unwrap_or_else(|_| target.to_path_buf());
-                                      if !canonical_target.starts_with(&canonical_wd) {
-                                          return true;
-                                      }
-                                  }            }
+                if arg.starts_with('/') {
+                    // D1 fix: Single-segment slash-prefixed tokens (e.g., /help, /start)
+                    // are likely commands, not file paths - exclude from directory escape check.
+                    // Only check as path if it contains a directory separator (e.g., /etc/passwd).
+                    if arg.len() > 1 && !arg[1..].contains('/') {
+                        // Single segment after / - treat as command, not a file path
+                        continue;
+                    }
+                    // Allow if the absolute path resolves to the working directory or a subdirectory of it
+                    let target = std::path::Path::new(arg);
+                    let canonical_target = target
+                        .canonicalize()
+                        .unwrap_or_else(|_| target.to_path_buf());
+                    if !canonical_target.starts_with(&canonical_wd) {
+                        return true;
+                    }
+                }
+            }
             search_start = abs_pos + 1;
         }
     }

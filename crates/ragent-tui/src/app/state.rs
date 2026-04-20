@@ -293,6 +293,11 @@ pub struct ModelPickerEntry {
     pub vision: bool,
     /// Whether the model supports tool use.
     pub tool_use: bool,
+    /// Cost tier label (e.g., "Free", "Low", "Medium", "High", "Premium").
+    pub cost_tier: String,
+    /// Cost multiplier relative to baseline (e.g., "0x", "1x", "3x", "10x").
+    /// This is typically relative to the least expensive model in the provider.
+    pub cost_multiplier: String,
 }
 
 /// State of the interactive provider-setup dialog.
@@ -595,43 +600,46 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
-                SlashCommandDef {
-                    trigger: "codeindex",
-                    description: "Manage codebase index: /codeindex on|off|show|reindex|help",
-                },
-                SlashCommandDef {
-                    trigger: "theme",
-                    description: "Switch theme: /theme default|high-contrast",
-                },
-                SlashCommandDef {
-                    trigger: "journal",
-                    description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
-                },
-                SlashCommandDef {
-                    trigger: "status",
-                    description: "Show status message history: /status [clear]",
-                },
-                      SlashCommandDef {
-                          trigger: "mouse",
-                          description: "Toggle mouse support: /mouse on | off",
-                      },
-                                              SlashCommandDef {
-                                                  trigger: "aiwiki",
-                                                  description: "AIWiki: /aiwiki init | on | off | ingest [path] | sync [--force] | status | help",
-                                              },                ];
-                
-                /// A single entry in the slash-command autocomplete menu.
-                #[derive(Debug, Clone)]                pub struct SlashMenuEntry {                    /// The trigger word (without the leading `/`).
-                    pub trigger: String,
-                    /// Short description shown in the menu.
-                    pub description: String,
-                    /// Whether this entry is a skill (vs. a builtin command).
-                    pub is_skill: bool,
-                    /// Suggested completions for this command (e.g., team names, agent names).
-                    pub suggestions: Vec<String>,
-                    /// Parameter hint shown after command (e.g., "<query>" or "[clear]").
-                    pub parameter_hint: Option<String>,
-                }
+    SlashCommandDef {
+        trigger: "codeindex",
+        description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+    },
+    SlashCommandDef {
+        trigger: "theme",
+        description: "Switch theme: /theme default|high-contrast",
+    },
+    SlashCommandDef {
+        trigger: "journal",
+        description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
+    },
+    SlashCommandDef {
+        trigger: "status",
+        description: "Show status message history: /status [clear]",
+    },
+    SlashCommandDef {
+        trigger: "mouse",
+        description: "Toggle mouse support: /mouse on | off",
+    },
+    SlashCommandDef {
+        trigger: "aiwiki",
+        description: "AIWiki: /aiwiki init | reset | on | off | ingest [path] | sync [--force] | status | help | autosync [on|off]",
+    },
+];
+
+/// A single entry in the slash-command autocomplete menu.
+#[derive(Debug, Clone)]
+pub struct SlashMenuEntry {
+    /// The trigger word (without the leading `/`).
+    pub trigger: String,
+    /// Short description shown in the menu.
+    pub description: String,
+    /// Whether this entry is a skill (vs. a builtin command).
+    pub is_skill: bool,
+    /// Suggested completions for this command (e.g., team names, agent names).
+    pub suggestions: Vec<String>,
+    /// Parameter hint shown after command (e.g., "<query>" or "[clear]").
+    pub parameter_hint: Option<String>,
+}
 /// State of the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
 pub struct SlashMenuState {
@@ -1028,26 +1036,29 @@ pub struct App {
     pub code_index_stats_last_refresh: std::time::Instant,
     /// True when the background indexer holds the store/FTS locks.
     pub code_index_busy: bool,
-          /// Active file watcher + background worker session for the code index.
-        pub code_index_watch_session: Option<ragent_code::WatchSession>,
-        /// Optional AIWiki instance for project knowledge base.
-        pub aiwiki: Option<aiwiki::Aiwiki>,
-        /// Whether AIWiki is enabled for the current project.
-        pub aiwiki_enabled: bool,
-        /// Cached AIWiki stats for the status bar.
-        pub aiwiki_stats_cache: Option<(usize, usize)>, // (sources, pages)
-        /// When the cached AIWiki stats were last refreshed.
-        pub aiwiki_stats_last_refresh: std::time::Instant,
-        /// Handle for the spawned AIWiki web server task.
-        pub aiwiki_web_server: Option<tokio::task::JoinHandle<()>>,
-        /// Port the AIWiki web server is listening on.
-        pub aiwiki_web_port: u16,
-        /// Handle for a background AIWiki sync task.
-        pub aiwiki_sync_handle: Option<tokio::task::JoinHandle<super::AiwikiSyncOutcome>>,
-        /// Shared progress counter for the active sync, if any.
-        pub aiwiki_sync_progress: Option<std::sync::Arc<aiwiki::sync::SyncProgress>>,
-        /// Active LSP discovery dialog, if any.
-        pub lsp_discover: Option<LspDiscoverState>,
+    /// Active file watcher + background worker session for the code index.
+    pub code_index_watch_session: Option<ragent_code::WatchSession>,
+    /// Optional AIWiki instance for project knowledge base.
+    pub aiwiki: Option<aiwiki::Aiwiki>,
+    /// Whether AIWiki is enabled for the current project.
+    pub aiwiki_enabled: bool,
+    /// Cached AIWiki stats for the status bar.
+    pub aiwiki_stats_cache: Option<(usize, usize, usize)>, // (raw_sources, ref_sources, pages)        /// When the cached AIWiki stats were last refreshed.
+    pub aiwiki_stats_last_refresh: std::time::Instant,
+    /// Handle for the spawned AIWiki web server task.
+    pub aiwiki_web_server: Option<tokio::task::JoinHandle<()>>,
+    /// Port the AIWiki web server is listening on.
+    pub aiwiki_web_port: u16,
+    /// Handle for a background AIWiki sync task.
+    pub aiwiki_sync_handle: Option<tokio::task::JoinHandle<super::AiwikiSyncOutcome>>,
+    /// Shared progress counter for the active sync, if any.
+    pub aiwiki_sync_progress: Option<std::sync::Arc<aiwiki::sync::SyncProgress>>,
+    /// Active file watcher session for AIWiki source folders.
+    pub aiwiki_watch_session: Option<aiwiki::sync::AiwikiWatchSession>,
+    /// Whether AIWiki should auto-sync on startup and watch for changes.
+    pub aiwiki_autosync: bool,
+    /// Active LSP discovery dialog, if any.
+    pub lsp_discover: Option<LspDiscoverState>,
     /// Active LSP edit dialog (enable/disable configured servers), if any.
     pub lsp_edit: Option<LspEditState>,
     /// Active MCP discovery dialog, if any.
@@ -1214,14 +1225,15 @@ pub struct App {
     /// Timestamp of the last memory update event (for relative time display).
     pub memory_last_updated: Option<std::time::Instant>,
 
-                      /// Current theme mode (default or high-contrast for accessibility)
-                      pub theme_mode: crate::theme::ThemeMode,
-                      /// Whether mouse input is enabled (default: true). Set to false for
-                      /// keyboard-only accessibility mode.
-                      pub mouse_enabled: bool,
-                      /// Status message history for tracking recent status messages
-                      pub status_history: StatusHistory,
-                  }/// State held while waiting for the user to approve or reject a plan.
+    /// Current theme mode (default or high-contrast for accessibility)
+    pub theme_mode: crate::theme::ThemeMode,
+    /// Whether mouse input is enabled (default: true). Set to false for
+    /// keyboard-only accessibility mode.
+    pub mouse_enabled: bool,
+    /// Status message history for tracking recent status messages
+    pub status_history: StatusHistory,
+}
+/// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {
     /// The plan text produced by the plan agent.

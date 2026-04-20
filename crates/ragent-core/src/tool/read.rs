@@ -99,7 +99,9 @@ impl Tool for ReadTool {
     fn description(&self) -> &'static str {
         "Read file contents. For large files (>100 lines) called without a line range, \
          returns the first 100 lines plus a section map of the file's structure. \
-         Use start_line/end_line to read specific sections."
+         Use start_line/end_line to read specific sections. \
+         IMPORTANT: start_line and end_line must not exceed the file's total line count. \
+         The response always includes total_lines in metadata."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -113,12 +115,12 @@ impl Tool for ReadTool {
                 "start_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Starting line number (1-based, inclusive)"
+                    "description": "Starting line number (1-based, inclusive). Must not exceed the file's total line count."
                 },
                 "end_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Ending line number (1-based, inclusive)"
+                    "description": "Ending line number (1-based, inclusive). Must not exceed the file's total line count."
                 }
             },
             "required": ["path"],
@@ -154,7 +156,7 @@ impl Tool for ReadTool {
         let content = cached_read(&path).await?;
 
         let start_line = input["start_line"].as_u64().map(|n| n as usize);
-        let end_line = input["end_line"].as_u64().map(|n| n as usize);
+        let mut end_line = input["end_line"].as_u64().map(|n| n as usize);
 
         if let Some(start) = start_line
             && start == 0
@@ -177,15 +179,29 @@ impl Tool for ReadTool {
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();
 
+        // Validate line ranges against actual file length
+        if let Some(start) = start_line {
+            if start > total_lines {
+                anyhow::bail!(
+                    "Invalid line range: start_line ({start}) exceeds file length \
+                     ({total_lines} lines). Use start_line={total_lines} or smaller."
+                );
+            }
+        }
+        if let Some(end) = end_line {
+            if end > total_lines {
+                end_line = Some(total_lines);
+            }
+        }
+
         let (output, actual_start, actual_end, summarised) = match (start_line, end_line) {
             (Some(start), Some(end)) => {
-                let start = start.saturating_sub(1).min(lines.len());
-                let end = end.min(lines.len());
+                let start = start.saturating_sub(1);
                 let text = format_lines(&lines[start..end], start + 1);
                 (text, start + 1, end, false)
             }
             (Some(start), None) => {
-                let start = start.saturating_sub(1).min(lines.len());
+                let start = start.saturating_sub(1);
                 let text = format_lines(&lines[start..], start + 1);
                 (text, start + 1, lines.len(), false)
             }

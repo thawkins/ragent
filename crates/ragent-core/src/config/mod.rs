@@ -64,6 +64,13 @@ pub struct Config {
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
+    /// AIWiki automatic sync on startup (default: true).
+    #[serde(default = "default_aiwiki_autosync")]
+    pub aiwiki_autosync: bool,
+}
+
+const fn default_aiwiki_autosync() -> bool {
+    true
 }
 /// Configuration for LLM streaming behaviour (timeouts, retries).
 ///
@@ -566,6 +573,11 @@ impl Config {
         }
         if overlay.gitlab.username.is_some() {
             base.gitlab.username = overlay.gitlab.username;
+        }
+
+        // AIWiki autosync: overlay takes precedence
+        if overlay.aiwiki_autosync != default_aiwiki_autosync() {
+            base.aiwiki_autosync = overlay.aiwiki_autosync;
         }
 
         base

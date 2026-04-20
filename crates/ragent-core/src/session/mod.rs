@@ -143,23 +143,23 @@ impl SessionManager {
         self.storage
             .create_session(&id, &directory.display().to_string())?;
 
-                  let session = Session {
-                      id: id.clone(),
-                      title: String::new(),
-                      project_id: String::new(),
-                      directory,
-                      parent_id: None,
-                      version: 1,
-                      format_version: 1, // Current format version
-                      created_at: now,
-                      updated_at: now,
-                      archived_at: None,
-                      summary: None,
-                      config_path: crate::config::Config::load()
-                          .ok()
-                          .and_then(|_| std::env::var("RAGENT_CONFIG").ok())
-                          .map(PathBuf::from),
-                  };
+        let session = Session {
+            id: id.clone(),
+            title: String::new(),
+            project_id: String::new(),
+            directory,
+            parent_id: None,
+            version: 1,
+            format_version: 1, // Current format version
+            created_at: now,
+            updated_at: now,
+            archived_at: None,
+            summary: None,
+            config_path: crate::config::Config::load()
+                .ok()
+                .and_then(|_| std::env::var("RAGENT_CONFIG").ok())
+                .map(PathBuf::from),
+        };
         self.event_bus
             .publish(Event::SessionCreated { session_id: id });
 
@@ -287,7 +287,7 @@ impl Drop for SessionManager {
     fn drop(&mut self) {
         // Signal that we're shutting down - this helps with async cleanup
         tracing::debug!("SessionManager dropping - ensuring session persistence");
-        
+
         // Note: Storage operations are synchronous via Mutex, so no async work needed.
         // The SQLite connection will be closed when the Arc<Storage> is dropped.
         // This is primarily a hook for future persistence needs.
@@ -298,7 +298,7 @@ impl From<crate::storage::SessionRow> for Session {
     fn from(row: crate::storage::SessionRow) -> Self {
         // Validate session row data integrity before conversion
         let session_id = row.id.clone();
-        
+
         let created_at = DateTime::parse_from_rfc3339(&row.created_at).map_or_else(
             |e| {
                 tracing::warn!(
@@ -328,8 +328,9 @@ impl From<crate::storage::SessionRow> for Session {
                 .ok()
                 .map(|dt| dt.with_timezone(&Utc))
         });
-        let summary = row.summary.and_then(|s| {
-            match serde_json::from_str::<SessionSummary>(&s) {
+        let summary = row
+            .summary
+            .and_then(|s| match serde_json::from_str::<SessionSummary>(&s) {
                 Ok(summ) => Some(summ),
                 Err(e) => {
                     tracing::warn!(
@@ -339,21 +340,21 @@ impl From<crate::storage::SessionRow> for Session {
                     );
                     None
                 }
-            }
-        });
+            });
 
-                  Self {
-                      id: row.id,
-                      title: row.title,
-                      project_id: row.project_id,
-                      directory: PathBuf::from(row.directory),
-                      parent_id: row.parent_id,
-                      version: row.version,
-                      format_version: row.format_version,
-                      created_at,
-                      updated_at,
-                      archived_at,
-                      summary,
-                      config_path: None, // Historical sessions don't store config path
-                  }    }
+        Self {
+            id: row.id,
+            title: row.title,
+            project_id: row.project_id,
+            directory: PathBuf::from(row.directory),
+            parent_id: row.parent_id,
+            version: row.version,
+            format_version: row.format_version,
+            created_at,
+            updated_at,
+            archived_at,
+            summary,
+            config_path: None, // Historical sessions don't store config path
+        }
+    }
 }

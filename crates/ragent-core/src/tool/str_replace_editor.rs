@@ -35,7 +35,10 @@ impl Tool for StrReplaceEditorTool {
         "Multi-command file editor compatible with Anthropic's str_replace_based_edit_tool. \
          Supports commands: 'view' (read file), 'create' (new file), 'str_replace' \
          (exact text replacement), 'insert' (insert after line N), 'delete' (remove lines). \
-         Use 'path' for the file and 'command' to select the operation."
+         Use 'path' for the file and 'command' to select the operation. \
+         IMPORTANT: The 'str_replace' command REQUIRES both 'old_str' and 'new_str' parameters. \
+         The 'old_str' parameter must contain the exact text to find and replace. \
+         Do NOT call str_replace without providing old_str — the call will fail."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -57,11 +60,11 @@ impl Tool for StrReplaceEditorTool {
                 },
                 "old_str": {
                     "type": "string",
-                    "description": "Exact text to find for 'str_replace'"
+                    "description": "REQUIRED for 'str_replace' command. The exact text to find in the file. Must match exactly one location."
                 },
                 "new_str": {
                     "type": "string",
-                    "description": "Replacement text for 'str_replace' (default: empty string)"
+                    "description": "REQUIRED for 'str_replace' command. The replacement text. Also used as fallback for 'insert' command."
                 },
                 "insert_line": {
                     "type": "integer",
@@ -73,11 +76,13 @@ impl Tool for StrReplaceEditorTool {
                 },
                 "start_line": {
                     "type": "integer",
-                    "description": "First line to view/delete (1-based)"
+                    "minimum": 1,
+                    "description": "First line to view/delete (1-based). Must not exceed the file's total line count."
                 },
                 "end_line": {
                     "type": "integer",
-                    "description": "Last line to view/delete (1-based, inclusive)"
+                    "minimum": 1,
+                    "description": "Last line to view/delete (1-based, inclusive). Must not exceed the file's total line count."
                 }
             },
             "required": ["command", "path"]
@@ -133,7 +138,15 @@ async fn handle_create(mut input: Value, ctx: &ToolContext) -> Result<ToolOutput
 }
 
 async fn handle_str_replace(input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-    // Delegate directly to EditTool (same parameter names)
+    // Validate old_str is present before delegating — models often omit it
+    if input.get("old_str").and_then(|v| v.as_str()).is_none() {
+        anyhow::bail!(
+            "Missing required 'old_str' parameter for 'str_replace' command. \
+             You must provide 'old_str' with the exact text to find in the file, \
+             and 'new_str' with the replacement text. Both are required."
+        );
+    }
+    // Delegate to EditTool (same parameter names)
     edit::EditTool.execute(input, ctx).await
 }
 

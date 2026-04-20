@@ -28,9 +28,7 @@ use tracing::{debug, info, warn};
 use crate::config::{CompactionConfig, EvictionConfig, MemoryConfig};
 use crate::event::EventBus;
 use crate::memory::block::BlockScope;
-use crate::memory::embedding::{
-    EmbeddingProvider, cosine_similarity, deserialise_embedding,
-};
+use crate::memory::embedding::{EmbeddingProvider, cosine_similarity, deserialise_embedding};
 use crate::memory::storage::{BlockStorage, FileBlockStorage};
 use crate::storage::Storage;
 

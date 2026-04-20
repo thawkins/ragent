@@ -1,0 +1,5 @@
+# AIWiki raw files - not tracked in git
+# These are source documents (PDFs, large files, etc.)
+# Only the generated wiki/ content is tracked
+*
+!.gitignore

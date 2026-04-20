@@ -1,7 +1,7 @@
 //! Search functionality for AIWiki web interface.
 
-use crate::web::templates::SearchResult;
 use crate::Aiwiki;
+use crate::web::templates::SearchResult;
 
 /// Search the wiki for pages matching the query.
 pub async fn search_wiki(
@@ -89,14 +89,13 @@ async fn search_in_file(
     };
 
     // Extract title
-    let title = extract_title(&content)
-        .unwrap_or_else(|| {
-            file_path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Untitled")
-                .to_string()
-        });
+    let title = extract_title(&content).unwrap_or_else(|| {
+        file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled")
+            .to_string()
+    });
 
     // Determine page type
     let page_type = if path_str.starts_with("entities/") {
@@ -164,7 +163,13 @@ fn extract_title(content: &str) -> Option<String> {
             let frontmatter = &content[4..end];
             for line in frontmatter.lines() {
                 if let Some(value) = line.strip_prefix("title:") {
-                    return Some(value.trim().trim_matches('"').trim_matches('\'').to_string());
+                    return Some(
+                        value
+                            .trim()
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .to_string(),
+                    );
                 }
             }
         }
@@ -181,12 +186,7 @@ fn extract_title(content: &str) -> Option<String> {
 }
 
 /// Generate an excerpt around the first match.
-fn generate_excerpt(
-    content_lower: &str,
-    original: &str,
-    query: &str,
-    max_len: usize,
-) -> String {
+fn generate_excerpt(content_lower: &str, original: &str, query: &str, max_len: usize) -> String {
     if let Some(pos) = content_lower.find(query) {
         let start = pos.saturating_sub(max_len / 2);
         let end = (pos + query.len() + max_len / 2).min(original.len());
@@ -206,10 +206,7 @@ fn generate_excerpt(
         }
 
         // Highlight the query
-        excerpt.replace(
-            &query.to_lowercase(),
-            &format!("<mark>{}</mark>", query),
-        )
+        excerpt.replace(&query.to_lowercase(), &format!("<mark>{}</mark>", query))
     } else {
         // No match in content (might only be in title)
         original.chars().take(max_len).collect()

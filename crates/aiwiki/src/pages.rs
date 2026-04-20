@@ -3,10 +3,58 @@
 //! Creates markdown wiki pages in the appropriate subdirectories
 //! (sources/, entities/, concepts/) from `ExtractionResult` data.
 
-use crate::extraction::{ExtractionResult, ExtractedEntity, ExtractedConcept};
+use crate::extraction::{ExtractedConcept, ExtractedEntity, ExtractionResult};
 use std::collections::HashSet;
 use std::path::Path;
 use tokio::fs;
+
+/// Strip markdown code fences from diagram content if present.
+///
+/// LLMs sometimes return diagram content wrapped in ` ```mermaid ... ``` `
+/// fences. Since the caller already wraps the content in fences, this
+/// function strips them to avoid double-fencing which breaks rendering.
+fn strip_mermaid_fences(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    // Check if content starts with a ```mermaid fence
+    if let Some(after_fence) = trimmed.strip_prefix("```mermaid") {
+        // Find the closing fence
+        let body = after_fence.trim_start_matches(|c: char| c == '\r' || c == '\n');
+        if let Some(end) = body.rfind("```") {
+            let inner = &body[..end];
+            return inner.trim();
+        }
+        // No closing fence found — return body as-is (stripped of leading newline)
+        return body.trim();
+    }
+    // Also handle bare ``` fences without the mermaid language tag
+    if let Some(after_fence) = trimmed.strip_prefix("```") {
+        // Check if the first non-empty line is a mermaid diagram type
+        let first_content_line = after_fence
+            .lines()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("");
+        if first_content_line.starts_with("flowchart")
+            || first_content_line.starts_with("graph")
+            || first_content_line.starts_with("sequenceDiagram")
+            || first_content_line.starts_with("classDiagram")
+            || first_content_line.starts_with("stateDiagram")
+            || first_content_line.starts_with("erDiagram")
+            || first_content_line.starts_with("gantt")
+            || first_content_line.starts_with("pie")
+            || first_content_line.starts_with("mindmap")
+            || first_content_line.starts_with("subgraph")
+        {
+            let body = after_fence.trim_start_matches(|c: char| c == '\r' || c == '\n');
+            if let Some(end) = body.rfind("```") {
+                let inner = &body[..end];
+                return inner.trim();
+            }
+            return body.trim();
+        }
+    }
+    trimmed
+}
 
 /// Write all wiki pages for a source extraction result.
 ///
@@ -49,18 +97,20 @@ pub async fn write_pages(
     }
 
     // Build set of concept slugs being created in this batch
-    let batch_concept_slugs: HashSet<String> = result
-        .concepts
-        .iter()
-        .map(|c| slugify(&c.name))
-        .collect();
+    let batch_concept_slugs: HashSet<String> =
+        result.concepts.iter().map(|c| slugify(&c.name)).collect();
 
     // Write concept pages
     for concept in &result.concepts {
         let slug = slugify(&concept.name);
         let concept_page = write_concept_page(
-            &concepts_dir, &slug, concept, source_name, &batch_concept_slugs,
-        ).await?;
+            &concepts_dir,
+            &slug,
+            concept,
+            source_name,
+            &batch_concept_slugs,
+        )
+        .await?;
         generated.push(format!("wiki/concepts/{concept_page}"));
     }
 
@@ -88,7 +138,10 @@ async fn write_source_page(
     if !result.tags.is_empty() {
         content.push_str(&format!("tags: [{}]\n", result.tags.join(", ")));
     }
-    content.push_str(&format!("generated: \"{}\"\n", chrono::Utc::now().to_rfc3339()));
+    content.push_str(&format!(
+        "generated: \"{}\"\n",
+        chrono::Utc::now().to_rfc3339()
+    ));
     content.push_str("---\n\n");
     content.push_str(&format!("# {}\n\n", result.title));
     content.push_str(&result.summary);
@@ -114,10 +167,7 @@ async fn write_source_page(
             content.push_str("### Concepts\n\n");
             for concept in &result.concepts {
                 let link = slugify(&concept.name);
-                content.push_str(&format!(
-                    "- [{}](../concepts/{}.md)\n",
-                    concept.name, link
-                ));
+                content.push_str(&format!("- [{}](../concepts/{}.md)\n", concept.name, link));
             }
             content.push('\n');
         }
@@ -144,10 +194,7 @@ async fn write_entity_page(
         // Append source reference to existing entity page
         let existing = fs::read_to_string(&path).await?;
         if !existing.contains(source_name) {
-            let addition = format!(
-                "\n### From: {source_name}\n\n{}\n",
-                entity.description
-            );
+            let addition = format!("\n### From: {source_name}\n\n{}\n", entity.description);
             fs::write(&path, format!("{existing}{addition}")).await?;
         }
     } else {
@@ -156,15 +203,48 @@ async fn write_entity_page(
         content.push_str(&format!("title: \"{}\"\n", escape_yaml(&entity.name)));
         content.push_str(&format!("entity_type: \"{}\"\n", entity.entity_type));
         content.push_str("type: entity\n");
-        content.push_str(&format!("generated: \"{}\"\n", chrono::Utc::now().to_rfc3339()));
+        content.push_str(&format!(
+            "generated: \"{}\"\n",
+            chrono::Utc::now().to_rfc3339()
+        ));
         content.push_str("---\n\n");
         content.push_str(&format!("# {}\n\n", entity.name));
         content.push_str(&format!("**Type:** {}\n\n", entity.entity_type));
         content.push_str(&format!("### From: {source_name}\n\n"));
         content.push_str(&entity.description);
-        content.push_str("\n\n## Sources\n\n");
+        content.push('\n');
+
+        // Mermaid diagram section
+        if let Some(ref diagram) = entity.diagram {
+            let clean = strip_mermaid_fences(diagram);
+            if !clean.is_empty() {
+                content.push_str("\n## Diagram\n\n");
+                content.push_str("```mermaid\n");
+                content.push_str(clean);
+                content.push_str("\n```\n");
+            }
+        }
+
+        // External links section (0-10 links maximum)
+        if !entity.external_links.is_empty() {
+            let limited_links: Vec<_> = entity.external_links.iter().take(10).collect();
+            content.push_str("\n## External Resources\n\n");
+            for link in limited_links {
+                content.push_str(&format!(
+                    "- [{}]({}) - {}\n",
+                    escape_yaml(&link.description),
+                    link.url,
+                    escape_yaml(&link.description)
+                ));
+            }
+        }
+
+        content.push_str("\n## Sources\n\n");
         let source_link = slugify(source_name);
-        content.push_str(&format!("- [{}](../sources/{}.md)\n", source_name, source_link));
+        content.push_str(&format!(
+            "- [{}](../sources/{}.md)\n",
+            source_name, source_link
+        ));
 
         fs::write(&path, &content).await?;
     }
@@ -192,10 +272,7 @@ async fn write_concept_page(
     if path.exists() {
         let existing = fs::read_to_string(&path).await?;
         if !existing.contains(source_name) {
-            let addition = format!(
-                "\n### From: {source_name}\n\n{}\n",
-                concept.description
-            );
+            let addition = format!("\n### From: {source_name}\n\n{}\n", concept.description);
             fs::write(&path, format!("{existing}{addition}")).await?;
         }
     } else {
@@ -203,12 +280,41 @@ async fn write_concept_page(
         content.push_str("---\n");
         content.push_str(&format!("title: \"{}\"\n", escape_yaml(&concept.name)));
         content.push_str("type: concept\n");
-        content.push_str(&format!("generated: \"{}\"\n", chrono::Utc::now().to_rfc3339()));
+        content.push_str(&format!(
+            "generated: \"{}\"\n",
+            chrono::Utc::now().to_rfc3339()
+        ));
         content.push_str("---\n\n");
         content.push_str(&format!("# {}\n\n", concept.name));
         content.push_str(&format!("### From: {source_name}\n\n"));
         content.push_str(&concept.description);
         content.push('\n');
+
+        // Mermaid diagram section
+        if let Some(ref diagram) = concept.diagram {
+            let clean = strip_mermaid_fences(diagram);
+            if !clean.is_empty() {
+                content.push_str("\n## Diagram\n\n");
+                content.push_str("```mermaid\n");
+                content.push_str(clean);
+                content.push_str("\n```\n");
+            }
+        }
+
+        // External links section (0-10 links maximum)
+        if !concept.external_links.is_empty() {
+            // Limit to 10 links maximum
+            let limited_links: Vec<_> = concept.external_links.iter().take(10).collect();
+            content.push_str("\n## External Resources\n\n");
+            for link in limited_links {
+                content.push_str(&format!(
+                    "- [{}]({}) - {}\n",
+                    escape_yaml(&link.description),
+                    link.url,
+                    escape_yaml(&link.description)
+                ));
+            }
+        }
 
         if !concept.related.is_empty() {
             // Only link to concepts that exist on disk or in the current batch
@@ -222,8 +328,7 @@ async fn write_concept_page(
                         return false;
                     }
                     // Accept if in current batch or already on disk
-                    batch_slugs.contains(&rel_slug)
-                        || dir.join(format!("{rel_slug}.md")).exists()
+                    batch_slugs.contains(&rel_slug) || dir.join(format!("{rel_slug}.md")).exists()
                 })
                 .collect();
 
@@ -238,7 +343,10 @@ async fn write_concept_page(
 
         content.push_str("\n## Sources\n\n");
         let source_link = slugify(source_name);
-        content.push_str(&format!("- [{}](../sources/{}.md)\n", source_name, source_link));
+        content.push_str(&format!(
+            "- [{}](../sources/{}.md)\n",
+            source_name, source_link
+        ));
 
         fs::write(&path, &content).await?;
     }
@@ -258,4 +366,46 @@ fn slugify(name: &str) -> String {
 /// Escape a string for YAML frontmatter values.
 fn escape_yaml(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_mermaid_fences_with_mermaid_tag() {
+        let input = "```mermaid\nflowchart LR\n  A --> B\n```";
+        assert_eq!(strip_mermaid_fences(input), "flowchart LR\n  A --> B");
+    }
+
+    #[test]
+    fn test_strip_mermaid_fences_bare_fences() {
+        let input = "```\nflowchart LR\n  A --> B\n```";
+        assert_eq!(strip_mermaid_fences(input), "flowchart LR\n  A --> B");
+    }
+
+    #[test]
+    fn test_strip_mermaid_fences_no_fences() {
+        let input = "flowchart LR\n  A --> B";
+        assert_eq!(strip_mermaid_fences(input), "flowchart LR\n  A --> B");
+    }
+
+    #[test]
+    fn test_strip_mermaid_fences_with_whitespace() {
+        let input = "  ```mermaid\n  flowchart LR\n    A --> B\n  ```  ";
+        assert_eq!(strip_mermaid_fences(input), "flowchart LR\n    A --> B");
+    }
+
+    #[test]
+    fn test_strip_mermaid_fences_sequence_diagram() {
+        let input = "```\nsequenceDiagram\n  A->>B: msg\n```";
+        assert_eq!(strip_mermaid_fences(input), "sequenceDiagram\n  A->>B: msg");
+    }
+
+    #[test]
+    fn test_strip_mermaid_fences_preserves_non_mermaid_code() {
+        // Should not strip fences for non-mermaid code
+        let input = "```\nlet x = 42;\n```";
+        assert_eq!(strip_mermaid_fences(input), "```\nlet x = 42;\n```");
+    }
 }

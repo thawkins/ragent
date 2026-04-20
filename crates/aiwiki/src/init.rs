@@ -55,53 +55,53 @@ impl Initializer {
     pub fn new(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref().canonicalize()?;
         let wiki_dir = root.join("aiwiki");
-        
+
         Ok(Self { root, wiki_dir })
     }
-    
+
     /// Check if a wiki already exists at this location.
     pub fn exists(&self) -> bool {
         self.wiki_dir.join("config.json").exists()
     }
-    
-          /// Initialize the wiki directory structure.
-        ///
-        /// Creates all required directories and files. Returns an error
-        /// if the wiki already exists (use `exists()` to check first).
-        /// Automatically enables the wiki (sets `enabled: true` in config).
-        ///
-        /// # Errors
-        ///
-        /// Returns an error if:
-        /// - The wiki already exists
-        /// - Directory creation fails
-        /// - File writing fails
-        pub async fn init(&self, config: Option<AiwikiConfig>) -> Result<()> {
-            if self.exists() {
-                return Err(AiwikiError::AlreadyInitialized);
-            }
-            
-            let mut config = config.unwrap_or_default();
-            // Auto-enable the wiki when initialized
-            config.enabled = true;
-            config.validate()?;
-            
-            // Create directory structure
-            self.create_directories().await?;
-            
-            // Write configuration
-            config.save(&self.wiki_dir).await?;
-            
-            // Write .gitignore files
-            self.write_gitignores().await?;
-            
-            // Create initial log.md
-            self.create_log(&config).await?;
-            
-            tracing::info!("AIWiki initialized at {:?}", self.wiki_dir);
-            
-            Ok(())
-        }    
+
+    /// Initialize the wiki directory structure.
+    ///
+    /// Creates all required directories and files. Returns an error
+    /// if the wiki already exists (use `exists()` to check first).
+    /// Automatically enables the wiki (sets `enabled: true` in config).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The wiki already exists
+    /// - Directory creation fails
+    /// - File writing fails
+    pub async fn init(&self, config: Option<AiwikiConfig>) -> Result<()> {
+        if self.exists() {
+            return Err(AiwikiError::AlreadyInitialized);
+        }
+
+        let mut config = config.unwrap_or_default();
+        // Auto-enable the wiki when initialized
+        config.enabled = true;
+        config.validate()?;
+
+        // Create directory structure
+        self.create_directories().await?;
+
+        // Write configuration
+        config.save(&self.wiki_dir).await?;
+
+        // Write .gitignore files
+        self.write_gitignores().await?;
+
+        // Create initial log.md
+        self.create_log(&config).await?;
+
+        tracing::info!("AIWiki initialized at {:?}", self.wiki_dir);
+
+        Ok(())
+    }
     /// Create all required directories.
     async fn create_directories(&self) -> Result<()> {
         let dirs = [
@@ -116,25 +116,25 @@ impl Initializer {
             &self.wiki_dir.join("static/css"),
             &self.wiki_dir.join("static/js"),
         ];
-        
+
         for dir in &dirs {
             fs::create_dir_all(dir).await?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Write .gitignore files to raw/ and wiki/.
     async fn write_gitignores(&self) -> Result<()> {
         // raw/ is gitignored (contains large/binary files)
         fs::write(self.wiki_dir.join("raw/.gitignore"), RAW_GITIGNORE).await?;
-        
+
         // wiki/ is tracked but we still add a .gitignore for completeness
         fs::write(self.wiki_dir.join("wiki/.gitignore"), WIKI_GITIGNORE).await?;
-        
+
         Ok(())
     }
-    
+
     /// Create the initial log.md file.
     async fn create_log(&self, config: &AiwikiConfig) -> Result<()> {
         let log_path = self.wiki_dir.join("wiki/log.md");
@@ -144,16 +144,16 @@ impl Initializer {
             .replace("{name}", &config.name)
             .replace("{sync_mode}", &format!("{:?}", config.sync_mode))
             .replace("{llm_model}", &config.llm_model);
-        
+
         fs::write(&log_path, content).await?;
         Ok(())
     }
-    
+
     /// Get the path to the wiki directory.
     pub fn wiki_dir(&self) -> &Path {
         &self.wiki_dir
     }
-    
+
     /// Get the path to the project root.
     pub fn root(&self) -> &Path {
         &self.root
@@ -174,16 +174,16 @@ pub async fn init_wiki(root: impl AsRef<Path>, config: Option<AiwikiConfig>) -> 
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    
+
     #[tokio::test]
     async fn test_init_creates_structure() {
         let temp = TempDir::new().unwrap();
         let initializer = Initializer::new(temp.path()).unwrap();
-        
+
         assert!(!initializer.exists());
-        
+
         initializer.init(None).await.unwrap();
-        
+
         assert!(initializer.exists());
         assert!(temp.path().join("aiwiki/config.json").exists());
         assert!(temp.path().join("aiwiki/raw").exists());
@@ -194,38 +194,38 @@ mod tests {
         assert!(temp.path().join("aiwiki/wiki/analyses").exists());
         assert!(temp.path().join("aiwiki/static").exists());
     }
-    
+
     #[tokio::test]
     async fn test_init_fails_if_exists() {
         let temp = TempDir::new().unwrap();
         let initializer = Initializer::new(temp.path()).unwrap();
-        
+
         initializer.init(None).await.unwrap();
-        
+
         let result = initializer.init(None).await;
         assert!(matches!(result, Err(AiwikiError::AlreadyInitialized)));
     }
-    
+
     #[tokio::test]
     async fn test_init_creates_gitignores() {
         let temp = TempDir::new().unwrap();
         let initializer = Initializer::new(temp.path()).unwrap();
-        
+
         initializer.init(None).await.unwrap();
-        
+
         let raw_gitignore = fs::read_to_string(temp.path().join("aiwiki/raw/.gitignore"))
             .await
             .unwrap();
         assert!(raw_gitignore.contains("not tracked in git"));
     }
-    
+
     #[tokio::test]
     async fn test_init_creates_log() {
         let temp = TempDir::new().unwrap();
         let initializer = Initializer::new(temp.path()).unwrap();
-        
+
         initializer.init(None).await.unwrap();
-        
+
         let log = fs::read_to_string(temp.path().join("aiwiki/wiki/log.md"))
             .await
             .unwrap();

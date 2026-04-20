@@ -63,8 +63,7 @@ pub struct MemoryExport {
 }
 
 /// Exported memory blocks organised by scope.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemoryBlocksExport {
     /// Project-scoped blocks, keyed by label.
     #[serde(default)]
@@ -73,7 +72,6 @@ pub struct MemoryBlocksExport {
     #[serde(default)]
     pub global: std::collections::HashMap<String, String>,
 }
-
 
 /// Result of an export operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,7 +389,8 @@ pub fn import_cline(
         let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if !std::path::Path::new(filename)
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("md")) {
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
             continue;
         }
 

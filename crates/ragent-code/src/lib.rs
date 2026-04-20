@@ -409,9 +409,17 @@ impl CodeIndex {
         let start = Instant::now();
         let mut result = IndexResult::default();
 
-        for path in paths {
+        // Set progress counters so TUI can show indexing indicator.
+        let total = paths.len() as u32;
+        self.reindex_total.store(total, Ordering::Relaxed);
+        self.reindex_done.store(0, Ordering::Relaxed);
+
+        for (i, path) in paths.iter().enumerate() {
             match self.index_file(path) {
-                Ok(()) => result.files_added += 1,
+                Ok(()) => {
+                    result.files_added += 1;
+                    self.reindex_done.store(i as u32 + 1, Ordering::Relaxed);
+                }
                 Err(e) => warn!("failed to index {}: {e}", path.display()),
             }
         }
@@ -420,6 +428,10 @@ impl CodeIndex {
         let store = self.store.lock().unwrap();
         result.symbols_extracted = store.symbol_count()? as usize;
         result.elapsed_ms = start.elapsed().as_millis() as u64;
+
+        // Clear progress counters.
+        self.reindex_total.store(0, Ordering::Relaxed);
+        self.reindex_done.store(0, Ordering::Relaxed);
 
         Ok(result)
     }

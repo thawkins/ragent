@@ -579,9 +579,13 @@ pub async fn get_visualisation(
     let block_storage = FileBlockStorage::new();
     let working_dir = working_dir();
 
-    match ragent_core::memory::generate_visualisation(&state.storage, &block_storage, &working_dir) {
+    match ragent_core::memory::generate_visualisation(&state.storage, &block_storage, &working_dir)
+    {
         Ok(data) => serialize_response(data, "visualisation"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate visualisation: {e}")),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate visualisation: {e}"),
+        ),
     }
 }
 
@@ -591,7 +595,10 @@ pub async fn get_visualisation_graph(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match ragent_core::memory::generate_graph(&state.storage) {
         Ok(graph) => serialize_response(graph, "graph"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate graph: {e}")),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate graph: {e}"),
+        ),
     }
 }
 
@@ -601,7 +608,10 @@ pub async fn get_visualisation_timeline(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match ragent_core::memory::generate_timeline(&state.storage) {
         Ok(timeline) => serialize_response(timeline, "timeline"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate timeline: {e}")),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate timeline: {e}"),
+        ),
     }
 }
 
@@ -611,7 +621,10 @@ pub async fn get_visualisation_tags(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match ragent_core::memory::generate_tag_cloud(&state.storage) {
         Ok(cloud) => serialize_response(cloud, "tag_cloud"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate tag cloud: {e}")),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate tag cloud: {e}"),
+        ),
     }
 }
 
@@ -621,6 +634,9 @@ pub async fn get_visualisation_heatmap(
 ) -> (StatusCode, Json<serde_json::Value>) {
     match ragent_core::memory::generate_heatmap(&state.storage) {
         Ok(heatmap) => serialize_response(heatmap, "heatmap"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to generate heatmap: {e}")),
+        Err(e) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate heatmap: {e}"),
+        ),
     }
 }

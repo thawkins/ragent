@@ -293,14 +293,12 @@ pub mod accessibility {
     pub const PROGRESS_FILL: &str = "█";
     /// Progress bar empty character
     pub const PROGRESS_EMPTY: &str = "░";
-    
+
     /// Animation frames for indeterminate loading spinner
-    pub const SPINNER_FRAMES: &[&str] = &[
-        "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
-    ];
-    
+    pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
     /// Get the current spinner frame based on elapsed time
-    /// 
+    ///
     /// # Arguments
     /// * `elapsed_ms` - Milliseconds elapsed since loading started
     /// * `interval_ms` - Milliseconds per frame (default: 80ms)
@@ -308,23 +306,23 @@ pub mod accessibility {
         let frame = (elapsed_ms / interval_ms.max(1)) as usize % SPINNER_FRAMES.len();
         SPINNER_FRAMES[frame]
     }
-    
+
     /// Get a progress bar string for determinate progress
-    /// 
+    ///
     /// # Arguments
     /// * `progress` - Progress value from 0.0 to 1.0
     /// * `width` - Width of the progress bar in characters
-    /// 
+    ///
     /// # Example
     /// ```
     /// use ragent_tui::theme::accessibility::progress_bar;
-    /// 
+    ///
     /// let bar = progress_bar(0.5, 20); // "[██████████░░░░░░░░░░]"
     /// ```
     pub fn progress_bar(progress: f32, width: usize) -> String {
         let filled = ((progress.clamp(0.0, 1.0) * width as f32) as usize).min(width);
         let empty = width.saturating_sub(filled);
-        
+
         format!(
             "{}{}{}{}{}",
             PROGRESS_PREFIX,
@@ -334,18 +332,18 @@ pub mod accessibility {
             if progress >= 1.0 { " ✓" } else { "" }
         )
     }
-    
+
     /// Get a labeled progress bar with percentage
-    /// 
+    ///
     /// # Arguments
     /// * `progress` - Progress value from 0.0 to 1.0
     /// * `width` - Width of the progress bar in characters
     /// * `label` - Label to display before the bar
-    /// 
+    ///
     /// # Example
     /// ```
     /// use ragent_tui::theme::accessibility::labeled_progress_bar;
-    /// 
+    ///
     /// let bar = labeled_progress_bar(0.5, 20, "Loading"); // "Loading [██████████░░░░░░░░░░] 50%"
     /// ```
     pub fn labeled_progress_bar(progress: f32, width: usize, label: &str) -> String {
@@ -354,7 +352,6 @@ pub mod accessibility {
         format!("{} {} {}%", label, bar, percent)
     }
 }
-
 
 /// Standardized loading spinner using braille patterns (rotates: ◐◓◑◒)
 pub const LOADING_FRAMES: &[&str] = &["◐", "◓", "◑", "◒"];
@@ -496,10 +493,7 @@ impl StatusMessage {
 
     /// Get age of the message in seconds
     pub fn age_secs(&self) -> u64 {
-        self.timestamp
-            .elapsed()
-            .unwrap_or_default()
-            .as_secs()
+        self.timestamp.elapsed().unwrap_or_default().as_secs()
     }
 }
 

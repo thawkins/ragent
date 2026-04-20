@@ -188,8 +188,10 @@ impl FtsIndex {
         self.reader.reload()?;
         let searcher = self.reader.searcher();
         let total_docs = searcher.num_docs();
+        let sanitized = Self::sanitize_query(query);
         tracing::debug!(
             query = %query,
+            sanitized = %sanitized,
             limit = limit,
             docs_in_index = total_docs,
             "FTS search starting"
@@ -212,9 +214,8 @@ impl FtsIndex {
         parser.set_field_boost(self.fields.body_snippet, 1.0);
 
         let parsed_query = parser
-            .parse_query(query)
-            .with_context(|| "cannot parse FTS query")?;
-
+            .parse_query(&sanitized)
+            .with_context(|| format!("cannot parse FTS query: {sanitized}"))?;
         let top_docs = searcher
             .search(&parsed_query, &TopDocs::with_limit(limit))
             .context("FTS search failed")?;
@@ -250,6 +251,45 @@ impl FtsIndex {
     }
 
     // ── Private helpers ─────────────────────────────────────────────────
+
+    /// Escape Tantivy query-parser special characters so that raw
+    /// code identifiers such as `Aiwiki::new`, `std::io`, or `foo<T>`
+    /// are treated as literal search terms.  Language scope operators
+    /// (`::`) are replaced with spaces so each path segment becomes a
+    /// separate search term.
+    fn sanitize_query(raw: &str) -> String {
+        // Replace :: with space first — the default tokenizer splits on
+        // punctuation anyway, so the index never contains literal colons.
+        let replaced = raw.replace("::", " ");
+        let mut out = String::with_capacity(replaced.len() * 2);
+        for ch in replaced.chars() {
+            if matches!(
+                ch,
+                '+' | '-'
+                    | '&'
+                    | '|'
+                    | '!'
+                    | '('
+                    | ')'
+                    | '{'
+                    | '}'
+                    | '['
+                    | ']'
+                    | '^'
+                    | '"'
+                    | '~'
+                    | '*'
+                    | '?'
+                    | ':'
+                    | '\\'
+                    | '/'
+            ) {
+                out.push('\\');
+            }
+            out.push(ch);
+        }
+        out
+    }
 
     fn build_schema() -> Schema {
         let mut builder = Schema::builder();
@@ -604,6 +644,46 @@ mod tests {
         assert!(detailed.contains("qualified: crate::foo"));
         assert!(detailed.contains("signature: fn foo()"));
         assert!(detailed.contains("doc: Does something."));
+    }
+
+    #[test]
+    fn test_search_with_scope_operator() {
+        let fts = FtsIndex::open_in_memory().unwrap();
+        let syms = vec![FtsSymbol {
+            name: "new",
+            qualified_name: Some("Aiwiki::new"),
+            kind: "function",
+            file_path: "src/aiwiki.rs",
+            signature: Some("fn new() -> Self"),
+            doc_comment: Some("Create a new Aiwiki instance."),
+            body_snippet: Some("Self { }"),
+            start_line: 10,
+            end_line: 15,
+        }];
+        fts.add_symbols(&syms).unwrap();
+
+        // Query with :: should not cause a parse error
+        let results = fts.search("Aiwiki::new", 10).unwrap();
+        assert!(!results.is_empty(), "should find Aiwiki::new");
+    }
+
+    #[test]
+    fn test_sanitize_query_escapes_special_chars() {
+        // :: is replaced with space so path segments become separate terms
+        let escaped = FtsIndex::sanitize_query("Aiwiki::new");
+        assert_eq!(escaped, "Aiwiki new");
+
+        let escaped2 = FtsIndex::sanitize_query("Result<Config>");
+        assert!(escaped2.contains("Result"));
+        assert!(escaped2.contains("Config"));
+
+        // Plain text should pass through unchanged
+        let plain = FtsIndex::sanitize_query("hello world");
+        assert_eq!(plain, "hello world");
+
+        // Single colon (field syntax) is escaped
+        let single = FtsIndex::sanitize_query("field:value");
+        assert_eq!(single, "field\\:value");
     }
 
     #[test]

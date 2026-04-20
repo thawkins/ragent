@@ -4,13 +4,13 @@
 //! into the AIWiki raw/ directory. Extracts text content where possible
 //! and tracks files in the state system.
 
-use async_recursion::async_recursion;
 use crate::{Aiwiki, AiwikiState, Result};
+use async_recursion::async_recursion;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
 pub mod extractors;
-pub use extractors::{extract_text, DocumentType};
+pub use extractors::{DocumentType, extract_text};
 
 /// Result of an ingestion operation.
 #[derive(Debug, Clone)]
@@ -48,79 +48,77 @@ pub async fn ingest_file<P: AsRef<Path>>(
     options: IngestOptions,
 ) -> Result<IngestionResult> {
     let source_path = source_path.as_ref();
-    
+
     // Check if wiki is enabled
     if !wiki.config.enabled {
         return Err(crate::AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
-    
+
     // Validate source file exists
     if !source_path.exists() {
-        return Err(crate::AiwikiError::Config(
-            format!("File not found: {}", source_path.display())
-        ));
+        return Err(crate::AiwikiError::Config(format!(
+            "File not found: {}",
+            source_path.display()
+        )));
     }
-    
+
     // Check if it's a file (not a directory)
     let metadata = fs::metadata(source_path).await?;
     if !metadata.is_file() {
-        return Err(crate::AiwikiError::Config(
-            format!("Path is not a file: {}", source_path.display())
-        ));
+        return Err(crate::AiwikiError::Config(format!(
+            "Path is not a file: {}",
+            source_path.display()
+        )));
     }
-    
+
     // Check file size
     let size_bytes = metadata.len();
     if size_bytes > wiki.config.max_file_size {
-        return Err(crate::AiwikiError::Config(
-            format!(
-                "File too large: {} bytes (max: {} bytes)",
-                size_bytes, wiki.config.max_file_size
-            )
-        ));
+        return Err(crate::AiwikiError::Config(format!(
+            "File too large: {} bytes (max: {} bytes)",
+            size_bytes, wiki.config.max_file_size
+        )));
     }
-    
+
     // Detect document type
     let doc_type = DocumentType::from_path(source_path);
-    
+
     // Generate destination path in raw/
     let file_name = source_path
         .file_name()
-        .ok_or_else(|| crate::AiwikiError::Config(
-            "Invalid file name".to_string()
-        ))?;
-    
+        .ok_or_else(|| crate::AiwikiError::Config("Invalid file name".to_string()))?;
+
     let dest_path = if let Some(subdir) = &options.subdirectory {
         wiki.path("raw").join(subdir).join(file_name)
     } else {
         wiki.path("raw").join(file_name)
     };
-    
+
     // Ensure parent directory exists
     if let Some(parent) = dest_path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    
+
     // Copy or move the file
     if options.move_file {
         fs::rename(source_path, &dest_path).await?;
     } else {
         fs::copy(source_path, &dest_path).await?;
     }
-    
+
     // Calculate hash
     let hash = AiwikiState::calculate_hash(&dest_path).await?;
-    
+
     // Try to extract text
     let text_extracted = extract_text(&dest_path, doc_type.clone()).await.is_ok();
-    
+
     // Get relative path for state tracking
     let _relative_path = dest_path
         .strip_prefix(&wiki.wiki_dir)
         .map_err(|e| crate::AiwikiError::State(e.to_string()))?;
-    
+
     Ok(IngestionResult {
         stored_path: dest_path,
         source_path: source_path.to_path_buf(),
@@ -149,26 +147,27 @@ pub async fn scan_directory<P: AsRef<Path> + Send>(
     recursive: bool,
 ) -> Result<Vec<IngestionResult>> {
     let dir_path = dir_path.as_ref();
-    
+
     // Check if wiki is enabled
     if !wiki.config.enabled {
         return Err(crate::AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
-    
+
     if !dir_path.exists() {
-        return Err(crate::AiwikiError::Config(
-            format!("Directory not found: {}", dir_path.display())
-        ));
+        return Err(crate::AiwikiError::Config(format!(
+            "Directory not found: {}",
+            dir_path.display()
+        )));
     }
-    
+
     let mut results = Vec::new();
     let mut entries = fs::read_dir(dir_path).await?;
-    
+
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
-        
+
         if path.is_file() {
             // Check if file type is supported
             if DocumentType::from_path(&path) != DocumentType::Unknown {
@@ -185,7 +184,7 @@ pub async fn scan_directory<P: AsRef<Path> + Send>(
             results.extend(sub_results);
         }
     }
-    
+
     Ok(results)
 }
 
@@ -220,19 +219,19 @@ impl IngestOptions {
             ..Default::default()
         }
     }
-    
+
     /// Set subdirectory.
     pub fn with_subdirectory(mut self, subdir: impl Into<String>) -> Self {
         self.subdirectory = Some(subdir.into());
         self
     }
-    
+
     /// Set move flag.
     pub fn with_move(mut self, move_file: bool) -> Self {
         self.move_file = move_file;
         self
     }
-    
+
     /// Set overwrite flag.
     pub fn with_overwrite(mut self, overwrite: bool) -> Self {
         self.overwrite = overwrite;

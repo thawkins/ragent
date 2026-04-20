@@ -28,8 +28,10 @@ pdf-extract = { workspace = true }
 calamine = { workspace = true }
 quick-xml = { workspace = true }
 zip = { workspace = true }
-ragent-code = { path = "../ragent-code" }
-
+  ragent-code = { path = "../ragent-code" }
+  globset = "0.4"
+  notify = "7.0"
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
 tempfile = "3.5"
+globset = "0.4"

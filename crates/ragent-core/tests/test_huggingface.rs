@@ -60,7 +60,10 @@ fn test_huggingface_default_models_have_valid_fields() {
         assert!(!model.id.is_empty(), "model id should not be empty");
         assert!(!model.name.is_empty(), "model name should not be empty");
         assert!(model.context_window > 0, "context window should be > 0");
-        assert!(model.capabilities.streaming, "all HF models should support streaming");
+        assert!(
+            model.capabilities.streaming,
+            "all HF models should support streaming"
+        );
         assert_eq!(model.cost.input, 0.0, "HF free tier should be free");
         assert_eq!(model.cost.output, 0.0, "HF free tier should be free");
     }
@@ -72,8 +75,14 @@ fn test_huggingface_deepseek_r1_has_reasoning() {
     let model = registry
         .resolve_model("huggingface", "deepseek-ai/DeepSeek-R1")
         .expect("DeepSeek R1 should be in defaults");
-    assert!(model.capabilities.reasoning, "DeepSeek R1 should have reasoning");
-    assert!(!model.capabilities.tool_use, "DeepSeek R1 should not have tool_use");
+    assert!(
+        model.capabilities.reasoning,
+        "DeepSeek R1 should have reasoning"
+    );
+    assert!(
+        !model.capabilities.tool_use,
+        "DeepSeek R1 should not have tool_use"
+    );
     assert_eq!(model.context_window, 128_000);
 }
 
@@ -81,9 +90,7 @@ fn test_huggingface_deepseek_r1_has_reasoning() {
 async fn test_huggingface_create_client_rejects_empty_key() {
     let registry = create_default_registry();
     let provider = registry.get("huggingface").unwrap();
-    let result = provider
-        .create_client("", None, &HashMap::new())
-        .await;
+    let result = provider.create_client("", None, &HashMap::new()).await;
     assert!(result.is_err(), "empty API key should be rejected");
     let err = result.err().unwrap().to_string();
     assert!(
@@ -99,7 +106,10 @@ async fn test_huggingface_create_client_with_valid_key() {
     let result = provider
         .create_client("hf_test_token_12345", None, &HashMap::new())
         .await;
-    assert!(result.is_ok(), "valid key should create client successfully");
+    assert!(
+        result.is_ok(),
+        "valid key should create client successfully"
+    );
 }
 
 #[tokio::test]
@@ -121,10 +131,7 @@ async fn test_huggingface_create_client_with_options() {
     let registry = create_default_registry();
     let provider = registry.get("huggingface").unwrap();
     let mut options = HashMap::new();
-    options.insert(
-        "wait_for_model".to_string(),
-        serde_json::Value::Bool(false),
-    );
+    options.insert("wait_for_model".to_string(), serde_json::Value::Bool(false));
     options.insert("use_cache".to_string(), serde_json::Value::Bool(false));
 
     let result = provider
@@ -147,7 +154,10 @@ fn test_huggingface_qwen_coder_has_tool_use() {
     let model = registry
         .resolve_model("huggingface", "Qwen/Qwen2.5-Coder-32B-Instruct")
         .expect("Qwen Coder should be in defaults");
-    assert!(model.capabilities.tool_use, "Qwen Coder should support tool_use");
+    assert!(
+        model.capabilities.tool_use,
+        "Qwen Coder should support tool_use"
+    );
     assert_eq!(model.context_window, 32_000);
 }
 

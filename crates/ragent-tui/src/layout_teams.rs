@@ -3,7 +3,7 @@
 //! Renders the active team as a compact table with lead + teammates, including
 //! status, elapsed time, step count, and tasks claimed/completed.
 
-use crate::theme::{colors, SPACING_SM};
+use crate::theme::{SPACING_SM, colors};
 use chrono::{DateTime, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;

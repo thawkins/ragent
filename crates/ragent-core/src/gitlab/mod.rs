@@ -8,7 +8,7 @@ pub mod auth;
 pub mod client;
 
 pub use auth::{
-    delete_config, delete_token, load_config, load_token, migrate_legacy_files, save_config,
-    save_token, GitLabConfig,
+    GitLabConfig, delete_config, delete_token, load_config, load_token, migrate_legacy_files,
+    save_config, save_token,
 };
 pub use client::GitLabClient;

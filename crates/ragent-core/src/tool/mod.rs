@@ -11,11 +11,11 @@
 pub mod mcp_tool;
 pub use mcp_tool::McpToolWrapper;
 
-pub mod aiwiki_ingest;
 /// AIWiki export tool for agents.
 pub mod aiwiki_export;
 /// AIWiki import tool for agents.
 pub mod aiwiki_import;
+pub mod aiwiki_ingest;
 /// AIWiki search tool for agents.
 pub mod aiwiki_search;
 /// AIWiki status tool for agents.

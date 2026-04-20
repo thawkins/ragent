@@ -68,9 +68,7 @@ impl Tool for GitlabListMrsTool {
         let state = input["state"].as_str().unwrap_or("opened");
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
-        let mut path = format!(
-            "/projects/{project}/merge_requests?state={state}&per_page={limit}"
-        );
+        let mut path = format!("/projects/{project}/merge_requests?state={state}&per_page={limit}");
         if let Some(target) = input["target_branch"].as_str() {
             path.push_str(&format!("&target_branch={target}"));
         }
@@ -147,12 +145,9 @@ impl Tool for GitlabGetMrTool {
             .context("Missing required 'iid' parameter")?;
 
         let mr_path = format!("/projects/{project}/merge_requests/{iid}");
-        let notes_path = format!(
-            "/projects/{project}/merge_requests/{iid}/notes?per_page=10"
-        );
+        let notes_path = format!("/projects/{project}/merge_requests/{iid}/notes?per_page=10");
 
-        let (mr, notes_val) =
-            tokio::try_join!(client.get(&mr_path), client.get(&notes_path))?;
+        let (mr, notes_val) = tokio::try_join!(client.get(&mr_path), client.get(&notes_path))?;
 
         let title = mr["title"].as_str().unwrap_or("(no title)");
         let state = mr["state"].as_str().unwrap_or("?");

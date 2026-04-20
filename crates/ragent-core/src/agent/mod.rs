@@ -1473,20 +1473,30 @@ pub fn build_system_prompt_with_storage(
     // Specific guidance on using line ranges for file reads
     prompt.push_str(
         "## File Reading Best Practices\n\n\
-         When reading files with the `read` tool:\n\
+         When reading files with the `read` tool or `str_replace_editor` view command:\n\
          - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
            to read the file in focused sections rather than all at once\n\
-         - Example call (read lines 50-100 of src/main.rs):\n\
-           {\"path\": \"src/main.rs\", \"start_line\": 50, \"end_line\": 100}\n\
-         - Why this is required:\n\
-           * Reduces token usage and response latency significantly\n\
-           * Allows you to understand code structure piece-by-piece\n\
-           * Prevents context overflow from large file dumps\n\
+         - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
+           The tool will return an error if they do. The error message includes the total line count.\n\
+           When you read a file, the response metadata includes `total_lines` — use that value\n\
+           to stay within range on subsequent reads of the same file.\n\
          - Strategy:\n\
-           1. First, check the file size with a grep or head command if needed\n\
-           2. Start by reading the first 50 lines to understand purpose\n\
-           3. Then read specific sections based on what you discover\n\
+           1. Read the file without start_line/end_line first — for large files this returns\n\
+              the first 100 lines plus a section map with the total line count\n\
+           2. Use the total_lines from the response to plan your subsequent reads\n\
+           3. Then read specific sections using valid line ranges\n\
            4. Never read an entire file >100 lines in a single call\n",
+    );
+
+    // Guidance on str_replace_editor to prevent missing old_str
+    prompt.push_str(
+        "\n## str_replace_editor Usage\n\n\
+         When using the `str_replace_editor` tool with `command: \"str_replace\"`:\n\
+         - You MUST always provide the `old_str` parameter containing the exact text to find\n\
+         - You MUST always provide the `new_str` parameter containing the replacement text\n\
+         - Calls to `str_replace` without `old_str` will fail with an error\n\
+         - The `old_str` must match exactly one location in the file\n\
+         - Read the relevant section of the file first to get the exact text for `old_str`\n",
     );
 
     prompt

@@ -15,8 +15,9 @@ pub struct AiwikiIngestTool;
 /// Build a "not available" response when AIWiki is not initialized.
 fn not_initialized() -> ToolOutput {
     ToolOutput {
-        content: "AIWiki is not initialized. Run `/aiwiki init` first to create the wiki structure."
-            .to_string(),
+        content:
+            "AIWiki is not initialized. Run `/aiwiki init` first to create the wiki structure."
+                .to_string(),
         metadata: Some(json!({
             "error": "aiwiki_not_initialized",
             "initialized": false
@@ -87,7 +88,7 @@ impl Tool for AiwikiIngestTool {
                 return Ok(ToolOutput {
                     content: format!("Failed to load AIWiki: {}", e),
                     metadata: Some(json!({"error": e.to_string()})),
-                })
+                });
             }
         };
 
@@ -175,10 +176,7 @@ fn format_ingestion_result(result: &aiwiki::IngestionResult) -> ToolOutput {
 }
 
 /// Format a directory ingestion result.
-fn format_directory_result(
-    results: &[aiwiki::IngestionResult],
-    source_dir: &Path,
-) -> ToolOutput {
+fn format_directory_result(results: &[aiwiki::IngestionResult], source_dir: &Path) -> ToolOutput {
     if results.is_empty() {
         return ToolOutput {
             content: format!(
@@ -189,17 +187,22 @@ fn format_directory_result(
         };
     }
 
-    let mut content = format!(
-        "## Directory Ingested: {}\n\n",
-        source_dir.display()
-    );
+    let mut content = format!("## Directory Ingested: {}\n\n", source_dir.display());
     content.push_str(&format!("**Files ingested:** {}\n\n", results.len()));
 
     for result in results.iter().take(10) {
         content.push_str(&format!(
             "- `{}` → `{}` ({:?})\n",
-            result.source_path.file_name().unwrap_or_default().to_string_lossy(),
-            result.stored_path.file_name().unwrap_or_default().to_string_lossy(),
+            result
+                .source_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
+            result
+                .stored_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             result.doc_type
         ));
     }
@@ -239,7 +242,11 @@ fn format_raw_scan_result(results: &[aiwiki::IngestionResult]) -> ToolOutput {
     for result in results.iter().take(10) {
         content.push_str(&format!(
             "- `{}` ({:?}, {} bytes)\n",
-            result.stored_path.file_name().unwrap_or_default().to_string_lossy(),
+            result
+                .stored_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             result.doc_type,
             result.size_bytes
         ));

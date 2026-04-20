@@ -14,7 +14,9 @@ mod templates;
 pub use templates::SearchResult;
 
 mod handlers;
-pub use handlers::{PageInfo, list_wiki_pages, get_page_content, save_page_content};
+pub use handlers::{
+    EntitySidebarData, PageInfo, get_page_content, list_wiki_pages, save_page_content,
+};
 
 mod search;
 pub use search::*;
@@ -60,6 +62,10 @@ pub fn create_router(project_root: impl Into<std::path::PathBuf>) -> axum::Route
         .route("/search", get(search_page))
         .route("/graph", get(graph_page))
         .route("/status", get(status_page))
+        .route("/sources", get(sources_list_page))
+        .route("/source/{*path}", get(source_detail_page))
+        .route("/entities/types", get(entity_types_page))
+        .route("/entities/type/{entity_type}", get(entities_by_type_page))
         // API routes
         .route("/api/pages", get(api_pages))
         .route("/api/search", get(api_search))
@@ -102,8 +108,9 @@ async fn home_page(State(state): State<Arc<WebState>>) -> impl IntoResponse {
         }
         Err(_) => Html(templates::render_error_page(
             "Failed to load AIWiki",
-            "The wiki exists but could not be loaded. Check the configuration."
-        )).into_response(),
+            "The wiki exists but could not be loaded. Check the configuration.",
+        ))
+        .into_response(),
     }
 }
 
@@ -121,9 +128,7 @@ async fn view_page(
             let page_path = wiki.path("wiki").join(&path);
 
             if !page_path.exists() {
-                return Html(templates::render_not_found_page(&path,
-                    &wiki
-                )).into_response();
+                return Html(templates::render_not_found_page(&path, &wiki)).into_response();
             }
 
             // If the path is a directory, show a listing of its pages.
@@ -136,20 +141,29 @@ async fn view_page(
             // Read and render the markdown
             match tokio::fs::read_to_string(&page_path).await {
                 Ok(content) => {
-                    let html = templates::render_markdown_page(&path, &content, &wiki
-                    );
+                    // For entity pages, load sidebar navigation data
+                    let sidebar = if path.starts_with("entities/") {
+                        handlers::get_entity_sidebar_data(&wiki).await.ok()
+                    } else {
+                        None
+                    };
+
+                    let html =
+                        templates::render_markdown_page(&path, &content, &wiki, sidebar.as_ref());
                     Html(html).into_response()
                 }
                 Err(e) => Html(templates::render_error_page(
                     "Failed to read page",
-                    &format!("Error reading {}: {}", path, e)
-                )).into_response(),
+                    &format!("Error reading {}: {}", path, e),
+                ))
+                .into_response(),
             }
         }
         Err(e) => Html(templates::render_error_page(
             "Failed to load AIWiki",
-            &e.to_string()
-        )).into_response(),
+            &e.to_string(),
+        ))
+        .into_response(),
     }
 }
 
@@ -171,18 +185,17 @@ async fn edit_page(
                 Ok(c) => c,
                 Err(_) => {
                     // New page - create template
-                    templates::create_page_template(&path
-                    )
+                    templates::create_page_template(&path)
                 }
             };
 
-            Html(templates::render_edit_page(&path, &content, &wiki
-            )).into_response()
+            Html(templates::render_edit_page(&path, &content, &wiki)).into_response()
         }
         Err(e) => Html(templates::render_error_page(
             "Failed to load AIWiki",
-            &e.to_string()
-        )).into_response(),
+            &e.to_string(),
+        ))
+        .into_response(),
     }
 }
 
@@ -210,8 +223,9 @@ async fn save_page(
                 Ok(_) => Redirect::to(&format!("/aiwiki/page/{}", path)).into_response(),
                 Err(e) => Html(templates::render_error_page(
                     "Failed to save page",
-                    &format!("Error saving {}: {}", path, e)
-                )).into_response(),
+                    &format!("Error saving {}: {}", path, e),
+                ))
+                .into_response(),
             }
         }
         Err(_) => Redirect::to("/aiwiki").into_response(),
@@ -232,16 +246,17 @@ async fn search_page(
 
     match state.load_wiki().await {
         Ok(wiki) => {
-            let results = search::search_wiki(&wiki, &search_term, page_type
-            ).await.unwrap_or_default();
+            let results = search::search_wiki(&wiki, &search_term, page_type)
+                .await
+                .unwrap_or_default();
 
-            Html(templates::render_search_page(&search_term, &results, &wiki
-            )).into_response()
+            Html(templates::render_search_page(&search_term, &results, &wiki)).into_response()
         }
         Err(e) => Html(templates::render_error_page(
             "Failed to load AIWiki",
-            &e.to_string()
-        )).into_response(),
+            &e.to_string(),
+        ))
+        .into_response(),
     }
 }
 
@@ -264,26 +279,111 @@ async fn status_page(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     }
 
     match state.load_wiki().await {
-        Ok(wiki) => {
-            Html(templates::render_status_page(&wiki
-            )).into_response()
-        }
+        Ok(wiki) => Html(templates::render_status_page(&wiki)).into_response(),
         Err(e) => Html(templates::render_error_page(
             "Failed to load AIWiki",
-            &e.to_string()
-        )).into_response(),
+            &e.to_string(),
+        ))
+        .into_response(),
+    }
+}
+
+/// Sources list page.
+async fn sources_list_page(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    if !state.wiki_exists() {
+        return Html(templates::render_setup_page()).into_response();
+    }
+
+    match state.load_wiki().await {
+        Ok(wiki) => Html(templates::render_sources_page(&wiki)).into_response(),
+        Err(e) => Html(templates::render_error_page(
+            "Failed to load AIWiki",
+            &e.to_string(),
+        ))
+        .into_response(),
+    }
+}
+
+/// Source detail page.
+async fn source_detail_page(
+    State(state): State<Arc<WebState>>,
+    Path(path): Path<String>,
+) -> impl IntoResponse {
+    if !state.wiki_exists() {
+        return Html(templates::render_setup_page()).into_response();
+    }
+
+    match state.load_wiki().await {
+        Ok(wiki) => Html(templates::render_source_detail_page(&path, &wiki)).into_response(),
+        Err(e) => Html(templates::render_error_page(
+            "Failed to load AIWiki",
+            &e.to_string(),
+        ))
+        .into_response(),
+    }
+}
+
+/// Entity types list page.
+async fn entity_types_page(State(state): State<Arc<WebState>>) -> impl IntoResponse {
+    if !state.wiki_exists() {
+        return Html(templates::render_setup_page()).into_response();
+    }
+
+    match state.load_wiki().await {
+        Ok(wiki) => match handlers::get_entity_types(&wiki).await {
+            Ok(types) => Html(templates::render_entity_types_page(&types, &wiki)).into_response(),
+            Err(e) => Html(templates::render_error_page(
+                "Failed to load entity types",
+                &e.to_string(),
+            ))
+            .into_response(),
+        },
+        Err(e) => Html(templates::render_error_page(
+            "Failed to load AIWiki",
+            &e.to_string(),
+        ))
+        .into_response(),
+    }
+}
+
+/// Entities by type page.
+async fn entities_by_type_page(
+    State(state): State<Arc<WebState>>,
+    Path(entity_type): Path<String>,
+) -> impl IntoResponse {
+    if !state.wiki_exists() {
+        return Html(templates::render_setup_page()).into_response();
+    }
+
+    match state.load_wiki().await {
+        Ok(wiki) => match handlers::get_entities_by_type(&wiki, &entity_type).await {
+            Ok(entities) => Html(templates::render_entities_by_type_page(
+                &entity_type,
+                &entities,
+                &wiki,
+            ))
+            .into_response(),
+            Err(e) => Html(templates::render_error_page(
+                "Failed to load entities",
+                &e.to_string(),
+            ))
+            .into_response(),
+        },
+        Err(e) => Html(templates::render_error_page(
+            "Failed to load AIWiki",
+            &e.to_string(),
+        ))
+        .into_response(),
     }
 }
 
 /// API: List all pages.
 async fn api_pages(State(state): State<Arc<WebState>>) -> impl IntoResponse {
     match state.load_wiki().await {
-        Ok(wiki) => {
-            match handlers::list_wiki_pages(&wiki).await {
-                Ok(pages) => axum::Json(pages).into_response(),
-                Err(_) => axum::Json(Vec::<handlers::PageInfo>::new()).into_response(),
-            }
-        }
+        Ok(wiki) => match handlers::list_wiki_pages(&wiki).await {
+            Ok(pages) => axum::Json(pages).into_response(),
+            Err(_) => axum::Json(Vec::<handlers::PageInfo>::new()).into_response(),
+        },
         Err(_) => axum::Json(Vec::<handlers::PageInfo>::new()).into_response(),
     }
 }
@@ -298,8 +398,9 @@ async fn api_search(
 
     match state.load_wiki().await {
         Ok(wiki) => {
-            let results = search::search_wiki(&wiki, &search_term, page_type
-            ).await.unwrap_or_default();
+            let results = search::search_wiki(&wiki, &search_term, page_type)
+                .await
+                .unwrap_or_default();
             axum::Json(results).into_response()
         }
         Err(_) => axum::Json(Vec::<templates::SearchResult>::new()).into_response(),
@@ -317,9 +418,10 @@ async fn api_graph(
             axum::Json(graph).into_response()
         }
         Err(_) => axum::Json(serde_json::json!({
-                "nodes": [],
-                "links": []
-            })).into_response(),
+            "nodes": [],
+            "links": []
+        }))
+        .into_response(),
     }
 }
 
@@ -341,15 +443,14 @@ async fn api_status(State(state): State<Arc<WebState>>) -> impl IntoResponse {
             axum::Json(status).into_response()
         }
         Err(e) => axum::Json(serde_json::json!({
-                "error": e.to_string()
-            })).into_response(),
+            "error": e.to_string()
+        }))
+        .into_response(),
     }
 }
 
 /// Serve static assets.
-async fn serve_static(
-    Path(path): Path<String>,
-) -> impl IntoResponse {
+async fn serve_static(Path(path): Path<String>) -> impl IntoResponse {
     // Embed static assets in binary
     let content = match path.as_str() {
         "css/aiwiki.css" => Some((templates::CSS_CONTENT, "text/css")),
@@ -359,15 +460,9 @@ async fn serve_static(
 
     match content {
         Some((data, content_type)) => {
-            (
-                [(axum::http::header::CONTENT_TYPE, content_type)],
-                data
-            ).into_response()
+            ([(axum::http::header::CONTENT_TYPE, content_type)], data).into_response()
         }
-        None => (
-            axum::http::StatusCode::NOT_FOUND,
-            "Not found"
-        ).into_response(),
+        None => (axum::http::StatusCode::NOT_FOUND, "Not found").into_response(),
     }
 }
 
@@ -407,7 +502,8 @@ async fn build_directory_listing(
                 is_dir: true,
             });
         } else if name.ends_with(".md") {
-            let title = extract_title_from_file(&path).await
+            let title = extract_title_from_file(&path)
+                .await
                 .unwrap_or_else(|| name.trim_end_matches(".md").replace('-', " "));
             entries.push(DirectoryEntry {
                 title,

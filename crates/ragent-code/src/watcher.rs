@@ -23,6 +23,7 @@ const IGNORED_DIRS: &[&str] = &[
     ".tox",
     ".mypy_cache",
     ".pytest_cache",
+    "aiwiki",
 ];
 
 /// A structured filesystem event for the code index.

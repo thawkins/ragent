@@ -8,6 +8,7 @@ pub mod app;
 pub mod input;
 pub mod layout;
 pub mod layout_active_agents;
+pub mod layout_statusbar;
 pub mod layout_teams;
 pub mod panels;
 pub mod theme;
@@ -253,7 +254,31 @@ pub async fn run_tui(
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
-    let mut bus_rx = event_bus.subscribe();
+    // Bridge the broadcast channel to an unbounded mpsc channel so the TUI never
+    // loses events.  The broadcast channel can drop events for slow receivers
+    // (Lagged error) during burst scenarios (many parallel tool calls, rapid
+    // streaming).  The mpsc channel is unbounded, so the TUI always receives
+    // every event regardless of drain speed.
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ragent_core::event::Event>();
+    {
+        let mut bus_rx = event_bus.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match bus_rx.recv().await {
+                    Ok(event) => {
+                        if event_tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("{n} broadcast events skipped in TUI bridge task");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
 
     // -- LSP startup --
     app.status = "starting LSP…".to_string();
@@ -351,6 +376,76 @@ pub async fn run_tui(
         }
     };
 
+    // -- AIWiki startup --
+    // If AIWiki is initialized and autosync is enabled, start sync and watcher
+    if app.aiwiki_autosync {
+        let current_dir = std::env::current_dir().unwrap_or_default();
+        if aiwiki::Aiwiki::exists(&current_dir) {
+            app.status = "starting aiwiki sync…".to_string();
+            terminal.draw(|frame| layout::render(frame, &mut app))?;
+
+            match tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(aiwiki::Aiwiki::new(&current_dir))
+            }) {
+                Ok(wiki) => {
+                    if wiki.config.enabled {
+                        app.aiwiki_enabled = true;
+                        app.aiwiki = Some(wiki);
+
+                        // Build LLM extractor from current provider/model
+                        let model_label = app.aiwiki_model_label();
+                        let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
+                        let extractor: Arc<(dyn aiwiki::extraction::LlmExtractor + Send + Sync)> =
+                            Arc::new(app::TuiLlmExtractor {
+                                registry: Arc::clone(&app.provider_registry),
+                                storage: Arc::clone(&app.storage),
+                                provider_id: pid.to_string(),
+                                model_id: mid.to_string(),
+                            });
+
+                        // Start initial sync in background
+                        let wiki_for_sync = app.aiwiki.take().unwrap();
+                        let progress = Arc::new(aiwiki::sync::SyncProgress::new());
+                        let progress_clone = Arc::clone(&progress);
+
+                        let handle = tokio::spawn(async move {
+                            let result = aiwiki::sync::sync(
+                                &wiki_for_sync,
+                                false, // force=false
+                                Some(&*extractor),
+                                Some(&progress_clone),
+                            )
+                            .await;
+                            // Wrap in AiwikiSyncOutcome
+                            crate::app::AiwikiSyncOutcome {
+                                result: result.map_err(|e| e.to_string()),
+                            }
+                        });
+
+                        app.aiwiki_sync_progress = Some(progress);
+                        app.aiwiki_sync_handle = Some(handle);
+                        // Wiki is being used by sync, will be None until sync completes
+                        app.aiwiki = None;
+
+                        app.append_assistant_text("\n✔ AIWiki: auto-sync starting");
+                        tracing::info!("AIWiki auto-sync started");
+                    } else {
+                        app.append_assistant_text("\n✔ AIWiki: initialized but disabled");
+                        app.aiwiki_enabled = false;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to initialize AIWiki");
+                    app.append_assistant_text("\n✘ AIWiki: failed to initialize");
+                }
+            }
+        } else {
+            app.append_assistant_text("\n✔ AIWiki: not initialized");
+        }
+    } else {
+        app.append_assistant_text("\n✔ AIWiki: auto-sync disabled");
+    }
+
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {
         app.status = "resuming session…".to_string();
@@ -375,20 +470,12 @@ pub async fn run_tui(
     let mut sigterm = signal(SignalKind::terminate())?;
 
     while app.is_running {
-        // Drain ALL pending bus events before rendering so the screen
+        // Drain ALL pending events before rendering so the screen
         // always reflects the latest state.
         loop {
-            match bus_rx.try_recv() {
+            match event_rx.try_recv() {
                 Ok(event) => app.handle_event(event),
-                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
-                    app.push_log(
-                        app::LogLevel::Warn,
-                        format!("{n} events dropped (event bus lag)"),
-                        None,
-                    );
-                    // After Lagged, the receiver is reset — continue draining
-                }
-                Err(_) => break, // Empty or Closed
+                Err(_) => break, // Empty or Disconnected
             }
         }
 
@@ -469,18 +556,11 @@ pub async fn run_tui(
                               if got_input {
                                   app.needs_redraw = true;
                               }
-                          }            // Wake up when a new bus event arrives (handled in drain loop above)
-            result = bus_rx.recv() => {
-                match result {
-                    Ok(event) => app.handle_event(event),
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        app.push_log(
-                            app::LogLevel::Warn,
-                            format!("{n} events dropped (event bus lag)"),
-                            None,
-                        );
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                          }            // Wake up when a new event arrives from the lossless mpsc bridge
+            event = event_rx.recv() => {
+                match event {
+                    Some(event) => app.handle_event(event),
+                    None => {} // Bridge task exited
                 }
             }
         }

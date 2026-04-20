@@ -5,22 +5,36 @@
 //! - Sync orchestration (process new/modified/deleted sources)
 //! - Cross-link validation and management
 //! - Auto-sync file watcher
+//! - Referenced source folder support
 
-use crate::extraction::{
-    self, LlmExtractor,
-};
+use crate::extraction::{self, LlmExtractor};
 use crate::ingest::extractors::{DocumentType, extract_text};
 use crate::{Aiwiki, AiwikiError, Result};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::fs;
 
 mod links;
-pub use links::{extract_links, validate_wiki_links, LinkValidationResult};
+pub use links::{LinkValidationResult, extract_links, validate_wiki_links};
 
 mod watcher;
 pub use watcher::{FileWatcher, WatcherConfig};
+
+mod sources;
+pub use sources::{
+    count_source_files, get_source_name, make_ref_key, parse_ref_key, resolve_file_path,
+    scan_source_folder,
+};
+
+mod source_watcher;
+pub use source_watcher::{SourceWatcher, WatchEvent};
+
+mod extraction_worker;
+pub use extraction_worker::{ExtractionWorker, WatcherProgress};
+
+mod watch_session;
+pub use watch_session::AiwikiWatchSession;
 
 /// Shared progress counter for sync operations.
 ///
@@ -152,7 +166,7 @@ pub async fn sync(
 ) -> Result<SyncResult> {
     if !wiki.config.enabled {
         return Err(AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
 
@@ -165,13 +179,64 @@ pub async fn sync(
         let mut new = Vec::new();
         let modified = wiki.state.files.keys().cloned().collect::<Vec<_>>();
         scan_all_files(&raw_dir, &mut new).await?;
+
+        // Also scan all source folders
+        for source in wiki.config.enabled_sources() {
+            let files =
+                scan_source_folder(&wiki.root, source, &wiki.config.ignore_patterns).await?;
+            for file in files {
+                let source_path = wiki.root.join(&source.path);
+                let state_key = if source.is_file {
+                    // For single file sources, use the filename as the relative path
+                    let file_name = source_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&source.path)
+                        .to_string();
+                    make_ref_key(&source.path, &file_name)
+                } else {
+                    // For directories, calculate relative path from source_path
+                    let relative = file
+                        .strip_prefix(&source_path)
+                        .map_err(|e| AiwikiError::Config(e.to_string()))?;
+                    make_ref_key(&source.path, &relative.to_string_lossy())
+                };
+                if !wiki.state.files.contains_key(&state_key) {
+                    new.push(state_key);
+                }
+            }
+        }
         // Remove files that are already tracked from "new"
         new.retain(|f| !wiki.state.files.contains_key(f));
-        crate::state::Changes { new, modified, deleted: Vec::new() }
+
+        crate::state::Changes {
+            new,
+            modified,
+            deleted: Vec::new(),
+        }
     } else {
-        let mut changes = wiki.state.get_changes(&raw_dir).await?;
+        // Use get_all_changes if sources exist
+        let changes = if !wiki.config.sources.is_empty() {
+            wiki.state
+                .get_all_changes(
+                    &raw_dir,
+                    &wiki.root,
+                    &wiki.config.sources,
+                    &wiki
+                        .config
+                        .ignore_patterns
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>(),
+                )
+                .await?
+        } else {
+            wiki.state.get_changes(&raw_dir).await?
+        };
+
         // If an extractor is available, re-process tracked files that have
         // no generated pages (e.g. from a previous sync without an LLM).
+        let mut changes = changes;
         if extractor.is_some() {
             for (path, file_state) in &wiki.state.files {
                 if file_state.generated_pages.is_empty()
@@ -198,13 +263,15 @@ pub async fn sync(
     }
 
     for path in &changes.new {
-        match process_new_source(wiki, path, extractor).await {
+        match process_new_source(wiki, path, extractor, Some(wiki.root.as_path())).await {
             Ok(pages) => {
                 result.new_count += 1;
                 result.pages_created += pages.len();
             }
             Err(e) => {
-                result.errors.push(format!("Failed to process new file {}: {}", path, e));
+                result
+                    .errors
+                    .push(format!("Failed to process new file {}: {}", path, e));
             }
         }
         llm_file_idx += 1;
@@ -212,19 +279,21 @@ pub async fn sync(
             p.current.store(llm_file_idx as u32, Ordering::Relaxed);
         }
         if llm_file_idx < total_llm_files {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
     // Process modified files
     for path in &changes.modified {
-        match process_modified_source(wiki, path, extractor).await {
+        match process_modified_source(wiki, path, extractor, Some(wiki.root.as_path())).await {
             Ok(pages) => {
                 result.updated_count += 1;
                 result.pages_updated += pages.len();
             }
             Err(e) => {
-                result.errors.push(format!("Failed to update file {}: {}", path, e));
+                result
+                    .errors
+                    .push(format!("Failed to update file {}: {}", path, e));
             }
         }
         llm_file_idx += 1;
@@ -232,7 +301,7 @@ pub async fn sync(
             p.current.store(llm_file_idx as u32, Ordering::Relaxed);
         }
         if llm_file_idx < total_llm_files {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
     }
 
@@ -244,7 +313,9 @@ pub async fn sync(
                 result.pages_removed += pages_removed;
             }
             Err(e) => {
-                result.errors.push(format!("Failed to remove file {}: {}", path, e));
+                result
+                    .errors
+                    .push(format!("Failed to remove file {}: {}", path, e));
             }
         }
         if let Some(p) = progress {
@@ -254,17 +325,20 @@ pub async fn sync(
 
     // Validate cross-links
     let validation = validate_wiki_links(wiki).await?;
-    result.broken_links = validation.broken.into_iter().map(|(source, target)| {
-        BrokenLink {
+    result.broken_links = validation
+        .broken
+        .into_iter()
+        .map(|(source, target)| BrokenLink {
             source_file: source.clone(),
             link_text: target.clone(),
             target,
-        }
-    }).collect();
+        })
+        .collect();
 
     // Reload the state that process_new_source / process_modified_source saved,
     // then update the sync timestamp and page count on top of it.
-    let mut state = crate::AiwikiState::load(&wiki.wiki_dir).await
+    let mut state = crate::AiwikiState::load(&wiki.wiki_dir)
+        .await
         .unwrap_or_else(|_| wiki.state.clone());
     state.page_count = count_wiki_pages(&wiki.path("wiki")).await;
     state.mark_synced();
@@ -291,25 +365,45 @@ pub async fn needs_sync(wiki: &Aiwiki) -> Result<bool> {
 pub async fn preview_sync(wiki: &Aiwiki) -> Result<SyncPreview> {
     if !wiki.config.enabled {
         return Err(AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
 
     let raw_dir = wiki.path("raw");
-    let changes = wiki.state.get_changes(&raw_dir).await?;
+
+    // Get changes from all sources
+    let changes = if !wiki.config.sources.is_empty() {
+        wiki.state
+            .get_all_changes(
+                &raw_dir,
+                &wiki.root,
+                &wiki.config.sources,
+                &wiki
+                    .config
+                    .ignore_patterns
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>(),
+            )
+            .await?
+    } else {
+        wiki.state.get_changes(&raw_dir).await?
+    };
 
     let mut new_files = Vec::new();
     let mut modified_files = Vec::new();
     let mut deleted_files = Vec::new();
 
     for path in &changes.new {
-        if let Ok(metadata) = fs::metadata(raw_dir.join(path)).await {
+        let full_path = resolve_file_path(&wiki.root, &raw_dir, path);
+        if let Ok(metadata) = fs::metadata(&full_path).await {
             new_files.push((path.clone(), metadata.len()));
         }
     }
 
     for path in &changes.modified {
-        if let Ok(metadata) = fs::metadata(raw_dir.join(path)).await {
+        let full_path = resolve_file_path(&wiki.root, &raw_dir, path);
+        if let Ok(metadata) = fs::metadata(&full_path).await {
             modified_files.push((path.clone(), metadata.len()));
         }
     }
@@ -381,13 +475,33 @@ impl SyncPreview {
 /// Process a new source file: extract text, call LLM, generate wiki pages.
 ///
 /// If no extractor is provided, only tracks the file hash without generating pages.
+///
+/// # Arguments
+///
+/// * `wiki` - The AIWiki instance
+/// * `relative_path` - The state key (e.g., "readme.md" or "ref:docs/guide.md")
+/// * `extractor` - Optional LLM extractor for generating wiki pages
+/// * `project_root` - Optional project root for resolving ref: paths
 async fn process_new_source(
     wiki: &Aiwiki,
     relative_path: &str,
     extractor: Option<&dyn LlmExtractor>,
+    project_root: Option<&Path>,
 ) -> Result<Vec<PathBuf>> {
     let raw_dir = wiki.path("raw");
-    let full_path = raw_dir.join(relative_path);
+
+    // Resolve the actual file path
+    let (full_path, source_label) = if relative_path.starts_with("ref:") {
+        let root = project_root.ok_or_else(|| {
+            AiwikiError::Config("Project root required for ref: paths".to_string())
+        })?;
+        // Use resolve_file_path which correctly handles single file sources
+        let source_path = resolve_file_path(root, &raw_dir, relative_path);
+        let source = get_source_name(relative_path);
+        (source_path, Some(source.to_string()))
+    } else {
+        (raw_dir.join(relative_path), None)
+    };
 
     let mut generated_page_paths: Vec<String> = Vec::new();
 
@@ -395,9 +509,9 @@ async fn process_new_source(
         // Extract text from the source file
         let doc_type = DocumentType::from_path(&full_path);
         if doc_type.supports_extraction() {
-            let text = extract_text(&full_path, doc_type).await
-                .map_err(|e| AiwikiError::Config(
-                    format!("Text extraction failed for {relative_path}: {e}")))?;
+            let text = extract_text(&full_path, doc_type).await.map_err(|e| {
+                AiwikiError::Config(format!("Text extraction failed for {relative_path}: {e}"))
+            })?;
 
             if text.trim().is_empty() {
                 tracing::info!("Empty text extracted from {relative_path}, skipping LLM");
@@ -415,24 +529,34 @@ async fn process_new_source(
                     wiki.config.extraction.extract_concepts,
                 );
 
-                let response = llm.complete(
-                    extraction::EXTRACTION_SYSTEM_PROMPT,
-                    &prompt,
-                    wiki.config.extraction.max_tokens,
-                    wiki.config.extraction.temperature,
-                ).await.map_err(|e| AiwikiError::Config(
-                    format!("LLM extraction failed for {relative_path}: {e}")))?;
+                let response = llm
+                    .complete(
+                        extraction::EXTRACTION_SYSTEM_PROMPT,
+                        &prompt,
+                        wiki.config.extraction.max_tokens,
+                        wiki.config.extraction.temperature,
+                    )
+                    .await
+                    .map_err(|e| {
+                        AiwikiError::Config(format!(
+                            "LLM extraction failed for {relative_path}: {e}"
+                        ))
+                    })?;
 
-                let result = extraction::parse_extraction_response(&response)
-                    .map_err(|e| AiwikiError::Config(
-                        format!("Failed to parse LLM response for {relative_path}: {e}")))?;
+                let result = extraction::parse_extraction_response(&response).map_err(|e| {
+                    AiwikiError::Config(format!(
+                        "Failed to parse LLM response for {relative_path}: {e}"
+                    ))
+                })?;
 
-                generated_page_paths = crate::pages::write_pages(
-                    &wiki.wiki_dir,
-                    &source_name,
-                    &result,
-                ).await.map_err(|e| AiwikiError::Config(
-                    format!("Failed to write pages for {relative_path}: {e}")))?;
+                generated_page_paths =
+                    crate::pages::write_pages(&wiki.wiki_dir, &source_name, &result)
+                        .await
+                        .map_err(|e| {
+                            AiwikiError::Config(format!(
+                                "Failed to write pages for {relative_path}: {e}"
+                            ))
+                        })?;
             }
         } else {
             tracing::info!("Unsupported doc type for {relative_path}, skipping extraction");
@@ -440,21 +564,48 @@ async fn process_new_source(
     }
 
     // Update state to track the file and its generated pages
-    let mut state = crate::AiwikiState::load(&wiki.wiki_dir).await
+    let mut state = crate::AiwikiState::load(&wiki.wiki_dir)
+        .await
         .unwrap_or_else(|_| wiki.state.clone());
-    state.update_file(&raw_dir, relative_path, generated_page_paths.clone()).await?;
+
+    // For ref: paths, calculate hash directly from full_path
+    let hash = crate::AiwikiState::calculate_hash(&full_path).await?;
+    let metadata = fs::metadata(&full_path).await?;
+
+    state.files.insert(
+        relative_path.to_string(),
+        crate::FileState {
+            hash,
+            modified: chrono::Utc::now(),
+            size: metadata.len(),
+            generated_pages: generated_page_paths.clone(),
+            source: source_label,
+        },
+    );
+
     state.save(&wiki.wiki_dir).await?;
 
-    Ok(generated_page_paths.into_iter().map(PathBuf::from).collect())
+    Ok(generated_page_paths
+        .into_iter()
+        .map(PathBuf::from)
+        .collect())
 }
 
 /// Process a modified source file: re-extract text, regenerate wiki pages.
 ///
 /// Removes old generated pages and creates new ones.
+///
+/// # Arguments
+///
+/// * `wiki` - The AIWiki instance
+/// * `relative_path` - The state key (e.g., "readme.md" or "ref:docs/guide.md")
+/// * `extractor` - Optional LLM extractor for generating wiki pages
+/// * `project_root` - Optional project root for resolving ref: paths
 async fn process_modified_source(
     wiki: &Aiwiki,
     relative_path: &str,
     extractor: Option<&dyn LlmExtractor>,
+    project_root: Option<&Path>,
 ) -> Result<Vec<PathBuf>> {
     // Remove previously generated pages for this source
     if let Some(file_state) = wiki.state.files.get(relative_path) {
@@ -467,7 +618,7 @@ async fn process_modified_source(
     }
 
     // Re-process as if new
-    process_new_source(wiki, relative_path, extractor).await
+    process_new_source(wiki, relative_path, extractor, project_root).await
 }
 
 /// Process a deleted source file.
@@ -546,7 +697,7 @@ async fn count_wiki_pages(wiki_dir: &Path) -> usize {
 pub async fn create_watcher(wiki: &Aiwiki, config: WatcherConfig) -> Result<FileWatcher> {
     if !wiki.config.enabled {
         return Err(AiwikiError::Config(
-            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string()
+            "AIWiki is disabled. Run `/aiwiki on` to enable.".to_string(),
         ));
     }
 
@@ -588,7 +739,10 @@ mod tests {
         };
 
         assert!(preview.is_empty());
-        assert_eq!(preview.to_string(), "No changes to sync. Wiki is up to date.");
+        assert_eq!(
+            preview.to_string(),
+            "No changes to sync. Wiki is up to date."
+        );
     }
 
     #[test]

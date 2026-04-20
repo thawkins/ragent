@@ -83,8 +83,7 @@ pub async fn validate_wiki_links(wiki: &Aiwiki) -> Result<LinkValidationResult> 
                 result.external.push((page_path.clone(), target));
             } else {
                 // Resolve internal link
-                let resolved_target = resolve_internal_link(&wiki_dir, page_path, &target
-                );
+                let resolved_target = resolve_internal_link(&wiki_dir, page_path, &target);
 
                 if existing_pages.contains(&resolved_target) {
                     result.valid.push((page_path.clone(), target.clone()));
@@ -119,10 +118,7 @@ async fn scan_wiki_pages(wiki_dir: &Path) -> Result<HashSet<PathBuf>> {
 }
 
 /// Recursively scan for markdown files.
-async fn scan_markdown_files_recursive(
-    dir: &Path,
-    pages: &mut HashSet<PathBuf>,
-) -> Result<()> {
+async fn scan_markdown_files_recursive(dir: &Path, pages: &mut HashSet<PathBuf>) -> Result<()> {
     let mut entries = fs::read_dir(dir).await?;
 
     while let Some(entry) = entries.next_entry().await? {
@@ -228,8 +224,7 @@ pub async fn suggest_links(wiki: &Aiwiki, content: &str) -> Result<Vec<LinkSugge
 
         // Add title from frontmatter if available
         if let Ok(content) = fs::read_to_string(&page).await {
-            if let Some(title) = extract_title_from_frontmatter(&content
-            ) {
+            if let Some(title) = extract_title_from_frontmatter(&content) {
                 targets.insert(title.to_lowercase(), page.clone());
                 targets.insert(slugify(&title), page.clone());
             }
@@ -244,8 +239,7 @@ pub async fn suggest_links(wiki: &Aiwiki, content: &str) -> Result<Vec<LinkSugge
             // Check if it's already linked
             let links = extract_links_from_text(content);
             let already_linked = links.iter().any(|(_, t)| {
-                t.to_lowercase().contains(&target_name)
-                    || target_name.contains(&t.to_lowercase())
+                t.to_lowercase().contains(&target_name) || target_name.contains(&t.to_lowercase())
             });
 
             if !already_linked {
@@ -282,7 +276,13 @@ fn extract_title_from_frontmatter(content: &str) -> Option<String> {
         let frontmatter = &content[4..end];
         for line in frontmatter.lines() {
             if let Some(value) = line.strip_prefix("title:") {
-                return Some(value.trim().trim_matches('"').trim_matches('\'').to_string());
+                return Some(
+                    value
+                        .trim()
+                        .trim_matches('"')
+                        .trim_matches('\'')
+                        .to_string(),
+                );
             }
         }
     }
