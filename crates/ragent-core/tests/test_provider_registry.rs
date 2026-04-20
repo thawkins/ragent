@@ -182,6 +182,7 @@ fn test_model_info_serde() {
         },
         context_window: 200_000,
         max_output: Some(4096),
+        request_multiplier: None,
     };
 
     let json = serde_json::to_string(&model).unwrap();

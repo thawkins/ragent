@@ -749,6 +749,7 @@ pub async fn list_ollama_cloud_models(
                 },
                 context_window: ctx,
                 max_output: None,
+                request_multiplier: None,
             }
         })
         .collect())

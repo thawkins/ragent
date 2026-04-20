@@ -298,6 +298,10 @@ async fn main() -> Result<()> {
     // Create registries
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());
+    // Apply configured tool-hiding rules so hidden tools are not advertised to the LLM.
+    if !config.hidden_tools.is_empty() {
+        tool_registry.set_hidden(&config.hidden_tools);
+    }
     let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(
         config.permission.clone(),
     )));

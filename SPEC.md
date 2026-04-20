@@ -52,7 +52,7 @@ User ──▶ TUI / HTTP API ──▶ Session Processor ──▶ LLM Provider
 | **Skills** | Loadable skill packs (bundled or custom YAML) that inject tools, prompts, and file context into agent sessions |
 | **Custom Agents** | OASF-based agent profiles with configurable models, tools, permissions, and personality |
 | **Autopilot** | Autonomous operation mode with configurable iteration limits and permission auto-approval |
-| **AIWiki** | Project-scoped knowledge base with LLM-powered extraction, multi-format ingestion (MD/PDF/DOCX/ODT), web interface, entity/concept graphs, and agent-accessible search |
+| **AIWiki** | Project-scoped knowledge base with LLM-powered extraction, multi-format ingestion (MD/PDF/DOCX/ODT/TXT plus supported source code), optional autosync/watch mode, web interface, entity/concept graphs, and agent-accessible search |
 
 ### Who It's For
 
@@ -239,10 +239,11 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 - **Health indicators** — Real-time connectivity status (● green/✗ red/● yellow)
 - **Model discovery** — Automatic model listing from provider APIs
 - **Vision support** — Image attachments for supported models
-- **Reasoning levels** — Copilot reasoning level selection (low/medium/high/none)
+- **Reasoning levels** — Copilot accepts `reasoning_effort` or `reasoning_level` with `low`/`medium`/`high`/`none`
 - **Context window display** — Status bar shows context utilization percentage
 - **Extended thinking** — Anthropic extended thinking/reasoning support
-- **Usage tracking** — Token usage and cost tracking
+- **Usage tracking** — Token usage, quota percentage, and provider plan display where available
+- **Dynamic model metadata** — Provider model pickers surface live-discovered context windows, capabilities, and Copilot premium request multipliers
 
 #### Anthropic Models
 
@@ -303,7 +304,7 @@ The local Ollama provider connects to self-hosted Ollama instances (no authentic
 
 **Features:**
 - **Local Model Execution** — Run models on local hardware (CPU/GPU)
-- **Dynamic Discovery** — Lists locally available models via `/api/tags`
+- **Dynamic Discovery** — Lists locally available models via `/api/tags` at runtime (placeholder defaults are only used as fallback metadata)
 - **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint
 - **Streaming Support** — Full SSE streaming
 
@@ -365,6 +366,7 @@ The HuggingFace provider connects to the HuggingFace Inference API, which expose
 - **Model Loading Detection** — Detects 503 "model loading" responses with estimated wait time
 - **Gated Model Handling** — Clear error messages for models requiring license acceptance
 - **Rate Limit Tracking** — Parses `X-RateLimit-Limit`/`X-RateLimit-Remaining` headers
+- **Tool Name Compatibility** — Internally prefixes tool names sent to the Hugging Face router to avoid streaming-mode name rejection, then maps responses back to canonical ragent tool names
 
 **Provider-Specific Options:**
 
@@ -585,7 +587,7 @@ The primary interface where all conversation happens.
 | Component | Description |
 |-----------|-------------|
 | **Status Bar (Line 1)** | Shows session ID, agent name, working directory, git branch, and current status message |
-| **Status Bar (Line 2)** | Displays provider/model, token usage, active tasks, LSP/MCP status, code index status, and log indicator |
+| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as LSP, code index, AIWiki, and AIWiki autosync |
 | **Messages Panel** | Scrollable conversation history with syntax highlighting and formatted tool calls |
 | **Input Area** | Multi-line text input with autocomplete support for slash commands and file references |
 | **Log Panel** | Toggleable panel showing step-numbered tool calls with pretty-printed JSON |
@@ -605,7 +607,7 @@ Multi-step wizard for configuring LLM providers.
 | **Select Provider** | Choose from Anthropic, OpenAI, GitHub Copilot, Ollama, Ollama Cloud, or Generic OpenAI |
 | **Enter API Key** | Secure input with masked characters and endpoint URL entry for Generic OpenAI |
 | **Device Flow** | GitHub Copilot OAuth flow with user code and verification URL |
-| **Select Model** | Browse available models with metadata (context window, cost, capabilities) |
+| **Select Model** | Browse available models with metadata (context window, cost, capabilities, and Copilot premium request multiplier where available) |
 | **Select Agent** | Choose default agent personality |
 | **Reset Provider** | Remove stored credentials for a provider |
 | **Done** | Confirmation screen showing configured provider and model |
@@ -1041,6 +1043,9 @@ Various inline widgets rendered within the message panel.
 ### 4.4 TUI Features
 
 - **Streaming responses** — Real-time token streaming from LLM
+- **Responsive two-line status bar** — Adapts between full, compact, and minimal layouts based on terminal width
+- **Provider-aware usage display** — Shows quota percentage when available, otherwise token totals and context usage; Copilot plan labels and Ollama context labels are surfaced when known
+- **AIWiki service indicators** — Status bar shows AIWiki enabled state and optional AutoSync state
 - **Step-numbered tool calls** — Cross-session tool call correlation
 - **Pretty-printed JSON** — Formatted tool parameters in log panel
 - **Image attachments** — Visual support with clipboard paste
@@ -2432,7 +2437,7 @@ The memory system can generate visualisation data for TUI display:
 
 #### Status Bar
 
-The TUI status bar displays memory status: `MEM: X blocks, Y entries`
+The TUI status bar displays subsystem health and usage summaries, including memory status, provider quota/token usage, context-window utilization, and AIWiki service state (`AIWiki` / `AutoSync`) when enabled.
 
 ### 7.13 HTTP API
 
@@ -2738,7 +2743,7 @@ AIWiki is an embedded, project-scoped knowledge base system that provides agents
 
 **Key Features:**
 - **Project-scoped** — Each project has its own isolated knowledge base
-- **Multi-format support** — Markdown (.md), Plain text (.txt), PDF (.pdf), Word (.docx), OpenDocument (.odt)
+- **Multi-format support** — Markdown (.md), Plain text (.txt), PDF (.pdf), Word (.docx), OpenDocument (.odt), and recognized source-code files via tree-sitter language detection
 - **Conceptual linking** — Automatic cross-linking between related concepts
 - **AI-powered analysis** — Fact extraction, Q&A generation, contradiction detection
 - **Web interface** — Built-in web UI integrated with ragent-server
@@ -2788,8 +2793,8 @@ AIWiki is an embedded, project-scoped knowledge base system that provides agents
 **Components:**
 | Component | Purpose |
 |-----------|---------|
-| **Document Sources** | Original files in supported formats |
-| **Ingest Pipeline** | Extract text, parse structure, identify concepts |
+| **Document Sources** | Original files in supported document and supported source-code formats |
+| **Ingest Pipeline** | Extract text, generate structured code summaries when applicable, parse structure, identify concepts |
 | **Knowledge Graph** | SQLite-based storage with JSON link graph |
 | **AI Analysis** | LLM-powered extraction of facts, Q&A pairs, contradictions |
 | **Web UI** | HTML templates served via ragent-server |
@@ -2915,7 +2920,7 @@ Ingest documents into the AIWiki knowledge base.
 }
 ```
 
-**Supports:** Markdown, Plain text, PDF, DOCX, ODT
+**Supports:** Markdown, Plain text, PDF, DOCX, ODT, plus recognized source-code files. Code ingestion produces a structured summary of imports, symbols, doc comments, references, and a truncated raw-source block for downstream AI analysis.
 
 ---
 
@@ -5631,6 +5636,8 @@ Content-Type: application/json
     "compaction": { "enabled": true, "block_size_limit": 4096 },
     "eviction": { "auto": false, "stale_days": 30 }
   },
+  "aiwiki_autosync": true,
+  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
   "bash": {
     "allowlist": [],
     "denylist": []
@@ -5640,6 +5647,11 @@ Content-Type: application/json
   ]
 }
 ```
+
+Additional top-level configuration keys:
+
+- `aiwiki_autosync` — When `true` (default), AIWiki auto-syncs on startup and can keep watching configured source folders for changes.
+- `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
 
 ### 16.3 Environment Variables
 
@@ -6792,12 +6804,12 @@ CLI with global flags and subcommands.
 |------|-------|------|---------|-------------|
 | `--model` | `-m` | string | config default | Override LLM model |
 | `--agent` | `-a` | string | `"general"` | Select agent profile |
-| `--log-level` | | string | `"info"` | Log verbosity (trace/debug/info/warn/error) |
+| `--log-level` | | string | `"warn"` | Log verbosity (trace/debug/info/warn/error) |
 | `--no-tui` | | flag | `false` | Run in non-interactive mode |
 | `--yes` | `-y` | flag | `false` | Auto-approve all permission requests |
-| `--log` | | path | | Write logs to file |
+| `--log` | | flag | `false` | Show the log panel in the TUI |
 | `--config` | `-c` | path | `ragent.json` | Configuration file path |
-| `--maxsteps` | | u32 | `100` | Maximum processing steps per turn |
+| `--maxsteps` | | u32 | agent default / override | Maximum number of agentic loop steps for the current run (CLI help currently documents 500 as the default when unspecified) |
 | `--no-git-context` | | flag | `false` | Disable git context in system prompt |
 | `--no-readme-context` | | flag | `false` | Disable README injection in system prompt |
 

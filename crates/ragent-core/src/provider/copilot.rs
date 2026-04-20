@@ -55,6 +55,72 @@ const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 /// Safety margin (seconds) before considering a cached session token expired.
 const TOKEN_EXPIRY_BUFFER_SECS: i64 = 60;
 
+/// Premium request multipliers for GitHub Copilot models (paid plans).
+/// Source: https://docs.github.com/en/copilot/concepts/billing/copilot-requests
+///
+/// Models with multiplier 0 are included with paid plans at no extra cost.
+/// Other multipliers represent the premium request cost per interaction.
+fn copilot_premium_multiplier(model_id: &str) -> Option<f64> {
+    let id_lower = model_id.to_ascii_lowercase();
+
+    // Check for exact matches first, then prefix/contains matches
+    match id_lower.as_str() {
+        // Included models (0x for paid plans)
+        "gpt-4.1" | "gpt-4o" | "gpt-5-mini" | "raptor-mini" => Some(0.0),
+
+        // Low-cost models (0.25x - 0.33x)
+        "claude-haiku-4.5" => Some(0.33),
+        "gemini-3-flash" => Some(0.33),
+        "gpt-5.4-mini" => Some(0.33),
+        "grok-code-fast-1" => Some(0.25),
+
+        // Standard models (1x)
+        "claude-sonnet-4" | "claude-sonnet-4.5" | "claude-sonnet-4.6" => Some(1.0),
+        "gemini-2.5-pro" | "gemini-3.1-pro" => Some(1.0),
+        "gpt-5.2" | "gpt-5.2-codex" | "gpt-5.3-codex" | "gpt-5.4" => Some(1.0),
+
+        // High-cost models (3x+)
+        "claude-opus-4.5" | "claude-opus-4.6" => Some(3.0),
+        "claude-opus-4.7" => Some(7.5),
+
+        // Very high-cost models
+        "claude-opus-4.6-fast" => Some(30.0),
+
+        _ => {
+            // Fallback pattern matching for variations
+            if id_lower.contains("gpt-4o") && !id_lower.contains("mini") {
+                Some(0.0) // GPT-4o variants are included
+            } else if id_lower.contains("gpt-4.1") {
+                Some(0.0) // GPT-4.1 is included
+            } else if id_lower.contains("gpt-5-mini") || id_lower.contains("gpt5-mini") {
+                Some(0.0) // GPT-5 mini is included
+            } else if id_lower.contains("sonnet") {
+                Some(1.0) // Claude Sonnet models
+            } else if id_lower.contains("haiku") {
+                Some(0.33) // Claude Haiku models
+            } else if id_lower.contains("opus") {
+                if id_lower.contains("4.7") {
+                    Some(7.5)
+                } else if id_lower.contains("fast") {
+                    Some(30.0)
+                } else {
+                    Some(3.0) // Claude Opus default
+                }
+            } else if id_lower.contains("o1") || id_lower.contains("o3") {
+                Some(1.0) // OpenAI reasoning models
+            } else if id_lower.contains("gemini") {
+                if id_lower.contains("flash") {
+                    Some(0.33)
+                } else {
+                    Some(1.0) // Gemini Pro models
+                }
+            } else {
+                None // Unknown model
+            }
+        }
+    }
+}
+
 /// Resolved authentication for the Copilot API.
 ///
 /// Depending on the source token type, this may either be a session JWT
@@ -163,6 +229,7 @@ impl Provider for CopilotProvider {
                 },
                 context_window: 128_000,
                 max_output: Some(16_384),
+                request_multiplier: Some(0.0),
             },
             ModelInfo {
                 id: "gpt-4o-mini".to_string(),
@@ -180,6 +247,7 @@ impl Provider for CopilotProvider {
                 },
                 context_window: 128_000,
                 max_output: Some(16_384),
+                request_multiplier: Some(0.0),
             },
             ModelInfo {
                 id: "claude-sonnet-4".to_string(),
@@ -197,6 +265,7 @@ impl Provider for CopilotProvider {
                 },
                 context_window: 200_000,
                 max_output: Some(64_000),
+                request_multiplier: Some(1.0),
             },
             ModelInfo {
                 id: "o3-mini".to_string(),
@@ -214,6 +283,7 @@ impl Provider for CopilotProvider {
                 },
                 context_window: 200_000,
                 max_output: Some(100_000),
+                request_multiplier: Some(1.0),
             },
         ]
     }
@@ -1479,8 +1549,13 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 .is_some_and(|efforts| !efforts.is_empty());
 
             let display_name = entry.name.clone().unwrap_or_else(|| entry.id.clone());
-            let multiplier_suffix = entry
+
+            // Get request multiplier: prefer API response, fall back to hardcoded table
+            let request_multiplier = entry
                 .request_multiplier()
+                .or_else(|| copilot_premium_multiplier(&entry.id));
+
+            let multiplier_suffix = request_multiplier
                 .map(|m| format!(" [req {}x]", format_request_multiplier(m)))
                 .unwrap_or_default();
 
@@ -1506,6 +1581,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                 },
                 context_window,
                 max_output,
+                request_multiplier,
             }
         })
         .collect();
@@ -1764,5 +1840,37 @@ mod tests {
 
         let body = client.build_request_body(&req, &[]);
         assert_eq!(body["reasoning_effort"], json!("high"));
+    }
+
+    #[test]
+    fn test_copilot_premium_multiplier_table() {
+        // Included models (0x)
+        assert_eq!(copilot_premium_multiplier("gpt-4o"), Some(0.0));
+        assert_eq!(copilot_premium_multiplier("GPT-4o"), Some(0.0)); // case insensitive
+        assert_eq!(copilot_premium_multiplier("gpt-4.1"), Some(0.0));
+        assert_eq!(copilot_premium_multiplier("gpt-5-mini"), Some(0.0));
+
+        // Low-cost models (0.25x - 0.33x)
+        assert_eq!(copilot_premium_multiplier("claude-haiku-4.5"), Some(0.33));
+        assert_eq!(copilot_premium_multiplier("gemini-3-flash"), Some(0.33));
+        assert_eq!(copilot_premium_multiplier("grok-code-fast-1"), Some(0.25));
+
+        // Standard models (1x)
+        assert_eq!(copilot_premium_multiplier("claude-sonnet-4"), Some(1.0));
+        assert_eq!(copilot_premium_multiplier("gemini-2.5-pro"), Some(1.0));
+
+        // High-cost models (3x)
+        assert_eq!(copilot_premium_multiplier("claude-opus-4.5"), Some(3.0));
+        assert_eq!(copilot_premium_multiplier("claude-opus-4.6"), Some(3.0));
+
+        // Very high-cost models
+        assert_eq!(copilot_premium_multiplier("claude-opus-4.7"), Some(7.5));
+
+        // Fallback pattern matching
+        assert_eq!(copilot_premium_multiplier("claude-3-sonnet-latest"), Some(1.0)); // contains "sonnet"
+        assert_eq!(copilot_premium_multiplier("claude-3-haiku-latest"), Some(0.33)); // contains "haiku"
+
+        // Unknown models return None
+        assert_eq!(copilot_premium_multiplier("unknown-model"), None);
     }
 }

@@ -243,7 +243,7 @@ fn test_spinner_frame_selection() {
 fn test_colors_module_exists() {
     use ragent_tui::layout_statusbar::colors;
     use ratatui::style::Color;
-    
+
     assert_eq!(colors::HEALTHY, Color::Green);
     assert_eq!(colors::WARNING, Color::Yellow);
     assert_eq!(colors::ERROR, Color::Red);
@@ -262,7 +262,7 @@ fn test_progress_bar_characters() {
 #[test]
 fn test_all_indicators_present() {
     use ragent_tui::layout_statusbar::indicators;
-    
+
     // Verify all indicator constants exist
     assert!(!indicators::HEALTHY.is_empty());
     assert!(!indicators::PARTIAL.is_empty());
@@ -280,7 +280,7 @@ fn test_all_indicators_present() {
 #[test]
 fn test_abbreviations_label_full_mode() {
     use ragent_tui::layout_statusbar::abbreviations;
-    
+
     // In full mode, return original label
     assert_eq!(abbreviations::label("tokens", true), "tokens");
     assert_eq!(abbreviations::label("provider", true), "provider");
@@ -290,7 +290,7 @@ fn test_abbreviations_label_full_mode() {
 #[test]
 fn test_abbreviations_label_compact_mode() {
     use ragent_tui::layout_statusbar::abbreviations;
-    
+
     // In compact mode, return abbreviated label
     assert_eq!(abbreviations::label("tokens", false), "tok");
     assert_eq!(abbreviations::label("provider", false), "pvd");
@@ -302,16 +302,19 @@ fn test_abbreviations_label_compact_mode() {
 #[test]
 fn test_abbreviations_label_unknown() {
     use ragent_tui::layout_statusbar::abbreviations;
-    
+
     // Unknown labels should return as-is
-    assert_eq!(abbreviations::label("unknown_label", false), "unknown_label");
+    assert_eq!(
+        abbreviations::label("unknown_label", false),
+        "unknown_label"
+    );
     assert_eq!(abbreviations::label("unknown_label", true), "unknown_label");
 }
 
 #[test]
 fn test_abbreviations_service() {
     use ragent_tui::layout_statusbar::abbreviations;
-    
+
     assert_eq!(abbreviations::service("lsp_servers"), "LSP");
     assert_eq!(abbreviations::service("code_index"), "Idx");
     assert_eq!(abbreviations::service("aiwiki"), "Wiki");
@@ -322,7 +325,7 @@ fn test_abbreviations_service() {
 #[test]
 fn test_abbreviations_provider() {
     use ragent_tui::layout_statusbar::abbreviations;
-    
+
     assert_eq!(abbreviations::provider("anthropic"), "An");
     assert_eq!(abbreviations::provider("claude"), "Cl");
     assert_eq!(abbreviations::provider("openai"), "OAI");
@@ -335,19 +338,28 @@ fn test_abbreviations_provider() {
 #[test]
 fn test_responsive_mode_determines_abbreviations() {
     use ragent_tui::layout_statusbar::{ResponsiveMode, abbreviations};
-    
+
     // Full mode should not use abbreviations
     let mode = ResponsiveMode::Full;
     assert_eq!(mode, ResponsiveMode::Full);
-    assert_eq!(abbreviations::label("tokens", mode == ResponsiveMode::Full), "tokens");
-    
+    assert_eq!(
+        abbreviations::label("tokens", mode == ResponsiveMode::Full),
+        "tokens"
+    );
+
     // Compact mode should use abbreviations
     let mode = ResponsiveMode::Compact;
     assert_eq!(mode, ResponsiveMode::Compact);
-    assert_eq!(abbreviations::label("tokens", mode == ResponsiveMode::Full), "tok");
-    
+    assert_eq!(
+        abbreviations::label("tokens", mode == ResponsiveMode::Full),
+        "tok"
+    );
+
     // Minimal mode should use abbreviations
     let mode = ResponsiveMode::Minimal;
     assert_eq!(mode, ResponsiveMode::Minimal);
-    assert_eq!(abbreviations::label("tokens", mode == ResponsiveMode::Full), "tok");
+    assert_eq!(
+        abbreviations::label("tokens", mode == ResponsiveMode::Full),
+        "tok"
+    );
 }

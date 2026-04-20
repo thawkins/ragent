@@ -156,7 +156,7 @@ pub mod truncate;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
@@ -355,6 +355,8 @@ pub trait Tool: Send + Sync {
 /// (e.g., MCP tools) after the registry is wrapped in an `Arc`.
 pub struct ToolRegistry {
     tools: RwLock<HashMap<String, Arc<dyn Tool>>>,
+    /// Tool names that are hidden from LLM tool definitions and system-prompt listings.
+    hidden: RwLock<HashSet<String>>,
 }
 
 impl ToolRegistry {
@@ -372,7 +374,19 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: RwLock::new(HashMap::new()),
+            hidden: RwLock::new(HashSet::new()),
         }
+    }
+
+    /// Marks the given tool names as hidden so they are excluded from
+    /// [`definitions`](Self::definitions) and the system-prompt tool listing.
+    /// Hidden tools remain registered and can still be executed if the LLM
+    /// happens to call them by name; they are simply not advertised.
+    ///
+    /// Call this once after constructing the registry, before the first session.
+    pub fn set_hidden(&self, names: &[String]) {
+        let mut hidden = self.hidden.write().expect("tool hidden lock poisoned");
+        *hidden = names.iter().cloned().collect();
     }
 
     /// Registers a tool, keyed by its [`Tool::name`].
@@ -441,8 +455,10 @@ impl ToolRegistry {
     /// ```
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let tools = self.tools.read().expect("tool registry lock poisoned");
+        let hidden = self.hidden.read().expect("tool hidden lock poisoned");
         let mut defs: Vec<ToolDefinition> = tools
             .values()
+            .filter(|t| !hidden.contains(t.name()))
             .map(|t| ToolDefinition {
                 name: t.name().to_string(),
                 description: t.description().to_string(),

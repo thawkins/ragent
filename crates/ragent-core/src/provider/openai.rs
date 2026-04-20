@@ -37,6 +37,7 @@ pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(16_384),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gpt-4o-mini".to_string(),
@@ -54,6 +55,7 @@ pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(16_384),
+            request_multiplier: None,
         },
     ]
 }

@@ -72,6 +72,7 @@ impl Provider for AnthropicProvider {
                 },
                 context_window: 200_000,
                 max_output: Some(64_000),
+                request_multiplier: None,
             },
             ModelInfo {
                 id: "claude-3-5-haiku-latest".to_string(),
@@ -89,6 +90,7 @@ impl Provider for AnthropicProvider {
                 },
                 context_window: 200_000,
                 max_output: Some(8_192),
+                request_multiplier: None,
             },
         ]
     }

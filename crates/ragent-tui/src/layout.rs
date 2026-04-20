@@ -398,83 +398,84 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-                  ProviderSetupStep::SelectModel {
-                      provider_name,
-                      models,
-                      selected,
-                      ..
-                  } => {
-                      // Create header row
-                      let header = Row::new(vec!["Model", "Context", "Cost", "Features"]).style(
-                          Style::default()
-                              .add_modifier(Modifier::BOLD)
-                              .fg(Color::Cyan),
-                      );
-        
-                      // Calculate visible rows based on available height
-                      let header_height = 3; // Header + border lines
-                      let footer_height = 3; // Footer hint + spacing
-                      let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
-                      let visible = available_rows.max(1).min(models.len());
-                      let start = if *selected >= visible {
-                          (*selected + 1).saturating_sub(visible)
-                      } else {
-                          0
-                      };
-                      let end = (start + visible).min(models.len());
-        
-                      let rows: Vec<Row> = models
-                          .iter()
-                          .enumerate()
-                          .skip(start)
-                          .take(end - start)
-                          .map(|(i, entry)| {
-                              let is_selected = i == *selected;
-                              let style = if is_selected {
-                                  Style::default()
-                                      .fg(Color::Cyan)
-                                      .add_modifier(Modifier::BOLD)
-                              } else {
-                                  Style::default().fg(Color::White)
-                              };
-        
-                              // Format context window
-                              let ctx_str = if entry.context_window >= 1_000_000 {
-                                  format!("{}M", entry.context_window / 1_000_000)
-                              } else if entry.context_window >= 1_000 {
-                                  format!("{}K", entry.context_window / 1_000)
-                              } else {
-                                  entry.context_window.to_string()
-                              };
-        
-                              // Format cost: display tier (Free, Low, Medium, etc.) and multiplier (0x, 1x, 3x, etc.)
-                              let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
-        
-                              // Format features
-                              let mut features = Vec::new();
-                              if entry.reasoning {
-                                  features.push("R");
-                              }
-                              if entry.vision {
-                                  features.push("V");
-                              }
-                              if entry.tool_use {
-                                  features.push("T");
-                              }
-                              let features_str = if features.is_empty() {
-                                  "-".to_string()
-                              } else {
-                                  features.join(",")
-                              };
-        
-                              // Add selection indicator
-                              let model_name = if is_selected {
-                                  format!("▸ {}", entry.name)
-                              } else {
-                                  format!("  {}", entry.name)
-                              };
-        
-                              Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)                })
+        ProviderSetupStep::SelectModel {
+            provider_name,
+            models,
+            selected,
+            ..
+        } => {
+            // Create header row
+            let header = Row::new(vec!["Model", "Context", "Cost", "Features"]).style(
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan),
+            );
+
+            // Calculate visible rows based on available height
+            let header_height = 3; // Header + border lines
+            let footer_height = 3; // Footer hint + spacing
+            let available_rows = area.height.saturating_sub(header_height + footer_height) as usize;
+            let visible = available_rows.max(1).min(models.len());
+            let start = if *selected >= visible {
+                (*selected + 1).saturating_sub(visible)
+            } else {
+                0
+            };
+            let end = (start + visible).min(models.len());
+
+            let rows: Vec<Row> = models
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(end - start)
+                .map(|(i, entry)| {
+                    let is_selected = i == *selected;
+                    let style = if is_selected {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+
+                    // Format context window
+                    let ctx_str = if entry.context_window >= 1_000_000 {
+                        format!("{}M", entry.context_window / 1_000_000)
+                    } else if entry.context_window >= 1_000 {
+                        format!("{}K", entry.context_window / 1_000)
+                    } else {
+                        entry.context_window.to_string()
+                    };
+
+                    // Format cost: display tier (Free, Low, Medium, etc.) and multiplier (0x, 1x, 3x, etc.)
+                    let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
+
+                    // Format features
+                    let mut features = Vec::new();
+                    if entry.reasoning {
+                        features.push("R");
+                    }
+                    if entry.vision {
+                        features.push("V");
+                    }
+                    if entry.tool_use {
+                        features.push("T");
+                    }
+                    let features_str = if features.is_empty() {
+                        "-".to_string()
+                    } else {
+                        features.join(",")
+                    };
+
+                    // Add selection indicator
+                    let model_name = if is_selected {
+                        format!("▸ {}", entry.name)
+                    } else {
+                        format!("  {}", entry.name)
+                    };
+
+                    Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)
+                })
                 .collect();
 
             let table = Table::new(
@@ -1881,113 +1882,109 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-                // Git branch
-                if let Some(ref branch) = app.git_branch {
-                    row1_left.push(Span::styled(
-                        format!("│ ⎇ {} ", branch),
-                        Style::default().fg(Color::Green),
-                    ));
-                }
-          
-                // Status message and AIWiki on the right
-                let mut row1_right: Vec<Span<'_>> = Vec::new();
-          
-                // ── AIWiki indicator ────────────────────────────────────────────────────
-                {
-                    // Record x-offset before adding AIWiki spans for click detection.
-                    let aiwiki_x_offset: u16 = row1_left.iter().map(|s| s.width() as u16).sum();
-          
-                    let (tick, tick_color) = if app.aiwiki_enabled {
-                        ("✓", Color::Green)
-                    } else {
-                        ("✗", Color::Red)
-                    };
+    // Git branch
+    if let Some(ref branch) = app.git_branch {
+        row1_left.push(Span::styled(
+            format!("│ ⎇ {} ", branch),
+            Style::default().fg(Color::Green),
+        ));
+    }
+
+    // Status message and AIWiki on the right
+    let mut row1_right: Vec<Span<'_>> = Vec::new();
+
+    // ── AIWiki indicator ────────────────────────────────────────────────────
+    {
+        // Record x-offset before adding AIWiki spans for click detection.
+        let aiwiki_x_offset: u16 = row1_left.iter().map(|s| s.width() as u16).sum();
+
+        let (tick, tick_color) = if app.aiwiki_enabled {
+            ("✓", Color::Green)
+        } else {
+            ("✗", Color::Red)
+        };
+        row1_right.push(Span::styled(
+            "AIWiki: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        row1_right.push(Span::styled(
+            format!("{tick} "),
+            Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
+        ));
+        if app.aiwiki_enabled {
+            let (raw_count, ref_count, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0, 0));
+            let label = if ref_count > 0 {
+                format!("{}src(+{}ref)/{}pg", raw_count, ref_count, pages)
+            } else {
+                format!("{}src/{}pg", raw_count, pages)
+            };
+            row1_right.push(Span::styled(label, Style::default().fg(Color::Cyan)));
+
+            // Sync status indicators
+            let sync_icon = if app.aiwiki_sync_progress.is_some() {
+                "⟳" // Sync is active
+            } else {
+                " "
+            };
+
+            let autosync_icon = if app.aiwiki_autosync {
+                "⊙" // Autosync enabled
+            } else {
+                "○" // Autosync disabled
+            };
+
+            row1_right.push(Span::styled(
+                format!("[{}{}]", sync_icon, autosync_icon),
+                Style::default().fg(if app.aiwiki_sync_progress.is_some() {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                }),
+            ));
+
+            // Show sync progress if active
+            if let Some(ref progress) = app.aiwiki_sync_progress {
+                let current = progress.current.load(std::sync::atomic::Ordering::Relaxed);
+                let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
+                if total > 0 {
                     row1_right.push(Span::styled(
-                        "AIWiki: ",
-                        Style::default().fg(Color::DarkGray),
+                        format!(" {}/{}", current, total),
+                        Style::default().fg(Color::Yellow),
                     ));
-                    row1_right.push(Span::styled(
-                        format!("{tick} "),
-                        Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
-                    ));
-                    if app.aiwiki_enabled {
-                        let (raw_count, ref_count, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0, 0));
-                        let label = if ref_count > 0 {
-                            format!("{}src(+{}ref)/{}pg", raw_count, ref_count, pages)
-                        } else {
-                            format!("{}src/{}pg", raw_count, pages)
-                        };
-                        row1_right.push(Span::styled(label, Style::default().fg(Color::Cyan)));
-          
-                        // Sync status indicators
-                        let sync_icon = if app.aiwiki_sync_progress.is_some() {
-                            "⟳" // Sync is active
-                        } else {
-                            " "
-                        };
-          
-                        let autosync_icon = if app.aiwiki_autosync {
-                            "⊙" // Autosync enabled
-                        } else {
-                            "○" // Autosync disabled
-                        };
-          
-                        row1_right.push(Span::styled(
-                            format!("[{}{}]", sync_icon, autosync_icon),
-                            Style::default().fg(
-                                if app.aiwiki_sync_progress.is_some() {
-                                    Color::Yellow
-                                } else {
-                                    Color::DarkGray
-                                }
-                            )
-                        ));
-          
-                        // Show sync progress if active
-                        if let Some(ref progress) = app.aiwiki_sync_progress {
-                            let current =
-                                progress.current.load(std::sync::atomic::Ordering::Relaxed);
-                            let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
-                            if total > 0 {
-                                row1_right.push(Span::styled(
-                                    format!(" {}/{}", current, total),
-                                    Style::default().fg(Color::Yellow),
-                                ));
-                            } else {
-                                row1_right
-                                    .push(Span::styled(" ...", Style::default().fg(Color::Yellow)));
-                            }
-                        }
-                        row1_right.push(Span::raw(" "));
-                    } else {
-                        row1_right.push(Span::raw(" "));
-                    }
-          
-                    // Width of the AIWiki spans we just added for click detection.
-                    let aiwiki_w: u16 = row1_right.iter().map(|s| s.width() as u16).sum();
-                    app.aiwiki_status_area = Rect::new(rows[0].x + aiwiki_x_offset, rows[0].y, aiwiki_w, 1);
+                } else {
+                    row1_right.push(Span::styled(" ...", Style::default().fg(Color::Yellow)));
                 }
-          
-                if !app.status.is_empty() && app.status != "Ready" {
-                    row1_right.push(Span::styled(
-                        format!("{} ", app.status),
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-          
-                let left_len: usize = row1_left.iter().map(|s| s.content.len()).sum();
-                let right_len: usize = row1_right.iter().map(|s| s.content.len()).sum();
-                let gap = rows[0]
-                    .width
-                    .saturating_sub(left_len as u16 + right_len as u16);
-                let gap_span = Span::raw(" ".repeat(gap as usize));
-          
-                row1_left.push(gap_span);
-                row1_left.extend(row1_right);          
-                let line1 = Line::from(row1_left);
-                frame.render_widget(Paragraph::new(line1), rows[0]);
+            }
+            row1_right.push(Span::raw(" "));
+        } else {
+            row1_right.push(Span::raw(" "));
+        }
+
+        // Width of the AIWiki spans we just added for click detection.
+        let aiwiki_w: u16 = row1_right.iter().map(|s| s.width() as u16).sum();
+        app.aiwiki_status_area = Rect::new(rows[0].x + aiwiki_x_offset, rows[0].y, aiwiki_w, 1);
+    }
+
+    if !app.status.is_empty() && app.status != "Ready" {
+        row1_right.push(Span::styled(
+            format!("{} ", app.status),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let left_len: usize = row1_left.iter().map(|s| s.content.len()).sum();
+    let right_len: usize = row1_right.iter().map(|s| s.content.len()).sum();
+    let gap = rows[0]
+        .width
+        .saturating_sub(left_len as u16 + right_len as u16);
+    let gap_span = Span::raw(" ".repeat(gap as usize));
+
+    row1_left.push(gap_span);
+    row1_left.extend(row1_right);
+    let line1 = Line::from(row1_left);
+    frame.render_widget(Paragraph::new(line1), rows[0]);
     // Row 2: Resources and system state (provider, tokens, tasks, LSP, log)
     let mut row2_left: Vec<Span<'_>> = Vec::new();
 
@@ -2191,7 +2188,6 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
-
 
     let line2 = Line::from(row2_left);
     frame.render_widget(Paragraph::new(line2), rows[1]);

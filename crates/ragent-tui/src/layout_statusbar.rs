@@ -8,10 +8,10 @@
 //! - Line 2: Provider info (left), token usage (center), service status (right)
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    Frame,
 };
 
 use crate::app::App;
@@ -223,7 +223,9 @@ fn build_line1(
     let left_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
 
     // Calculate gap between sections
-    let total_used = left_width.saturating_add(center_width).saturating_add(right_width);
+    let total_used = left_width
+        .saturating_add(center_width)
+        .saturating_add(right_width);
     let gap_size = width.saturating_sub(total_used);
 
     // Add center section
@@ -264,7 +266,9 @@ fn build_line2(
     let left_width: u16 = spans.iter().map(|s| s.width() as u16).sum();
 
     // Calculate gap
-    let total_used = left_width.saturating_add(center_width).saturating_add(right_width);
+    let total_used = left_width
+        .saturating_add(center_width)
+        .saturating_add(right_width);
     let gap_size = width.saturating_sub(total_used);
 
     // Add center section
@@ -324,7 +328,9 @@ fn build_line1_center(
         ));
         spans.push(Span::styled(
             status_icon.to_string(),
-            Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -332,7 +338,11 @@ fn build_line1_center(
 }
 
 /// Build Line 1 right section: Session status
-fn build_line1_right(app: &App, _config: &StatusBarConfig, _mode: ResponsiveMode) -> Vec<Span<'static>> {
+fn build_line1_right(
+    app: &App,
+    _config: &StatusBarConfig,
+    _mode: ResponsiveMode,
+) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
     if !app.status.is_empty() && app.status != "Ready" {
@@ -343,10 +353,7 @@ fn build_line1_right(app: &App, _config: &StatusBarConfig, _mode: ResponsiveMode
                 .add_modifier(Modifier::BOLD),
         ));
     } else {
-        spans.push(Span::styled(
-            "Ready ",
-            Style::default().fg(colors::HEALTHY),
-        ));
+        spans.push(Span::styled("Ready ", Style::default().fg(colors::HEALTHY)));
     }
 
     spans
@@ -374,7 +381,9 @@ fn build_line2_left(
 
         spans.push(Span::styled(
             format!("{} {} ", indicators::HEALTHY, label),
-            Style::default().fg(colors::TEXT).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(colors::TEXT)
+                .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
             format!("{} ", icon),
@@ -466,7 +475,9 @@ fn build_line2_center(
 
     spans.push(Span::styled(
         display_text.0,
-        Style::default().fg(display_text.1).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(display_text.1)
+            .add_modifier(Modifier::BOLD),
     ));
 
     // Context window percentage (after token usage)
@@ -495,10 +506,7 @@ fn build_line2_center(
         ResponsiveMode::Minimal => format!(" {}%", ctx_pct),
     };
 
-    spans.push(Span::styled(
-        ctx_label,
-        Style::default().fg(ctx_color),
-    ));
+    spans.push(Span::styled(ctx_label, Style::default().fg(ctx_color)));
 
     spans
 }
@@ -555,29 +563,31 @@ fn build_line2_right(
         ));
     }
 
-          // AIWiki status
-          {
-              let (icon, color) = if app.aiwiki_enabled {
-                  (indicators::SUCCESS, colors::HEALTHY)
-              } else {
-                  (indicators::ERROR, colors::ERROR)
-              };
-    
-              spans.push(Span::styled(
-                  format!("AIWiki:{icon} "),
-                  Style::default().fg(color),
-              ));
-          }
-    
-                                      // AIWiki autosync status - only show when enabled
-                                      if app.aiwiki_autosync {
-                                          let (icon, color) = (indicators::SUCCESS, colors::HEALTHY);
-                              
-                                          spans.push(Span::styled(
-                                              format!("AutoSync:{icon}"),
-                                              Style::default().fg(color),
-                                          ));
-                                      }          spans}
+    // AIWiki status
+    {
+        let (icon, color) = if app.aiwiki_enabled {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+
+        spans.push(Span::styled(
+            format!("AIWiki:{icon} "),
+            Style::default().fg(color),
+        ));
+    }
+
+    // AIWiki autosync status - only show when enabled
+    if app.aiwiki_autosync {
+        let (icon, color) = (indicators::SUCCESS, colors::HEALTHY);
+
+        spans.push(Span::styled(
+            format!("AutoSync:{icon}"),
+            Style::default().fg(color),
+        ));
+    }
+    spans
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styling Helper Functions
@@ -666,7 +676,10 @@ fn shorten_path(path: &str, max_len: usize) -> String {
     let keep_left = (max_len - 1) / 2;
     let keep_right = max_len - 1 - keep_left;
     let left: String = path.chars().take(keep_left).collect();
-    let right: String = path.chars().skip(path.len().saturating_sub(keep_right)).collect();
+    let right: String = path
+        .chars()
+        .skip(path.len().saturating_sub(keep_right))
+        .collect();
     format!("{left}…{right}")
 }
 

@@ -67,6 +67,15 @@ pub struct Config {
     /// AIWiki automatic sync on startup (default: true).
     #[serde(default = "default_aiwiki_autosync")]
     pub aiwiki_autosync: bool,
+    /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
+    /// Hidden tools remain registered and executable; they are simply not advertised to the model.
+    ///
+    /// Example — suppress all GitHub and GitLab tools:
+    /// ```json
+    /// { "hidden_tools": ["github_list_issues", "github_get_issue", "gitlab_list_mrs"] }
+    /// ```
+    #[serde(default)]
+    pub hidden_tools: Vec<String>,
 }
 
 const fn default_aiwiki_autosync() -> bool {
@@ -578,6 +587,13 @@ impl Config {
         // AIWiki autosync: overlay takes precedence
         if overlay.aiwiki_autosync != default_aiwiki_autosync() {
             base.aiwiki_autosync = overlay.aiwiki_autosync;
+        }
+
+        // hidden_tools: union of base and overlay (both lists are honoured)
+        for name in overlay.hidden_tools {
+            if !base.hidden_tools.contains(&name) {
+                base.hidden_tools.push(name);
+            }
         }
 
         base

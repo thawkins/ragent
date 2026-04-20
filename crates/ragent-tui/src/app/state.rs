@@ -294,9 +294,11 @@ pub struct ModelPickerEntry {
     /// Whether the model supports tool use.
     pub tool_use: bool,
     /// Cost tier label (e.g., "Free", "Low", "Medium", "High", "Premium").
+    /// For Copilot, this shows the premium request tier based on multiplier.
     pub cost_tier: String,
     /// Cost multiplier relative to baseline (e.g., "0x", "1x", "3x", "10x").
-    /// This is typically relative to the least expensive model in the provider.
+    /// For Copilot, this is the premium request multiplier from GitHub docs.
+    /// For other providers, this is relative to the least expensive model.
     pub cost_multiplier: String,
 }
 

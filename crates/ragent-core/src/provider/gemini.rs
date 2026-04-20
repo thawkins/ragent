@@ -37,6 +37,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 1_048_576,
             max_output: Some(65_536),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gemini-2.5-pro-preview-05-06".to_string(),
@@ -54,6 +55,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 1_048_576,
             max_output: Some(65_536),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gemini-2.0-flash".to_string(),
@@ -71,6 +73,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gemini-2.0-flash-lite".to_string(),
@@ -88,6 +91,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gemini-1.5-flash".to_string(),
@@ -105,6 +109,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "gemini-1.5-pro".to_string(),
@@ -122,6 +127,7 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
             },
             context_window: 2_097_152,
             max_output: Some(8_192),
+            request_multiplier: None,
         },
     ]
 }

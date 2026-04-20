@@ -183,6 +183,7 @@ impl Provider for MockOllamaProvider {
             capabilities: Default::default(),
             context_window: 8_192,
             max_output: None,
+            request_multiplier: None,
         }]
     }
 

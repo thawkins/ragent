@@ -194,6 +194,7 @@ impl Provider for OllamaProvider {
             },
             context_window: 131_072,
             max_output: None,
+            request_multiplier: None,
         }]
     }
 
@@ -653,6 +654,7 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
                 },
                 context_window: ctx,
                 max_output: None,
+                request_multiplier: None,
             }
         })
         .collect();

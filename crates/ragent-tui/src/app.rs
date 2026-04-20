@@ -803,9 +803,52 @@ impl App {
 
     /// Calculate cost tier and multiplier for a model based on its per-token costs.
     /// Returns a tuple of (tier_label, multiplier_label).
-    fn calculate_cost_tier(&self, cost_input: f64, cost_output: f64, baseline_cost: f64) -> (String, String) {
+    /// For Copilot models with request_multiplier set, uses the multiplier directly.
+    fn calculate_cost_tier(
+        &self,
+        cost_input: f64,
+        cost_output: f64,
+        baseline_cost: f64,
+        request_multiplier: Option<f64>,
+    ) -> (String, String) {
+        // If we have a Copilot-style request multiplier, use it directly
+        if let Some(mult) = request_multiplier {
+            let tier = if mult == 0.0 {
+                "Included".to_string()
+            } else if mult <= 0.33 {
+                "Low".to_string()
+            } else if mult <= 1.0 {
+                "Standard".to_string()
+            } else if mult <= 3.0 {
+                "High".to_string()
+            } else {
+                "Premium".to_string()
+            };
+
+            let multiplier_str = if mult == 0.0 {
+                "0x".to_string()
+            } else if (mult - mult.round()).abs() < 0.001 {
+                format!("{:.0}x", mult)
+            } else if mult < 1.0 {
+                format!("{:.2}x", mult)
+                    .trim_end_matches('0')
+                    .trim_end_matches('.')
+                    .to_string()
+                    + "x"
+            } else {
+                format!("{:.1}x", mult)
+                    .trim_end_matches('0')
+                    .trim_end_matches('.')
+                    .to_string()
+                    + "x"
+            };
+
+            return (tier, multiplier_str);
+        }
+
+        // Standard per-token cost calculation
         let avg_cost = (cost_input + cost_output) / 2.0;
-        
+
         let tier = if avg_cost == 0.0 {
             "Free".to_string()
         } else if avg_cost <= 0.001 {
@@ -817,7 +860,7 @@ impl App {
         } else {
             "Premium".to_string()
         };
-        
+
         let multiplier = if baseline_cost > 0.0 {
             let factor = avg_cost / baseline_cost;
             // Round to 1 decimal place for display
@@ -833,7 +876,7 @@ impl App {
         } else {
             "0x".to_string()
         };
-        
+
         (tier, multiplier)
     }
 
@@ -844,17 +887,22 @@ impl App {
             .get("huggingface")
             .map(|p| {
                 let models = p.default_models();
-                let baseline_cost = models.iter()
+                let baseline_cost = models
+                    .iter()
                     .map(|m| (m.cost.input + m.cost.output) / 2.0)
                     .filter(|c| *c > 0.0)
                     .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
                     .unwrap_or(0.001);
-                
+
                 models
                     .into_iter()
                     .map(|m| {
-                        let (cost_tier, cost_multiplier) = 
-                            self.calculate_cost_tier(m.cost.input, m.cost.output, baseline_cost);
+                        let (cost_tier, cost_multiplier) = self.calculate_cost_tier(
+                            m.cost.input,
+                            m.cost.output,
+                            baseline_cost,
+                            m.request_multiplier,
+                        );
                         ModelPickerEntry {
                             id: m.id,
                             name: m.name,
@@ -2675,73 +2723,88 @@ impl App {
     /// }
     /// # }
     /// ```
-                /// Helper function to convert a model with cost information into a ModelPickerEntry.
-                /// Calculates cost tier and multiplier relative to the baseline cost in the list.
-                fn model_to_picker_entry(&self, m: ragent_core::provider::ModelInfo, baseline_cost: f64) -> ModelPickerEntry {
-                    let (cost_tier, cost_multiplier) = 
-                        self.calculate_cost_tier(m.cost.input, m.cost.output, baseline_cost);
-                    ModelPickerEntry {
-                        id: m.id,
-                        name: m.name,
-                        context_window: m.context_window,
-                        max_output: m.max_output,
-                        cost_input: m.cost.input,
-                        cost_output: m.cost.output,
-                        reasoning: m.capabilities.reasoning,
-                        vision: m.capabilities.vision,
-                        tool_use: m.capabilities.tool_use,
-                        cost_tier,
-                        cost_multiplier,
-                                          }
-                                      }
-                    
-                        /// Get models available for a given provider.
-                        pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {              let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
-                  if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                      let result = tokio::task::block_in_place(|| {
-                          handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
-                      });
-                      if let Ok(fetched) = result {
-                          if !fetched.is_empty() {
-                              let baseline_cost = fetched.iter()
-                                  .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                  .filter(|c| *c > 0.0)
-                                  .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                  .unwrap_or(0.001);
-                              fetched
-                                  .into_iter()
-                                  .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                  .collect()
-                          } else {
-                              vec![]
-                          }
-                      } else {
-                          vec![]
-                      }
-                  } else {
-                      vec![]
-                  }
-                              } else if provider_id == "ollama_cloud" {
-                            if let Some(token) = self.ollama_cloud_api_key() {
-                                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                                    let result = tokio::task::block_in_place(|| {
-                                        handle.block_on(
-                                            ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
-                                                &token, None,
-                                            ),
-                                        )
-                                    });
-                                    if let Ok(fetched) = result {
-                                        if !fetched.is_empty() {
-                                            let baseline_cost = fetched.iter()
-                                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                                .filter(|c| *c > 0.0)
-                                                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                .unwrap_or(0.001);
-                                            fetched
-                                                .into_iter()
-                                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                                .collect()                        } else {
+    /// Helper function to convert a model with cost information into a ModelPickerEntry.
+    /// Calculates cost tier and multiplier relative to the baseline cost in the list.
+    /// For Copilot models with request_multiplier, uses the multiplier directly.
+    fn model_to_picker_entry(
+        &self,
+        m: ragent_core::provider::ModelInfo,
+        baseline_cost: f64,
+    ) -> ModelPickerEntry {
+        let (cost_tier, cost_multiplier) = self.calculate_cost_tier(
+            m.cost.input,
+            m.cost.output,
+            baseline_cost,
+            m.request_multiplier,
+        );
+        ModelPickerEntry {
+            id: m.id,
+            name: m.name,
+            context_window: m.context_window,
+            max_output: m.max_output,
+            cost_input: m.cost.input,
+            cost_output: m.cost.output,
+            reasoning: m.capabilities.reasoning,
+            vision: m.capabilities.vision,
+            tool_use: m.capabilities.tool_use,
+            cost_tier,
+            cost_multiplier,
+        }
+    }
+
+    /// Get models available for a given provider.
+    pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let result = tokio::task::block_in_place(|| {
+                    handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
+                });
+                if let Ok(fetched) = result {
+                    if !fetched.is_empty() {
+                        let baseline_cost = fetched
+                            .iter()
+                            .map(|m| (m.cost.input + m.cost.output) / 2.0)
+                            .filter(|c| *c > 0.0)
+                            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                            .unwrap_or(0.001);
+                        fetched
+                            .into_iter()
+                            .map(|m| self.model_to_picker_entry(m, baseline_cost))
+                            .collect()
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                }
+            } else {
+                vec![]
+            }
+        } else if provider_id == "ollama_cloud" {
+            if let Some(token) = self.ollama_cloud_api_key() {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle.block_on(
+                            ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
+                                &token, None,
+                            ),
+                        )
+                    });
+                    if let Ok(fetched) = result {
+                        if !fetched.is_empty() {
+                            let baseline_cost = fetched
+                                .iter()
+                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
+                                .filter(|c| *c > 0.0)
+                                .min_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .unwrap_or(0.001);
+                            fetched
+                                .into_iter()
+                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
+                                .collect()
+                        } else {
                             vec![]
                         }
                     } else {
@@ -2753,36 +2816,40 @@ impl App {
             } else {
                 vec![]
             }
-                  } else if provider_id == "copilot" {
-                      // Prefer DB-stored device flow token (works for token exchange),
-                      // then fall back to other token sources for model discovery.
-                      let token = self
-                          .storage
-                          .get_provider_auth("copilot")
-                          .ok()
-                          .flatten()
-                          .filter(|k| !k.is_empty())
-                          .or_else(|| {
-                              let _storage = self.storage.clone();
-                              let db_lookup = move || -> Option<String> { None }; // already checked
-                              ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
-                          });
-                      if let Some(token) = token {
-                          if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                              let result = tokio::task::block_in_place(|| {
-                                  handle.block_on(ragent_core::provider::copilot::list_copilot_models(&token))
-                              });
-                              if let Ok(fetched) = result {
-                                  if !fetched.is_empty() {
-                                      let baseline_cost = fetched.iter()
-                                          .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                          .filter(|c| *c > 0.0)
-                                          .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                          .unwrap_or(0.001);
-                                      fetched
-                                          .into_iter()
-                                          .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                          .collect()                        } else {
+        } else if provider_id == "copilot" {
+            // Prefer DB-stored device flow token (works for token exchange),
+            // then fall back to other token sources for model discovery.
+            let token = self
+                .storage
+                .get_provider_auth("copilot")
+                .ok()
+                .flatten()
+                .filter(|k| !k.is_empty())
+                .or_else(|| {
+                    let _storage = self.storage.clone();
+                    let db_lookup = move || -> Option<String> { None }; // already checked
+                    ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
+                });
+            if let Some(token) = token {
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle.block_on(ragent_core::provider::copilot::list_copilot_models(&token))
+                    });
+                    if let Ok(fetched) = result {
+                        if !fetched.is_empty() {
+                            let baseline_cost = fetched
+                                .iter()
+                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
+                                .filter(|c| *c > 0.0)
+                                .min_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .unwrap_or(0.001);
+                            fetched
+                                .into_iter()
+                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
+                                .collect()
+                        } else {
                             vec![]
                         }
                     } else {
@@ -2813,16 +2880,20 @@ impl App {
                         handle.block_on(ragent_core::provider::huggingface::discover_models(&token))
                     });
                     if let Ok(fetched) = result {
-                                                  if !fetched.is_empty() {
-                                                      let baseline_cost = fetched.iter()
-                                                          .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                                          .filter(|c| *c > 0.0)
-                                                          .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                                          .unwrap_or(0.001);
-                                                      fetched
-                                                          .into_iter()
-                                                          .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                                          .collect()                        } else {
+                        if !fetched.is_empty() {
+                            let baseline_cost = fetched
+                                .iter()
+                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
+                                .filter(|c| *c > 0.0)
+                                .min_by(|a, b| {
+                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .unwrap_or(0.001);
+                            fetched
+                                .into_iter()
+                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
+                                .collect()
+                        } else {
                             self.hf_default_model_entries()
                         }
                     } else {
@@ -2834,23 +2905,24 @@ impl App {
             } else {
                 self.hf_default_model_entries()
             }
-                  } else {
-                      self.provider_registry
-                          .get(provider_id)
-                          .map(|p| {
-                              let models = p.default_models();
-                              let baseline_cost = models.iter()
-                                  .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                  .filter(|c| *c > 0.0)
-                                  .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                                  .unwrap_or(0.001);
-                              models
-                                  .into_iter()
-                                  .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                  .collect()
-                          })
-                          .unwrap_or_default()
-                  };
+        } else {
+            self.provider_registry
+                .get(provider_id)
+                .map(|p| {
+                    let models = p.default_models();
+                    let baseline_cost = models
+                        .iter()
+                        .map(|m| (m.cost.input + m.cost.output) / 2.0)
+                        .filter(|c| *c > 0.0)
+                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                        .unwrap_or(0.001);
+                    models
+                        .into_iter()
+                        .map(|m| self.model_to_picker_entry(m, baseline_cost))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
         // Sort models alphabetically by name
         models.sort_by(|a, b| a.name.cmp(&b.name));
         models
@@ -7562,82 +7634,83 @@ Type `/swarm help` for more info.\n";
                                     self.status = "aiwiki: error".to_string();
                                 }
                             }
-                                                  }
-                                              }
-                                              "show" => {
-                                                  let current_dir = std::env::current_dir()
-                                                      .map_err(|e| e.to_string())
-                                                      .unwrap_or_default();
-                        
-                                                  if !Aiwiki::exists(&current_dir) {
-                                                      self.append_assistant_text(
+                        }
+                    }
+                    "show" => {
+                        let current_dir = std::env::current_dir()
+                            .map_err(|e| e.to_string())
+                            .unwrap_or_default();
+
+                        if !Aiwiki::exists(&current_dir) {
+                            self.append_assistant_text(
                                                           "From: /aiwiki show\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first to create the wiki structure."
                                                       );
-                                                      self.status = "aiwiki: not initialized".to_string();
-                                                  } else {
-                                                      let rt = tokio::runtime::Handle::current();
-                                                      match tokio::task::block_in_place(|| {
-                                                          rt.block_on(Aiwiki::new(&current_dir))
-                                                      }) {
-                                                          Ok(wiki) => {
-                                                              if !wiki.config.enabled {
-                                                                  self.append_assistant_text(
+                            self.status = "aiwiki: not initialized".to_string();
+                        } else {
+                            let rt = tokio::runtime::Handle::current();
+                            match tokio::task::block_in_place(|| {
+                                rt.block_on(Aiwiki::new(&current_dir))
+                            }) {
+                                Ok(wiki) => {
+                                    if !wiki.config.enabled {
+                                        self.append_assistant_text(
                                                                       "From: /aiwiki show\n\n⛔ **AIWiki is currently disabled.**\n\nRun `/aiwiki on` to enable."
                                                                   );
-                                                                  self.status = "aiwiki: disabled".to_string();
-                                                              } else {
-                                                                  // Start web server and open browser
-                                                                  self.open_aiwiki_browser();
-                                                                  self.append_assistant_text(
+                                        self.status = "aiwiki: disabled".to_string();
+                                    } else {
+                                        // Start web server and open browser
+                                        self.open_aiwiki_browser();
+                                        self.append_assistant_text(
                                                                       "From: /aiwiki show\n\n✅ **Opening AIWiki in browser...**\n\nThe web interface is starting. Your default browser should open automatically.\n\nIf the browser doesn't open, visit the URL shown in the logs."
                                                                   );
-                                                                  self.status = "aiwiki: browser opened".to_string();
-                                                              }
-                                                          }
-                                                          Err(e) => {
-                                                              self.append_assistant_text(&format!(
-                                                                  "From: /aiwiki show\n\n❌ **Error loading wiki:** {}",
-                                                                  e
-                                                              ));
-                                                              self.status = "aiwiki: error".to_string();
-                                                          }
-                                                      }
-                                                  }
-                                              }
-                                              "status" => {
-                                                  let current_dir = std::env::current_dir()
-                                                      .map_err(|e| e.to_string())
-                                                      .unwrap_or_default();
-                        
-                                                  if !Aiwiki::exists(&current_dir) {
-                                                      self.append_assistant_text(
+                                        self.status = "aiwiki: browser opened".to_string();
+                                    }
+                                }
+                                Err(e) => {
+                                    self.append_assistant_text(&format!(
+                                        "From: /aiwiki show\n\n❌ **Error loading wiki:** {}",
+                                        e
+                                    ));
+                                    self.status = "aiwiki: error".to_string();
+                                }
+                            }
+                        }
+                    }
+                    "status" => {
+                        let current_dir = std::env::current_dir()
+                            .map_err(|e| e.to_string())
+                            .unwrap_or_default();
+
+                        if !Aiwiki::exists(&current_dir) {
+                            self.append_assistant_text(
                                                                                                                                                                                     "From: /aiwiki status\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` to create the wiki structure."
                                                                                                                                                                                 );
-                                                      self.status = "aiwiki: not initialized".to_string();
-                                                  } else {
-                                                      let rt = tokio::runtime::Handle::current();
-                                                      match tokio::task::block_in_place(|| {
-                                                          rt.block_on(Aiwiki::new(&current_dir))
-                                                      }) {
-                                                          Ok(wiki) => {
-                                                              let stats = wiki.state.stats();
-                                                              let enabled_status = if wiki.config.enabled {
-                                                                  "✅ Enabled"
-                                                              } else {
-                                                                  "⛔ Disabled"
-                                                              };
-                        
-                                                              // Count raw/ and referenced files separately
-                                                              let raw_count = wiki
-                                                                  .state
-                                                                  .files
-                                                                  .keys()
-                                                                  .filter(|k| !k.starts_with("ref:"))
-                                                                  .count();
-                                                              let ref_count = wiki
-                                                                  .state
-                                                                  .files
-                                                                  .keys()                                        .filter(|k| k.starts_with("ref:"))
+                            self.status = "aiwiki: not initialized".to_string();
+                        } else {
+                            let rt = tokio::runtime::Handle::current();
+                            match tokio::task::block_in_place(|| {
+                                rt.block_on(Aiwiki::new(&current_dir))
+                            }) {
+                                Ok(wiki) => {
+                                    let stats = wiki.state.stats();
+                                    let enabled_status = if wiki.config.enabled {
+                                        "✅ Enabled"
+                                    } else {
+                                        "⛔ Disabled"
+                                    };
+
+                                    // Count raw/ and referenced files separately
+                                    let raw_count = wiki
+                                        .state
+                                        .files
+                                        .keys()
+                                        .filter(|k| !k.starts_with("ref:"))
+                                        .count();
+                                    let ref_count = wiki
+                                        .state
+                                        .files
+                                        .keys()
+                                        .filter(|k| k.starts_with("ref:"))
                                         .count();
 
                                     let sources_info = if wiki.config.sources.is_empty() {
@@ -8352,8 +8425,8 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                                          "help" | _ => {
-                                              let help_text = r#"From: /aiwiki help
+                    "help" | _ => {
+                        let help_text = r#"From: /aiwiki help
                                                                                             
                                                                                             📚 **AIWiki Commands**
                                                                                             

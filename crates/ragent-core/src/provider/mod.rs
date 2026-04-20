@@ -37,6 +37,11 @@ pub struct ModelInfo {
     pub context_window: usize,
     /// Maximum number of output tokens, if limited.
     pub max_output: Option<usize>,
+    /// Premium request multiplier for Copilot models (e.g., 0.33, 1.0, 3.0).
+    /// `None` for non-Copilot providers or models without multiplier info.
+    /// This is the billing multiplier per GitHub Copilot documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_multiplier: Option<f64>,
 }
 
 /// Summary information about a provider and the models it offers.

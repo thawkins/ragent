@@ -393,10 +393,11 @@ pub async fn run_tui(
                         app.aiwiki = Some(wiki);
 
                         // Build LLM extractor from current provider/model
-                                                  let model_label = app.aiwiki_model_label();
-                                                  let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-                                                  let extractor: Arc<dyn aiwiki::extraction::LlmExtractor + Send + Sync> =
-                                                      Arc::new(app::TuiLlmExtractor {                                registry: Arc::clone(&app.provider_registry),
+                        let model_label = app.aiwiki_model_label();
+                        let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
+                        let extractor: Arc<dyn aiwiki::extraction::LlmExtractor + Send + Sync> =
+                            Arc::new(app::TuiLlmExtractor {
+                                registry: Arc::clone(&app.provider_registry),
                                 storage: Arc::clone(&app.storage),
                                 provider_id: pid.to_string(),
                                 model_id: mid.to_string(),

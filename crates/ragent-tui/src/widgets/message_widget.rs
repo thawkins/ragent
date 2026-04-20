@@ -1501,10 +1501,7 @@ impl<'a> MessageWidget<'a> {
                     if is_thinking_placeholder && self.message.role == Role::Assistant {
                         lines.push(Line::from(vec![
                             Span::styled("💭 ", theme::think()),
-                            Span::styled(
-                                "Thinking ...",
-                                theme::think(),
-                            ),
+                            Span::styled("Thinking ...", theme::think()),
                         ]));
                         continue;
                     }
@@ -1588,18 +1585,20 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ];
-                                                                                      if summary.is_empty() {
-                                                                                          spans.push(Span::styled(display_name, name_style));
-                                                                                      } else {
-                                                                                          spans.push(Span::styled(format!("{} ", display_name), name_style));
-                                                                                                                                                                                                                                                                                                                      let summary_style = if canonical_tool_name(tool) == "think" {
-                                                                                                                                                                                                                                                                                                                          theme::think_summary()
-                                                                                                                                                                                                                                                                                                                      } else {
-                                                                                                                                                                                                                                                                                                                          Style::default().fg(Color::DarkGray)
-                                                                                                                                                                                                                                                                                                                      };                                                                                                                                                                                      spans.push(Span::styled(summary, summary_style));
-                                                                                                                                                                                  }
-                                                                                                                // Show line range for read tool (and aliases) in bold
-                                                                                                                if canonical_tool_name(tool) == "read" {                        if let Some(range) = read_line_range(&state.output) {
+                    if summary.is_empty() {
+                        spans.push(Span::styled(display_name, name_style));
+                    } else {
+                        spans.push(Span::styled(format!("{} ", display_name), name_style));
+                        let summary_style = if canonical_tool_name(tool) == "think" {
+                            theme::think_summary()
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        };
+                        spans.push(Span::styled(summary, summary_style));
+                    }
+                    // Show line range for read tool (and aliases) in bold
+                    if canonical_tool_name(tool) == "read" {
+                        if let Some(range) = read_line_range(&state.output) {
                             spans.push(Span::styled(
                                 format!(" {}", range),
                                 Style::default()
@@ -1741,21 +1740,22 @@ impl<'a> MessageWidget<'a> {
                                     Style::default().fg(Color::Gray),
                                 )));
                             }
-                                                  } else if tool != "edit" {
-                                                      // Skip result summary for edit tool on success (already shows inline diff)
-                                                      if let Some(result) =
-                                                          tool_result_summary(tool, &state.output, &state.input, self.cwd)
-                                                      {
-                                                          let result_style = if canonical_tool_name(tool) == "think" {
-                                                              theme::think_summary()
-                                                          } else {
-                                                              Style::default().fg(Color::Gray)
-                                                          };
-                                                          lines.push(Line::from(Span::styled(
-                                                              format!("  └ {}", result),
-                                                              result_style,
-                                                          )));
-                                                      }                        }
+                        } else if tool != "edit" {
+                            // Skip result summary for edit tool on success (already shows inline diff)
+                            if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                            {
+                                let result_style = if canonical_tool_name(tool) == "think" {
+                                    theme::think_summary()
+                                } else {
+                                    Style::default().fg(Color::Gray)
+                                };
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    result_style,
+                                )));
+                            }
+                        }
                     }
                     if state.status == ToolCallStatus::Error {
                         let err_msg = state
@@ -1775,7 +1775,8 @@ impl<'a> MessageWidget<'a> {
                             theme::think(),
                         )));
                     }
-                }                MessagePart::Image { path, .. } => {
+                }
+                MessagePart::Image { path, .. } => {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),

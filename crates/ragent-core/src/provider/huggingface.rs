@@ -115,6 +115,7 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(4_096),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "meta-llama/Llama-3.1-70B-Instruct".to_string(),
@@ -132,6 +133,7 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(4_096),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "Qwen/Qwen2.5-Coder-32B-Instruct".to_string(),
@@ -149,6 +151,7 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             },
             context_window: 32_000,
             max_output: Some(4_096),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "Qwen/Qwen2.5-72B-Instruct".to_string(),
@@ -166,6 +169,7 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(4_096),
+            request_multiplier: None,
         },
         ModelInfo {
             id: "deepseek-ai/DeepSeek-R1".to_string(),
@@ -183,6 +187,7 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
             },
             context_window: 128_000,
             max_output: Some(8_192),
+            request_multiplier: None,
         },
     ]
 }
@@ -729,6 +734,7 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
                 },
                 context_window: estimate_context_from_id(&m.model_id),
                 max_output: Some(4_096),
+                request_multiplier: None,
             }
         })
         .collect();
