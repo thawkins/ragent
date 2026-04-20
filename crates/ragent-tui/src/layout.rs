@@ -20,6 +20,7 @@ use ratatui::{
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
+use crate::theme;
 use crate::utils::{ResponsiveBreakpoint, centered_rect, is_below_minimum_size};
 
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
@@ -28,8 +29,8 @@ use crate::app::{
     App, ContextAction, LogLevel, OutputViewTarget, PROVIDER_LIST, ProviderSetupStep, SelectionPane,
 };
 use crate::widgets::message_widget::{
-    capitalize_tool_name, read_line_range, tool_inline_diff, tool_input_summary,
-    tool_result_summary,
+    canonical_tool_name, capitalize_tool_name, read_line_range, tool_inline_diff,
+    tool_input_summary, tool_result_summary,
 };
 
 fn shorten_middle(s: &str, max_chars: usize) -> String {
@@ -2304,17 +2305,21 @@ fn messages_to_lines<'a>(
                         let icon = parts.next().unwrap_or("");
                         let rest = parts.next().unwrap_or("");
                         if !icon.is_empty() {
-                            spans.push(Span::styled(
-                                format!("{} ", icon),
-                                Style::default().fg(Color::DarkGray),
-                            ));
+                            let icon_style = if canonical_tool_name(tool) == "think" {
+                                theme::think_summary()
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            };
+                            spans.push(Span::styled(format!("{} ", icon), icon_style));
                         }
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
                         if !rest.is_empty() {
-                            spans.push(Span::styled(
-                                rest.to_string(),
-                                Style::default().fg(Color::DarkGray),
-                            ));
+                            let summary_style = if canonical_tool_name(tool) == "think" {
+                                theme::think_summary()
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            };
+                            spans.push(Span::styled(rest.to_string(), summary_style));
                         }
                     }
                     if tool == "read" {
@@ -2361,9 +2366,14 @@ fn messages_to_lines<'a>(
                         if let Some(result) =
                             tool_result_summary(tool, &state.output, &state.input, cwd)
                         {
+                            let result_style = if canonical_tool_name(tool) == "think" {
+                                theme::think_summary()
+                            } else {
+                                Style::default().fg(Color::DarkGray)
+                            };
                             lines.push(Line::from(Span::styled(
                                 format!("  └ {}", result),
-                                Style::default().fg(Color::DarkGray),
+                                result_style,
                             )));
                         }
                     }
@@ -2381,9 +2391,7 @@ fn messages_to_lines<'a>(
                     for line in text.lines() {
                         lines.push(Line::from(Span::styled(
                             format!("  💭 {}", line),
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::ITALIC),
+                            theme::think(),
                         )));
                     }
                 }

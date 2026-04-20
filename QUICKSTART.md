@@ -849,6 +849,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/aiwiki init` | Initialize AIWiki |
 | `/aiwiki on` | Enable AIWiki |
 | `/aiwiki off` | Disable AIWiki |
+| `/aiwiki show` | Open web interface in browser |
 | `/aiwiki ingest [path]` | Ingest documents |
 | `/aiwiki sync` | Sync wiki |
 | `/aiwiki status` | Show wiki statistics |

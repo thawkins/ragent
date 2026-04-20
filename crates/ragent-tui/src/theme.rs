@@ -67,6 +67,8 @@ pub mod colors {
     pub const BORDER_INACTIVE: Color = Color::Rgb(100, 100, 100);
     /// Primary text color (white)
     pub const TEXT_PRIMARY: Color = Color::White;
+    /// Think tool reasoning text color (light lavender, high contrast on dark bg)
+    pub const THINK: Color = Color::Rgb(180, 180, 220);
 }
 
 /// High contrast colors (WCAG AAA compliant)
@@ -119,6 +121,8 @@ pub mod high_contrast {
     pub const BORDER_INACTIVE: Color = Color::Rgb(128, 128, 128);
     /// Primary text color.
     pub const TEXT_PRIMARY: Color = Color::White;
+    /// Think tool reasoning text color (bright lavender for high contrast)
+    pub const THINK: Color = Color::Rgb(210, 210, 255);
 }
 
 /// Theme mode enum for switching between default and high contrast themes
@@ -185,6 +189,20 @@ pub fn warning() -> Style {
 /// Info text style (cyan, for informational messages)
 pub fn info() -> Style {
     Style::default().fg(status::INFO)
+}
+
+/// Think tool reasoning text style (lavender, readable on dark backgrounds)
+pub fn think() -> Style {
+    Style::default()
+        .fg(colors::THINK)
+        .add_modifier(Modifier::ITALIC)
+}
+
+/// Think tool summary style (lavender + bold, for tool call headers)
+pub fn think_summary() -> Style {
+    Style::default()
+        .fg(colors::THINK)
+        .add_modifier(Modifier::BOLD)
 }
 
 /// Loading text style (bold cyan with dimmed effect)

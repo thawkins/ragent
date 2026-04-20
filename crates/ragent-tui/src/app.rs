@@ -7562,43 +7562,82 @@ Type `/swarm help` for more info.\n";
                                     self.status = "aiwiki: error".to_string();
                                 }
                             }
-                        }
-                    }
-                    "status" => {
-                        let current_dir = std::env::current_dir()
-                            .map_err(|e| e.to_string())
-                            .unwrap_or_default();
-
-                        if !Aiwiki::exists(&current_dir) {
-                            self.append_assistant_text(
-                                                                                                                                                          "From: /aiwiki status\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` to create the wiki structure."
-                                                                                                                                                      );
-                            self.status = "aiwiki: not initialized".to_string();
-                        } else {
-                            let rt = tokio::runtime::Handle::current();
-                            match tokio::task::block_in_place(|| {
-                                rt.block_on(Aiwiki::new(&current_dir))
-                            }) {
-                                Ok(wiki) => {
-                                    let stats = wiki.state.stats();
-                                    let enabled_status = if wiki.config.enabled {
-                                        "✅ Enabled"
-                                    } else {
-                                        "⛔ Disabled"
-                                    };
-
-                                    // Count raw/ and referenced files separately
-                                    let raw_count = wiki
-                                        .state
-                                        .files
-                                        .keys()
-                                        .filter(|k| !k.starts_with("ref:"))
-                                        .count();
-                                    let ref_count = wiki
-                                        .state
-                                        .files
-                                        .keys()
-                                        .filter(|k| k.starts_with("ref:"))
+                                                  }
+                                              }
+                                              "show" => {
+                                                  let current_dir = std::env::current_dir()
+                                                      .map_err(|e| e.to_string())
+                                                      .unwrap_or_default();
+                        
+                                                  if !Aiwiki::exists(&current_dir) {
+                                                      self.append_assistant_text(
+                                                          "From: /aiwiki show\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` first to create the wiki structure."
+                                                      );
+                                                      self.status = "aiwiki: not initialized".to_string();
+                                                  } else {
+                                                      let rt = tokio::runtime::Handle::current();
+                                                      match tokio::task::block_in_place(|| {
+                                                          rt.block_on(Aiwiki::new(&current_dir))
+                                                      }) {
+                                                          Ok(wiki) => {
+                                                              if !wiki.config.enabled {
+                                                                  self.append_assistant_text(
+                                                                      "From: /aiwiki show\n\n⛔ **AIWiki is currently disabled.**\n\nRun `/aiwiki on` to enable."
+                                                                  );
+                                                                  self.status = "aiwiki: disabled".to_string();
+                                                              } else {
+                                                                  // Start web server and open browser
+                                                                  self.open_aiwiki_browser();
+                                                                  self.append_assistant_text(
+                                                                      "From: /aiwiki show\n\n✅ **Opening AIWiki in browser...**\n\nThe web interface is starting. Your default browser should open automatically.\n\nIf the browser doesn't open, visit the URL shown in the logs."
+                                                                  );
+                                                                  self.status = "aiwiki: browser opened".to_string();
+                                                              }
+                                                          }
+                                                          Err(e) => {
+                                                              self.append_assistant_text(&format!(
+                                                                  "From: /aiwiki show\n\n❌ **Error loading wiki:** {}",
+                                                                  e
+                                                              ));
+                                                              self.status = "aiwiki: error".to_string();
+                                                          }
+                                                      }
+                                                  }
+                                              }
+                                              "status" => {
+                                                  let current_dir = std::env::current_dir()
+                                                      .map_err(|e| e.to_string())
+                                                      .unwrap_or_default();
+                        
+                                                  if !Aiwiki::exists(&current_dir) {
+                                                      self.append_assistant_text(
+                                                                                                                                                                                    "From: /aiwiki status\n\n⚠️ **AIWiki not initialized.**\n\nRun `/aiwiki init` to create the wiki structure."
+                                                                                                                                                                                );
+                                                      self.status = "aiwiki: not initialized".to_string();
+                                                  } else {
+                                                      let rt = tokio::runtime::Handle::current();
+                                                      match tokio::task::block_in_place(|| {
+                                                          rt.block_on(Aiwiki::new(&current_dir))
+                                                      }) {
+                                                          Ok(wiki) => {
+                                                              let stats = wiki.state.stats();
+                                                              let enabled_status = if wiki.config.enabled {
+                                                                  "✅ Enabled"
+                                                              } else {
+                                                                  "⛔ Disabled"
+                                                              };
+                        
+                                                              // Count raw/ and referenced files separately
+                                                              let raw_count = wiki
+                                                                  .state
+                                                                  .files
+                                                                  .keys()
+                                                                  .filter(|k| !k.starts_with("ref:"))
+                                                                  .count();
+                                                              let ref_count = wiki
+                                                                  .state
+                                                                  .files
+                                                                  .keys()                                        .filter(|k| k.starts_with("ref:"))
                                         .count();
 
                                     let sources_info = if wiki.config.sources.is_empty() {
@@ -8313,31 +8352,31 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                    "help" | _ => {
-                        let help_text = r#"From: /aiwiki help
-                                                                      
-                                                                      📚 **AIWiki Commands**
-                                                                      
-                                                                      AIWiki is an embedded, project-scoped knowledge base system.
-                                                                      
-                                                                                                                                                                                                                                                                                              **Commands:**
-                                                                                                                                                                                                                                                                                              • `/aiwiki init` — Initialize the wiki directory structure (auto-enables)
-                                                                                                                                                                                                                                                                                              • `/aiwiki on` — Enable AIWiki system
-                                                                                                                                                                                                                                                                                              • `/aiwiki off` — Disable AIWiki system (no performance impact)
-                                                                                                                                                                                                                                                                                              • `/aiwiki reset [--full]` — Clear all wiki data and generated pages
-                                                                                                                                                                                                                                                                                              • `/aiwiki sync [--force]` — Sync wiki with changes in raw/ folder
-                                                                                                                                                                                                                                                                                              • `/aiwiki ingest <path>` — Copy files from a directory or file into raw/
-                                                                                                                                                                                                                                                                                              • `/aiwiki sources` — List registered source folders
-                                                                                                                                                                                                                                                                                              • `/aiwiki sources add <path|spec>` — Add a referenced source folder
-                                                                                                                                                                                                                                                                                              • `/aiwiki sources remove <path>` — Remove a source folder
-                                                                                                                                                                                                                                                                                              • `/aiwiki sources edit <path> [options]` — Edit source settings
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              • `/aiwiki sources enable/disable <path>` — Toggle source state
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              • `/aiwiki autosync [on|off]` — Enable/disable automatic sync on startup
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              • `/aiwiki analyze <topic> <sources...>` — Generate analysis from sources                                                                                                                                                                                                                                                                                              • `/aiwiki ask <question>` — Query wiki content with citations
-                                                                                                                                                                                                                                                                                              • `/aiwiki review` — Review wiki for contradictions
-                                                                                                                                                                                                                                                                                              • `/aiwiki status` — Show wiki statistics and configuration
-                                                                                                                                                                                                                                                                                              • `/aiwiki help` — Show this help message
-                                                                                                                                                                                                                                                                                              
+                                          "help" | _ => {
+                                              let help_text = r#"From: /aiwiki help
+                                                                                            
+                                                                                            📚 **AIWiki Commands**
+                                                                                            
+                                                                                            AIWiki is an embedded, project-scoped knowledge base system.
+                                                                                            
+                                                                                                                                                                                                                                                                                                                    **Commands:**
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki init` — Initialize the wiki directory structure (auto-enables)
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki on` — Enable AIWiki system
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki off` — Disable AIWiki system (no performance impact)
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki show` — Open AIWiki web interface in default browser
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki reset [--full]` — Clear all wiki data and generated pages
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki sync [--force]` — Sync wiki with changes in raw/ folder
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki ingest <path>` — Copy files from a directory or file into raw/
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki sources` — List registered source folders
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki sources add <path|spec>` — Add a referenced source folder
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki sources remove <path>` — Remove a source folder
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki sources edit <path> [options]` — Edit source settings
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    • `/aiwiki sources enable/disable <path>` — Toggle source state
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    • `/aiwiki autosync [on|off]` — Enable/disable automatic sync on startup
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    • `/aiwiki analyze <topic> <sources...>` — Generate analysis from sources                                                                                                                                                                                                                                                                                              • `/aiwiki ask <question>` — Query wiki content with citations
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki review` — Review wiki for contradictions
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki status` — Show wiki statistics and configuration
+                                                                                                                                                                                                                                                                                                                    • `/aiwiki help` — Show this help message                                                                                                                                                                                                                                                                                              
                                                                                                                                                                                                                                                                                               **Reset Command:**
                                                                                                                                                                                                                                                                                               • `/aiwiki reset` — Clear state and remove generated pages (preserves raw/)
                                                                                                                                                                                                                                                                                               • `/aiwiki reset --full` — Also remove all files from raw/                                                                                                                                              

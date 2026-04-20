@@ -1,32 +1,37 @@
 # Release
 
-## Current Version: 0.1.0-alpha.44
+## Current Version: 0.1.0-alpha.45
+
+### Changed
+
+- Updated workspace version to 0.1.0-alpha.45
+## Previous: 0.1.0-alpha.44
 
 ### Added
 - **TUI Status Bar Redesign - Phases 2-4 Complete**: Core layout engine with visual polish and responsive behavior
-    - **Phase 2 - Core Layout Engine**: New `layout_statusbar` module (529 lines)
-      - `ResponsiveMode` enum: Full (≥120 chars), Compact (80-120 chars), Minimal (<80 chars)
-      - Line 1: Working directory (left), git branch (center), session status (right)
-      - Line 2: Provider + health (left), token usage % + progress bar (center), service status (right)
-      - Intelligent path shortening with HOME → ~ replacement and ellipsis truncation
-      - Dynamic gap calculation for responsive layout across terminal widths
-      - 22 comprehensive unit tests for core layout (PHASE2_STATUSBAR_COMPLETION.md)
-    - **Phase 3 - Visual Polish & Indicators**: Semantic indicators and color coding
-      - `indicators` module: Status indicators (●, ◔, ✗, ✓, ↕, ⟳, •) and progress blocks (█, ░)
-      - `spinner` module: 10-frame animated loading indicator with 45ms timing
-      - `colors` module: Semantic palette (healthy=green, warning=yellow, error=red, in-progress=cyan)
-      - 6 styling helper functions for consistent visual application
-      - Integration with all section builders for semantic feedback
-      - 6 new tests for indicators, spinner, colors, and styling (PHASE3_VISUAL_POLISH_COMPLETION.md)
-    - **Phase 4 - Responsive & Adaptive Behavior**: Dynamic abbreviations and information hiding
-      - `abbreviations` module: Smart label abbreviation (tokens→tok, provider→pvd, context→ctx, etc.)
-      - Service abbreviations (lsp_servers→LSP, code_index→Idx, aiwiki→Wiki, etc.)
-      - Provider abbreviations (anthropic→An, openai→OAI, gpt→GPT, gemini→Gm, etc.)
-      - Mode-based label adaptation (Full labels in Full mode, abbreviated in Compact/Minimal)
-      - Smart information hiding based on terminal width
-      - 6 new tests for abbreviations and responsive behavior (PHASE4_RESPONSIVE_COMPLETE.md)
-    - **Summary**: 636 lines of production code + 353 lines of tests (34 tests, 100% passing)
-    - See individual phase completion reports for detailed documentation
+      - **Phase 2 - Core Layout Engine**: New `layout_statusbar` module (529 lines)
+        - `ResponsiveMode` enum: Full (≥120 chars), Compact (80-120 chars), Minimal (<80 chars)
+        - Line 1: Working directory (left), git branch (center), session status (right)
+        - Line 2: Provider + health (left), token usage % + progress bar (center), service status (right)
+        - Intelligent path shortening with HOME → ~ replacement and ellipsis truncation
+        - Dynamic gap calculation for responsive layout across terminal widths
+        - 22 comprehensive unit tests for core layout (PHASE2_STATUSBAR_COMPLETION.md)
+      - **Phase 3 - Visual Polish & Indicators**: Semantic indicators and color coding
+        - `indicators` module: Status indicators (●, ◔, ✗, ✓, ↕, ⟳, •) and progress blocks (█, ░)
+        - `spinner` module: 10-frame animated loading indicator with 45ms timing
+        - `colors` module: Semantic palette (healthy=green, warning=yellow, error=red, in-progress=cyan)
+        - 6 styling helper functions for consistent visual application
+        - Integration with all section builders for semantic feedback
+        - 6 new tests for indicators, spinner, colors, and styling (PHASE3_VISUAL_POLISH_COMPLETION.md)
+      - **Phase 4 - Responsive & Adaptive Behavior**: Dynamic abbreviations and information hiding
+        - `abbreviations` module: Smart label abbreviation (tokens→tok, provider→pvd, context→ctx, etc.)
+        - Service abbreviations (lsp_servers→LSP, code_index→Idx, aiwiki→Wiki, etc.)
+        - Provider abbreviations (anthropic→An, openai→OAI, gpt→GPT, gemini→Gm, etc.)
+        - Mode-based label adaptation (Full labels in Full mode, abbreviated in Compact/Minimal)
+        - Smart information hiding based on terminal width
+        - 6 new tests for abbreviations and responsive behavior (PHASE4_RESPONSIVE_COMPLETE.md)
+      - **Summary**: 636 lines of production code + 353 lines of tests (34 tests, 100% passing)
+      - See individual phase completion reports for detailed documentation
 
 ### Changed
 - Updated workspace version to 0.1.0-alpha.44

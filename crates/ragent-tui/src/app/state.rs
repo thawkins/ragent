@@ -622,7 +622,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "aiwiki",
-        description: "AIWiki: /aiwiki init | reset | on | off | ingest [path] | sync [--force] | status | help | autosync [on|off]",
+        description: "AIWiki: /aiwiki init | on | off | show | reset | sync [--force] | status | help",
     },
 ];
 

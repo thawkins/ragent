@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.0-alpha.45] - 2025-01-17
+
+### Changed
+- Updated workspace version to 0.1.0-alpha.45
+
 ## [0.1.0-alpha.44] - 2025-01-17
 
 ### Added
@@ -26,9 +31,9 @@
       - Smart information hiding based on terminal width
       - 6 new tests for abbreviations and responsive behavior (PHASE4_RESPONSIVE_COMPLETE.md)
     - **Summary**: 636 lines of production code + 353 lines of tests (34 tests, 100% passing)
-    - See individual phase completion reports for detailed documentation
-
-## [0.1.0-alpha.43] - 2025-01-16
+  ### Fixed
+- **TUI tool result readability** — changed tool result summary text color from DarkGray to Gray for improved visibility on various terminal backgrounds
+- **Think tool accessibility** — updated think tool summary and reasoning block colors from muted white/dark gray to bright cyan for better visibility for visually impaired users
 
 ### Added
 - **AIWiki Milestone 1-6: Complete Knowledge Base System** — An embedded, project-scoped knowledge base for ragent

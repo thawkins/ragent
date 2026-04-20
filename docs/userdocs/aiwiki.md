@@ -79,7 +79,7 @@ AIWiki tracks file hashes in `state.json`. Only new or modified files are proces
 
 | Command | Description |
 |---------|-------------|
-| `/aiwiki` | Open AIWiki in browser |
+| `/aiwiki show` | Open AIWiki in browser |
 | `/aiwiki init` | Initialize wiki structure |
 | `/aiwiki on` | Enable AIWiki |
 | `/aiwiki off` | Disable AIWiki (zero performance impact) |

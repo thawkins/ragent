@@ -2832,6 +2832,7 @@ AIWiki organizes knowledge into four page types:
 /aiwiki init                       # Initialize AIWiki for current project
 /aiwiki on                         # Enable AIWiki
 /aiwiki off                        # Disable AIWiki
+/aiwiki show                       # Open AIWiki web interface in browser
 /aiwiki status                     # Show AIWiki status
 /aiwiki ingest <path>              # Ingest document(s) into AIWiki
 /aiwiki sync                       # Sync wiki with raw/ folder and referenced folders
