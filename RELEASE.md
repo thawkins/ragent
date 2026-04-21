@@ -1,21 +1,18 @@
 # Release
 
-## Current Version: 0.1.0-alpha.46
-
-### Added
-- **Provider metadata improvements** — Copilot model metadata now includes premium request multipliers in model selection and provider status surfaces.
+## Current Version: 0.1.0-alpha.47
 
 ### Changed
-- **SPEC.md refresh** — Documented AIWiki source-code ingestion, AIWiki autosync indicators, hidden-tools configuration, dynamic provider metadata, quota/context status-bar reporting, and current CLI defaults/flags.
-- **TUI status bar** — Expanded second-line status output to show provider-aware usage, context utilization, AIWiki enabled state, and AutoSync when active.
-- **Configuration schema** — Added documented `hidden_tools` support with merge/union behavior across config layers.
+- **Crate reorganization** — Extracted foundation crates from ragent-core (Milestones 1-3 complete)
+  - **ragent-types** (2,733 lines) — Core types, traits, error handling, events, messages
+  - **ragent-config** (1,854 lines) — Configuration loading, permission checking, runtime lists
+  - **ragent-storage** (2,818 lines) — SQLite persistence for sessions, memories, journals, snapshots, teams
+  - **ragent-llm** (6,736 lines) — LLM provider implementations for 8 providers
+  - Reduced ragent-core from 64,909 → 50,800 lines (-21.8%)
+  - Clean dependency chain: ragent-types → ragent-config/ragent-storage/ragent-llm → ragent-core
+  - All tests passing, backward compatibility maintained via re-exports
 
-### Fixed
-- **Hugging Face tool-call compatibility** — Tool names are adapted for router streaming compatibility and mapped back to canonical ragent tool names.
-- **AIWiki DOCX extraction** — Table content extraction formatting cleaned up for ingestion.
-- **Workspace version** — Updated workspace version to 0.1.0-alpha.46.
-
-## Previous: 0.1.0-alpha.45
+## Previous: 0.1.0-alpha.46
 
 ### Changed
 - Updated workspace version to 0.1.0-alpha.45
