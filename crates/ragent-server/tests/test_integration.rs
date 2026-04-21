@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use ragent_agent as ragent_core;
 use ragent_core::config::Config;
 use ragent_core::event::{Event, EventBus};
 use ragent_core::permission::PermissionChecker;
@@ -37,6 +38,7 @@ fn test_state(token: &str) -> AppState {
         code_index: std::sync::OnceLock::new(),
         stream_config: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
+        auto_approve: false,
     });
     AppState {
         event_bus,

@@ -1,0 +1,132 @@
+//! LSP hover tool.
+//!
+//! Provides [`LspHoverTool`], which queries the LSP server for type information
+//! and documentation at a specific position in a source file.
+
+use anyhow::{Context as _, Result};
+use serde_json::{Value, json};
+
+use super::{Tool, ToolContext, ToolOutput};
+
+/// Returns type information and documentation at a specific position in a file.
+///
+/// Delegates to the LSP server's `textDocument/hover` request. Useful for
+/// understanding the type of an expression, reading doc-comments, or
+/// investigating what a function signature looks like without navigating to
+/// its definition.
+pub struct LspHoverTool;
+
+#[async_trait::async_trait]
+impl Tool for LspHoverTool {
+    /// Returns the tool name.
+    fn name(&self) -> &'static str {
+        "lsp_hover"
+    }
+
+    fn description(&self) -> &'static str {
+        "Get type information and documentation for a symbol at a specific line and column \
+         in a source file using the Language Server Protocol. \
+         Requires an LSP server configured for the file's language."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the source file"
+                },
+                "line": {
+                    "type": "integer",
+                    "description": "1-based line number"
+                },
+                "column": {
+                    "type": "integer",
+                    "description": "1-based column (character) number"
+                }
+            },
+            "required": ["path", "line", "column"]
+        })
+    }
+
+    /// Returns the permission category.
+    fn permission_category(&self) -> &'static str {
+        "lsp:read"
+    }
+
+    /// Executes the LSP hover query.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Required parameters (`path`, `line`, `column`) are missing or invalid
+    /// - The file path cannot be resolved or canonicalized
+    /// - No LSP manager is configured in the context
+    /// - No LSP server is available for the file's language/extension
+    /// - The document cannot be opened by the LSP server
+    /// - The LSP hover request fails
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
+        let path_str = input["path"]
+            .as_str()
+            .context("Missing required 'path' parameter")?;
+        let line = input["line"]
+            .as_u64()
+            .context("Missing required 'line' parameter")? as u32;
+        let column = input["column"]
+            .as_u64()
+            .context("Missing required 'column' parameter")? as u32;
+
+        // LSP positions are 0-based; ragent exposes 1-based to the LLM.
+        let lsp_line = line.saturating_sub(1);
+        let lsp_char = column.saturating_sub(1);
+
+        let path = ctx.working_dir.join(path_str);
+        let path = path
+            .canonicalize()
+            .with_context(|| format!("Cannot resolve path: {path_str}"))?;
+
+        let lsp = ctx
+            .lsp_backend
+            .as_ref()
+            .context("No LSP backend — add a server to ragent.json 'lsp' section")?;
+        let result = lsp
+            .hover(&path, lsp_line, lsp_char)
+            .await
+            .context("LSP hover request failed")?;
+
+        let content = match result {
+            None => format!("No hover information available at {path_str}:{line}:{column}"),
+            Some(hover) => {
+                let text = match &hover.contents {
+                    lsp_types::HoverContents::Scalar(markup) => markup_to_text(&markup),
+                    lsp_types::HoverContents::Array(markups) => markups
+                        .iter()
+                        .map(markup_to_text)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                    lsp_types::HoverContents::Markup(markup) => markup.value.clone(),
+                };
+                format!("Hover at {path_str}:{line}:{column}\n\n{text}")
+            }
+        };
+
+        Ok(ToolOutput {
+            content,
+            metadata: Some(json!({
+                "path": path_str,
+                "line": line,
+                "column": column,
+            })),
+        })
+    }
+}
+
+fn markup_to_text(markup: &lsp_types::MarkedString) -> String {
+    match markup {
+        lsp_types::MarkedString::String(s) => s.clone(),
+        lsp_types::MarkedString::LanguageString(ls) => {
+            format!("```{}\n{}\n```", ls.language, ls.value)
+        }
+    }
+}

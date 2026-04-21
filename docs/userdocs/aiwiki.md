@@ -21,7 +21,7 @@ AIWiki is an embedded, project-scoped knowledge base system for ragent. It compi
 /aiwiki init
 ```
 
-This creates the `aiwiki/` directory structure:
+This creates the `aiwiki/ directory structure:
 - `aiwiki/raw/` — Place source documents here
 - `aiwiki/wiki/` — Generated markdown pages
 - `aiwiki/static/` — Web UI assets
@@ -290,4 +290,4 @@ Use `/aiwiki sync --force` to re-process all files.
 ## See Also
 
 - [AIWIKIPLAN.md](../AIWIKIPLAN.md) — Implementation plan
-- Examples: `examples/aiwiki/`
+- Examples: `examples/aiwiki/

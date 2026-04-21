@@ -333,7 +333,7 @@ Based on project structure analysis:
 ```
 ragent/
 ├── ragent-core/    # Types, storage, config, providers, tools, agents
-├── ragent-code/    # Codebase indexing, Tantivy FTS, SQLite store
+├── ragent-codeindex/    # Codebase indexing, Tantivy FTS, SQLite store
 ├── ragent-server/  # Axum HTTP routes, SSE streaming
 └── ragent-tui/     # Ratatui terminal interface
 ```
@@ -814,7 +814,7 @@ limit: 10000
 # Project: ragent
 
 ## Architecture
-- Workspace with 4 crates: ragent-core, ragent-code, ragent-server, ragent-tui
+- Workspace with 4 crates: ragent-core, ragent-codeindex, ragent-server, ragent-tui
 - Event bus for real-time updates
 - SQLite for persistence, Tantivy for search
 

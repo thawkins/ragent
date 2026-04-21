@@ -1,0 +1,57 @@
+[package]
+name = "ragent-tools-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Tim Hawkins"]
+description = "Essential file, shell, and search tools for ragent"
+repository = "https://github.com/thawkins/ragent"
+
+[dependencies]
+ragent-types = { path = "../ragent-types" }
+ragent-config = { path = "../ragent-config" }
+ragent-storage = { path = "../ragent-storage" }
+
+# Core async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# File operations
+glob = { workspace = true }
+globset = { workspace = true }
+walkdir = "2.5"
+similar = { workspace = true }
+lru = { workspace = true }
+
+# Search tools
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+ignore = { workspace = true }
+regex = { workspace = true }
+rayon = { workspace = true }
+
+# Shell utilities
+which = "7.0"
+
+# Process management
+nix = { version = "0.29", features = ["signal", "process"] }
+
+# Utilities
+chrono = { workspace = true }
+sha2 = "0.10"
+dashmap = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.14"

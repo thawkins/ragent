@@ -1,0 +1,37 @@
+[package]
+name = "ragent-aiwiki"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+serde_yaml = { workspace = true }
+regex = { workspace = true }
+async-recursion = "1"
+async-trait = { workspace = true }
+axum = { workspace = true }
+docx-rust = { workspace = true }
+lopdf = { workspace = true }
+pdf-extract = { workspace = true }
+calamine = { workspace = true }
+quick-xml = { workspace = true }
+zip = { workspace = true }
+  ragent-codeindex = { path = "../ragent-codeindex" }
+  globset = "0.4"
+  notify = "7.0"
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+tempfile = "3.5"
+globset = "0.4"

@@ -170,8 +170,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .unwrap_or_default()
     };
 
-    // Helper: truncate to standard 100 chars
-    let trunc50 = |s: &str| truncate_str(s, 100);
+    // Helper: keep inline tool summaries compact.
+    let trunc50 = |s: &str| truncate_str(s, 50);
 
     match tool {
         // ═══════════════════════════════════════════════════════════════════

@@ -1,0 +1,48 @@
+[package]
+name = "ragent-codeindex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Codebase indexing and structured search for ragent"
+
+[dependencies]
+blake3 = { workspace = true }
+ignore = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+rayon = { workspace = true }
+tree-sitter = "0.26"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-go = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-hcl = "1"
+tree-sitter-openscad-ng = "0.7"
+tree-sitter-cmake = "0.7"
+tree-sitter-groovy = "0.1"
+tree-sitter-kotlin-ng = "1"
+tree-sitter-xml = "0.7"
+tantivy = "0.22"
+notify = "7.0"
+lru = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.5"
+tokio = { workspace = true, features = ["full", "test-util"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "bench_indexing"
+harness = false
+
+[lints]
+workspace = true

@@ -8,7 +8,7 @@ AIWiki is an embedded, project-scoped knowledge base system for ragent, inspired
 
 | Feature | axiom-wiki | ragent AIWiki |
 |---------|-----------|---------------|
-| Storage | `axiom/` directory | `[PROJECT_ROOT]/aiwiki/` |
+| Storage | `axiom/` directory | `[PROJECT_ROOT]/aiwiki/ |
 | CLI | Standalone tool | Embedded slash commands (`/aiwiki`) |
 | Integration | External process | Native HTTP server + slash commands |
 | LLM | Configurable provider | Uses ragent's configured provider |
@@ -210,7 +210,7 @@ Engineering lead at Acme Corp...
 #### Tasks
 
 1. ✅ **T1.1 - Create aiwiki crate structure**
-   - Create `crates/aiwiki/` with Cargo.toml
+   - Create `crates/ragent-aiwiki/ with Cargo.toml
    - Define public API module structure
    - Add to workspace Cargo.toml
 
@@ -483,7 +483,7 @@ Engineering lead at Acme Corp...
 ### Crate Structure
 
 ```
-crates/aiwiki/
+crates/ragent-aiwiki/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs              # Public API
@@ -558,7 +558,7 @@ ragent-core = { path = "../ragent-core" }
 ### Integration Points
 
 1. **HTTP Server Integration** (`crates/ragent-server/src/`)
-   - Add `aiwiki` module to server routes
+   - Add `ragent-aiwiki` module to server routes
    - Mount at `/aiwiki/*` 
    - Serve static files, pages, search, graph
 

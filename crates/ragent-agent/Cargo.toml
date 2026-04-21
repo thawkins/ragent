@@ -1,0 +1,95 @@
+[package]
+name = "ragent-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+num_cpus = { workspace = true }
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+fs2 = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+globset = { workspace = true }
+glob = { workspace = true }
+html2text = { workspace = true }
+similar = { workspace = true }
+tokio-stream = { workspace = true }
+async-stream = { workspace = true }
+futures = { workspace = true }
+dirs = { workspace = true }
+pin-project-lite = { workspace = true }
+bytes = { workspace = true }
+regex = { workspace = true }
+base64 = { workspace = true }
+rmcp = { workspace = true }
+docx-rust = { workspace = true }
+calamine = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+ooxmlsdk = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
+spreadsheet-ods = { workspace = true }
+printpdf = { workspace = true }
+pdf-extract = { workspace = true }
+lopdf = { workspace = true }
+serde_yaml = { workspace = true }
+lsp-types = { workspace = true }
+url = { workspace = true }
+rand = { workspace = true }
+grep-regex = { workspace = true }
+grep-searcher = { workspace = true }
+ignore = { workspace = true }
+dashmap = { workspace = true }
+lru = { workspace = true }
+rayon = { workspace = true }
+ragent-aiwiki = { path = "../ragent-aiwiki" }
+ragent-codeindex = { path = "../ragent-codeindex" }
+ragent-config = { path = "../ragent-config" }
+ragent-llm = { path = "../ragent-llm" }
+ragent-storage = { path = "../ragent-storage" }
+ragent-tools-core = { path = "../ragent-tools-core" }
+ragent-tools-extended = { path = "../ragent-tools-extended" }
+ragent-tools-vcs = { path = "../ragent-tools-vcs" }
+ragent-types = { path = "../ragent-types" }
+
+[features]
+default = []
+embeddings = ["ort", "tokenizers", "ndarray"]
+
+[dependencies.ort]
+version = "2.0.0-rc.12"
+features = ["download-binaries", "load-dynamic"]
+optional = true
+
+[dependencies.tokenizers]
+version = "0.21"
+features = ["onig"]
+optional = true
+
+[dependencies.ndarray]
+version = "0.17"
+optional = true
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+tempfile = "3.5"
+criterion = { version = "0.5", features = ["async_tokio"] }
+serial_test = "3.2"

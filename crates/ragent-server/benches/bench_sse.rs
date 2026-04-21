@@ -8,6 +8,7 @@
 #![allow(missing_docs)]
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use ragent_agent as ragent_core;
 use ragent_core::event::{Event, FinishReason};
 use ragent_server::sse::{event_to_parts, event_to_sse};
 

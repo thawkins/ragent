@@ -12,6 +12,7 @@ use std::sync::atomic::AtomicBool;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use ragent_agent as ragent_core;
 use tracing_subscriber::EnvFilter;
 
 use ragent_core::{
@@ -95,7 +96,7 @@ struct Cli {
     no_tui: bool,
 
     /// Auto-approve all permissions
-    #[arg(long, global = true)]
+    #[arg(long, alias = "no-prompt", global = true)]
     yes: bool,
 
     /// Show the log panel in the TUI
@@ -366,6 +367,7 @@ async fn main() -> Result<()> {
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config,
+        auto_approve: cli.yes,
     });
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)

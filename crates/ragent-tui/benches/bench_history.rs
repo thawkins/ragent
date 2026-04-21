@@ -37,6 +37,10 @@ fn make_app() -> App {
         lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
+        code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: ragent_core::config::StreamConfig::default(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

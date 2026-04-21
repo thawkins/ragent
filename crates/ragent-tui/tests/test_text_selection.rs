@@ -21,6 +21,7 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
+use ragent_team::team::{TeamConfig, TeamMember};
 use ragent_tui::App;
 use ragent_tui::app::{
     ContextAction, ContextMenuState, OutputViewState, OutputViewTarget, ScreenMode, SelectionPane,
@@ -45,6 +46,9 @@ fn make_app() -> App {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: ragent_core::config::StreamConfig::default(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -201,7 +205,7 @@ fn test_clicking_active_agents_row_opens_output_view() {
         reported: false,
         waiter_count: 0,
     });
-    app.handle_mouse_event(mouse_down(2, 13));
+    app.handle_mouse_event(mouse_down(2, 12));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("child-s1"));
 }
@@ -211,13 +215,13 @@ fn test_clicking_teams_row_opens_output_view() {
     let mut app = make_app();
     app.session_id = Some("lead-s1".to_string());
     app.show_teams_window = true;
-    app.active_team = Some(ragent_core::team::TeamConfig::new("alpha", "lead-s1"));
-    let mut member = ragent_core::team::TeamMember::new("writer", "tm-001", "general");
+    app.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
+    let mut member = TeamMember::new("writer", "tm-001", "general");
     member.session_id = Some("tm-s1".to_string());
     app.team_members.push(member);
     app.teams_area = Rect::new(0, 20, 80, 8);
 
-    app.handle_mouse_event(mouse_down(2, 23));
+    app.handle_mouse_event(mouse_down(2, 22));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("tm-s1"));
 }
@@ -269,7 +273,7 @@ fn test_clicking_agents_button_toggles_agents_window() {
 #[test]
 fn test_clicking_teams_button_toggles_teams_window() {
     let mut app = make_app();
-    app.active_team = Some(ragent_core::team::TeamConfig::new("alpha", "lead-s1"));
+    app.active_team = Some(TeamConfig::new("alpha", "lead-s1"));
     app.teams_button_area = Rect::new(12, 30, 9, 3);
 
     app.handle_mouse_event(mouse_down(13, 31));

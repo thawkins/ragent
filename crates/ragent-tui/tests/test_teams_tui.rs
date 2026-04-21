@@ -22,9 +22,9 @@ use ragent_core::{
     provider,
     session::{SessionManager, processor::SessionProcessor},
     storage::Storage,
-    team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore},
     tool,
 };
+use ragent_team::team::{MemberStatus, Task, TaskStatus, TeamConfig, TeamMember, TeamStore};
 use ragent_tui::App;
 use ragent_tui::app::{LogEntry, LogLevel};
 use ratatui::{Terminal, backend::TestBackend};
@@ -50,6 +50,9 @@ fn make_app() -> App {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: ragent_core::config::StreamConfig::default(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

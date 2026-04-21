@@ -52,7 +52,7 @@
 
 ### Added
 - **AIWiki Milestone 1-6: Complete Knowledge Base System** — An embedded, project-scoped knowledge base for ragent
-    - New `aiwiki` crate with full knowledge base infrastructure
+    - New `ragent-aiwiki` crate with full knowledge base infrastructure
     - Directory initialization (`/aiwiki init`), enable/disable system (`/aiwiki on|off`)
     - Document ingestion pipeline supporting Markdown, Plain Text, PDF, DOCX, ODT
     - Sync & auto-update with file watcher, broken link detection
@@ -88,7 +88,7 @@
 
 ### Added
 - **AIWiki Milestone 1-6: Complete Knowledge Base System** — An embedded, project-scoped knowledge base for ragent
-  - New `aiwiki` crate with full knowledge base infrastructure
+  - New `ragent-aiwiki` crate with full knowledge base infrastructure
   - Directory initialization (`/aiwiki init`), enable/disable system (`/aiwiki on|off`)
   - Document ingestion pipeline supporting Markdown, Plain Text, PDF, DOCX, ODT
   - Sync & auto-update with file watcher, broken link detection
@@ -110,8 +110,8 @@
 
 ### Added
 - **AIWiki Milestone 1: Core Infrastructure** — An embedded, project-scoped knowledge base system for ragent
-  - New `aiwiki` crate with core infrastructure for knowledge base management
-  - Directory initialization (`/aiwiki init`): Creates `aiwiki/` directory structure with config, state tracking, and organized subdirectories
+  - New `ragent-aiwiki` crate with core infrastructure for knowledge base management
+  - Directory initialization (`/aiwiki init`): Creates `aiwiki/ directory structure with config, state tracking, and organized subdirectories
   - Configuration management: `config.json` with wiki name, sync mode, LLM model, extraction settings, and ignore patterns
   - **Enable/Disable system**: `enabled` field in config.json controls AIWiki activation
     - `/aiwiki init` auto-enables the wiki (sets `enabled: true`)
@@ -159,7 +159,7 @@
 - **AIWiki Milestone 4: Web Interface (ragent-server Integration)** — Web-based wiki browsing
   - HTML templates for wiki pages, search results, graph visualization, and status dashboard
   - CSS and JavaScript for responsive dark/light theme and interactivity
-  - HTTP routes: `/aiwiki/`, `/aiwiki/page/:path`, `/aiwiki/edit/:path`, `/aiwiki/search`, `/aiwiki/graph`, `/aiwiki/status`
+  - HTTP routes: `/aiwiki/, `/aiwiki/page/:path`, `/aiwiki/edit/:path`, `/aiwiki/search`, `/aiwiki/graph`, `/aiwiki/status`
   - Page editing with frontmatter preservation
   - Full-text search with keyword matching and relevance scoring
   - Interactive graph visualization with D3.js
@@ -326,7 +326,7 @@
   - SSE event `memory_searched` in HTTP server
   - Embedding evaluation document at `docs/performance/embedding-evaluation.md`
 - **Code index — multi-language support** (Milestone 6) — Added tree-sitter parsers for Python, TypeScript/JavaScript (TS/TSX/JS/JSX), Go, C/C++, and Java alongside the existing Rust parser, bringing the total to 7 supported languages; each parser extracts functions, classes/structs, interfaces, enums, imports, type aliases, constants, and more
-- **Code index benchmarks** — Criterion-based benchmarks (`cargo bench -p ragent-code`) covering per-language parse throughput, store upsert, FTS search latency, and full 7-file indexing
+- **Code index benchmarks** — Criterion-based benchmarks (`cargo bench -p ragent-codeindex`) covering per-language parse throughput, store upsert, FTS search latency, and full 7-file indexing
 - **Code index config persistence** — `code_index` section in `ragent.json` for persisting `enabled`, `max_file_size`, `extra_exclude_dirs`, and `extra_exclude_patterns`
 
 ### Fixed

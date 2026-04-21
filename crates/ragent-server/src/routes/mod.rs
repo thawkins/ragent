@@ -23,6 +23,7 @@ use axum::{
     routing::{get, post},
 };
 use futures::stream::StreamExt;
+use ragent_agent as ragent_core;
 use serde::{Deserialize, Serialize};
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::cors::CorsLayer;
@@ -38,7 +39,7 @@ use ragent_core::{
 };
 
 use crate::sse::event_to_sse;
-use prompt_opt::{Completer, OptMethod, optimize};
+use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 /// Shared application state passed to every Axum handler.
 #[derive(Clone)]
@@ -434,6 +435,7 @@ async fn abort_session(
 #[serde(rename_all = "lowercase")]
 enum PermissionReplyDecision {
     Allow,
+    Always,
     Deny,
 }
 
@@ -448,10 +450,16 @@ async fn reply_permission(
     Json(body): Json<PermissionReply>,
 ) -> impl IntoResponse {
     let allowed = body.decision != PermissionReplyDecision::Deny;
+    let decision = match body.decision {
+        PermissionReplyDecision::Allow => ragent_core::permission::PermissionDecision::Once,
+        PermissionReplyDecision::Always => ragent_core::permission::PermissionDecision::Always,
+        PermissionReplyDecision::Deny => ragent_core::permission::PermissionDecision::Deny,
+    };
     state.event_bus.publish(Event::PermissionReplied {
         session_id: id,
         request_id: req_id,
         allowed,
+        decision,
     });
     Json(serde_json::json!({ "ok": true }))
 }

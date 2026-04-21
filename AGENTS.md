@@ -1,16 +1,16 @@
 # Agent Guidelines for Rust apps
-- First when you startup say "Hi im Rust Agent and I have read Agents.md" 
+- First when you startup say "Hi im Rust Agent and I have read Agents.md"
 
 ## Technology Stack
-- **Language**: Rust edition 2021 or greater
+- **Language**: Rust edition 2024 or greater
 
 ## Build Commands
-- `cargo build` - Build debug binary, timeout is 600 seconds min
-- `cargo build --release` - Build optimized release binary timeout is 600 seconds min
-- `cargo check` - Check code without building
-- Build only debug builds unless specificaly asked to perform a `release build`
+- `cargo build` - Build debug binary; allow up to 600 seconds.
+- `cargo build --release` - Build optimized release binary; allow up to 600 seconds.
+- `cargo check` - Check code without building.
+- Build only debug builds unless specifically asked to perform a `release build`.
 
-Builds can take a long time so allow up to 600 seconds for a rebuild
+Builds can take a long time, so allow up to 600 seconds for a rebuild.
 
 ## Test Commands
 - `cargo test` - Run all tests
@@ -23,12 +23,12 @@ Builds can take a long time so allow up to 600 seconds for a rebuild
 
 ### Test Organization
 
-All tests **MUST** be located in the `tests/` inside each crate, if the test is at root level then it should be at the root tests/folder, NOT inline in source files:
-- Use `#[test]` for sync tests and `#[tokio::test]` for async tests
-- Import from the public `ragent` crate 
-- Be organized with related tests grouped together
-- Follow naming convention: `test_<component>_<scenario>` (e.g., `test_jog_x_positive`)
-- For each project crate, reorganise tests by:  migrating all tests related to the crate into relevant subfolders in the tests folder in the crate, review tests both inside crate and outside of it to find candidate tests for migration, then look at all .rs files that are outside of the tests folder in the crate and relocate all the inline tests found within them into seperate files in suitable subfolders in the crate tests folder 
+All tests **MUST** be located in the `tests/` directory inside each crate. If a test is at the workspace root, it should be placed in the root `tests/` folder, not inline in source files.
+- Use `#[test]` for sync tests and `#[tokio::test]` for async tests.
+- Import from the relevant public crate for the crate under test rather than assuming a single `ragent` crate path.
+- Organize related tests together.
+- Follow the naming convention: `test_<component>_<scenario>` (e.g. `test_jog_x_positive`).
+- For each project crate, migrate related tests into suitable subfolders within that crate's `tests/` directory. Review both inline and external tests for migration candidates, and relocate inline tests from `.rs` files into separate files under the appropriate `tests/` subfolder where practical.
 
 
 ## Lint & Format Commands
@@ -36,10 +36,10 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 - `cargo fmt` - Format code with rustfmt
 - `cargo fmt --check` - Check formatting without changes
 
-## Units ##
-- DateTime values should be represented internaly in UTC and translated to locale based represetations in the UI layer. 
-- Dimensional units should be represented internaly in mms, and be of type f32, and mm values should be represted to 2 decimal place accuracy. 
-- All text strings where feasable should be internaly represented in UTF8 encoding, with translation to and from UI encoding in the UI layer if required. 
+## Units
+- DateTime values should be represented internally in UTC and translated to locale-based representations in the UI layer.
+- Dimensional units should be represented internally in millimetres (`mm`) as `f32`, and presented to 2 decimal places where relevant.
+- Text should be represented internally as UTF-8 where feasible, with translation to and from UI-specific encodings only when required.
 
 ## GitHub Access
 - Use "gh" to access all GitHub repositories.
@@ -59,26 +59,27 @@ All tests **MUST** be located in the `tests/` inside each crate, if the test is 
 - Whenever a new feature or function is added ensure that SPEC.md and QUICKSTART.md is updated if relevant. 
 
 ## Documentation Standards
-- For all functions create DOCBLOCK documentation comments above each function that describes the purpose of the function, and documents any arguments and return values.
+- For all functions create DOCBLOCK documentation comments above each public function that describes the purpose of the function, and documents any arguments and return values.
 - For all modules place a DOCBLOCK at the top of the file that describes the purpose of the module, and any dependencies.
-- **Documentation Files**: All documentation markdown files (*.md) **MUST** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`,  `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md` and `CHANGELOG.md` which remain in the project root. This includes: implementation guides, architecture documentation, feature specifications, task breakdowns, user guides, API references, and any other markdown documentation. Any future documentation should be created in the docs/ folder following this convention.
-- Do not create explainer documents or other .md files unless specifically asked to.
+- **Documentation Files**: All documentation markdown files (`*.md`) **SHOULD** be located in the `docs/` folder, except for `QUICKSTART.md`, `RELEASE.md`, `STATS.md`, `SPEC.md`, `AGENTS.md`, `README.md`, `PLAN.md`, and `CHANGELOG.md`, which remain in the project root. Existing root-level project documents that predate this convention may remain until they are explicitly reorganized. When updating legacy root-level documents, prefer moving or consolidating them into `docs/` unless they are one of the approved root exceptions. Any future documentation should be created in the `docs/` folder following this convention.
+- Do not create explainer documents or other `.md` files unless specifically asked to.
 
 ## Code Style Guidelines
-- **Formatting**: 4 spaces, max 100 width, reorder_imports=true, Unix newlines
-- **Naming**: snake_case for functions/variables, PascalCase for types/structs/enums
-- **Imports**: Group std, external crates, then local modules; reorder automatically
-- **Error Handling**: Use `Result<T, E>` with `?`, `anyhow::Result` for main, `thiserror` for custom errors
-- **Types**: Prefer explicit types, use type aliases for complex types
-- **Logging**: Use `tracing` crate with structured logging, avoid `println!` or `eprintln!` in any phase of development. Performance profiling: Use `debug!()` for non-hot paths, `trace!()` for debug scenarios
-- **Logging Cleanliness** after an issue has been resolved remove all debug! and tracing::debug! calls in the relevant code. 
-- **Documentation**: `//!` for crate docs, `///` for public APIs, `//` for internal comments
-- **Linting**: No wildcard imports, cognitive complexity ≤30, warn on missing docs
-- **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply to the project.
+- **Formatting**: 4 spaces, max width 100, reorder imports automatically, Unix newlines.
+- **Naming**: snake_case for functions/variables, PascalCase for types/structs/enums.
+- **Imports**: Group std, external crates, then local modules.
+- **Error Handling**: Use `Result<T, E>` with `?`, `anyhow::Result` for main, and `thiserror` for custom errors.
+- **Types**: Prefer explicit types, and use type aliases for complex types.
+- **Logging**: Use the `tracing` crate with structured logging; avoid `println!` or `eprintln!` in application code. For performance profiling, use `debug!()` for non-hot paths and `trace!()` for debug scenarios.
+- **Logging Cleanliness**: After an issue has been resolved, remove temporary `debug!()` and `tracing::debug!()` calls in the relevant code.
+- **Documentation**: Use `//!` for crate/module docs, `///` for public APIs, and `//` for internal comments.
+- **Linting**: No wildcard imports. Treat cognitive complexity ≤30 and missing docs warnings as review targets rather than guaranteed compiler-enforced limits.
+- **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply them to the project where relevant.
 
 ## Team Workflow
 
 When asked to use a team or when a task benefits from parallel reviewers / workers:
+
 
 1. **Create the team**: Use `team_create` with an appropriate `blueprint` (e.g. `code-review`).
    **Always pass `context`** — the user's specific request details: which directories/files to
@@ -89,31 +90,30 @@ When asked to use a team or when a task benefits from parallel reviewers / worke
 4. **Do not duplicate work**: Do not independently read files or do analysis that a teammate is already doing. Wait for them first.
 
 ```
-team_create blueprint="code-review" context="Review the crates/ragent-server directory for security, test coverage, and performance issues. Write findings to COMPLIANCE.md"
+team_create blueprint="code-review" context="Review the crates/ragent-server directory for security, test coverage, and performance issues. Write findings to docs/COMPLIANCE.md"
 team_wait                          ← REQUIRED: blocks until all idle
 team_status                        ← read what they found
 ```
 
 
-2. Don't suggest features unless asked to.
-3. When debugging problems, use Occam's razor and assume that the simplest solution is more likely to be the right one. 
-4. Also when you are trying to debug a problem, change only one thing at a time, if it does not fix the problem then revert it, before trying another possible solution. 
-5. DO NOT perform tempoary solutions or fixes, always provide a complete solution. 
-6. DO NOT declare an issue as fixed unless it has been confirmed, 90% of assertions of completion turn out to be false. 
+1. Don't suggest features unless asked to.
+2. When debugging problems, use Occam's razor and assume that the simplest solution is more likely to be the right one.
+3. When debugging a problem, change only one thing at a time. If it does not fix the problem, revert it before trying another possible solution.
+4. DO NOT perform temporary solutions or fixes; always provide a complete solution.
+5. DO NOT declare an issue as fixed unless it has been confirmed; 90% of assertions of completion turn out to be false.
 
 ## Versioning
 
-1. During development the release number will have "-alpha" appended to the end as per semantic versioning standards. only when it is a production release will it be removed. 
+1. During development the release number will have `-alpha` appended to the end in line with semantic versioning conventions. Only remove it for a production release.
 
 ## Temporary Files
 
-1. Create a directory called "target" in the project root
-2. Create a directory called "temp" in the target folder
-3. Ensure that the target/temp folder is in the .gitignore file
-4. Use target/temp for all temporary files, scripts and other ephemeral items that are normally placed in /tmp
+1. Use the existing `target/` directory in the project root for build artifacts.
+2. Create and use a `target/temp` directory for temporary files, scripts, and other ephemeral items that would normally be placed in `/tmp`.
+3. Ensure that the `target/temp/` path is present in `.gitignore`.
 
 
-### Priorities
+## Priorities
 
 - `0` - Critical (security, data loss, broken builds)
 - `1` - High (major features, important bugs)

@@ -480,11 +480,11 @@ fn build_line2_center(
             .add_modifier(Modifier::BOLD),
     ));
 
-    // Context window percentage (after token usage)
+    // Context window percentage from the most recent request.
     let ctx_pct = if let Some(ctx_window) = app.selected_model_ctx_window {
-        let (input_tokens, _output_tokens) = app.token_usage;
+        let input_tokens = app.last_input_tokens;
         if ctx_window > 0 {
-            ((input_tokens as f32 / ctx_window as f32) * 100.0) as u32
+            ((input_tokens as f32 / ctx_window as f32) * 100.0).min(100.0) as u32
         } else {
             0
         }
@@ -654,7 +654,8 @@ fn get_git_status_indicator() -> (&'static str, Color) {
 
 /// Shorten a path using ~ for home directory and truncation.
 fn shorten_path(path: &str, max_len: usize) -> String {
-    if path.len() <= max_len {
+    let path_len = path.chars().count();
+    if path_len <= max_len {
         return path.to_string();
     }
 
@@ -662,7 +663,7 @@ fn shorten_path(path: &str, max_len: usize) -> String {
     if let Ok(home) = std::env::var("HOME") {
         if let Some(stripped) = path.strip_prefix(&home) {
             let tilde_path = format!("~{}", stripped);
-            if tilde_path.len() <= max_len {
+            if tilde_path.chars().count() <= max_len {
                 return tilde_path;
             }
         }
@@ -678,7 +679,7 @@ fn shorten_path(path: &str, max_len: usize) -> String {
     let left: String = path.chars().take(keep_left).collect();
     let right: String = path
         .chars()
-        .skip(path.len().saturating_sub(keep_right))
+        .skip(path_len.saturating_sub(keep_right))
         .collect();
     format!("{left}…{right}")
 }
@@ -703,7 +704,7 @@ mod tests {
 
         let long_path = "/very/long/path/that/exceeds/maximum";
         let shortened = shorten_path(long_path, 20);
-        assert!(shortened.len() <= 20);
+        assert!(shortened.chars().count() <= 20);
         assert!(shortened.contains('…'));
     }
 }

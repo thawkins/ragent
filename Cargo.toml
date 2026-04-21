@@ -111,7 +111,7 @@ unsafe_code = "deny"
 
 [workspace.dependencies]
 # ── Internal crates ───────────────────────────────────────────────────────
-ragent-core = { path = "crates/ragent-core" }
+ragent-agent = { path = "crates/ragent-agent" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
 
@@ -171,6 +171,7 @@ crossterm = "0.28"
 
 # ── File / path / text ──────────────────────────────────────────────────
 globset = "0.4"
+glob = "0.3"
 dirs = "6"
 html2text = "0.16"
 similar = "2"
@@ -230,7 +231,7 @@ name = "ragent"
 path = "src/main.rs"
 
 [dependencies]
-ragent-core = { workspace = true }
+ragent-agent = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
 tokio = { workspace = true }

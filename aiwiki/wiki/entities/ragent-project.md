@@ -11,7 +11,7 @@ generated: "2026-04-19T17:26:49.141715232+00:00"
 
 ### From: codeindex_search
 
-Ragent is an agent framework designed for software engineering tasks, providing structured tool systems for code analysis, search, and manipulation. The project appears to be organized as a Rust workspace with multiple crates, including `ragent-core` for foundational tool implementations and `ragent_code` for code analysis capabilities. The framework follows a modular architecture where tools implement a common `Tool` trait, enabling consistent parameter validation, execution, and permission management across diverse capabilities. The codebase demonstrates production-quality Rust patterns including async/await, trait-based abstraction, and comprehensive error handling.
+Ragent is an agent framework designed for software engineering tasks, providing structured tool systems for code analysis, search, and manipulation. The project appears to be organized as a Rust workspace with multiple crates, including `ragent-core` for foundational tool implementations and `ragent_codeindex` for code analysis capabilities. The framework follows a modular architecture where tools implement a common `Tool` trait, enabling consistent parameter validation, execution, and permission management across diverse capabilities. The codebase demonstrates production-quality Rust patterns including async/await, trait-based abstraction, and comprehensive error handling.
 
 The Ragent framework's tool system represents a sophisticated approach to AI agent capabilities, where each tool is self-describing through JSON Schema definitions. This enables runtime discovery and validation of tool parameters, crucial for reliable agent behavior. The `CodeIndexSearchTool` exemplifies this philosophy, providing not just search functionality but detailed guidance on when to use it versus alternatives. The project's integration with language server protocol (LSP) concepts and symbol indexing suggests it targets professional software development workflows, competing with or complementing tools like GitHub Copilot, Sourcegraph, or IDE-integrated AI assistants.
 
@@ -28,7 +28,7 @@ flowchart TD
         CIS[CodeIndexSearchTool]
         GT[Other Tools]
     end
-    subgraph Code["ragent_code"]
+    subgraph Code["ragent_codeindex"]
         IDX[Code Index]
         SQ[SearchQuery]
         SK[SymbolKind]

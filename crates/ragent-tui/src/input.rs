@@ -252,6 +252,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: true,
+                            decision: ragent_core::permission::PermissionDecision::Once,
                         });
                 }
                 None
@@ -268,6 +269,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: true,
+                            decision: ragent_core::permission::PermissionDecision::Always,
                         });
                 }
                 None
@@ -284,6 +286,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                             session_id: req.session_id.clone(),
                             request_id: req.id.clone(),
                             allowed: false,
+                            decision: ragent_core::permission::PermissionDecision::Deny,
                         });
                 }
                 None
@@ -578,6 +581,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             None
         }
         KeyCode::Enter => {
+            if app.is_processing
+                || app.compact_in_progress
+                || app.auto_compact_in_progress
+                || app.pending_send_after_compact.is_some()
+            {
+                app.status = "busy - wait for the current turn to finish".to_string();
+                return None;
+            }
             let text = app.input.clone();
             if text.is_empty() {
                 return None;
@@ -1574,10 +1585,10 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
                     username: username.clone(),
                 };
                 let mut errors = Vec::new();
-                if let Err(e) = ragent_core::gitlab::auth::save_token(&storage, &token) {
+                if let Err(e) = ragent_core::gitlab::auth::save_token(storage.as_ref(), &token) {
                     errors.push(format!("token save: {e}"));
                 }
-                if let Err(e) = ragent_core::gitlab::auth::save_config(&storage, &cfg) {
+                if let Err(e) = ragent_core::gitlab::auth::save_config(storage.as_ref(), &cfg) {
                     errors.push(format!("config save: {e}"));
                 }
                 if errors.is_empty() {

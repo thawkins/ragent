@@ -12,14 +12,14 @@ This document details the implementation plan for the ragent Code Index system d
 
 ## Milestone 1: Foundation — Crate Setup, Types, and Scanner ✅
 
-**Goal**: Establish the `ragent-code` crate with core types, file scanning, and content hashing. No parsing yet — just the ability to discover and fingerprint all source files in a project.
+**Goal**: Establish the `ragent-codeindex` crate with core types, file scanning, and content hashing. No parsing yet — just the ability to discover and fingerprint all source files in a project.
 
 **Status**: Complete — 22 tests passing (14 unit + 8 integration)
 
 ### Tasks
 
-#### M1.1 — Bootstrap ragent-code crate ✅
-- Update `crates/ragent-code/Cargo.toml` with initial dependencies:
+#### M1.1 — Bootstrap ragent-codeindex crate ✅
+- Update `crates/ragent-codeindex/Cargo.toml` with initial dependencies:
   - `blake3` (content hashing)
   - `ignore` (gitignore-aware directory walking)
   - `rusqlite` (bundled, index storage)
@@ -30,7 +30,7 @@ This document details the implementation plan for the ragent Code Index system d
   - `anyhow` (error handling)
 - Create module structure in `src/`: `lib.rs`, `types.rs`, `scanner.rs`, `store.rs`
 - Export public API from `lib.rs`
-- Verify crate compiles with `cargo check -p ragent-code`
+- Verify crate compiles with `cargo check -p ragent-codeindex`
 
 #### M1.2 — Define core types (`types.rs`) ✅
 - Define `SymbolKind` enum: `Function`, `Method`, `Struct`, `Class`, `Enum`, `EnumVariant`, `Trait`, `Interface`, `Impl`, `Module`, `Constant`, `Static`, `TypeAlias`, `Field`, `Import`, `Macro`, `Test`, `Unknown`
@@ -78,10 +78,10 @@ This document details the implementation plan for the ragent Code Index system d
   3. Stores results with `IndexStore`
   4. Modifies one file, re-scans
   5. Verifies `get_stale_files()` correctly identifies the changed file
-- Verify the full pipeline with `cargo test -p ragent-code`
+- Verify the full pipeline with `cargo test -p ragent-codeindex`
 
 ### Deliverables
-- Compiling `ragent-code` crate with scanner and store
+- Compiling `ragent-codeindex` crate with scanner and store
 - Core type definitions used by all subsequent milestones
 - Passing tests for scanning, hashing, language detection, and file storage
 
@@ -96,7 +96,7 @@ This document details the implementation plan for the ragent Code Index system d
 ### Tasks
 
 #### M2.1 — Add tree-sitter dependencies ✅
-- Added to `ragent-code/Cargo.toml`:
+- Added to `ragent-codeindex/Cargo.toml`:
   - `tree-sitter = "0.26"` (latest 0.26.8)
   - `tree-sitter-rust = "0.24"` (latest 0.24.2)
 - Verify tree-sitter compiles on the CI target (may need C compiler for grammar)
@@ -162,7 +162,7 @@ This document details the implementation plan for the ragent Code Index system d
 ### Tasks
 
 #### M3.1 — Add tantivy dependency ✅
-- Added `tantivy = "0.22"` to `ragent-code/Cargo.toml`
+- Added `tantivy = "0.22"` to `ragent-codeindex/Cargo.toml`
 - Created `src/search.rs` module with `FtsIndex` struct
 - Compilation verified (tantivy adds ~60 new crate deps)
 
@@ -218,7 +218,7 @@ This document details the implementation plan for the ragent Code Index system d
 ### Tasks
 
 #### M4.1 — Add notify dependency and create watcher module ✅
-- Added `notify = "7.0"` and `lru` (workspace) to `ragent-code/Cargo.toml`
+- Added `notify = "7.0"` and `lru` (workspace) to `ragent-codeindex/Cargo.toml`
 - Created `src/watcher.rs` with `CodeWatcher` and `WatchEvent` enum
 - Filters: `.git/`, `target/`, `node_modules/`, `__pycache__/`, `.ragent/`, etc.
 - Maps `notify::Event` variants to `WatchEvent::{Created, Changed, Deleted, Renamed}`
@@ -271,8 +271,8 @@ This document details the implementation plan for the ragent Code Index system d
 
 ### Implementation Notes
 
-- Added `ragent-code` as dependency of `ragent-core` in Cargo.toml
-- Added `code_index: Option<Arc<ragent_code::CodeIndex>>` to `ToolContext`
+- Added `ragent-codeindex` as dependency of `ragent-core` in Cargo.toml
+- Added `code_index: Option<Arc<ragent_codeindex::CodeIndex>>` to `ToolContext`
 - Created 6 tool files in `crates/ragent-core/src/tool/`:
   - `codeindex_search.rs` — FTS search with kind/language/file_pattern filters
   - `codeindex_symbols.rs` — Structured symbol query with name/kind/visibility filters
@@ -361,8 +361,8 @@ This document details the implementation plan for the ragent Code Index system d
 - Updated `README.md` with code index feature description and architecture table
 - Updated `QUICKSTART.md` with `/codeindex` slash commands
 - Updated `CHANGELOG.md` with M6 feature entry
-- Fixed all `cargo doc` warnings in ragent-code
-- `cargo doc -p ragent-code --no-deps` builds clean
+- Fixed all `cargo doc` warnings in ragent-codeindex
+- `cargo doc -p ragent-codeindex --no-deps` builds clean
 
 #### M6.11 — Enhance `@` reference system (deferred)
 - Deferred to future milestone — requires deeper integration with reference resolution system

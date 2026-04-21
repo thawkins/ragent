@@ -311,26 +311,26 @@ pub async fn run_tui(
     // Track the fallback reindex thread so we can join it on shutdown
     let mut code_index_fallback_thread: Option<std::thread::JoinHandle<()>> = None;
 
-    let _code_index: Option<Arc<ragent_code::CodeIndex>> = {
+    let _code_index: Option<Arc<ragent_codeindex::CodeIndex>> = {
         let cwd = std::env::current_dir().unwrap_or_default();
         match ragent_core::config::Config::load() {
             Ok(config) => {
                 if config.code_index.enabled {
-                    let index_config = ragent_code::types::CodeIndexConfig {
+                    let index_config = ragent_codeindex::types::CodeIndexConfig {
                         enabled: true,
                         project_root: cwd.clone(),
                         index_dir: cwd.join(".ragent/codeindex"),
-                        scan_config: ragent_code::types::ScanConfig::default(),
+                        scan_config: ragent_codeindex::types::ScanConfig::default(),
                     };
-                    match ragent_code::CodeIndex::open(&index_config) {
+                    match ragent_codeindex::CodeIndex::open(&index_config) {
                         Ok(idx) => {
                             let arc_idx = Arc::new(idx);
                             // Start the file watcher + background worker.
                             // start_watching() performs an initial full_reindex() and then
                             // watches for filesystem changes to keep the index up to date.
-                            match ragent_code::start_watching(
+                            match ragent_codeindex::start_watching(
                                 arc_idx.clone(),
-                                ragent_code::worker::WorkerConfig::default(),
+                                ragent_codeindex::worker::WorkerConfig::default(),
                             ) {
                                 Ok(session) => {
                                     app.code_index_watch_session = Some(session);
@@ -380,12 +380,12 @@ pub async fn run_tui(
     // If AIWiki is initialized and autosync is enabled, start sync and watcher
     if app.aiwiki_autosync {
         let current_dir = std::env::current_dir().unwrap_or_default();
-        if aiwiki::Aiwiki::exists(&current_dir) {
+        if ragent_aiwiki::Aiwiki::exists(&current_dir) {
             app.status = "starting aiwiki sync…".to_string();
             terminal.draw(|frame| layout::render(frame, &mut app))?;
 
             match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(aiwiki::Aiwiki::new(&current_dir))
+                tokio::runtime::Handle::current().block_on(ragent_aiwiki::Aiwiki::new(&current_dir))
             }) {
                 Ok(wiki) => {
                     if wiki.config.enabled {
@@ -395,7 +395,7 @@ pub async fn run_tui(
                         // Build LLM extractor from current provider/model
                         let model_label = app.aiwiki_model_label();
                         let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-                        let extractor: Arc<dyn aiwiki::extraction::LlmExtractor + Send + Sync> =
+                        let extractor: Arc<dyn ragent_aiwiki::extraction::LlmExtractor + Send + Sync> =
                             Arc::new(app::TuiLlmExtractor {
                                 registry: Arc::clone(&app.provider_registry),
                                 storage: Arc::clone(&app.storage),
@@ -405,11 +405,11 @@ pub async fn run_tui(
 
                         // Start initial sync in background
                         let wiki_for_sync = app.aiwiki.take().unwrap();
-                        let progress = Arc::new(aiwiki::sync::SyncProgress::new());
+                        let progress = Arc::new(ragent_aiwiki::sync::SyncProgress::new());
                         let progress_clone = Arc::clone(&progress);
 
                         let handle = tokio::spawn(async move {
-                            let result = aiwiki::sync::sync(
+                            let result = ragent_aiwiki::sync::sync(
                                 &wiki_for_sync,
                                 false, // force=false
                                 Some(&*extractor),

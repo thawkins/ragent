@@ -3,7 +3,7 @@
 //! This example shows how to use the [`ConcurrentFileReader`] to read multiple files
 //! in parallel and [`apply_batch_edits`] to stage and commit changes.
 
-use ragent_core::file_ops::{ConcurrentFileReader, apply_batch_edits};
+use ragent_agent::file_ops::{ConcurrentFileReader, apply_batch_edits};
 use std::path::PathBuf;
 
 #[tokio::main]

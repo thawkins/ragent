@@ -1,0 +1,56 @@
+[package]
+name = "ragent-tools-extended"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Tim Hawkins"]
+description = "Extended document, web, memory, code index, and LSP tools for ragent"
+repository = "https://github.com/thawkins/ragent"
+
+[dependencies]
+ragent-codeindex = { path = "../ragent-codeindex" }
+ragent-config = { path = "../ragent-config" }
+ragent-storage = { path = "../ragent-storage" }
+ragent-types = { path = "../ragent-types" }
+ragent-aiwiki = { path = "../ragent-aiwiki" }
+
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+tracing = { workspace = true }
+
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = { workspace = true }
+html2text = { workspace = true }
+base64 = { workspace = true }
+
+reqwest = { workspace = true }
+docx-rust = { workspace = true }
+calamine = { workspace = true }
+rust_xlsxwriter = { workspace = true }
+ooxmlsdk = { workspace = true }
+zip = { workspace = true }
+quick-xml = { workspace = true }
+spreadsheet-ods = { workspace = true }
+printpdf = { workspace = true }
+pdf-extract = { workspace = true }
+lopdf = { workspace = true }
+
+lsp-types = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.14"
+
+[features]
+default = []
+embeddings = []

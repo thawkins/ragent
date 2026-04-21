@@ -117,7 +117,7 @@ Options:
 
 ## Configuration
 
-ragent reads configuration from `ragent.json` (or `ragent.jsonc`) in the current
+ragent reads configuration from `ragent.json` (or `ragent.jsonc`) in the `.ragent/`
 directory, with fallback to `~/.config/ragent/config.json`. The format is compatible
 with OpenCode's `opencode.json`.
 
@@ -214,16 +214,23 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace with four crates:
+The project is a Cargo workspace built from focused crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `ragent-core` | Types, storage, config, providers, tools, agents, sessions, event bus |
-| `ragent-code` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
-| `ragent-server` | Axum HTTP routes, SSE streaming |
+| `ragent-agent` | Agent/runtime layer: sessions, orchestration, MCP/LSP, memory, tool registry |
+| `ragent-team` | Team coordination runtime and team tools |
+| `ragent-storage` | SQLite-backed storage, snapshots, encrypted credentials |
+| `ragent-config` | Configuration types, defaults, and parsing |
+| `ragent-types` | Shared IDs, events, messages, and sanitization primitives |
+| `ragent-aiwiki` | Embedded wiki knowledge base, extraction, and web interface |
+| `ragent-llm` | Provider clients and model/provider registry |
+| `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
+| `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
+| `ragent-server` | Axum HTTP routes and SSE streaming |
 | `ragent-tui` | Ratatui terminal interface |
 
-The binary entry point (`src/main.rs`) wires these together behind a clap CLI.
+The binary entry point (`src/main.rs`) wires these crates together behind a clap CLI.
 
 ```
 User Input
@@ -249,12 +256,15 @@ User Input
 
 ## Performance
 
-`ragent-core` includes Criterion benchmarks for the orchestrator, tools, snapshots, and team mailbox. `ragent-code` includes benchmarks for parser throughput, store upsert, search, and full indexing. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md) for full instructions.
+Criterion benchmarks currently ship with `ragent-tui`, `ragent-server`, and
+`ragent-codeindex`. See [`docs/performance/benchmark-guide.md`](docs/performance/benchmark-guide.md)
+for full instructions.
 
 ```bash
-# Run all benchmarks
-cargo bench -p ragent-core
-cargo bench -p ragent-code
+# Run crate benchmarks
+cargo bench -p ragent-tui
+cargo bench -p ragent-server
+cargo bench -p ragent-codeindex
 ```
 
 Key optimisations in the current release:

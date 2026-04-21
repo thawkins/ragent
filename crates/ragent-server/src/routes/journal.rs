@@ -17,6 +17,7 @@ use axum::{
     http::StatusCode,
     routing::get,
 };
+use ragent_agent as ragent_core;
 use ragent_core::event::Event;
 use serde::{Deserialize, Serialize};
 

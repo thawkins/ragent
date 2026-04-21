@@ -222,7 +222,7 @@ impl<'a> Button<'a> {
         let label_width = self.label.chars().count() as u16;
         if let Some(_shortcut) = self.shortcut {
             // [X]Label format
-            4 + label_width // "[X]" + label
+            3 + label_width // "[X]" + label
         } else {
             label_width
         }

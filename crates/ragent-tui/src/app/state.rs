@@ -21,7 +21,7 @@ use ragent_core::permission::PermissionRequest;
 use ragent_core::provider::ProviderRegistry;
 use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
-use ragent_core::team::{TeamConfig, TeamMember};
+use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
 
 use crate::theme::StatusHistory;
 
@@ -559,6 +559,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Manage bash command lists: /bash add|remove allow|deny <entry> [--global] | show | help",
     },
     SlashCommandDef {
+        trigger: "dirs",
+        description: "Manage directory/file permission lists: /dirs add|remove allow|deny <pattern> [--global] | show | help",
+    },
+    SlashCommandDef {
         trigger: "yolo",
         description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
     },
@@ -1029,19 +1033,19 @@ pub struct App {
     /// Handle to the running LSP manager (kept alive for the lifetime of the TUI).
     pub lsp_manager: Option<SharedLspManager>,
     /// Optional code index for codebase search and symbol lookup.
-    pub code_index: Option<Arc<ragent_code::CodeIndex>>,
+    pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
     /// Whether code indexing is enabled in configuration.
     pub code_index_enabled: bool,
     /// Cached code index stats for the status bar (refreshed every few seconds).
-    pub code_index_stats_cache: Option<ragent_code::types::IndexStats>,
+    pub code_index_stats_cache: Option<ragent_codeindex::types::IndexStats>,
     /// When the cached stats were last refreshed.
     pub code_index_stats_last_refresh: std::time::Instant,
     /// True when the background indexer holds the store/FTS locks.
     pub code_index_busy: bool,
     /// Active file watcher + background worker session for the code index.
-    pub code_index_watch_session: Option<ragent_code::WatchSession>,
+    pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
     /// Optional AIWiki instance for project knowledge base.
-    pub aiwiki: Option<aiwiki::Aiwiki>,
+    pub aiwiki: Option<ragent_aiwiki::Aiwiki>,
     /// Whether AIWiki is enabled for the current project.
     pub aiwiki_enabled: bool,
     /// Cached AIWiki stats for the status bar.
@@ -1055,9 +1059,9 @@ pub struct App {
     /// Handle for a background AIWiki sync task.
     pub aiwiki_sync_handle: Option<tokio::task::JoinHandle<super::AiwikiSyncOutcome>>,
     /// Shared progress counter for the active sync, if any.
-    pub aiwiki_sync_progress: Option<std::sync::Arc<aiwiki::sync::SyncProgress>>,
+    pub aiwiki_sync_progress: Option<std::sync::Arc<ragent_aiwiki::sync::SyncProgress>>,
     /// Active file watcher session for AIWiki source folders.
-    pub aiwiki_watch_session: Option<aiwiki::sync::AiwikiWatchSession>,
+    pub aiwiki_watch_session: Option<ragent_aiwiki::sync::AiwikiWatchSession>,
     /// Whether AIWiki should auto-sync on startup and watch for changes.
     pub aiwiki_autosync: bool,
     /// Active LSP discovery dialog, if any.
@@ -1098,6 +1102,10 @@ pub struct App {
     /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.
     /// Step number comes from EventBus; sub_step is per-tool-call within a step.
     pub tool_step_map: HashMap<String, (String, u32, u32)>,
+    /// Pending tool call args received before the ToolCallStart event. Some providers
+    /// may emit args/result events before the start event; store them here and apply
+    /// when the ToolCallStart arrives.
+    pub pending_tool_args: HashMap<String, String>,
     /// Tracks the last seen step number for each session (to detect step changes).
     pub last_step_per_session: HashMap<String, u32>,
     /// Tracks the current sub-step counter for each session (resets when step changes).
@@ -1150,7 +1158,7 @@ pub struct App {
     /// to this teammate's mailbox instead of the lead session.
     pub focused_teammate: Option<String>,
     /// Active swarm state (if a /swarm is running).
-    pub swarm_state: Option<ragent_core::team::SwarmState>,
+    pub swarm_state: Option<SwarmState>,
     /// Pending result from an async `/swarm` LLM decomposition call.
     pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Active output overlay state.

@@ -13,8 +13,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use ragent_core::team::MemberStatus;
-use ragent_core::team::{TaskStore, TeamStore};
+use ragent_team::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
 
 use crate::app::App;
 
@@ -91,7 +90,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                         if let Some(agent) = &task.assigned_to {
                             let entry = counts.entry(agent.clone()).or_default();
                             entry.0 += 1; // claimed
-                            if task.status == ragent_core::team::TaskStatus::Completed {
+                            if task.status == TaskStatus::Completed {
                                 entry.1 += 1; // completed
                             }
                         }

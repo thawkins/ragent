@@ -474,7 +474,7 @@ pub fn compact_history_parallel(history: &[Message]) -> Vec<Message> {
 ```bash
 # Run all benchmarks
 cargo bench -p ragent-core
-cargo bench -p ragent-code
+cargo bench -p ragent-codeindex
 
 # Profile specific benchmark
 cargo bench -p ragent-core -- orchestrator

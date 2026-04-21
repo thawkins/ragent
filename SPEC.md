@@ -78,15 +78,20 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.44). The core architecture, tool system,
+Ragent is in **alpha** (v0.1.0-alpha.46). The core architecture, tool system,
 TUI, HTTP server, memory system, teams, security layer, and AIWiki knowledge base
 are functional and under active development. The specification below documents
 the current state of all subsystems.
 
 **Current Release Highlights:**
+- **Permission System Milestones Complete:**
+  - Milestone 1: Core Permission System (7 tasks, 20 tests passing)
+  - Milestone 2: Bash Security — 7 Layers (8 tasks, 27+ tests passing)
+- Permission dialog countdown timer (120s timeout with visual feedback)
+- Bash command name extraction for accurate permission matching
+- Built-in directory allowlist/denylist (22 system-critical paths protected)
+- `/dirs show` and `/bash show` commands display all security layers
 - AIWiki knowledge base fully implemented with 6 complete milestones
-- AIWiki single-file reference path resolution bugfix
-- Unified TUI dialog and button component system
 - 147+ tools across 18 categories including comprehensive team coordination tools
 - Native GitLab integration with issues, merge requests, and CI/CD pipeline management
 
@@ -206,13 +211,24 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 
 ### 2.1 Workspace Crates
 
-| Crate | Purpose |
-|-------|---------|
-| `ragent-core` | Types, storage, config, providers, tools, agents, sessions, event bus |
-| `ragent-code` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
-| `ragent-server` | Axum HTTP routes, SSE streaming |
-| `ragent-tui` | Ratatui terminal interface |
-| `prompt_opt` | Prompt optimization transformations |
+| Crate | LOC % | Purpose |
+|-------|------:|---------|
+| `ragent-agent` | 34.61% | Agent/runtime layer: sessions, orchestration, MCP/LSP, memory, tool registry |
+| `ragent-aiwiki` | 7.89% | Embedded wiki knowledge base, extraction pipeline, and web interface |
+| `ragent-codeindex` | 9.11% | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
+| `ragent-config` | 1.29% | Configuration types, defaults, and parsing |
+| `ragent-llm` | 4.04% | Provider clients and model/provider registry |
+| `ragent-prompt_opt` | 0.40% | Prompt optimization transformations |
+| `ragent-server` | 2.47% | Axum HTTP routes and SSE streaming |
+| `ragent-storage` | 1.70% | SQLite storage, snapshots, and encrypted credential persistence |
+| `ragent-team` | 3.63% | Team runtime, team state, and team tools |
+| `ragent-tools-core` | 3.56% | Core shell/file/search tools |
+| `ragent-tools-extended` | 7.08% | Extended document/web/memory/codeindex/LSP tools |
+| `ragent-tools-vcs` | 2.08% | GitHub and GitLab tool surface |
+| `ragent-tui` | 20.92% | Ratatui terminal interface |
+| `ragent-types` | 1.21% | Shared IDs, events, messages, and sanitization primitives |
+
+Percentages are based on a fresh count of current Rust `.rs` lines across workspace crates (167,466 total).
 
 ---
 
@@ -1248,7 +1264,7 @@ The Code Index is a built-in codebase indexing, search, and retrieval system tha
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        ragent-code crate                        │
+│                        ragent-codeindex crate                        │
 ├──────────────���──────────────────────────────────────────────────┤
 │  ┌──────────────┐   ┌──────────────┐   ┌────────────────────┐ │
 │  │ File Scanner  │──▶│   Parser     │──▶│  Symbol Extractor  │ │
@@ -1436,7 +1452,7 @@ Full-text search across symbols, documentation, and code.
 {
   "query": "config parser",
   "language": "rust",
-  "file_pattern": "crates/ragent-core/**/*.rs",
+  "file_pattern": "crates/ragent-agent/**/*.rs",
   "max_results": 10
 }
 ```
@@ -1508,7 +1524,7 @@ Query file-level dependencies from the code index.
 **Example:**
 ```json
 {
-  "path": "crates/ragent-core/src/agent/mod.rs",
+  "path": "crates/ragent-agent/src/agent/mod.rs",
   "direction": "dependents"
 }
 ```
@@ -1583,7 +1599,7 @@ Call codeindex_references with:
 Call codeindex_symbols with:
 {
   "kind": "struct",
-  "file_path": "crates/ragent-core",
+  "file_path": "crates/ragent-agent",
   "visibility": "public",
   "limit": 100
 }
@@ -1593,7 +1609,7 @@ Call codeindex_symbols with:
 ```
 Call codeindex_dependencies with:
 {
-  "path": "crates/ragent-core/src/lib.rs",
+  "path": "crates/ragent-agent/src/lib.rs",
   "direction": "dependents"
 }
 ```
@@ -2125,10 +2141,10 @@ similarity.
 #### 7.6.4 Enabling Embeddings — Build Step
 
 Embeddings are gated behind the `embeddings` Cargo feature flag on the
-`ragent-core` crate. This keeps the binary small when semantic search is not
+`ragent-agent` crate. This keeps the binary small when semantic search is not
 needed (ONNX Runtime and tokeniser add significant size).
 
-**Feature flag definition** (`crates/ragent-core/Cargo.toml`):
+**Feature flag definition** (`crates/ragent-agent/Cargo.toml`):
 
 ```toml
 [features]
@@ -2146,14 +2162,14 @@ embeddings = ["ort", "tokenizers", "ndarray"]
 **Build with embeddings enabled:**
 
 ```bash
-# Build the ragent-core crate with embeddings
-cargo build -p ragent-core --features embeddings
+# Build the ragent-agent crate with embeddings
+cargo build -p ragent-agent --features embeddings
 
 # Build the full workspace with embeddings
-cargo build --features ragent-core/embeddings
+cargo build --features ragent-agent/embeddings
 
 # Run tests including embedding tests
-cargo test -p ragent-core --features embeddings
+cargo test -p ragent-agent --features embeddings
 ```
 
 When the `embeddings` feature is **not** compiled in, the
@@ -2377,7 +2393,7 @@ to build a structured understanding of the project.
 |------|-------------|---------|
 | `Uses` | Subject uses target | "ragent Uses Rust" |
 | `Prefers` | Subject prefers target | "project Prefers explicit errors" |
-| `DependsOn` | Subject depends on target | "ragent-tui DependsOn ragent-core" |
+| `DependsOn` | Subject depends on target | "ragent-tui DependsOn ragent-agent" |
 | `Avoids` | Subject avoids target | "project Avoids println!" |
 | `RelatedTo` | General association | "auth RelatedTo JWT" |
 
@@ -2698,7 +2714,7 @@ project knowledge that goes beyond flat text memories.
 | `calls` | Function calls another | `main() → calls → parse_config()` |
 | `uses` | Entity uses another | `AppConfig → uses → serde` |
 | `contains` | Containment relationship | `mod.rs → contains → parse_config()` |
-| `depends_on` | Dependency relationship | `ragent-tui → depends_on → ragent-core` |
+| `depends_on` | Dependency relationship | `ragent-tui → depends_on → ragent-agent` |
 | `implements` | Implementation of trait/interface | `OllamaProvider → implements → Provider` |
 
 #### Graph Operations
@@ -2806,7 +2822,7 @@ Each project with AIWiki enabled contains:
 
 ```
 project_root/
-└── aiwiki/
+└── ragent-aiwiki/
     ├── config.json          # AIWiki configuration
     ├── state.json           # Runtime state (watcher, etc.)
     ├── raw/                 # Ingested source documents
@@ -4141,7 +4157,7 @@ Swarm builds on ragent's team infrastructure:
 #### Data Structures
 
 ```rust
-// Core swarm types in ragent-core/src/team/swarm.rs
+// Core swarm types in ragent-agent/src/team/swarm.rs
 
 /// Runtime state for an active swarm
 pub struct SwarmState {
@@ -5457,7 +5473,7 @@ EOF
 Transform plain prompts into structured frameworks using the `/opt` command
 or `POST /opt` endpoint. The prompt optimization module provides 12
 LLM-powered prompt engineering frameworks via an async `optimize` function
-in the `prompt_opt` crate. It is decoupled from any specific LLM backend
+in the `ragent-prompt_opt` crate. It is decoupled from any specific LLM backend
 through a `Completer` trait that callers implement.
 
 ### 15.2 Architecture
@@ -5874,7 +5890,7 @@ bar. Other components can also subscribe to coordinate dependent operations
 
 | Approach | Description |
 |----------|-------------|
-| **Native Tool** | Direct LSP client implementation in ragent-core |
+| **Native Tool** | Direct LSP client implementation in ragent-agent |
 | **MCP Bridge** | LSP as MCP server (external process) |
 | **Hybrid** | Combine native + MCP for different languages |
 
@@ -6933,19 +6949,25 @@ the project convention of external test files rather than inline tests:
 
 ```text
 crates/
-├── ragent-core/
+├── ragent-agent/
 │   ├── src/          — Source code (no inline #[test])
 │   └── tests/        — Integration and unit tests
+├── ragent-team/
+│   ├── src/
+│   └── tests/
+├── ragent-storage/
+│   ├── src/
+│   └── tests/
 ├── ragent-tui/
 │   ├── src/
 │   └── tests/
 ├── ragent-server/
 │   ├── src/
 │   └── tests/
-├── ragent-code/
+├── ragent-codeindex/
 │   ├── src/
 │   └── tests/
-└── prompt_opt/
+└── ragent-prompt_opt/
     ├── src/
     └── tests/
 tests/                — Root-level integration tests
@@ -6956,7 +6978,7 @@ tests/                — Root-level integration tests
 | Command | Description |
 |---------|-------------|
 | `cargo test` | Run all tests across all crates |
-| `cargo test -p ragent-core` | Test a specific crate |
+| `cargo test -p ragent-agent` | Test a specific crate |
 | `cargo test <name>` | Run tests matching a name |
 | `cargo test -- --nocapture` | Show test output |
 | `cargo test --lib` | Library tests only (skip integration) |
@@ -6970,8 +6992,7 @@ Performance benchmarks use the Criterion framework:
 |-------|---------------|-----------------|
 | `ragent-tui` | `bench_markdown.rs` | Markdown rendering performance |
 | `ragent-server` | `bench_sse.rs` | SSE event throughput |
-| `ragent-core` | `bench_file_ops.rs` | File operation performance |
-| `ragent-code` | `bench_index.rs` | Code indexing throughput |
+| `ragent-codeindex` | `bench_index.rs` | Code indexing throughput |
 
 **Running benchmarks:**
 
@@ -7184,6 +7205,12 @@ A `PermissionRequest` is published as an event to the TUI:
 | `patterns` | Vec&lt;String&gt; | Glob patterns describing target resources |
 | `metadata` | JSON | Tool-specific metadata (command text, file path, etc.) |
 | `tool_call_id` | Option&lt;String&gt; | Tool call that triggered the request |
+| `created_at` | u64 | Unix timestamp when the request was created |
+| `timeout_secs` | u64 | Timeout duration in seconds (default: 120) |
+
+**Permission Dialog Timeout:**
+
+Permission requests have a 120-second timeout (2 minutes). The TUI displays a countdown timer in the dialog title (format: `M:SS remaining`) that updates in real-time. When the timeout expires, the dialog shows `EXPIRED` and the request is automatically denied.
 
 #### 24.3.2 Permission Decisions
 
@@ -7311,6 +7338,7 @@ Users can customise bash security via configuration or slash commands:
 | `/bash add deny git push -f` | Always reject force-push commands |
 | `/bash remove allow curl` | Re-enable the `curl` ban |
 | `/bash remove deny git push -f` | Remove the custom deny rule |
+| `/bash show` | Display all built-in and user-defined lists |
 
 Configuration equivalent in `ragent.json`:
 
@@ -7327,6 +7355,13 @@ Allowlist entries exempt commands from the banned-commands check only.
 Denylist entries are checked as substring patterns, similar to the built-in
 denied patterns. Both global and project-level configurations are merged.
 
+**Command Name Extraction:**
+
+When checking permissions for bash commands, only the command name (first word) is extracted and matched against permission patterns. This prevents false rejections when arguments are present. For example:
+- Permission pattern `"ls"` matches command `"ls"` exactly
+- Permission pattern `"ls*"` matches `"ls"`, `"ls -la"`, `"lsof"`, etc. (glob)
+- Command `"ls -la /home"` → extracts `"ls"` for permission matching
+
 ### 24.5 File Path Security
 
 - **Directory escape guard** — `check_path_within_root` ensures file
@@ -7340,6 +7375,47 @@ denied patterns. Both global and project-level configurations are merged.
 - **Large file handling** — files exceeding 100 lines return a summary with
   the first 100 lines plus a section map, preventing accidental consumption
   of enormous files.
+
+#### 24.5.1 Directory Allowlist / Denylist
+
+ragent provides built-in directory patterns for auto-approval and auto-denial
+of file operations, with user customization via slash commands.
+
+**Built-in Denylist** — 22 system-critical directory patterns that are always
+denied without user prompt:
+
+| Platform | Protected Directories |
+|----------|----------------------|
+| **Unix/Linux** | `/bin/**`, `/sbin/**`, `/boot/**`, `/dev/**`, `/proc/**`, `/sys/**`, `/etc/**`, `/usr/bin/**`, `/usr/sbin/**`, `/usr/lib/**`, `/lib/**`, `/lib64/**` |
+| **macOS** | `/System/**`, `/Library/**`, `/Applications/**`, `/private/**` |
+| **Windows** | `C:/Windows/**`, `C:/Program Files/**`, `C:/Program Files (x86)/**` |
+
+**Built-in Allowlist** — currently empty, reserved for commonly safe patterns
+(e.g., `target/**`, `.git/**`, `node_modules/**`).
+
+**User Customization:**
+
+| Command | Effect |
+|---------|--------|
+| `/dirs add allow src/**` | Auto-approve operations on `src/` directory |
+| `/dirs add deny secrets/**` | Auto-deny operations on `secrets/` directory |
+| `/dirs remove allow src/**` | Remove auto-approval rule |
+| `/dirs remove deny secrets/**` | Remove auto-denial rule |
+| `/dirs show` | Display all built-in and user-defined lists |
+
+Configuration equivalent in `ragent.json`:
+
+```jsonc
+{
+  "dirs": {
+    "allowlist": ["src/**", "docs/**"],
+    "denylist": ["secrets/**", ".env.*"]
+  }
+}
+```
+
+Both global (`~/.config/ragent/ragent.json`) and project-level configurations
+are merged.
 
 ### 24.6 Resource Limits
 
@@ -7627,7 +7703,7 @@ All logging and event serialisation passes through secret redaction:
 
 ### 24.13 Encrypted Credential Storage
 
-ragent stores all sensitive credentials (API keys, tokens, OAuth tokens) in an encrypted SQLite database rather than plain-text files. This system is implemented in `crates/ragent-core/src/storage/mod.rs`.
+ragent stores all sensitive credentials (API keys, tokens, OAuth tokens) in an encrypted SQLite database rather than plain-text files. This system is implemented in `crates/ragent-storage/src/storage.rs`.
 
 #### Encryption Architecture
 
@@ -7700,9 +7776,9 @@ The following subsystems use `set_provider_auth` / `get_provider_auth` / `delete
 | **Copilot OAuth flow** | `ragent-tui/src/input.rs` | Stores OAuth token after GitHub Copilot device flow |
 | **Copilot token check** | `ragent-tui/src/app.rs` | Reads Copilot token to check auth status |
 | **Provider auto-detection** | `ragent-tui/src/app.rs` | Reads stored keys to auto-select available providers at startup |
-| **Session processor** | `ragent-core/src/session/processor.rs` | Reads provider keys when creating LLM clients for inference |
-| **GitLab auth** | `ragent-core/src/gitlab/auth.rs` | Stores/retrieves GitLab PAT (provider_id = `"gitlab"`) |
-| **GitLab legacy migration** | `ragent-core/src/gitlab/auth.rs` | Imports tokens from legacy `~/.ragent/gitlab_token` files |
+| **Session processor** | `ragent-agent/src/session/processor.rs` | Reads provider keys when creating LLM clients for inference |
+| **GitLab auth** | `ragent-tools-vcs/src/gitlab/auth.rs` | Stores/retrieves GitLab PAT (provider_id = `"gitlab"`) |
+| **GitLab legacy migration** | `ragent-tools-vcs/src/gitlab/auth.rs` | Imports tokens from legacy `~/.ragent/gitlab_token` files |
 
 #### Callers — Settings
 
@@ -7714,9 +7790,9 @@ The following subsystems use `set_setting` / `get_setting` / `delete_setting`:
 | **Copilot API base** | `ragent-tui/src/input.rs` | Stores `copilot_api_base` URL |
 | **Generic OpenAI endpoint** | `ragent-tui/src/input.rs` | Stores `generic_openai_api_base` URL |
 | **Provider disable flags** | `ragent-tui/src/input.rs` | Stores `provider_{id}_disabled` flags |
-| **GitLab config** | `ragent-core/src/gitlab/auth.rs` | Stores `gitlab_config` JSON (instance URL + username) |
-| **Session processor** | `ragent-core/src/session/processor.rs` | Reads `copilot_api_base` and `generic_openai_api_base` for LLM clients |
-| **Memory system** | `ragent-core/src/memory/extract.rs` | Reads `project_name` for memory extraction context |
+| **GitLab config** | `ragent-tools-vcs/src/gitlab/auth.rs` | Stores `gitlab_config` JSON (instance URL + username) |
+| **Session processor** | `ragent-agent/src/session/processor.rs` | Reads `copilot_api_base` and `generic_openai_api_base` for LLM clients |
+| **Memory system** | `ragent-agent/src/memory/extract.rs` | Reads `project_name` for memory extraction context |
 
 #### Layered Credential Resolution
 
@@ -7909,4 +7985,3 @@ The following were verified as accurate and required no updates:
 - Teams and swarm mode documentation is comprehensive
 - Security and permission system documentation is detailed and current
 - All tool categories and counts match implementation
-

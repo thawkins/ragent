@@ -8,10 +8,14 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ragent-core = { workspace = true }
-ragent-code = { path = "../ragent-code" }
+ragent-core = { package = "ragent-agent", path = "../ragent-agent" }
+ragent-team = { path = "../ragent-team" }
+ragent-config = { path = "../ragent-config" }
+ragent-types = { path = "../ragent-types" }
+ragent-storage = { path = "../ragent-storage" }
+ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-server = { path = "../ragent-server" }
-aiwiki = { path = "../aiwiki" }
+ragent-aiwiki = { path = "../ragent-aiwiki" }
 axum = { workspace = true }
 dirs = { workspace = true }
 tokio = { workspace = true }
@@ -30,7 +34,7 @@ arboard = { workspace = true }
 image = { workspace = true }
 html2text = { workspace = true }
 pulldown-cmark = "0.12"
-prompt_opt = { path = "../prompt_opt" }
+ragent-prompt_opt = { path = "../ragent-prompt_opt" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }

@@ -1776,7 +1776,7 @@ fn render_teams_window_overlay(frame: &mut Frame, app: &mut App) {
 /// Shows each teammate as a compact pill: `[icon] name (status)`.
 /// The focused teammate is highlighted with a different background.
 fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
-    use ragent_core::team::MemberStatus;
+    use ragent_team::team::MemberStatus;
 
     let bg = Color::Rgb(30, 30, 40);
     let mut spans: Vec<Span<'_>> = Vec::new();
@@ -2778,18 +2778,39 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
         return;
     }
 
-    // Standard permission dialog: y/a/n.
+    // Standard permission dialog: y/a/n with countdown timer.
     let area = centered_rect(60, 40, frame.area()); // Increased height for better visibility
     frame.render_widget(Clear, area);
 
+    // Calculate remaining time for countdown
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let created_at = req
+        .metadata
+        .get("created_at")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(now);
+    let timeout_secs = req
+        .metadata
+        .get("timeout_secs")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(30);
+    let elapsed = now.saturating_sub(created_at);
+    let remaining = timeout_secs.saturating_sub(elapsed);
+
+    let countdown_text = if remaining == 0 {
+        "(EXPIRED)".to_string()
+    } else {
+        let remaining_mins = remaining / 60;
+        let remaining_secs = remaining % 60;
+        format!("({}:{:02} remaining)", remaining_mins, remaining_secs)
+    };
+
     // Wrap the dialog in a block with strong styling to make it prominent
     let text = vec![
-        Line::from(Span::styled(
-            "⚠️  Permission Required",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
         Line::from(""),
         Line::from(format!("Permission: {}", req.permission)),
         Line::from(""),
@@ -2809,9 +2830,12 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
 
     let queue_depth = app.permission_queue.len();
     let title_suffix = if queue_depth > 1 {
-        format!(" Permission: {} ({} queued) ", req.permission, queue_depth)
+        format!(
+            "⚠️  Permission Required {} ({} queued)",
+            countdown_text, queue_depth
+        )
     } else {
-        format!(" Permission: {} ", req.permission)
+        format!("⚠️  Permission Required {}", countdown_text)
     };
 
     let block = Block::default()

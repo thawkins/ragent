@@ -12,7 +12,7 @@ This document presents a Rust implementation of the `CodeIndexSearchTool`, a spe
 
 The `CodeIndexSearchTool` is architected as part of a larger tool ecosystem within `ragent-core`, implementing the `Tool` trait that standardizes how agent capabilities are exposed. The tool accepts structured parameters including query strings, symbol kind filters (function, struct, enum, trait, etc.), language filters, file path patterns, and result limits. This design enables precise, context-aware searches that would be difficult or inefficient with traditional text-based approaches. The implementation also includes thoughtful fallback mechanisms, directing users to alternative tools (`grep`, `glob`, `lsp_symbols`, `lsp_references`) when the code index is disabled or uninitialized.
 
-The execution flow reveals a multi-layered architecture where the tool acts as a presentation layer over the underlying `ragent_code` indexing system. Results are formatted with rich metadata including symbol signatures and truncated documentation snippets, making the output immediately useful for developers or AI agents consuming the results. The code demonstrates Rust's strengths in type safety and error handling, using `anyhow` for ergonomic error propagation and `serde_json` for schema definition and response serialization. The permission category `codeindex:read` indicates integration with a capability-based security model for tool access control.
+The execution flow reveals a multi-layered architecture where the tool acts as a presentation layer over the underlying `ragent_codeindex` indexing system. Results are formatted with rich metadata including symbol signatures and truncated documentation snippets, making the output immediately useful for developers or AI agents consuming the results. The code demonstrates Rust's strengths in type safety and error handling, using `anyhow` for ergonomic error propagation and `serde_json` for schema definition and response serialization. The permission category `codeindex:read` indicates integration with a capability-based security model for tool access control.
 
 ## Related
 
@@ -21,7 +21,7 @@ The execution flow reveals a multi-layered architecture where the tool acts as a
 - [Ragent Project](../entities/ragent-project.md) — product
 - [serde_json](../entities/serde-json.md) — technology
 - [anyhow](../entities/anyhow.md) — technology
-- [ragent_code](../entities/ragent-code.md) — product
+- [ragent_codeindex](../entities/ragent-codeindex.md) — product
 
 ### Concepts
 

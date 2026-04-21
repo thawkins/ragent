@@ -8,8 +8,11 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-ragent-core = { workspace = true }
-prompt_opt = { path = "../prompt_opt" }
+ragent-agent = { path = "../ragent-agent" }
+ragent-team = { path = "../ragent-team" }
+ragent-config = { path = "../ragent-config" }
+ragent-types = { path = "../ragent-types" }
+ragent-prompt_opt = { path = "../ragent-prompt_opt" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

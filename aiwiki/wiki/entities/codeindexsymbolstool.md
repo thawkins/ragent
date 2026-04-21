@@ -41,7 +41,7 @@ flowchart TD
     end
     
     subgraph Filter["SymbolFilter Construction"]
-        sf["ragent_code::types::SymbolFilter"]
+        sf["ragent_codeindex::types::SymbolFilter"]
     end
     
     subgraph Output["Result Processing"]

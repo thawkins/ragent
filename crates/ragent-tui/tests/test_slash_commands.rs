@@ -42,6 +42,9 @@ fn make_app() -> App {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        extraction_engine: std::sync::OnceLock::new(),
+        stream_config: ragent_core::config::StreamConfig::default(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -436,6 +439,8 @@ fn test_slash_provider_selection_updates_displayed_provider() {
             reasoning: false,
             vision: false,
             tool_use: true,
+            cost_tier: "Free".to_string(),
+            cost_multiplier: "0x".to_string(),
         }],
         selected: 0,
     });
@@ -488,6 +493,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                cost_tier: "Free".to_string(),
+                cost_multiplier: "0x".to_string(),
             },
             ragent_tui::app::ModelPickerEntry {
                 id: "m2".to_string(),
@@ -499,6 +506,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                cost_tier: "Free".to_string(),
+                cost_multiplier: "0x".to_string(),
             },
             ragent_tui::app::ModelPickerEntry {
                 id: "m3".to_string(),
@@ -510,6 +519,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                cost_tier: "Free".to_string(),
+                cost_multiplier: "0x".to_string(),
             },
         ],
         selected: 0,

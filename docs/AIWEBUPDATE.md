@@ -24,7 +24,7 @@ Sources are added via the `/aiwiki sources add` slash command. The command accep
 ```
 /aiwiki sources add docs                        # All files in docs/ and subfolders
 /aiwiki sources add src/*.rs                     # Only .rs files in src/ and subfolders
-/aiwiki sources add crates/aiwiki/src/*.rs       # Rust files in a nested path
+/aiwiki sources add crates/ragent-aiwiki/src/*.rs       # Rust files in a nested path
 /aiwiki sources add examples --label "Examples"  # All files, with a custom label
 ```
 
@@ -132,7 +132,7 @@ Sources can be specified as a plain folder path or a folder path with a file spe
 | `src/*.rs` | `src/` | `**/*.rs` | Only `.rs` files in src/ and all subfolders |
 | `tests/**/*.rs` | `tests/` | `**/*.rs` | Only `.rs` files recursively (explicit glob) |
 | `examples/*.py` | `examples/` | `**/*.py` | Only `.py` files recursively |
-| `crates/aiwiki/src` | `crates/aiwiki/src/` | `**/*` | All files under nested path |
+| `crates/ragent-aiwiki/src` | `crates/ragent-aiwiki/src/` | `**/*` | All files under nested path |
 
 **Parsing rules:**
 1. If the path contains a glob character (`*`, `?`, `{`, `[`), split at the last `/` before the first glob → folder + file pattern
@@ -195,11 +195,11 @@ Real-time Watch Pipeline (notify-driven):
 - Added `sources: Vec<SourceFolder>` and `watch_mode: bool` to `AiwikiConfig`
 - Added `source: Option<String>` to `FileState` for tracking origin of referenced files
 - Implemented CRUD methods: `add_source`, `remove_source`, `update_source`, `get_source`, `list_sources`, `enabled_sources`
-- Created 26 unit tests in `crates/aiwiki/tests/test_source_folders.rs` (exceeds 12 minimum)
+- Created 26 unit tests in `crates/ragent-aiwiki/tests/test_source_folders.rs` (exceeds 12 minimum)
 - All tests passing
 
 #### Task 1.1 — Define `SourceFolder` struct ✅
-**File**: `crates/aiwiki/src/source_folder.rs`
+**File**: `crates/ragent-aiwiki/src/source_folder.rs`
 - [x] Add `SourceFolder` struct with fields:
   - `path: String` — relative folder path from project root
   - `label: Option<String>` — human-readable label
@@ -213,21 +213,21 @@ Real-time Watch Pipeline (notify-driven):
 - [x] Add `SourceFolder::matches(file_path: &str) -> bool` for glob pattern matching
 
 #### Task 1.2 — Add `sources` field to `AiwikiConfig` ✅
-**File**: `crates/aiwiki/src/config.rs`
+**File**: `crates/ragent-aiwiki/src/config.rs`
 - [x] Add `sources: Vec<SourceFolder>` field to `AiwikiConfig` (default: empty vec)
 - [x] Add `watch_mode: bool` field for auto-start file watching
 - [x] Ensure serde `#[serde(default)]` for backward compatibility
 - [x] Export `SourceFolder` from config module for convenience
 
 #### Task 1.3 — Add source origin tracking to `FileState` ✅
-**File**: `crates/aiwiki/src/state.rs`
+**File**: `crates/ragent-aiwiki/src/state.rs`
 - [x] Add `source: Option<String>` field to `FileState` (default: `None` = raw/)
 - [x] Add `#[serde(default)]` for backwards compatibility
 - [x] Update `update_file()` method to accept optional source parameter
 - [x] Update callers in sync module
 
 #### Task 1.4 — Config CRUD methods for sources ✅
-**File**: `crates/aiwiki/src/config.rs`
+**File**: `crates/ragent-aiwiki/src/config.rs`
 - [x] `add_source(&mut self, source: SourceFolder) -> Result<()>` — validates and appends
 - [x] `remove_source(&mut self, path: &str) -> Result<SourceFolder>` — removes by path
 - [x] `update_source(&mut self, path: &str, updated: SourceFolder) -> Result<()>` — replaces entry
@@ -236,12 +236,12 @@ Real-time Watch Pipeline (notify-driven):
 - [x] `enabled_sources(&self)` — return iterator over enabled sources
 
 #### Task 1.5 — Unit tests for data model ✅
-**File**: `crates/aiwiki/tests/test_source_folders.rs`
+**File**: `crates/ragent-aiwiki/tests/test_source_folders.rs`
 - [x] Test `SourceFolder::new()` defaults
 - [x] Test `SourceFolder::from_spec("docs")` → path: `"docs"`, patterns: `["**/*"]`
 - [x] Test `SourceFolder::from_spec("src/*.rs")` → path: `"src"`, patterns: `["**/*.rs"]`
 - [x] Test `SourceFolder::from_spec("tests/**/*.rs")` → path: `"tests"`, patterns: `["**/*.rs"]`
-- [x] Test `SourceFolder::from_spec("crates/aiwiki/src/*.rs")` → nested path + pattern
+- [x] Test `SourceFolder::from_spec("crates/ragent-aiwiki/src/*.rs")` → nested path + pattern
 - [x] Test `AiwikiConfig` with/without sources field (backward compat)
 - [x] Test add/remove/update/get source methods
 - [x] Test validation: reject absolute paths, `..` escape, duplicate paths
@@ -257,27 +257,27 @@ Real-time Watch Pipeline (notify-driven):
 **Goal**: Implement the file scanning and change detection for referenced folders, integrating with the existing sync pipeline.
 
 **Summary**:
-- Created `crates/aiwiki/src/sync/sources.rs` with `scan_source_folder()` and utility functions
+- Created `crates/ragent-aiwiki/src/sync/sources.rs` with `scan_source_folder()` and utility functions
 - Added `globset` dependency to `Cargo.toml` for pattern matching
 - Extended `AiwikiState` with `get_ref_changes()` and `get_all_changes()` methods
 - Updated `sync()` function to process referenced folders alongside raw/
 - Updated `preview_sync()` to show changes from all sources
-- Created 13 integration tests in `crates/aiwiki/tests/test_ref_folder_sync.rs` (exceeds minimum of 8)
+- Created 13 integration tests in `crates/ragent-aiwiki/tests/test_ref_folder_sync.rs` (exceeds minimum of 8)
 - All tests passing
 
 #### Task 2.1 — Implement `scan_source_folder()` ✅
-**File**: `crates/aiwiki/src/sync/sources.rs`
+**File**: `crates/ragent-aiwiki/src/sync/sources.rs`
 - [x] `pub async fn scan_source_folder(root: &Path, source: &SourceFolder, ignore_patterns: &[impl AsRef<str>]) -> Result<Vec<PathBuf>>`
 - [x] Resolves `source.path` relative to `root`
 - [x] Recursively scans directory (respecting `source.recursive`)
 - [x] Filters files against `source.patterns` using glob matching via `globset`
 - [x] Respects `config.ignore_patterns`
 - [x] Returns list of absolute file paths
-- [x] Added `globset = "0.4"` dependency to `crates/aiwiki/Cargo.toml`
+- [x] Added `globset = "0.4"` dependency to `crates/ragent-aiwiki/Cargo.toml`
 - [x] Helper functions: `make_ref_key()`, `parse_ref_key()`, `resolve_file_path()`, `count_source_files()`
 
 #### Task 2.2 — Extend `get_changes()` for referenced folders ✅
-**File**: `crates/aiwiki/src/state.rs`
+**File**: `crates/ragent-aiwiki/src/state.rs`
 - [x] Added `pub async fn get_ref_changes(&self, root: &Path, source: &SourceFolder, ignore_patterns: &[&str]) -> Result<Changes>`
 - [x] Works like `get_changes()` but:
   - Scans source folder path instead of `raw/`
@@ -290,7 +290,7 @@ Real-time Watch Pipeline (notify-driven):
   - Merges all Changes into a single unified Changes struct
 
 #### Task 2.3 — Update `sync()` to process referenced folders ✅
-**File**: `crates/aiwiki/src/sync/mod.rs`
+**File**: `crates/ragent-aiwiki/src/sync/mod.rs`
 - [x] Modified `sync()` to call `get_all_changes()` when sources exist
 - [x] Updated `process_new_source()` to accept `project_root` parameter
   - Resolves actual file path for `ref:` prefixed keys
@@ -300,13 +300,13 @@ Real-time Watch Pipeline (notify-driven):
 - [x] `process_deleted_source()` handles `ref:` keys correctly
 
 #### Task 2.4 — Update `preview_sync()` for referenced folders ✅
-**File**: `crates/aiwiki/src/sync/mod.rs`
+**File**: `crates/ragent-aiwiki/src/sync/mod.rs`
 - [x] `preview_sync()` uses `get_all_changes()` when sources exist
 - [x] Uses `resolve_file_path()` to get metadata from correct location
 - [x] Preview output includes changes from all source folders
 
 #### Task 2.5 — Integration tests for scanning and sync ✅
-**File**: `crates/aiwiki/tests/test_ref_folder_sync.rs`
+**File**: `crates/ragent-aiwiki/tests/test_ref_folder_sync.rs`
 - [x] Test: scan a referenced folder, detect new files
 - [x] Test: modify a file, detect as modified on re-scan
 - [x] Test: delete a file, detect as deleted
@@ -412,7 +412,7 @@ Real-time Watch Pipeline (notify-driven):
   - Shows `Xsrc(+Yref)/ Zpg` when referenced files exist
 
 #### Task 4.2 — Update sync progress for referenced folders ✅
-**File**: `crates/aiwiki/src/sync/mod.rs`, `crates/ragent-tui/src/layout.rs`
+**File**: `crates/ragent-aiwiki/src/sync/mod.rs`, `crates/ragent-tui/src/layout.rs`
 - [x] `sync()` already uses `get_all_changes()` which includes raw/ + referenced folders
 - [x] `SyncProgress` counters track total files correctly (no changes needed)
 - [x] Progress indicator shows `{current}/{total}` during sync
@@ -434,21 +434,21 @@ Real-time Watch Pipeline (notify-driven):
 - All web routes integrated into the router
 
 #### Task 5.1 — Update status page ✅
-**File**: `crates/aiwiki/src/web/templates.rs`
+**File**: `crates/ragent-aiwiki/src/web/templates.rs`
 - [x] Added "Sources" section to the status page
 - [x] Shows each registered folder with path, label, patterns, enabled state, file count
 - [x] Status cards now show: Raw Files, Ref Files, Wiki Pages, Sources count
 - [x] Sources grid displays source cards with visual enabled/disabled indicators
 
 #### Task 5.2 — Update source page attribution ✅
-**File**: `crates/aiwiki/src/web/templates.rs`
+**File**: `crates/ragent-aiwiki/src/web/templates.rs`
 - [x] Added `find_page_source()` helper to locate source file from generated page
 - [x] Updated `render_markdown_page()` to show source attribution in page meta
 - [x] Shows "Source: docs/readme.md" vs "Source: raw/readme.md" based on origin
 - [x] Added styled source-attribution badge in page header
 
 #### Task 5.3 — Source folder browsing ✅
-**File**: `crates/aiwiki/src/web/mod.rs`, `crates/aiwiki/src/web/templates.rs`
+**File**: `crates/ragent-aiwiki/src/web/mod.rs`, `crates/ragent-aiwiki/src/web/templates.rs`
 - [x] Added `/aiwiki/sources` route that lists all registered source folders
 - [x] Created `render_sources_page()` with grid of source cards
 - [x] Added `/aiwiki/source/{*path}` route for viewing a specific source
@@ -470,7 +470,7 @@ Real-time Watch Pipeline (notify-driven):
 - Updated README.md features list to mention AIWiki knowledge base with referenced source folders
 
 #### Task 6.1 — End-to-end integration test ✅
-**File**: `crates/aiwiki/tests/test_ref_folder_e2e.rs`
+**File**: `crates/ragent-aiwiki/tests/test_ref_folder_e2e.rs`
 - [x] Create temp project with docs/ and src/ folders
 - [x] Init aiwiki, add sources, sync, verify pages generated
 - [x] Modify a file, re-sync, verify update detected
@@ -497,7 +497,7 @@ Real-time Watch Pipeline (notify-driven):
 
 ### Milestone 7 — Real-Time File Watching
 
-**Goal**: Detect changes in registered source folders in real-time using the `notify` crate (same version as ragent-code: 7.0) and automatically push changed files through the extraction pipeline without requiring a manual `/aiwiki sync`.
+**Goal**: Detect changes in registered source folders in real-time using the `notify` crate (same version as ragent-codeindex: 7.0) and automatically push changed files through the extraction pipeline without requiring a manual `/aiwiki sync`.
 
 #### Architecture
 
@@ -545,7 +545,7 @@ Real-time Watch Pipeline (notify-driven):
 - Reuse the **patterns** (WatchEvent enum, EventBatch dedup, debounce loop) but not the concrete types
 
 **Why not make CodeIndex's watcher generic:**
-- Would require refactoring the existing `IndexWorker<T: IndexBackend>` across ragent-code, risking regressions
+- Would require refactoring the existing `IndexWorker<T: IndexBackend>` across ragent-codeindex, risking regressions
 - The two use cases have fundamentally different timing characteristics
 - Can revisit genericization later if a third consumer appears
 
@@ -555,12 +555,12 @@ Real-time Watch Pipeline (notify-driven):
 - 5s is long enough to coalesce bursts but short enough to feel responsive
 
 #### Task 7.1 — Add `notify` dependency to aiwiki
-**File**: `crates/aiwiki/Cargo.toml`
+**File**: `crates/ragent-aiwiki/Cargo.toml`
 - Add `notify = "7.0"` to dependencies
 - Add `globset = "0.4"` if not already present (for pattern matching in event filtering)
 
 #### Task 7.2 — Implement `SourceWatcher`
-**File**: `crates/aiwiki/src/sync/watcher.rs` (new file)
+**File**: `crates/ragent-aiwiki/src/sync/watcher.rs` (new file)
 - Define `WatchEvent` enum:
   ```rust
   pub enum WatchEvent {
@@ -586,7 +586,7 @@ Real-time Watch Pipeline (notify-driven):
 - `pub fn watched_paths(&self) -> Vec<&Path>` — returns list of watched directories
 
 #### Task 7.3 — Implement `ExtractionWorker`
-**File**: `crates/aiwiki/src/sync/extraction_worker.rs` (new file)
+**File**: `crates/ragent-aiwiki/src/sync/extraction_worker.rs` (new file)
 - Define shared state:
   ```rust
   pub struct WatcherProgress {
@@ -624,7 +624,7 @@ Real-time Watch Pipeline (notify-driven):
 - Graceful shutdown via `stop_flag`
 
 #### Task 7.4 — Implement `WatchSession` for AIWiki
-**File**: `crates/aiwiki/src/sync/watch_session.rs` (new file)
+**File**: `crates/ragent-aiwiki/src/sync/watch_session.rs` (new file)
 - Define:
   ```rust
   pub struct AiwikiWatchSession {
@@ -645,7 +645,7 @@ Real-time Watch Pipeline (notify-driven):
 - `Drop` implementation calls `stop()`
 
 #### Task 7.5 — Integrate watch session with sync module
-**File**: `crates/aiwiki/src/sync/mod.rs`
+**File**: `crates/ragent-aiwiki/src/sync/mod.rs`
 - Re-export `AiwikiWatchSession`, `WatcherProgress` from new modules
 - Add `pub fn start_watching(...)` convenience function on the sync module
 - Ensure manual `sync()` and watch session don't conflict:
@@ -669,14 +669,14 @@ Real-time Watch Pipeline (notify-driven):
 - Use green for idle, yellow for processing
 
 #### Task 7.8 — Add `watch_mode` config field
-**File**: `crates/aiwiki/src/config.rs`
+**File**: `crates/ragent-aiwiki/src/config.rs`
 - Add `watch_mode: bool` field to `AiwikiConfig` (default: `false`)
 - `#[serde(default)]` for backward compatibility
 - When `true`, TUI auto-starts the watch session on initialization
 - Can be toggled via `/aiwiki watch start/stop` at runtime
 
 #### Task 7.9 — Unit & integration tests for watcher
-**File**: `crates/aiwiki/tests/test_watcher.rs`
+**File**: `crates/ragent-aiwiki/tests/test_watcher.rs`
 - Test: SourceWatcher detects file creation in watched folder
 - Test: SourceWatcher detects file modification
 - Test: SourceWatcher detects file deletion

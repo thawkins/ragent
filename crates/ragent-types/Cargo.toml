@@ -1,0 +1,27 @@
+[package]
+name = "ragent-types"
+version = "0.1.0"
+edition = "2024"
+authors = ["Tim Hawkins"]
+license = "MIT"
+description = "Core types and traits for ragent"
+
+[dependencies]
+tokio = { version = "1", features = ["sync", "time", "rt"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+dashmap = "6"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+once_cell = "1"
+string-interner = "0.17"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+serial_test = "3.2"

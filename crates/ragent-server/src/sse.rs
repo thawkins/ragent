@@ -8,6 +8,7 @@
 //! allocations that the `json!` macro would create.
 
 use axum::response::sse::Event as SseEvent;
+use ragent_agent as ragent_core;
 use ragent_core::event::{Event, FinishReason};
 use ragent_core::sanitize::redact_secrets;
 use serde::Serialize;
@@ -369,6 +370,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             session_id,
             request_id,
             allowed,
+            ..
         } => to_data(&PermRepP {
             session_id,
             request_id,
@@ -745,7 +747,7 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
 /// `serde_json::Value` is allocated.
 ///
 /// ```rust
-/// use ragent_core::event::Event;
+/// use ragent_agent::event::Event;
 /// use ragent_server::sse::event_to_sse;
 ///
 /// let event = Event::SessionCreated {

@@ -15,6 +15,7 @@ use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use pulldown_cmark::{Options, Parser, html};
 use ratatui::layout::Rect;
 
+use ragent_core::team::TeamManager;
 use ragent_core::{
     agent::{AgentInfo, ModelRef},
     event::{Event, EventBus, FinishReason},
@@ -25,18 +26,17 @@ use ragent_core::{
     provider::ProviderRegistry,
     session::processor::SessionProcessor,
     storage::Storage,
-    team::{
-        Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamManager, TeamMember,
-        TeamStore,
-    },
     tool::TeamManagerInterface,
+};
+use ragent_team::team::{
+    self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamMember, TeamStore,
 };
 
 use crate::input::{self, InputAction};
 use crate::tips;
 
 // Prompt optimization templates
-use prompt_opt::{Completer, OptMethod, optimize};
+use ragent_prompt_opt::{Completer, OptMethod, optimize};
 
 mod state;
 pub use self::state::*;
@@ -44,7 +44,7 @@ pub use self::state::*;
 // Re-export status types from theme for use in app
 pub use crate::theme::{StatusCategory, StatusHistory, StatusMessage};
 
-/// Connects the `prompt_opt` crate to the session's active LLM provider.
+/// Connects the `ragent-prompt_opt` crate to the session's active LLM provider.
 ///
 /// `RagentCompleter` implements [`Completer`] by building an [`LlmClient`] from
 /// the configured provider, sending the system+user message pair, and collecting
@@ -107,9 +107,9 @@ impl Completer for RagentCompleter {
     }
 }
 
-/// Implements `aiwiki::LlmExtractor` using the TUI's active LLM provider.
+/// Implements `ragent_aiwiki::LlmExtractor` using the TUI's active LLM provider.
 ///
-/// Bridges the aiwiki extraction pipeline to the ragent-core provider system.
+/// Bridges the aiwiki extraction pipeline to the extracted provider system.
 pub struct TuiLlmExtractor {
     /// Provider registry for LLM access.
     pub registry: Arc<ragent_core::provider::ProviderRegistry>,
@@ -122,7 +122,7 @@ pub struct TuiLlmExtractor {
 }
 
 #[async_trait::async_trait]
-impl aiwiki::LlmExtractor for TuiLlmExtractor {
+impl ragent_aiwiki::LlmExtractor for TuiLlmExtractor {
     async fn complete(
         &self,
         system: &str,
@@ -198,7 +198,7 @@ impl aiwiki::LlmExtractor for TuiLlmExtractor {
 /// Result of a background AIWiki sync operation, delivered via `JoinHandle`.
 pub struct AiwikiSyncOutcome {
     /// The sync result or error message.
-    pub result: Result<aiwiki::sync::SyncResult, String>,
+    pub result: Result<ragent_aiwiki::sync::SyncResult, String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -550,6 +550,7 @@ impl App {
             pending_send_after_compact: None,
             agent_halted: false,
             tool_step_map: HashMap::new(),
+            pending_tool_args: HashMap::new(),
             last_step_per_session: HashMap::new(),
             substep_counter_per_session: HashMap::new(),
             active_tasks: Vec::new(),
@@ -637,8 +638,11 @@ impl App {
         // Initialise the bash allowlist/denylist from config
         ragent_core::bash_lists::load_from_config();
 
+        // Initialise the directory allowlist/denylist from config
+        ragent_core::dir_lists::load_from_config();
+
         // Migrate legacy file-based GitLab credentials into the database
-        ragent_core::gitlab::auth::migrate_legacy_files(&app.storage);
+        ragent_core::gitlab::auth::migrate_legacy_files(app.storage.as_ref());
 
         app
     }
@@ -694,7 +698,7 @@ impl App {
         };
         let Some(outcome) = outcome else { return };
         match outcome {
-            Ok(raw_json) => match ragent_core::team::parse_decomposition(&raw_json) {
+            Ok(raw_json) => match team::parse_decomposition(&raw_json) {
                 Ok(decomposition) => {
                     self.execute_swarm_decomposition(decomposition);
                 }
@@ -1930,7 +1934,7 @@ impl App {
     /// Called from `run_tui()` after the code index has been initialized
     /// (if enabled in config). The app keeps the reference alive and uses it
     /// for `/codeindex show` to display real-time statistics.
-    pub fn set_code_index(&mut self, code_index: Option<Arc<ragent_code::CodeIndex>>) {
+    pub fn set_code_index(&mut self, code_index: Option<Arc<ragent_codeindex::CodeIndex>>) {
         self.code_index = code_index;
     }
 
@@ -1997,11 +2001,11 @@ impl App {
 
         let current_dir = std::env::current_dir().unwrap_or_default();
 
-        if aiwiki::Aiwiki::exists(&current_dir) {
+        if ragent_aiwiki::Aiwiki::exists(&current_dir) {
             let rt = tokio::runtime::Handle::try_current();
             if let Ok(runtime) = rt {
                 let wiki_result = tokio::task::block_in_place(|| {
-                    runtime.block_on(aiwiki::Aiwiki::new(&current_dir))
+                    runtime.block_on(ragent_aiwiki::Aiwiki::new(&current_dir))
                 });
                 match wiki_result {
                     Ok(wiki) => {
@@ -2157,7 +2161,7 @@ impl App {
         // Build LLM extractor
         let model_label = self.aiwiki_model_label();
         let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-        let extractor: Arc<dyn aiwiki::extraction::LlmExtractor + Send + Sync> =
+        let extractor: Arc<dyn ragent_aiwiki::extraction::LlmExtractor + Send + Sync> =
             Arc::new(TuiLlmExtractor {
                 registry: Arc::clone(&self.provider_registry),
                 storage: Arc::clone(&self.storage),
@@ -2168,13 +2172,13 @@ impl App {
         // We need to load the wiki again to start the watcher
         // Since we can't easily move the wiki out, we'll create a new one
         match tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(aiwiki::Aiwiki::new(&current_dir))
+            tokio::runtime::Handle::current().block_on(ragent_aiwiki::Aiwiki::new(&current_dir))
         }) {
             Ok(wiki) => {
                 let wiki = Arc::new(tokio::sync::Mutex::new(wiki));
                 let config = match tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
-                        .block_on(aiwiki::AiwikiConfig::load(&wiki_dir))
+                        .block_on(ragent_aiwiki::AiwikiConfig::load(&wiki_dir))
                 }) {
                     Ok(cfg) => cfg,
                     Err(e) => {
@@ -2183,7 +2187,7 @@ impl App {
                     }
                 };
 
-                match aiwiki::sync::AiwikiWatchSession::start(&wiki_dir, &config, wiki, extractor) {
+                match ragent_aiwiki::sync::AiwikiWatchSession::start(&wiki_dir, &config, wiki, extractor) {
                     Ok(session) => {
                         self.aiwiki_watch_session = Some(session);
                         tracing::info!("AIWiki watch session started");
@@ -2209,7 +2213,7 @@ impl App {
         if let Some(p) = self.configured_provider.as_ref() {
             return p.id.clone();
         }
-        aiwiki::config::DEFAULT_LLM_MODEL.to_string()
+        ragent_aiwiki::config::DEFAULT_LLM_MODEL.to_string()
     }
 
     /// Start the AIWiki web server (if not already running) and open a browser.
@@ -2260,7 +2264,7 @@ impl App {
         };
 
         let project_root = std::env::current_dir().unwrap_or_default();
-        let wiki_router = aiwiki::web::create_router(&project_root);
+        let wiki_router = ragent_aiwiki::web::create_router(&project_root);
         let app_router = axum::Router::new().nest("/aiwiki", wiki_router).route(
             "/",
             axum::routing::get(|| async { axum::response::Redirect::permanent("/aiwiki") }),
@@ -2316,6 +2320,7 @@ impl App {
     pub fn toggle_lsp_server_enabled(&self, id: &str) -> Result<String, String> {
         let config_path = std::env::current_dir()
             .unwrap_or_default()
+            .join(".ragent")
             .join("ragent.json");
 
         let config = ragent_core::config::Config::load().unwrap_or_default();
@@ -2363,6 +2368,7 @@ impl App {
         // Persist back to ragent.json in the working directory.
         let config_path = std::env::current_dir()
             .unwrap_or_default()
+            .join(".ragent")
             .join("ragent.json");
 
         let server_id = server.id.clone();
@@ -2405,6 +2411,7 @@ impl App {
         // Persist back to ragent.json in the working directory.
         let config_path = std::env::current_dir()
             .unwrap_or_default()
+            .join(".ragent")
             .join("ragent.json");
 
         let server_id = server.id.clone();
@@ -4417,6 +4424,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.status = "reload".to_string();
                 // Reload bash lists alongside other config
                 ragent_core::bash_lists::load_from_config();
+                // Reload directory lists alongside other config
+                ragent_core::dir_lists::load_from_config();
             }
             "resume" => {
                 if !self.agent_halted {
@@ -6299,7 +6308,7 @@ built-in safety rules.
 | `/bash help` | Show this help text |
 
 Append `--global` to write the change to the global config
-(`~/.config/ragent/ragent.json`) instead of the project `ragent.json`.
+(`~/.config/ragent/ragent.json`) instead of the project `.ragent/ragent.json`.
 
 ### How it works
 
@@ -6308,17 +6317,34 @@ check.  Use this to re-enable tools like `curl` without entering YOLO mode.
 - **denylist**: substring patterns that always reject a command, \
 supplementing the built-in denied-patterns list.
 
-Changes are persisted immediately to `ragent.json` and take effect at once.
+Changes are persisted immediately to `.ragent/ragent.json` and take effect at once.
 ";
                         self.append_assistant_text(help);
                     }
                     "show" => {
                         let allowlist = ragent_core::bash_lists::get_allowlist();
                         let denylist = ragent_core::bash_lists::get_denylist();
+                        let safe_commands = ragent_core::tool::bash::get_safe_commands();
+                        let (
+                            builtin_banned,
+                            builtin_denied_commands,
+                            builtin_denied_cmd_patterns,
+                            builtin_patterns,
+                        ) = ragent_core::tool::bash::get_builtin_lists();
 
                         let mut out = String::from("From: /bash show\n\n## Bash command lists\n\n");
 
-                        out.push_str("### Allowlist (user-defined)\n");
+                        // Built-in safe commands (Layer 1)
+                        out.push_str("### Built-in Safe Commands (Layer 1 - Auto-approved)\n");
+                        out.push_str(
+                            "*These commands are auto-approved without user prompting*\n\n",
+                        );
+                        for cmd in safe_commands {
+                            out.push_str(&format!("  - `{cmd}`\n"));
+                        }
+
+                        // User-defined allowlist
+                        out.push_str("\n### Allowlist (user-defined - Layer 2 exemptions)\n");
                         if allowlist.is_empty() {
                             out.push_str("  *(empty)*\n");
                         } else {
@@ -6327,7 +6353,8 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                             }
                         }
 
-                        out.push_str("\n### Denylist (user-defined)\n");
+                        // User-defined denylist
+                        out.push_str("\n### Denylist (user-defined - Layer 3 custom blocks)\n");
                         if denylist.is_empty() {
                             out.push_str("  *(empty)*\n");
                         } else {
@@ -6336,10 +6363,42 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                             }
                         }
 
+                        // Built-in banned commands
                         out.push_str(
-                            "\n*Built-in lists are not shown here. \
-                            Use `/bash help` for more information.*\n",
+                            "\n### Built-in Banned Commands (Layer 2 - Word-boundary matched)\n",
                         );
+                        out.push_str("*These commands are blocked unless allowlisted or YOLO mode is enabled*\n\n");
+                        for cmd in builtin_banned {
+                            out.push_str(&format!("  - `{cmd}`\n"));
+                        }
+
+                        // Built-in denied commands
+                        out.push_str(
+                            "\n### Built-in Denied Commands (Layer 3 - Word-boundary matched)\n",
+                        );
+                        out.push_str("*These command names are unconditionally blocked (e.g., mkfs, insmod, useradd)*\n\n");
+                        for cmd in builtin_denied_commands {
+                            out.push_str(&format!("  - `{cmd}`\n"));
+                        }
+
+                        // Built-in denied command patterns
+                        out.push_str("\n### Built-in Denied Command Patterns (Layer 3 - Command+args matched)\n");
+                        out.push_str("*Commands with specific arguments are blocked (e.g., sudo , su -, passwd )*\n\n");
+                        for pattern in builtin_denied_cmd_patterns {
+                            out.push_str(&format!("  - `{pattern}`\n"));
+                        }
+
+                        // Built-in denied patterns
+                        out.push_str(
+                            "\n### Built-in Denied Patterns (Layer 3 - Substring matched)\n",
+                        );
+                        out.push_str(
+                            "*Commands containing these patterns are unconditionally blocked*\n\n",
+                        );
+                        for pattern in builtin_patterns {
+                            out.push_str(&format!("  - `{pattern}`\n"));
+                        }
+
                         self.append_assistant_text(&out);
                     }
                     "add" | "remove" => {
@@ -6372,7 +6431,7 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                         let config_file = if is_global {
                             "~/.config/ragent/ragent.json"
                         } else {
-                            "ragent.json"
+                            ".ragent/ragent.json"
                         };
 
                         match (sub, list_type) {
@@ -6468,6 +6527,253 @@ Changes are persisted immediately to `ragent.json` and take effect at once.
                         self.append_assistant_text(&format!(
                             "From: /bash\n\nUnknown subcommand `{sub}`. \
                             Run `/bash help` for usage."
+                        ));
+                    }
+                }
+            }
+            // ── /dirs ────────────────────────────────────────────────────────
+            "dirs" => {
+                let (sub, rest) = args
+                    .split_once(char::is_whitespace)
+                    .map_or((args, ""), |(s, r)| (s.trim(), r.trim()));
+
+                match sub {
+                    "help" | "" => {
+                        let help = "\
+            From: /dirs help
+            
+            ## /dirs — Directory/file permission management
+            
+            Manage glob patterns for file operations that are automatically **allowed** or **denied**
+            by the permission system without prompting.
+            
+            ### Subcommands
+            
+            | Command | Description |
+            |---------|-------------|
+            | `/dirs add allow <pattern>` | Add a glob pattern to auto-allow (e.g. `src/**/*.rs`) |
+            | `/dirs add deny <pattern>` | Add a glob pattern to auto-deny (e.g. `secrets/**`) |
+            | `/dirs remove allow <pattern>` | Remove a pattern from the allowlist |
+            | `/dirs remove deny <pattern>` | Remove a pattern from the denylist |
+            | `/dirs show` | Show current allowlist and denylist |
+            | `/dirs help` | Show this help text |
+            
+            ### Flags
+            
+            - `--global` — Persist to global config (`~/.config/ragent/ragent.json`)
+            - (default) — Persist to project config (`./.ragent/ragent.json`)
+            
+            ### Examples
+            
+            ```bash
+            # Allow editing all Rust source files without prompting
+            /dirs add allow src/**/*.rs
+            
+            # Deny all operations in the secrets directory
+            /dirs add deny secrets/**
+            
+            # Show current lists
+            /dirs show
+            ```
+            
+            ### Pattern Matching
+            
+            Patterns use **glob syntax**:
+            - `*` matches any sequence of characters (except `/`)
+            - `**` matches any sequence of characters (including `/`)
+            - `?` matches any single character
+            - `[abc]` matches any character in the set
+            
+            ### Notes
+            
+            - Patterns are checked **before** user permission prompts
+            - Denylist patterns override allowlist patterns
+            - Use `/dirs show` to see active patterns
+            ";
+                        self.append_assistant_text(help);
+                    }
+                    "show" => {
+                        let (builtin_allow, builtin_deny) =
+                            ragent_core::dir_lists::get_builtin_lists();
+                        let user_allow = ragent_core::dir_lists::get_allowlist();
+                        let user_deny = ragent_core::dir_lists::get_denylist();
+
+                        let mut out = String::from("From: /dirs show\n\n");
+                        out.push_str("## Directory/File Permission Lists\n\n");
+
+                        // Built-in allowlist
+                        out.push_str("### Built-in Allowlist (auto-approve)\n");
+                        if builtin_allow.is_empty() {
+                            out.push_str("*(empty)*\n\n");
+                        } else {
+                            out.push_str("*File operations matching these patterns are automatically allowed*\n\n");
+                            for pattern in &builtin_allow {
+                                out.push_str(&format!("  - `{pattern}`\n"));
+                            }
+                            out.push('\n');
+                        }
+
+                        // User allowlist
+                        out.push_str("### User Allowlist (auto-approve)\n");
+                        if user_allow.is_empty() {
+                            out.push_str("*(empty)*\n\n");
+                        } else {
+                            out.push_str("*File operations matching these patterns are automatically allowed*\n\n");
+                            for pattern in &user_allow {
+                                out.push_str(&format!("  - `{pattern}`\n"));
+                            }
+                            out.push('\n');
+                        }
+
+                        // Built-in denylist
+                        out.push_str("### Built-in Denylist (auto-deny)\n");
+                        if builtin_deny.is_empty() {
+                            out.push_str("*(empty)*\n\n");
+                        } else {
+                            out.push_str("*File operations matching these patterns are automatically denied*\n\n");
+                            for pattern in &builtin_deny {
+                                out.push_str(&format!("  - `{pattern}`\n"));
+                            }
+                            out.push('\n');
+                        }
+
+                        // User denylist
+                        out.push_str("### User Denylist (auto-deny)\n");
+                        if user_deny.is_empty() {
+                            out.push_str("*(empty)*\n\n");
+                        } else {
+                            out.push_str("*File operations matching these patterns are automatically denied*\n\n");
+                            for pattern in &user_deny {
+                                out.push_str(&format!("  - `{pattern}`\n"));
+                            }
+                        }
+
+                        self.append_assistant_text(&out);
+                    }
+                    "add" | "remove" => {
+                        // Parse: [allow|deny] <pattern> [--global]
+                        let (list_type, pattern_with_flag) = rest
+                            .split_once(char::is_whitespace)
+                            .map_or((rest, ""), |(l, p)| (l.trim(), p.trim()));
+
+                        let is_global = pattern_with_flag.ends_with("--global");
+                        let pattern = if is_global {
+                            pattern_with_flag.trim_end_matches("--global").trim()
+                        } else {
+                            pattern_with_flag
+                        };
+
+                        if pattern.is_empty() {
+                            self.append_assistant_text(&format!(
+                                              "From: /dirs {sub}\n\nUsage: `/dirs {sub} allow|deny <pattern> [--global]`"
+                                          ));
+                            return;
+                        }
+
+                        let scope = if is_global {
+                            ragent_core::dir_lists::Scope::Global
+                        } else {
+                            ragent_core::dir_lists::Scope::Project
+                        };
+                        let scope_label = if is_global { "global" } else { "project" };
+                        let config_file = if is_global {
+                            "~/.config/ragent/ragent.json"
+                        } else {
+                            ".ragent/ragent.json"
+                        };
+
+                        match (sub, list_type) {
+                            ("add", "allow") => {
+                                match ragent_core::dir_lists::add_allowlist(pattern, scope) {
+                                    Ok(()) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs add allow\n\n\
+                                                          ✅ Added `{pattern}` to the **allowlist** \
+                                                          ({scope_label}: `{config_file}`).\n\n\
+                                                          File operations matching `{pattern}` will be automatically allowed."
+                                                      ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs add allow\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("add", "deny") => {
+                                match ragent_core::dir_lists::add_denylist(pattern, scope) {
+                                    Ok(()) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs add deny\n\n\
+                                                          ✅ Added `{pattern}` to the **denylist** \
+                                                          ({scope_label}: `{config_file}`).\n\n\
+                                                          File operations matching `{pattern}` will be automatically denied."
+                                                      ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs add deny\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("remove", "allow") => {
+                                match ragent_core::dir_lists::remove_allowlist(pattern, scope) {
+                                    Ok(true) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs remove allow\n\n\
+                                                          ✅ Removed `{pattern}` from the **allowlist** \
+                                                          ({scope_label}: `{config_file}`)."
+                                                      ));
+                                    }
+                                    Ok(false) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs remove allow\n\n\
+                                                          ⚠️ `{pattern}` was not in the {scope_label} allowlist."
+                                                      ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs remove allow\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            ("remove", "deny") => {
+                                match ragent_core::dir_lists::remove_denylist(pattern, scope) {
+                                    Ok(true) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs remove deny\n\n\
+                                                          ✅ Removed `{pattern}` from the **denylist** \
+                                                          ({scope_label}: `{config_file}`)."
+                                                      ));
+                                    }
+                                    Ok(false) => {
+                                        self.append_assistant_text(&format!(
+                                                          "From: /dirs remove deny\n\n\
+                                                          ⚠️ `{pattern}` was not in the {scope_label} denylist."
+                                                      ));
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /dirs remove deny\n\n❌ Error: {e}"
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                self.append_assistant_text(&format!(
+                                                  "From: /dirs {sub}\n\n\
+                                                  Unknown list type `{list_type}`. Use `allow` or `deny`.\n\n\
+                                                  Usage: `/dirs {sub} allow|deny <pattern> [--global]`"
+                                              ));
+                            }
+                        }
+                    }
+                    _ => {
+                        self.append_assistant_text(&format!(
+                            "From: /dirs\n\nUnknown subcommand `{sub}`. \
+                                          Run `/dirs help` for usage."
                         ));
                     }
                 }
@@ -6608,9 +6914,8 @@ Type `/swarm help` for more info.\n";
                                 model_id,
                             };
 
-                            let system = ragent_core::team::DECOMPOSITION_SYSTEM_PROMPT;
-                            let user =
-                                ragent_core::team::build_decomposition_user_prompt(&full_prompt);
+                            let system = team::DECOMPOSITION_SYSTEM_PROMPT;
+                            let user = team::build_decomposition_user_prompt(&full_prompt);
 
                             let outcome = match completer.complete(system, &user).await {
                                 Ok(text) => Ok(text),
@@ -6911,7 +7216,7 @@ Type `/swarm help` for more info.\n";
                     // Pre-fill from existing config if available
                     let (url, _user) = {
                         let storage = &self.storage;
-                        let cfg = ragent_core::gitlab::auth::load_config(storage);
+                        let cfg = ragent_core::gitlab::auth::load_config(storage.as_ref());
                         match cfg {
                             Some(c) => (c.instance_url, c.username),
                             None => ("https://gitlab.com".to_string(), String::new()),
@@ -6929,10 +7234,10 @@ Type `/swarm help` for more info.\n";
                 "logout" => {
                     let storage = &self.storage;
                     let mut msgs = Vec::new();
-                    if let Err(e) = ragent_core::gitlab::auth::delete_token(storage) {
+                    if let Err(e) = ragent_core::gitlab::auth::delete_token(storage.as_ref()) {
                         msgs.push(format!("❌ Failed to remove token: {e}"));
                     }
-                    if let Err(e) = ragent_core::gitlab::auth::delete_config(storage) {
+                    if let Err(e) = ragent_core::gitlab::auth::delete_config(storage.as_ref()) {
                         msgs.push(format!("❌ Failed to remove config: {e}"));
                     }
                     if msgs.is_empty() {
@@ -6945,8 +7250,8 @@ Type `/swarm help` for more info.\n";
                 }
                 "status" | "" => {
                     let storage = &self.storage;
-                    let config = ragent_core::gitlab::auth::load_config(storage);
-                    let token = ragent_core::gitlab::auth::load_token(storage);
+                    let config = ragent_core::gitlab::auth::load_config(storage.as_ref());
+                    let token = ragent_core::gitlab::auth::load_token(storage.as_ref());
                     match (config, token) {
                         (Some(cfg), Some(_)) => {
                             self.append_assistant_text(&format!(
@@ -7421,9 +7726,9 @@ Type `/swarm help` for more info.\n";
             }
 
             "aiwiki" => {
-                use aiwiki::Aiwiki;
-                use aiwiki::init::Initializer;
-                use aiwiki::sync::{preview_sync, sync};
+                use ragent_aiwiki::Aiwiki;
+                use ragent_aiwiki::init::Initializer;
+                use ragent_aiwiki::sync::{preview_sync, sync};
 
                 let sub = args.split_whitespace().next().unwrap_or("");
                 let sub_args = args
@@ -7549,7 +7854,7 @@ Type `/swarm help` for more info.\n";
                                     self.status = "aiwiki: already initialized".to_string();
                                 } else {
                                     // Use the global provider/model for aiwiki
-                                    let mut cfg = aiwiki::AiwikiConfig::default();
+                                    let mut cfg = ragent_aiwiki::AiwikiConfig::default();
                                     let model_label = self.aiwiki_model_label();
                                     cfg.llm_model = model_label;
                                     let rt = tokio::runtime::Handle::current();
@@ -7828,7 +8133,7 @@ Type `/swarm help` for more info.\n";
 
                                                     // Spawn sync as a background task so the TUI stays responsive
                                                     let progress = std::sync::Arc::new(
-                                                        aiwiki::sync::SyncProgress::new(),
+                                                        ragent_aiwiki::sync::SyncProgress::new(),
                                                     );
                                                     let progress_clone =
                                                         std::sync::Arc::clone(&progress);
@@ -7892,7 +8197,7 @@ Type `/swarm help` for more info.\n";
                                                                                                                                                                       "From: /aiwiki ingest\n\n⛔ **AIWiki is currently disabled.**\n\nRun `/aiwiki on` to enable."
                                                                                                                                                                   );
                                     } else {
-                                        use aiwiki::ingest::{
+                                        use ragent_aiwiki::ingest::{
                                             IngestOptions, ingest_file, scan_directory,
                                         };
 
@@ -8094,7 +8399,7 @@ Type `/swarm help` for more info.\n";
                                                                                                                                                                                                                           "From: /aiwiki sources add\n\n⚠️ **Missing path.**\n\nUsage: /aiwiki sources add <path|spec>\n\nExamples:\n  /aiwiki sources add docs\n  /aiwiki sources add src/*.rs\n  /aiwiki sources add README.md"
                                                                                                                                                                                                                       );
                                                 } else {
-                                                    use aiwiki::SourceFolder;
+                                                    use ragent_aiwiki::SourceFolder;
 
                                                     let spec = rest_args.trim();
                                                     let source_path_full = current_dir.join(spec);
@@ -8377,7 +8682,8 @@ Type `/swarm help` for more info.\n";
                                 // Persist to config
                                 if let Ok(mut cfg) = ragent_core::config::Config::load() {
                                     cfg.aiwiki_autosync = true;
-                                    let project_path = std::path::PathBuf::from("ragent.json");
+                                    let project_path =
+                                        std::path::PathBuf::from(".ragent").join("ragent.json");
                                     if project_path.exists() {
                                         if let Err(e) = std::fs::write(
                                             &project_path,
@@ -8397,7 +8703,8 @@ Type `/swarm help` for more info.\n";
                                 // Persist to config
                                 if let Ok(mut cfg) = ragent_core::config::Config::load() {
                                     cfg.aiwiki_autosync = false;
-                                    let project_path = std::path::PathBuf::from("ragent.json");
+                                    let project_path =
+                                        std::path::PathBuf::from(".ragent").join("ragent.json");
                                     if project_path.exists() {
                                         if let Err(e) = std::fs::write(
                                             &project_path,
@@ -8507,9 +8814,9 @@ Type `/swarm help` for more info.\n";
                             // Already active — just ensure watcher is running
                             if self.code_index_watch_session.is_none() {
                                 if let Some(ref idx) = self.code_index {
-                                    match ragent_code::start_watching(
+                                    match ragent_codeindex::start_watching(
                                         idx.clone(),
-                                        ragent_code::worker::WorkerConfig::default(),
+                                        ragent_codeindex::worker::WorkerConfig::default(),
                                     ) {
                                         Ok(session) => {
                                             self.code_index_watch_session = Some(session);
@@ -8532,20 +8839,20 @@ Type `/swarm help` for more info.\n";
                         } else {
                             // Create and initialize the code index
                             let cwd = std::env::current_dir().unwrap_or_default();
-                            let index_config = ragent_code::types::CodeIndexConfig {
+                            let index_config = ragent_codeindex::types::CodeIndexConfig {
                                 enabled: true,
                                 project_root: cwd.clone(),
                                 index_dir: cwd.join(".ragent/codeindex"),
-                                scan_config: ragent_code::types::ScanConfig::default(),
+                                scan_config: ragent_codeindex::types::ScanConfig::default(),
                             };
-                            match ragent_code::CodeIndex::open(&index_config) {
+                            match ragent_codeindex::CodeIndex::open(&index_config) {
                                 Ok(idx) => {
                                     let arc_idx = Arc::new(idx);
                                     // Start watching — this performs an initial full reindex
                                     // to catch any changes made while the index was disabled.
-                                    match ragent_code::start_watching(
+                                    match ragent_codeindex::start_watching(
                                         arc_idx.clone(),
-                                        ragent_code::worker::WorkerConfig::default(),
+                                        ragent_codeindex::worker::WorkerConfig::default(),
                                     ) {
                                         Ok(session) => {
                                             self.code_index_watch_session = Some(session);
@@ -10256,6 +10563,12 @@ Type `/swarm help` for more info.\n";
                     self.tool_step_map
                         .insert(call_id.clone(), (short_sid.clone(), step, current_substep));
                     self.add_tool_call_part(tool, call_id);
+
+                    // If args were received before the start event, apply them now.
+                    if let Some(args_json) = self.pending_tool_args.remove(call_id) {
+                        let _ = self.update_tool_call_input(call_id, &args_json);
+                    }
+
                     self.status = format!("running: {}", tool);
                     let display_name = self
                         .sid_to_display_name
@@ -10479,12 +10792,19 @@ Type `/swarm help` for more info.\n";
                             permission = %permission,
                             "TUI received PermissionRequested, showing dialog"
                         );
+                        let created_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
                         self.permission_queue.push_back(PermissionRequest {
                             id: request_id.clone(),
                             session_id: session_id.clone(),
                             permission: permission.clone(),
                             patterns: vec![description.clone()],
-                            metadata: serde_json::Value::Null,
+                            metadata: serde_json::json!({
+                                "created_at": created_at,
+                                "timeout_secs": 30u64,
+                            }),
                             tool_call_id: None,
                         });
                         self.status = "awaiting permission".to_string();
@@ -10506,6 +10826,7 @@ Type `/swarm help` for more info.\n";
                 ref session_id,
                 ref request_id,
                 allowed,
+                ..
             } => {
                 if self.is_current_session(session_id) {
                     // Remove the specific answered request from the queue.
@@ -10684,7 +11005,13 @@ Type `/swarm help` for more info.\n";
                 ref args,
             } => {
                 if self.is_current_session(session_id) {
-                    self.update_tool_call_input(call_id, args);
+                    // Try to apply args to an existing ToolCall part; if not found,
+                    // store them pending until the ToolCallStart event arrives.
+                    let applied = self.update_tool_call_input(call_id, args);
+                    if !applied {
+                        self.pending_tool_args.insert(call_id.clone(), args.clone());
+                    }
+
                     let step_tag = self
                         .tool_step_map
                         .get(call_id)
@@ -11401,12 +11728,8 @@ Type `/swarm help` for more info.\n";
     // ── Swarm helpers ───────────────────────────────────────────────────────
 
     /// Process a successful decomposition and create the ephemeral swarm team.
-    fn execute_swarm_decomposition(
-        &mut self,
-        decomposition: ragent_core::team::SwarmDecomposition,
-    ) {
-        use ragent_core::team::task::Task;
-        use ragent_core::team::{SwarmState, TaskStore, TeamStore};
+    fn execute_swarm_decomposition(&mut self, decomposition: team::SwarmDecomposition) {
+        use ragent_team::team::{SwarmState, TaskStore, TeamStore, task::Task};
 
         let task_count = decomposition.tasks.len();
         if task_count == 0 {
@@ -11492,7 +11815,7 @@ Type `/swarm help` for more info.\n";
     fn spawn_swarm_teammates(
         &mut self,
         team_name: &str,
-        decomposition: &ragent_core::team::SwarmDecomposition,
+        decomposition: &team::SwarmDecomposition,
         team_dir: &std::path::Path,
     ) {
         let working_dir = std::env::current_dir().unwrap_or_default();
@@ -11543,16 +11866,11 @@ Type `/swarm help` for more info.\n";
 
             // Record member in config
             {
-                if let Ok(mut store) =
-                    ragent_core::team::TeamStore::load_by_name(team_name, &working_dir)
-                {
+                if let Ok(mut store) = team::TeamStore::load_by_name(team_name, &working_dir) {
                     if store.config.member_by_name(&teammate_name).is_none() {
                         let agent_id = store.next_agent_id();
-                        let mut member = ragent_core::team::TeamMember::new(
-                            &teammate_name,
-                            &agent_id,
-                            &agent_type,
-                        );
+                        let mut member =
+                            team::TeamMember::new(&teammate_name, &agent_id, &agent_type);
                         member.spawn_prompt = Some(prompt.clone());
                         member.model_override = teammate_model.clone();
                         member.status = initial_status;
@@ -11613,10 +11931,9 @@ Type `/swarm help` for more info.\n";
 
         // Load tasks from disk for current status
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let tasks = if let Ok(store) =
-            ragent_core::team::TeamStore::load_by_name(&swarm.team_name, &working_dir)
+        let tasks = if let Ok(store) = team::TeamStore::load_by_name(&swarm.team_name, &working_dir)
         {
-            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+            if let Ok(ts) = team::TaskStore::open(&store.dir) {
                 ts.read().ok()
             } else {
                 None
@@ -11630,17 +11947,17 @@ Type `/swarm help` for more info.\n";
             let c = tl
                 .tasks
                 .iter()
-                .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
+                .filter(|t| t.status == team::TaskStatus::Completed)
                 .count();
             let ip = tl
                 .tasks
                 .iter()
-                .filter(|t| t.status == ragent_core::team::TaskStatus::InProgress)
+                .filter(|t| t.status == team::TaskStatus::InProgress)
                 .count();
             let p = tl
                 .tasks
                 .iter()
-                .filter(|t| t.status == ragent_core::team::TaskStatus::Pending)
+                .filter(|t| t.status == team::TaskStatus::Pending)
                 .count();
             (c, ip, p)
         } else {
@@ -11667,10 +11984,10 @@ Type `/swarm help` for more info.\n";
         if let Some(ref tl) = tasks {
             for task in &tl.tasks {
                 let status_icon = match task.status {
-                    ragent_core::team::TaskStatus::Completed => "✅",
-                    ragent_core::team::TaskStatus::InProgress => "🔄",
-                    ragent_core::team::TaskStatus::Pending => "⏳",
-                    ragent_core::team::TaskStatus::Cancelled => "❌",
+                    team::TaskStatus::Completed => "✅",
+                    team::TaskStatus::InProgress => "🔄",
+                    team::TaskStatus::Pending => "⏳",
+                    team::TaskStatus::Cancelled => "❌",
                 };
                 let assigned = task.assigned_to.as_deref().unwrap_or("—");
                 let deps = if task.depends_on.is_empty() {
@@ -11776,25 +12093,24 @@ Type `/swarm help` for more info.\n";
 
         // Also check TaskStore for explicitly completed tasks
         let working_dir = std::env::current_dir().unwrap_or_default();
-        let task_completed_ids: std::collections::HashSet<String> = if let Ok(store) =
-            ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
-        {
-            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
-                if let Ok(tl) = ts.read() {
-                    tl.tasks
-                        .iter()
-                        .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
-                        .map(|t| t.id.clone())
-                        .collect()
+        let task_completed_ids: std::collections::HashSet<String> =
+            if let Ok(store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
+                if let Ok(ts) = team::TaskStore::open(&store.dir) {
+                    if let Ok(tl) = ts.read() {
+                        tl.tasks
+                            .iter()
+                            .filter(|t| t.status == team::TaskStatus::Completed)
+                            .map(|t| t.id.clone())
+                            .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    }
                 } else {
                     std::collections::HashSet::new()
                 }
             } else {
                 std::collections::HashSet::new()
-            }
-        } else {
-            std::collections::HashSet::new()
-        };
+            };
 
         let all_completed: std::collections::HashSet<String> = completed_task_ids
             .union(&task_completed_ids)
@@ -11848,9 +12164,7 @@ Type `/swarm help` for more info.\n";
                 m.status = MemberStatus::Spawning;
             }
             // Update persisted config
-            if let Ok(mut store) =
-                ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
-            {
+            if let Ok(mut store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
                 if let Some(m) = store.config.member_by_id_mut(agent_id) {
                     m.status = MemberStatus::Spawning;
                 }
@@ -11923,13 +12237,12 @@ Type `/swarm help` for more info.\n";
 
         // If all members are terminal, auto-complete any non-completed tasks in the task store
         if all_members_terminal {
-            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
-            {
-                if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+            if let Ok(store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
+                if let Ok(ts) = team::TaskStore::open(&store.dir) {
                     if let Ok(tl) = ts.read() {
                         for task in &tl.tasks {
-                            if task.status != ragent_core::team::TaskStatus::Completed
-                                && task.status != ragent_core::team::TaskStatus::Cancelled
+                            if task.status != team::TaskStatus::Completed
+                                && task.status != team::TaskStatus::Cancelled
                             {
                                 let agent_id = task.assigned_to.as_deref().unwrap_or("swarm");
                                 if let Err(e) = ts.complete(&task.id, agent_id) {
@@ -11943,10 +12256,8 @@ Type `/swarm help` for more info.\n";
         }
 
         // Now check task store for final tally
-        let tasks = if let Ok(store) =
-            ragent_core::team::TeamStore::load_by_name(&team_name, &working_dir)
-        {
-            if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+        let tasks = if let Ok(store) = team::TeamStore::load_by_name(&team_name, &working_dir) {
+            if let Ok(ts) = team::TaskStore::open(&store.dir) {
                 ts.read().ok()
             } else {
                 None
@@ -11974,12 +12285,12 @@ Type `/swarm help` for more info.\n";
         let completed = tl
             .tasks
             .iter()
-            .filter(|t| t.status == ragent_core::team::TaskStatus::Completed)
+            .filter(|t| t.status == team::TaskStatus::Completed)
             .count();
         let cancelled = tl
             .tasks
             .iter()
-            .filter(|t| t.status == ragent_core::team::TaskStatus::Cancelled)
+            .filter(|t| t.status == team::TaskStatus::Cancelled)
             .count();
         let failed_members = members
             .iter()
@@ -12016,14 +12327,14 @@ Type `/swarm help` for more info.\n";
 
         // Include task table if we have tasks
         if total > 0 {
-            if let Ok(store) = ragent_core::team::TeamStore::load_by_name(team_name, &working_dir) {
-                if let Ok(ts) = ragent_core::team::TaskStore::open(&store.dir) {
+            if let Ok(store) = team::TeamStore::load_by_name(team_name, &working_dir) {
+                if let Ok(ts) = team::TaskStore::open(&store.dir) {
                     if let Ok(tl) = ts.read() {
                         output.push_str("| ID | Title | Status |\n|----|-------|--------|\n");
                         for task in &tl.tasks {
                             let icon = match task.status {
-                                ragent_core::team::TaskStatus::Completed => "✅",
-                                ragent_core::team::TaskStatus::Cancelled => "❌",
+                                team::TaskStatus::Completed => "✅",
+                                team::TaskStatus::Cancelled => "❌",
                                 _ => "⚠️",
                             };
                             output.push_str(&format!(
@@ -12192,7 +12503,9 @@ Type `/swarm help` for more info.\n";
             }
         }
     }
-    fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) {
+    /// Update the input args for a previously added ToolCall message part.
+    /// Returns true if a matching ToolCall was found and updated, false otherwise.
+    fn update_tool_call_input(&mut self, call_id: &str, args_json: &str) -> bool {
         if let Ok(input) = serde_json::from_str::<serde_json::Value>(args_json) {
             for msg in self.messages.iter_mut().rev() {
                 for part in msg.parts.iter_mut() {
@@ -12204,11 +12517,12 @@ Type `/swarm help` for more info.\n";
                         && cid == call_id
                     {
                         state.input = input;
-                        return;
+                        return true;
                     }
                 }
             }
         }
+        false
     }
 
     fn update_tool_call_output(
