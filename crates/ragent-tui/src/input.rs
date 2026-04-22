@@ -370,8 +370,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
                 return Some(InputAction::SlashCommand(command));
             }
             KeyCode::Esc => {
-                app.input.clear();
                 app.slash_menu = None;
+                app.set_cursor_char_index_clamped(app.input_len_chars());
                 return None;
             }
             KeyCode::Char(c) => {

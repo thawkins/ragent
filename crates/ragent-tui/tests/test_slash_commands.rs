@@ -400,6 +400,51 @@ fn test_slash_model_no_provider_shows_warning() {
     }
 }
 
+#[test]
+fn test_slash_model_show_without_selected_model_uses_agent_model() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+
+    app.execute_slash_command("/model show");
+
+    assert_eq!(app.status, "active model metadata");
+    let text = app.messages.last().expect("metadata message").text_content();
+    assert!(text.contains("From: /model show"));
+    assert!(text.contains("Model Ref"));
+}
+
+#[test]
+fn test_slash_model_show_displays_metadata_for_active_model() {
+    let mut app = make_app();
+    app.session_id = Some("s1".to_string());
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "openai".to_string(),
+        name: "OpenAI (GPT)".to_string(),
+        source: ProviderSource::Database,
+    });
+    app.selected_model = Some("openai/gpt-4o-mini".to_string());
+    app.selected_model_ctx_window = Some(128_000);
+
+    app.execute_slash_command("/model show");
+
+    assert_eq!(app.status, "active model metadata");
+    let text = app.messages.last().expect("metadata message").text_content();
+    assert!(text.contains("From: /model show"));
+    assert!(text.contains("OpenAI (GPT)"));
+    assert!(text.contains("gpt-4o-mini"));
+    assert!(text.contains("Context window"));
+    assert!(text.contains("Tool use"));
+}
+
+#[test]
+fn test_slash_model_show_invalid_subcommand_shows_usage() {
+    let mut app = make_app();
+
+    app.execute_slash_command("/model nope");
+
+    assert_eq!(app.status, "Usage: /model [show]");
+}
+
 // ── /provider ───────────────────────────────────────────────────────
 
 #[test]

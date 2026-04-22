@@ -1517,6 +1517,7 @@ impl App {
             "memory" => Some("<subcommand> [<arg>]".to_string()),
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|sync]".to_string()),
+            "model" => Some("[show]".to_string()),
             "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
@@ -2969,6 +2970,62 @@ impl App {
         })
     }
 
+    /// Builds a detailed metadata report for the currently active model.
+    fn active_model_metadata_report(&self) -> Option<String> {
+        let model_ref = self.active_model_ref_string()?;
+        let (provider_id, model_id) = model_ref.split_once('/').unwrap_or((&model_ref, ""));
+        let provider_name = self
+            .configured_provider
+            .as_ref()
+            .filter(|provider| provider.id == provider_id)
+            .map(|provider| provider.name.clone())
+            .or_else(|| {
+                self.provider_registry
+                    .get(provider_id)
+                    .map(|provider| provider.name().to_string())
+            })
+            .unwrap_or_else(|| provider_id.to_string());
+
+        let mut report = format!(
+            "From: /model show\n\n# Active Model\n\n- **Provider:** {} (`{}`)\n- **Model ID:** `{}`\n- **Model Ref:** `{}`\n",
+            provider_name, provider_id, model_id, model_ref
+        );
+
+        if let Some(entry) = self
+            .models_for_provider(provider_id)
+            .into_iter()
+            .find(|entry| entry.id == model_id)
+        {
+            let max_output = entry
+                .max_output
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            report.push_str(&format!(
+                "\n## Capabilities\n\n- **Reasoning:** {}\n- **Vision:** {}\n- **Tool use:** {}\n\n## Limits\n\n- **Context window:** {} tokens\n- **Max output:** {}\n\n## Cost\n\n- **Input:** ${:.2} / 1M tokens\n- **Output:** ${:.2} / 1M tokens\n- **Tier:** {}\n- **Relative multiplier:** {}\n",
+                if entry.reasoning { "Yes" } else { "No" },
+                if entry.vision { "Yes" } else { "No" },
+                if entry.tool_use { "Yes" } else { "No" },
+                entry.context_window,
+                max_output,
+                entry.cost_input,
+                entry.cost_output,
+                entry.cost_tier,
+                entry.cost_multiplier,
+            ));
+
+            if entry.name != entry.id {
+                report.push_str(&format!("\n- **Display name:** {}\n", entry.name));
+            }
+        } else {
+            report.push_str("\n_Metadata could not be resolved from the provider registry._\n");
+            if let Some(context_window) = self.selected_model_context_window() {
+                report.push_str(&format!("\n- **Cached context window:** {} tokens\n", context_window));
+            }
+        }
+
+        Some(report)
+    }
+
     /// Summarise `/llmstats` samples for the currently active model.
     ///
     /// The summary is based on completed request samples recorded from the
@@ -4228,18 +4285,36 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 }
             }
             "model" => {
-                if let Some(ref prov) = self.configured_provider {
-                    let models = self.models_for_provider(&prov.id.clone());
-                    let prov_name = prov.name.clone();
-                    let prov_id = prov.id.clone();
-                    self.provider_setup = Some(ProviderSetupStep::SelectModel {
-                        provider_id: prov_id,
-                        provider_name: prov_name,
-                        models,
-                        selected: 0,
-                    });
-                } else {
-                    self.status = "⚠ No provider configured — use /provider first".to_string();
+                match args.trim() {
+                    "" => {
+                        if let Some(ref prov) = self.configured_provider {
+                            let models = self.models_for_provider(&prov.id.clone());
+                            let prov_name = prov.name.clone();
+                            let prov_id = prov.id.clone();
+                            self.provider_setup = Some(ProviderSetupStep::SelectModel {
+                                provider_id: prov_id,
+                                provider_name: prov_name,
+                                models,
+                                selected: 0,
+                            });
+                        } else {
+                            self.status =
+                                "⚠ No provider configured — use /provider first".to_string();
+                        }
+                    }
+                    "show" => {
+                        if !self.ensure_session() {
+                            self.status = "⚠ Failed to create session".to_string();
+                        } else if let Some(report) = self.active_model_metadata_report() {
+                            self.append_assistant_text(&report);
+                            self.status = "active model metadata".to_string();
+                        } else {
+                            self.status = "⚠ No active model selected".to_string();
+                        }
+                    }
+                    _ => {
+                        self.status = "Usage: /model [show]".to_string();
+                    }
                 }
             }
             "provider" => {

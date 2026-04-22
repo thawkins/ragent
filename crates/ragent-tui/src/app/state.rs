@@ -484,7 +484,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "model",
-        description: "Switch the active model on the current provider",
+        description: "Switch the active model, or show metadata with /model show",
     },
     SlashCommandDef {
         trigger: "provider",
