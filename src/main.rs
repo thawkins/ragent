@@ -266,8 +266,34 @@ async fn main() -> Result<()> {
 
     // Load config
     let config = if let Some(ref path) = cli.config {
-        let content = std::fs::read_to_string(path)?;
-        serde_json::from_str(&content)?
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("Failed to read config file '{}': {}", path, e))?;
+
+        serde_json::from_str(&content).map_err(|e| {
+            let line = e.line();
+            let column = e.column();
+            let problematic_line = content
+                .lines()
+                .nth(line.saturating_sub(1))
+                .unwrap_or("<line not found>");
+
+            anyhow::anyhow!(
+                "Failed to parse config file '{}':\n\
+                 Error at line {}, column {}:\n\
+                 {}\n\
+                 Problematic line:\n\
+                 {}\n\
+                 {}^\n\
+                 Parse error: {}",
+                path,
+                line,
+                column,
+                "─".repeat(80),
+                problematic_line,
+                " ".repeat(column.saturating_sub(1)),
+                e
+            )
+        })?
     } else {
         Config::load()?
     };

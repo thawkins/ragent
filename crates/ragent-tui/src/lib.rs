@@ -395,13 +395,14 @@ pub async fn run_tui(
                         // Build LLM extractor from current provider/model
                         let model_label = app.aiwiki_model_label();
                         let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-                        let extractor: Arc<dyn ragent_aiwiki::extraction::LlmExtractor + Send + Sync> =
-                            Arc::new(app::TuiLlmExtractor {
-                                registry: Arc::clone(&app.provider_registry),
-                                storage: Arc::clone(&app.storage),
-                                provider_id: pid.to_string(),
-                                model_id: mid.to_string(),
-                            });
+                        let extractor: Arc<
+                            dyn ragent_aiwiki::extraction::LlmExtractor + Send + Sync,
+                        > = Arc::new(app::TuiLlmExtractor {
+                            registry: Arc::clone(&app.provider_registry),
+                            storage: Arc::clone(&app.storage),
+                            provider_id: pid.to_string(),
+                            model_id: mid.to_string(),
+                        });
 
                         // Start initial sync in background
                         let wiki_for_sync = app.aiwiki.take().unwrap();
@@ -522,11 +523,10 @@ pub async fn run_tui(
         // Check if background AIWiki sync has completed.
         app.poll_aiwiki_sync();
 
-        // Only draw when UI dirty or periodic refresh
-        if app.needs_redraw {
-            terminal.draw(|frame| layout::render(frame, &mut app))?;
-            app.needs_redraw = false;
-        }
+        // Always draw so time-based UI elements (for example permission countdowns)
+        // continue to update even when the user is idle.
+        terminal.draw(|frame| layout::render(frame, &mut app))?;
+        app.needs_redraw = false;
         tokio::select! {
             // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
             _ = sigint.recv() => {

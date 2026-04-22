@@ -2187,7 +2187,9 @@ impl App {
                     }
                 };
 
-                match ragent_aiwiki::sync::AiwikiWatchSession::start(&wiki_dir, &config, wiki, extractor) {
+                match ragent_aiwiki::sync::AiwikiWatchSession::start(
+                    &wiki_dir, &config, wiki, extractor,
+                ) {
                     Ok(session) => {
                         self.aiwiki_watch_session = Some(session);
                         tracing::info!("AIWiki watch session started");
@@ -9139,24 +9141,11 @@ Type `/swarm help` for more info.\n";
                     let args_owned = args.to_string();
                     let processor = self.session_processor.clone();
 
-                    let mut agent = self.agent_info.clone();
-                    // Skill model takes highest priority, then agent-defined
-                    // model, then global selected_model as fallback.
-                    let override_model = skill.model.as_ref().or_else(|| {
-                        if agent.model.is_none() {
-                            self.selected_model.as_ref()
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(ref model_str) = override_model {
-                        if let Some((provider, model)) = model_str.split_once('/') {
-                            agent.model = Some(ModelRef {
-                                provider_id: provider.to_string(),
-                                model_id: model.to_string(),
-                            });
-                        }
-                    }
+                    let agent = ragent_core::skill::invoke::resolve_inline_skill_agent(
+                        &self.agent_info,
+                        self.selected_model.as_deref(),
+                        skill.model.as_deref(),
+                    );
 
                     self.status = format!("invoking skill /{}…", cmd);
                     self.push_log_no_agent(
@@ -9196,6 +9185,7 @@ Type `/swarm help` for more info.\n";
                                         &sid,
                                         &working_dir,
                                         flag,
+                                        agent.model.clone(),
                                     )
                                     .await
                                     {
@@ -10803,7 +10793,7 @@ Type `/swarm help` for more info.\n";
                             patterns: vec![description.clone()],
                             metadata: serde_json::json!({
                                 "created_at": created_at,
-                                "timeout_secs": 30u64,
+                                "timeout_secs": 120u64,
                             }),
                             tool_call_id: None,
                         });

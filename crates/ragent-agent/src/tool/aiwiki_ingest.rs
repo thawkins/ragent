@@ -176,7 +176,10 @@ fn format_ingestion_result(result: &ragent_aiwiki::IngestionResult) -> ToolOutpu
 }
 
 /// Format a directory ingestion result.
-fn format_directory_result(results: &[ragent_aiwiki::IngestionResult], source_dir: &Path) -> ToolOutput {
+fn format_directory_result(
+    results: &[ragent_aiwiki::IngestionResult],
+    source_dir: &Path,
+) -> ToolOutput {
     if results.is_empty() {
         return ToolOutput {
             content: format!(

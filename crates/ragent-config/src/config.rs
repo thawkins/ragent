@@ -522,16 +522,70 @@ impl Config {
 
         // Inline config from environment variable
         if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
-            let overlay: Self = serde_json::from_str(&content)?;
+            let overlay: Self = serde_json::from_str(&content).map_err(|e| {
+                let line = e.line();
+                let column = e.column();
+                let problematic_line = content
+                    .lines()
+                    .nth(line.saturating_sub(1))
+                    .unwrap_or("<line not found>");
+
+                anyhow::anyhow!(
+                    "Failed to parse RAGENT_CONFIG_CONTENT environment variable:\n\
+                     Error at line {}, column {}:\n\
+                     {}\n\
+                     Problematic line:\n\
+                     {}\n\
+                     {}^\n\
+                     Parse error: {}",
+                    line,
+                    column,
+                    "─".repeat(80),
+                    problematic_line,
+                    " ".repeat(column.saturating_sub(1)),
+                    e
+                )
+            })?;
             config = Self::merge(config, overlay);
         }
 
         Ok(config)
     }
 
-    fn load_file(path: &Path) -> anyhow::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        let config: Self = serde_json::from_str(&content)?;
+    pub(crate) fn load_file(path: &Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            anyhow::anyhow!("Failed to read config file '{}': {}", path.display(), e)
+        })?;
+
+        let config: Self = serde_json::from_str(&content).map_err(|e| {
+            // Extract line and column from serde_json error
+            let line = e.line();
+            let column = e.column();
+
+            // Get the problematic line from the content
+            let problematic_line = content
+                .lines()
+                .nth(line.saturating_sub(1))
+                .unwrap_or("<line not found>");
+
+            anyhow::anyhow!(
+                "Failed to parse config file '{}':\n\
+                 Error at line {}, column {}:\n\
+                 {}\n\
+                 Problematic line:\n\
+                 {}\n\
+                 {}^\n\
+                 Parse error: {}",
+                path.display(),
+                line,
+                column,
+                "─".repeat(80),
+                problematic_line,
+                " ".repeat(column.saturating_sub(1)),
+                e
+            )
+        })?;
+
         Ok(config)
     }
 

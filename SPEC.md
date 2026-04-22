@@ -27,14 +27,14 @@ dispatches execution requests. An asynchronous event bus (built on tokio)
 connects all components, enabling real-time streaming of tokens, tool results,
 and status updates to both the TUI and the HTTP API.
 
-```
-User ──▶ TUI / HTTP API ──▶ Session Processor ──▶ LLM Provider
-                                    │
-                              Agent Profile
-                                    │
-                              Tool Registry ──▶ File ops, bash, GitHub,
-                                                code index, memory, teams,
-                                                office docs, LSP, web, ...
+```mermaid
+graph LR
+    User[User] --> TUI[TUI / HTTP API]
+    TUI --> SP[Session Processor]
+    SP --> LLM[LLM Provider]
+    SP --> AP[Agent Profile]
+    SP --> TR[Tool Registry]
+    TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, LSP, web, ...]
 ```
 
 ### Key Capabilities
@@ -181,32 +181,35 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 
 ## 2. Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Interface                            │
-│  ┌──────────────┐              ┌──────────────┐                  │
-│  │     TUI      │              │ HTTP Server  │                  │
-│  │  (ratatui)   │              │   (axum)     │                  │
-│  └──────┬───────┘              └──────┬───────┘                  │
-└─────────┼─────────────────────────────┼────────────────────────┘
-          │                             │
-          ▼                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Event Bus (tokio)                           │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-          ┌────────────────┼────────────────┐
-          ▼                ▼                ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   Session    │  │   Agent      │  │    Tool      │
-│  Processor   │  │   System     │  │   Registry   │
-└──────┬───────┘  └──────────────┘  └──────┬───────┘
-       │                                   │
-       ▼                                   ▼
-┌──────────────┐  ┌───────────��──┐  ┌──────────────┐
-│   Provider   │  │   Storage    │  │  Background  │
-│   (LLM API)  │  │  (SQLite)    │  │    Agents    │
-└──────────────┘  └──────────────┘  └──────────────┘
+```mermaid
+graph TB
+    subgraph UI["User Interface"]
+        TUI["TUI<br/>(ratatui)"]
+        HTTP["HTTP Server<br/>(axum)"]
+    end
+    
+    EventBus["Event Bus (tokio)"]
+    
+    subgraph Core["Core Components"]
+        Session["Session<br/>Processor"]
+        Agent["Agent<br/>System"]
+        Tool["Tool<br/>Registry"]
+    end
+    
+    subgraph Backend["Backend Services"]
+        Provider["Provider<br/>(LLM API)"]
+        Storage["Storage<br/>(SQLite)"]
+        BgAgents["Background<br/>Agents"]
+    end
+    
+    TUI --> EventBus
+    HTTP --> EventBus
+    EventBus --> Session
+    EventBus --> Agent
+    EventBus --> Tool
+    Session --> Provider
+    Tool --> Storage
+    Tool --> BgAgents
 ```
 
 ### 2.1 Workspace Crates
@@ -1262,39 +1265,42 @@ The Code Index is a built-in codebase indexing, search, and retrieval system tha
 
 ### 6.2 Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        ragent-codeindex crate                        │
-├──────────────���──────────────────────────────────────────────────┤
-│  ┌──────────────┐   ┌──────────────┐   ┌────────────────────┐ │
-│  │ File Scanner  │──▶│   Parser     │──▶│  Symbol Extractor  │ │
-│  │ (ignore crate)│   │ (tree-sitter)│   │  (per-language)    │ │
-│  └──────┬───────┘   └──────────────┘   └────────┬───────────┘ │
-│         │                                         │             │
-│         │  ┌──────────────┐                       ▼             │
-│         │  │ File Watcher  │            ┌──────────────────┐    │
-│         │  │ (notify crate)│───queue───▶│ Background Worker│    │
-│         │  └──────────────┘            │ (tokio task)     │    │
-│         │                               └────────┬─────────┘    │
-│         ▼                                         ▼             │
-│  ┌──────────────────────────────────────────────────────────┐ │
-│  │                    Index Store (SQLite)                    │ │
-│  │  ┌────────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐  │ │
-│  │  │indexed_files│ │ symbols │ │ imports │ │ references │  │ │
-│  │  └────────────┘ └─────────┘ └─────────┘ └────────────┘  │ │
-│  └──────────────────────────────────────────────────────────┘ │
-│         │                                                        │
-│         ▼                                                        │
-│  ┌──────────────────┐   ┌──────────────────────────────────┐   │
-│  │ Tantivy FTS Index │   │       Tool Interface             │   │
-│  │ (full-text search)│   │  codeindex_search                │   │
-│  └──────────────────┘   │  codeindex_symbols                │   │
-│                          │  codeindex_references             │   │
-│                          │  codeindex_dependencies           │   │
-│                          │  codeindex_status                 │   │
-│                          │  codeindex_reindex                │   │
-│                          └──────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph CodeIndex["ragent-codeindex crate"]
+        Scanner["File Scanner<br/>(ignore crate)"]
+        Parser["Parser<br/>(tree-sitter)"]
+        Extractor["Symbol Extractor<br/>(per-language)"]
+        Watcher["File Watcher<br/>(notify crate)"]
+        Worker["Background Worker<br/>(tokio task)"]
+        
+        subgraph IndexStore["Index Store (SQLite)"]
+            Files["indexed_files"]
+            Symbols["symbols"]
+            Imports["imports"]
+            References["references"]
+        end
+        
+        FTS["Tantivy FTS Index<br/>(full-text search)"]
+        
+        subgraph Tools["Tool Interface"]
+            T1["codeindex_search"]
+            T2["codeindex_symbols"]
+            T3["codeindex_references"]
+            T4["codeindex_dependencies"]
+            T5["codeindex_status"]
+            T6["codeindex_reindex"]
+        end
+    end
+    
+    Scanner --> Parser
+    Parser --> Extractor
+    Extractor --> Worker
+    Scanner --> IndexStore
+    Watcher -->|queue| Worker
+    Worker --> IndexStore
+    IndexStore --> FTS
+    IndexStore --> Tools
 ```
 
 **Components:**
@@ -2032,21 +2038,27 @@ When either condition is missing the system falls back silently to FTS5.
 
 #### 7.6.1 Architecture
 
-```text
-┌──────────────────────────┐
-│   EmbeddingProvider      │  (trait)
-│   - embed(text)          │
-│   - embed_batch(texts)   │
-│   - dimensions()         │
-│   - name()               │
-│   - is_available()       │
-└──────┬───────────────────┘
-       │
-  ┌────┴─────┐
-  │          │
-  ▼          ▼
-NoOp     Local (ort)
-(empty)  (ONNX Runtime)
+```mermaid
+classDiagram
+    class EmbeddingProvider {
+        <<trait>>
+        +embed(text) Result~Vec~f32~~
+        +embed_batch(texts) Result~Vec~Vec~f32~~~
+        +dimensions() usize
+        +name() &str
+        +is_available() bool
+    }
+    
+    class NoOpEmbedding {
+        (empty)
+    }
+    
+    class LocalEmbeddingProvider {
+        ONNX Runtime
+    }
+    
+    EmbeddingProvider <|.. NoOpEmbedding
+    EmbeddingProvider <|.. LocalEmbeddingProvider
 ```
 
 The `EmbeddingProvider` trait abstracts all embedding generation behind a

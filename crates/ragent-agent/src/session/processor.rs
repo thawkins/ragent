@@ -308,7 +308,7 @@ fn extract_command_name(command: &str) -> String {
 /// # Errors
 ///
 /// Returns an error if the event bus closes during the wait.
-async fn check_permission_with_prompt(
+pub(crate) async fn check_permission_with_prompt(
     checker: &Arc<tokio::sync::RwLock<PermissionChecker>>,
     event_bus: &Arc<EventBus>,
     session_id: &str,
@@ -317,11 +317,31 @@ async fn check_permission_with_prompt(
     tool_name: &str,
     auto_approve: bool,
 ) -> Result<crate::permission::PermissionAction> {
+    const AUTO_APPROVED_CODEINDEX_TOOLS: &[&str] = &[
+        "codeindex_search",
+        "codeindex_symbols",
+        "codeindex_references",
+        "codeindex_dependencies",
+        "codeindex_status",
+        "codeindex_reindex",
+    ];
+
+    fn is_hardwired_auto_approved_tool(tool_name: &str) -> bool {
+        AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
+            || tool_name.starts_with("team_")
+            || tool_name.ends_with("_task")
+    }
     use crate::permission::PermissionAction;
     use tokio::sync::broadcast::error::RecvError;
 
     // Short-circuit if --yes / --no-prompt flag is set
     if auto_approve {
+        return Ok(PermissionAction::Allow);
+    }
+
+    // Codeindex tools, team tools, and *_task tools are hardwired helpers and
+    // must never trigger interactive permission prompts.
+    if is_hardwired_auto_approved_tool(tool_name) {
         return Ok(PermissionAction::Allow);
     }
 
@@ -335,6 +355,33 @@ async fn check_permission_with_prompt(
             } else if !resource.starts_with('/') && !resource.starts_with("..") {
                 // Relative path within project, not yet created
                 return Ok(PermissionAction::Allow);
+            }
+        }
+    }
+
+    // Check dir_lists allowlist/denylist for file operations (file:read, file:write, edit)
+    if permission.starts_with("file:")
+        || permission == "read"
+        || permission == "edit"
+        || permission == "write"
+    {
+        use crate::dir_lists::{get_allowlist, get_denylist};
+
+        // Denylist takes precedence - immediately reject
+        for pattern in get_denylist() {
+            if let Ok(glob) = globset::Glob::new(&pattern) {
+                if glob.compile_matcher().is_match(resource) {
+                    return Ok(PermissionAction::Deny);
+                }
+            }
+        }
+
+        // Allowlist - immediately approve
+        for pattern in get_allowlist() {
+            if let Ok(glob) = globset::Glob::new(&pattern) {
+                if glob.compile_matcher().is_match(resource) {
+                    return Ok(PermissionAction::Allow);
+                }
             }
         }
     }
@@ -363,8 +410,8 @@ async fn check_permission_with_prompt(
                 description: format!("{tool_name}: {resource}"),
             });
 
-            // Wait for reply with 30s timeout
-            let timeout = tokio::time::Duration::from_secs(30);
+            // Wait for reply with 120s timeout
+            let timeout = tokio::time::Duration::from_secs(120);
             let deadline = tokio::time::Instant::now() + timeout;
 
             loop {
@@ -2494,4 +2541,70 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 
     // Incomplete if user asked for file creation but no write tool was used.
     !has_write_tool
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permission::{PermissionAction, PermissionChecker};
+
+    #[tokio::test]
+    async fn test_hardwired_team_tool_is_auto_approved() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "tool:execute",
+            "tool:team_status",
+            "team_status",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_hardwired_task_suffix_tool_is_auto_approved() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "tool:execute",
+            "tool:new_task",
+            "new_task",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_non_hardwired_tool_still_uses_permission_rules() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "bash",
+            "cargo build",
+            "bash",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Ask);
+    }
 }

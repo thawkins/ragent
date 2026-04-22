@@ -1,0 +1,254 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0-alpha.47"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/thawkins/ragent"
+authors = ["Tim Hawkins <tim.thawkins@gmail.com>"]
+
+[package]
+name = "ragent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[workspace.lints.clippy]
+# Groups must have higher priority than individual overrides
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# ── Pedantic/nursery lints that require architectural changes to fix ─────────
+# These are suppressed at workspace level; fixing them is tracked separately.
+too_many_lines = "allow"
+too_many_arguments = "allow"
+struct_excessive_bools = "allow"
+type_complexity = "allow"
+similar_names = "allow"
+# Numeric casts are intentional throughout (geometry/layout/token counts)
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+# Doc style — enforced by review rather than lint
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+too_long_first_doc_paragraph = "allow"
+doc_markdown = "allow"
+empty_line_after_doc_comments = "allow"
+# Code style — auto-fixable but low-risk; auto-fixer already ran
+needless_pass_by_value = "allow"
+items_after_statements = "allow"
+option_if_let_else = "allow"
+manual_let_else = "allow"
+match_same_arms = "allow"
+if_same_then_else = "allow"
+branches_sharing_code = "allow"
+single_match = "allow"
+match_wildcard_for_single_variants = "allow"
+needless_continue = "allow"
+needless_range_loop = "allow"
+unnecessary_sort_by = "allow"
+unnecessary_wraps = "allow"
+unnecessary_unwrap = "allow"
+unused_peekable = "allow"
+unused_self = "allow"
+format_push_string = "allow"
+format_collect = "allow"
+ptr_arg = "allow"
+new_without_default = "allow"
+missing_fields_in_debug = "allow"
+significant_drop_tightening = "allow"
+assigning_clones = "allow"
+or_fun_call = "allow"
+default_trait_access = "allow"
+collection_is_never_read = "allow"
+no_effect_underscore_binding = "allow"
+double_must_use = "allow"
+unwrap_used = "allow"
+unused_async = "allow"
+# Additional lints from second auto-fix pass
+bool_to_int_with_if = "allow"
+cast_lossless = "allow"
+clone_on_copy = "allow"
+collapsible_else_if = "allow"
+collapsible_if = "allow"
+comparison_chain = "allow"
+equatable_if_let = "allow"
+explicit_iter_loop = "allow"
+if_not_else = "allow"
+ignored_unit_patterns = "allow"
+implicit_clone = "allow"
+manual_clamp = "allow"
+manual_strip = "allow"
+manual_unwrap_or_default = "allow"
+map_unwrap_or = "allow"
+missing_const_for_fn = "allow"
+must_use_candidate = "allow"
+needless_borrow = "allow"
+needless_pass_by_ref_mut = "allow"
+redundant_clone = "allow"
+redundant_closure_for_method_calls = "allow"
+redundant_else = "allow"
+ref_option = "allow"
+semicolon_if_nothing_returned = "allow"
+should_implement_trait = "allow"
+single_char_add_str = "allow"
+single_match_else = "allow"
+trivially_copy_pass_by_ref = "allow"
+uninlined_format_args = "allow"
+unnecessary_map_or = "allow"
+unnested_or_patterns = "allow"
+useless_format = "allow"
+useless_let_if_seq = "allow"
+manual_unwrap_or = "allow"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+
+[workspace.dependencies]
+# ── Internal crates ───────────────────────────────────────────────────────
+ragent-agent = { path = "crates/ragent-agent" }
+ragent-server = { path = "crates/ragent-server" }
+ragent-tui = { path = "crates/ragent-tui" }
+
+# ── Hashing / file-locking ───────────────────────────────────────────────
+num_cpus = "1.16"
+sha2 = "0.10"
+blake3 = "1.4"
+fs2 = "0.4"
+
+# ── Async runtime ────────────────────────────────────────────────────────
+# "full" is intentional: the binary uses fs, net, process, signal, rt-multi-thread.
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }   # sync → BroadcastStream
+async-stream = "0.3"
+pin-project-lite = "0.2"
+bytes = "1"
+
+# ── Serialization ────────────────────────────────────────────────────────
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# ── Error handling ───────────────────────────────────────────────────────
+anyhow = "1"
+thiserror = "2"
+
+# ── Logging / tracing ───────────────────────────────────────────────────
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# ── Identity / time ─────────────────────────────────────────────────────
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── HTTP client ──────────────────────────────────────────────────────────
+# default-features = false avoids native-tls; rustls-tls is pure-Rust and auditable.
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+
+# ── Database ─────────────────────────────────────────────────────────────
+# "bundled" compiles SQLite from source — no system libsqlite3 dependency.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# ── CLI ──────────────────────────────────────────────────────────────────
+clap = { version = "4", features = ["derive"] }
+
+# ── Web framework (Axum) ────────────────────────────────────────────────
+axum = { version = "0.8", features = ["macros"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# ── TUI ──────────────────────────────────────────────────────────────────
+ratatui = { version = "0.29", features = ["unstable-rendered-line-info"] }
+crossterm = "0.28"
+
+# ── File / path / text ──────────────────────────────────────────────────
+globset = "0.4"
+glob = "0.3"
+dirs = "6"
+html2text = "0.16"
+similar = "2"
+regex = "1"
+base64 = "0.22"
+rand = "0.9"
+
+# ── ripgrep library crates ───────────────────────────────────────────────
+grep-regex = "0.1"
+grep-searcher = "0.1"
+ignore = "0.4"
+
+# ── Clipboard / image ───────────────────────────────────────────────────
+arboard = "3"
+# default-features = false: only PNG codec — avoids pulling in gif, jpeg, tiff, etc.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# ── Hardware / IPMI ──────────────────────────────────────────────────────
+rmcp = { version = "0.16", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+
+# ── Document format support ─────────────────────────────────────────────
+docx-rust = "0.1"
+calamine = "0.34"
+rust_xlsxwriter = "0.94"
+ooxmlsdk = "0.3"
+# default-features = false: only deflate — avoids bzip2, zstd, lzma, aes.
+zip = { version = "7", default-features = false, features = ["deflate"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
+spreadsheet-ods = "1.0"
+# default-features = false: only text_layout + raster formats needed.
+printpdf = { version = "0.9", default-features = false, features = ["text_layout", "png", "jpeg"] }
+pdf-extract = "0.10"
+lopdf = "0.39"
+
+# ── LSP client ───────────────────────────────────────────────────────────
+lsp-types = "0.97"
+url = "2"
+
+# ── Concurrent collections ──────────────────────────────────────────────
+dashmap = "6"
+lru = "0.12"
+rayon = "1"
+
+# ── Encoding ───────────────────────────────────────────────────────────
+hex = "0.4"
+
+# ── Benchmarking ─────────────────────────────────────────────────────────
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# ── Embeddings (optional, feature-gated) ────────────────────────────────
+ort = { version = "2.0.0-rc.12", features = ["download-binaries", "load-dynamic"] }
+tokenizers = { version = "0.21", features = ["onig"] }
+ndarray = "0.17"
+
+[[bin]]
+name = "ragent"
+path = "src/main.rs"
+
+[dependencies]
+ragent-agent = { workspace = true }
+ragent-server = { workspace = true }
+ragent-tui = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+
+[lints]
+workspace = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "z"

@@ -13,6 +13,47 @@ use super::SkillInfo;
 use super::args::substitute_args;
 use super::context::inject_dynamic_context;
 
+/// Parse a model reference in either `provider/model` or `provider:model` format.
+#[must_use]
+pub fn parse_model_ref(model_str: &str) -> Option<crate::agent::ModelRef> {
+    model_str
+        .split_once('/')
+        .or_else(|| model_str.split_once(':'))
+        .map(|(provider, model)| crate::agent::ModelRef {
+            provider_id: provider.to_string(),
+            model_id: model.to_string(),
+        })
+}
+
+/// Resolve the agent used for an inline skill invocation in the current session.
+///
+/// The active session model overrides built-in agent defaults unless the agent
+/// profile explicitly pinned its model. An explicit skill-level `model:` then
+/// takes highest priority over both.
+#[must_use]
+pub fn resolve_inline_skill_agent(
+    base_agent: &crate::agent::AgentInfo,
+    active_model: Option<&str>,
+    skill_model: Option<&str>,
+) -> crate::agent::AgentInfo {
+    let mut agent = base_agent.clone();
+
+    if (!agent.model_pinned || agent.model.is_none())
+        && let Some(model_str) = active_model
+        && let Some(model_ref) = parse_model_ref(model_str)
+    {
+        agent.model = Some(model_ref);
+    }
+
+    if let Some(model_str) = skill_model
+        && let Some(model_ref) = parse_model_ref(model_str)
+    {
+        agent.model = Some(model_ref);
+    }
+
+    agent
+}
+
 /// Result of invoking a skill, containing the processed content and metadata.
 #[derive(Debug, Clone)]
 pub struct SkillInvocation {
@@ -167,6 +208,7 @@ pub async fn invoke_forked_skill(
     parent_session_id: &str,
     working_dir: &std::path::Path,
     cancel_flag: Arc<AtomicBool>,
+    active_model: Option<crate::agent::ModelRef>,
 ) -> anyhow::Result<ForkedSkillResult> {
     tracing::info!(
         skill = %invocation.skill_name,
@@ -189,27 +231,7 @@ pub async fn invoke_forked_skill(
     );
 
     // 2. Resolve the subagent
-    let agent_name = invocation.fork_agent.as_deref().unwrap_or("general");
-
-    let config = crate::config::Config::default();
-    let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
-    agent.mode = crate::agent::AgentMode::Subagent;
-
-    // 3. Apply skill model override
-    if let Some(ref model_str) = invocation.model_override {
-        if let Some((provider, model)) = model_str.split_once('/') {
-            agent.model = Some(crate::agent::ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model.to_string(),
-            });
-        } else if let Some((provider, model)) = model_str.split_once(':') {
-            // Also support provider:model format (common in config files)
-            agent.model = Some(crate::agent::ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model.to_string(),
-            });
-        }
-    }
+    let agent = resolve_forked_skill_agent(invocation, active_model.as_ref())?;
 
     // 4. Format the skill content as the initial prompt
     let prompt = format_skill_message(invocation);
@@ -233,6 +255,39 @@ pub async fn invoke_forked_skill(
         forked_session_id: forked_sid,
         response: response_text,
     })
+}
+
+/// Resolve the agent used for a forked skill invocation.
+///
+/// Starts from the skill's requested agent (defaulting to `general`), inherits
+/// the active session model when the target agent is not model-pinned, and then
+/// applies any explicit skill-level model override.
+///
+/// # Errors
+///
+/// Returns an error if the target agent cannot be resolved.
+pub fn resolve_forked_skill_agent(
+    invocation: &SkillInvocation,
+    active_model: Option<&crate::agent::ModelRef>,
+) -> anyhow::Result<crate::agent::AgentInfo> {
+    let agent_name = invocation.fork_agent.as_deref().unwrap_or("general");
+    let config = crate::config::Config::default();
+    let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
+    agent.mode = crate::agent::AgentMode::Subagent;
+
+    if (!agent.model_pinned || agent.model.is_none())
+        && let Some(model_ref) = active_model
+    {
+        agent.model = Some(model_ref.clone());
+    }
+
+    if let Some(model_str) = invocation.model_override.as_deref()
+        && let Some(model_ref) = parse_model_ref(model_str)
+    {
+        agent.model = Some(model_ref);
+    }
+
+    Ok(agent)
 }
 
 /// Format the result of a forked skill execution as a message for the

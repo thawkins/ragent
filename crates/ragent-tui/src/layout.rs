@@ -2797,7 +2797,7 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
         .metadata
         .get("timeout_secs")
         .and_then(serde_json::Value::as_u64)
-        .unwrap_or(30);
+        .unwrap_or(120);
     let elapsed = now.saturating_sub(created_at);
     let remaining = timeout_secs.saturating_sub(elapsed);
 

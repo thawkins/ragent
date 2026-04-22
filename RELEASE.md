@@ -1,6 +1,13 @@
 # Release
 
-## Current Version: 0.1.0-alpha.47
+## Current Version: 0.1.0-alpha.48
+
+### Changed
+- **Permission workflow and config updates** — Refined permission handling, TUI countdown behavior, and config parsing diagnostics.
+- **Codeindex permissions** — Hardwired codeindex tools to bypass prompts for read-only local analysis.
+- **Workspace maintenance** — Added new crate-level tests and refreshed specification/supporting reports for the current release.
+
+## Previous: 0.1.0-alpha.47
 
 ### Changed
 - **Crate reorganization** — Extracted foundation crates from ragent-core (Milestones 1-3 complete)
@@ -11,8 +18,3 @@
   - Reduced ragent-core from 64,909 → 50,800 lines (-21.8%)
   - Clean dependency chain: ragent-types → ragent-config/ragent-storage/ragent-llm → ragent-core
   - All tests passing, backward compatibility maintained via re-exports
-
-## Previous: 0.1.0-alpha.46
-
-### Changed
-- Updated workspace version to 0.1.0-alpha.45
