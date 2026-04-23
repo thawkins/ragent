@@ -5,6 +5,7 @@
 //! backed by persistent [`Storage`] and emits lifecycle events via [`EventBus`].
 
 pub mod processor;
+pub mod profiler;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

@@ -330,6 +330,7 @@ pub(crate) async fn check_permission_with_prompt(
         AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
             || tool_name.starts_with("team_")
             || tool_name.ends_with("_task")
+            || tool_name == "question"
     }
     use crate::permission::PermissionAction;
     use tokio::sync::broadcast::error::RecvError;
@@ -408,6 +409,7 @@ pub(crate) async fn check_permission_with_prompt(
                 request_id: request_id.clone(),
                 permission: permission.to_string(),
                 description: format!("{tool_name}: {resource}"),
+                options: vec![],
             });
 
             // Wait for reply with 120s timeout
@@ -623,8 +625,11 @@ impl SessionProcessor {
         agent: &AgentInfo,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<Message> {
+        let profiler = crate::session::profiler::agent_loop_profiler();
+
         // 1. Store user message (off async thread)
         {
+            let _scope = profiler.scope("storage.user_message.create");
             let msg = user_msg.clone();
             self.storage_op(move |s| s.create_message(&msg)).await?;
         }
@@ -648,29 +653,38 @@ impl SessionProcessor {
         };
 
         // 2. Resolve model and create LLM client
-        let model_ref = if let Some(m) = agent.model.as_ref() {
-            m
-        } else {
-            let err = format!("Agent '{}' has no model configured", agent.name);
-            publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-            bail!("{err}");
+        let model_ref = {
+            let _scope = profiler.scope("llm.resolve_model");
+            if let Some(m) = agent.model.as_ref() {
+                m
+            } else {
+                let err = format!("Agent '{}' has no model configured", agent.name);
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                bail!("{err}");
+            }
         };
 
-        let provider = if let Some(p) = self.provider_registry.get(&model_ref.provider_id) {
-            p
-        } else {
-            let err = format!("Provider '{}' not found", model_ref.provider_id);
-            publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-            bail!("{err}");
+        let provider = {
+            let _scope = profiler.scope("llm.resolve_provider");
+            if let Some(p) = self.provider_registry.get(&model_ref.provider_id) {
+                p
+            } else {
+                let err = format!("Provider '{}' not found", model_ref.provider_id);
+                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                bail!("{err}");
+            }
         };
 
         // Try to get API key from environment or storage
-        let api_key = match self.resolve_api_key(&model_ref.provider_id).await {
-            Ok(k) => k,
-            Err(e) => {
-                let err = e.to_string();
-                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-                return Err(e);
+        let api_key = {
+            let _scope = profiler.scope("llm.resolve_api_key");
+            match self.resolve_api_key(&model_ref.provider_id).await {
+                Ok(k) => k,
+                Err(e) => {
+                    let err = e.to_string();
+                    publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                    return Err(e);
+                }
             }
         };
 
@@ -708,38 +722,53 @@ impl SessionProcessor {
             "creating LLM client"
         );
 
-        let client = match provider
-            .create_client(&api_key, base_url.as_deref(), &HashMap::new())
-            .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                let err = e.to_string();
-                publish_error(&self.event_bus, session_id, &user_msg.id, &err);
-                return Err(e);
+        let client = {
+            let _scope = profiler.scope("llm.create_client");
+            match provider
+                .create_client(&api_key, base_url.as_deref(), &HashMap::new())
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    let err = e.to_string();
+                    publish_error(&self.event_bus, session_id, &user_msg.id, &err);
+                    return Err(e);
+                }
             }
         };
 
         // 3. Build system prompt
-        let working_dir = self.session_manager.get_session(session_id)?.map_or_else(
-            || std::env::current_dir().unwrap_or_default(),
-            |s| s.directory,
-        );
-        let team_context_for_session = resolve_team_context_for_session(session_id, &working_dir);
+        let working_dir = {
+            let _scope = profiler.scope("session.resolve_working_dir");
+            self.session_manager.get_session(session_id)?.map_or_else(
+                || std::env::current_dir().unwrap_or_default(),
+                |s| s.directory,
+            )
+        };
+        let team_context_for_session = {
+            let _scope = profiler.scope("team.resolve_context");
+            resolve_team_context_for_session(session_id, &working_dir)
+        };
 
         // Load config once for hooks and other config-dependent features
-        let session_config = crate::config::Config::load().unwrap_or_default();
+        let session_config = {
+            let _scope = profiler.scope("config.load");
+            crate::config::Config::load().unwrap_or_default()
+        };
 
         // Fire on_session_start hook when this is the first message in the session
-        let has_prior_messages = self
-            .session_manager
-            .get_messages(session_id)
-            .map(|msgs| {
-                msgs.iter()
-                    .any(|m| m.role == crate::message::Role::Assistant)
-            })
-            .unwrap_or(false);
+        let has_prior_messages = {
+            let _scope = profiler.scope("history.check_prior_assistant");
+            self.session_manager
+                .get_messages(session_id)
+                .map(|msgs| {
+                    msgs.iter()
+                        .any(|m| m.role == crate::message::Role::Assistant)
+                })
+                .unwrap_or(false)
+        };
         if !has_prior_messages {
+            let _scope = profiler.scope("hooks.on_session_start");
             crate::hooks::fire_hooks(
                 &session_config.hooks,
                 crate::hooks::HookTrigger::OnSessionStart,
@@ -750,28 +779,55 @@ impl SessionProcessor {
 
         // Load skill registry for system prompt injection
         let skill_dirs = session_config.skill_dirs.clone();
-        let skill_registry = crate::skill::SkillRegistry::load(&working_dir, &skill_dirs);
-        let (git_status, readme, agents_md, file_tree) =
-            crate::agent::collect_prompt_context(&working_dir).await;
-        let mut system_prompt = crate::agent::build_system_prompt_with_storage(
-            agent,
-            &working_dir,
-            &file_tree,
-            Some(&skill_registry),
-            Some(&git_status),
-            Some(&readme),
-            Some(&agents_md),
-            Some(self.session_manager.storage()),
-            Some(&session_config.memory),
-        ); // Inject a tool reference listing so the model knows the exact tool names.
+        let skill_registry = {
+            let _scope = profiler.scope("skills.load_registry");
+            crate::skill::SkillRegistry::load(&working_dir, &skill_dirs)
+        };
+        let (git_status, readme, agents_md, file_tree) = {
+            let _scope = profiler.scope("prompt.collect_context");
+            crate::agent::collect_prompt_context(&working_dir).await
+        };
+        let mut system_prompt = {
+            let _scope = profiler.scope("prompt.build_system_prompt");
+            crate::agent::build_system_prompt_with_storage(
+                agent,
+                &working_dir,
+                &file_tree,
+                Some(&skill_registry),
+                Some(&git_status),
+                Some(&readme),
+                Some(&agents_md),
+                Some(self.session_manager.storage()),
+                Some(&session_config.memory),
+            )
+        }; // Inject a tool reference listing so the model knows the exact tool names.
         // This is critical for models (especially via Ollama) that may hallucinate
         // tool names like "search" instead of the actual "grep" tool.
         let tool_reference = build_tool_reference_section(&self.tool_registry);
         system_prompt.push_str(&tool_reference);
 
-        // Inject LSP guidance only for the servers that are actually connected.
+        // Inject question-tool guidance so the model knows how to present
+      // multiple-choice prompts effectively.
+      system_prompt.push_str(
+          "\n## Question Tool Usage\n\
+           When you need to ask the user a question, use the `question` tool. \
+           If the answer should be one of a fixed set of choices, provide the `options` \
+           parameter as an array of strings. The user will see a multiple-choice dialog \
+           instead of a free-text input, which is faster and less error-prone.\n\n\
+           Example — multiple choice:\n\
+           ```\n\
+           question(question: \"Which build profile?\", options: [\"Debug\", \"Release\", \"Check only\"])\n\
+           ```\n\n\
+           Example — free-text input (no options):\n\
+           ```\n\
+           question(question: \"What is your name?\")\n\
+           ```\n\n",
+      );
+
+      // Inject LSP guidance only for the servers that are actually connected.
         // This avoids telling the model it can use rust-analyzer when none is running.
         if let Some(lsp) = self.lsp_manager.get() {
+            let _scope = profiler.scope("prompt.build_lsp_guidance");
             let lsp_guidance = build_lsp_guidance_section(lsp).await;
             system_prompt.push_str(&lsp_guidance);
         }
@@ -860,7 +916,10 @@ impl SessionProcessor {
         }
 
         // 4. Build chat messages from history with context window awareness
-        let history = self.session_manager.get_messages(session_id)?;
+        let history = {
+            let _scope = profiler.scope("history.load");
+            self.session_manager.get_messages(session_id)?
+        };
 
         // Get model's context window size for potential compaction
         let context_window = self
@@ -876,11 +935,14 @@ impl SessionProcessor {
             .unwrap_or(128_000); // Default fallback                            
         // Compact history if needed to prevent context window overflow
         // This ensures tool calls are atomic and not split across boundaries
-        let compacted_history = compact_history_with_atomic_tool_calls(
-            &history,
-            context_window,
-            8192, // Default max output tokens
-        );
+        let compacted_history = {
+            let _scope = profiler.scope("history.compact");
+            compact_history_with_atomic_tool_calls(
+                &history,
+                context_window,
+                8192, // Default max output tokens
+            )
+        };
 
         let mut chat_messages = history_to_chat_messages(&compacted_history); // 4b. AGENTS.md init exchange — on the first message of a session,
         // prompt the model to acknowledge project guidelines so its output
@@ -995,6 +1057,7 @@ impl SessionProcessor {
         // is visible in the output view (e.g. teammate inspection) even before
         // the agent loop finishes.  We update it incrementally after each step.
         let assistant_msg_id = {
+            let _scope = profiler.scope("storage.assistant_placeholder.create");
             let placeholder = Message::new(session_id, Role::Assistant, vec![]);
             let id = placeholder.id.clone();
             self.storage_op(move |s| s.create_message(&placeholder))
@@ -1003,9 +1066,13 @@ impl SessionProcessor {
         };
 
         loop {
-            self.event_bus
-                .set_step(session_id, self.event_bus.current_step(session_id) + 1);
-            let step = self.event_bus.current_step(session_id) as usize;
+            let _step_scope = profiler.scope("loop.step.total");
+            let step = {
+                let _scope = profiler.scope("loop.step.setup");
+                self.event_bus
+                    .set_step(session_id, self.event_bus.current_step(session_id) + 1);
+                self.event_bus.current_step(session_id) as usize
+            };
             if step > max_steps {
                 warn!("Reached max steps ({}), stopping agent loop", max_steps);
                 self.event_bus.publish(Event::AgentError {
@@ -1050,6 +1117,7 @@ impl SessionProcessor {
 
             // Log which tools are being sent with this request
             if !tool_definitions.is_empty() {
+                let _scope = profiler.scope("loop.step.publish_tools");
                 let tool_names: Vec<String> =
                     tool_definitions.iter().map(|t| t.name.clone()).collect();
                 self.event_bus.publish(Event::ToolsSent {
@@ -1068,244 +1136,311 @@ impl SessionProcessor {
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
 
-            'retry: for attempt in 0..=max_retries {
-                if attempt > 0 {
-                    // Reset buffers for retry
-                    text_buffer.clear();
-                    reasoning_buffer.clear();
-                    tool_calls.clear();
-                    last_input_tokens = 0;
-                    last_output_tokens = 0;
+            {
+                let _scope = profiler.scope("loop.llm.total");
+                'retry: for attempt in 0..=max_retries {
+                    if attempt > 0 {
+                        // Reset buffers for retry
+                        text_buffer.clear();
+                        reasoning_buffer.clear();
+                        tool_calls.clear();
+                        last_input_tokens = 0;
+                        last_output_tokens = 0;
 
-                    let wait_secs = attempt as u64 * backoff_secs;
-                    self.event_bus.publish(Event::AgentError {
-                        session_id: session_id.to_string(),
-                        error: format!(
-                            "Retrying LLM request (attempt {}/{}), waiting {}s...",
-                            attempt + 1,
-                            max_retries + 1,
-                            wait_secs
-                        ),
-                    });
-                    tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
-                }
-
-                // Build request (fresh for each attempt)
-                let attempt_request = ChatRequest {
-                    model: model_ref.model_id.clone(),
-                    messages: chat_messages.clone(),
-                    tools: tool_definitions.clone(),
-                    temperature: agent.temperature,
-                    top_p: agent.top_p,
-                    max_tokens: None,
-                    system: Some(system_prompt.clone()),
-                    options: agent.options.clone(),
-                    session_id: Some(session_id.to_string()),
-                    request_id: Some(Uuid::new_v4().to_string()),
-                    stream_timeout_secs: Some(self.stream_config.timeout_secs),
-                };
-
-                let mut stream = match client.chat(attempt_request).await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        debug!(
-                            "LLM call failed (attempt {}): {}",
-                            attempt + 1,
-                            redact_secrets(&e.to_string())
-                        );
-                        if attempt < max_retries {
-                            self.event_bus.publish(Event::AgentError {
-                                session_id: session_id.to_string(),
-                                error: format!("{} — will retry", e),
-                            });
-                            continue 'retry;
-                        }
+                        let wait_secs = attempt as u64 * backoff_secs;
                         self.event_bus.publish(Event::AgentError {
                             session_id: session_id.to_string(),
-                            error: e.to_string(),
-                        });
-                        let error_msg = e.to_string();
-                        crate::hooks::fire_hooks(
-                            &session_config.hooks,
-                            crate::hooks::HookTrigger::OnError,
-                            &working_dir,
-                            &[("RAGENT_ERROR", &error_msg)],
-                        );
-                        bail!("LLM call failed after {} attempts: {e}", max_retries + 1);
-                    }
-                };
-
-                let mut had_retryable_error = false;
-                while let Some(event) = stream.next().await {
-                    match event {
-                        StreamEvent::TextDelta { text } => {
-                            self.event_bus.publish(Event::TextDelta {
-                                session_id: session_id.to_string(),
-                                text: text.clone(),
-                            });
-                            text_buffer.push_str(&text);
-                        }
-                        StreamEvent::ReasoningStart => {}
-                        StreamEvent::ReasoningDelta { text } => {
-                            self.event_bus.publish(Event::ReasoningDelta {
-                                session_id: session_id.to_string(),
-                                text: text.clone(),
-                            });
-                            reasoning_buffer.push_str(&text);
-                        }
-                        StreamEvent::ReasoningEnd => {}
-                        StreamEvent::ToolCallStart { id, name } => {
-                            tool_calls.push(PendingToolCall {
-                                id,
-                                name,
-                                args_json: String::new(),
-                            });
-                        }
-                        StreamEvent::ToolCallDelta { id, args_json } => {
-                            if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
-                                tc.args_json.push_str(&args_json);
-                            }
-                        }
-                        StreamEvent::ToolCallEnd { id } => {
-                            if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
-                                self.event_bus.publish(Event::ToolCallArgs {
-                                    session_id: session_id.to_string(),
-                                    call_id: tc.id.clone(),
-                                    tool: tc.name.clone(),
-                                    args: tc.args_json.clone(),
-                                });
-                            }
-                        }
-                        StreamEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                        } => {
-                            last_input_tokens = input_tokens;
-                            last_output_tokens = output_tokens;
-                            self.event_bus.publish(Event::TokenUsage {
-                                session_id: session_id.to_string(),
-                                input_tokens,
-                                output_tokens,
-                            });
-                        }
-                        StreamEvent::Error { message } => {
-                            debug!(
-                                "Stream error (attempt {}): {}",
+                            error: format!(
+                                "Retrying LLM request (attempt {}/{}), waiting {}s...",
                                 attempt + 1,
-                                redact_secrets(&message)
-                            );
-                            let is_retryable = is_retryable_stream_error(&message);
-                            if is_retryable && attempt < max_retries {
-                                self.event_bus.publish(Event::AgentError {
-                                    session_id: session_id.to_string(),
-                                    error: format!("{} — will retry", message),
-                                });
-                                had_retryable_error = true;
-                            } else {
-                                self.event_bus.publish(Event::AgentError {
-                                    session_id: session_id.to_string(),
-                                    error: message,
-                                });
-                            }
+                                max_retries + 1,
+                                wait_secs
+                            ),
+                        });
+                        {
+                            let _scope = profiler.scope("loop.llm.backoff_sleep");
+                            tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
                         }
-                        StreamEvent::RateLimit {
-                            requests_used_pct,
-                            tokens_used_pct,
-                        } => {
-                            let percent = requests_used_pct.or(tokens_used_pct);
-                            if let Some(pct) = percent {
-                                self.event_bus.publish(Event::QuotaUpdate {
-                                    session_id: session_id.to_string(),
-                                    percent: pct,
-                                });
-                            }
-                        }
-                        StreamEvent::Finish { .. } => {}
                     }
-                }
 
-                if had_retryable_error {
-                    continue 'retry;
+                    // Build request (fresh for each attempt)
+                    let attempt_request = ChatRequest {
+                        model: model_ref.model_id.clone(),
+                        messages: chat_messages.clone(),
+                        tools: tool_definitions.clone(),
+                        temperature: agent.temperature,
+                        top_p: agent.top_p,
+                        max_tokens: None,
+                        system: Some(system_prompt.clone()),
+                        options: agent.options.clone(),
+                        session_id: Some(session_id.to_string()),
+                        request_id: Some(Uuid::new_v4().to_string()),
+                        stream_timeout_secs: Some(self.stream_config.timeout_secs),
+                    };
+
+                    let mut stream = {
+                        let _scope = profiler.scope("loop.llm.create_stream");
+                        match client.chat(attempt_request).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                debug!(
+                                    "LLM call failed (attempt {}): {}",
+                                    attempt + 1,
+                                    redact_secrets(&e.to_string())
+                                );
+                                if attempt < max_retries {
+                                    self.event_bus.publish(Event::AgentError {
+                                        session_id: session_id.to_string(),
+                                        error: format!("{} — will retry", e),
+                                    });
+                                    continue 'retry;
+                                }
+                                self.event_bus.publish(Event::AgentError {
+                                    session_id: session_id.to_string(),
+                                    error: e.to_string(),
+                                });
+                                let error_msg = e.to_string();
+                                crate::hooks::fire_hooks(
+                                    &session_config.hooks,
+                                    crate::hooks::HookTrigger::OnError,
+                                    &working_dir,
+                                    &[("RAGENT_ERROR", &error_msg)],
+                                );
+                                bail!("LLM call failed after {} attempts: {e}", max_retries + 1);
+                            }
+                        }
+                    };
+
+                    let mut had_retryable_error = false;
+                    let mut first_stream_event_pending = true;
+                    {
+                        let _scope = profiler.scope("loop.llm.stream");
+                        loop {
+                            let wait_started = Instant::now();
+                            let next_event = {
+                                let _scope = profiler.scope("loop.llm.wait_next_event");
+                                stream.next().await
+                            };
+                            if first_stream_event_pending {
+                                if next_event.is_some() {
+                                    profiler.record_duration(
+                                        "loop.llm.first_event_wait",
+                                        wait_started.elapsed(),
+                                    );
+                                }
+                                first_stream_event_pending = false;
+                            }
+                            let Some(event) = next_event else {
+                                break;
+                            };
+
+                            match event {
+                                StreamEvent::TextDelta { text } => {
+                                    let _scope = profiler.scope("loop.llm.handle.text_delta");
+                                    self.event_bus.publish(Event::TextDelta {
+                                        session_id: session_id.to_string(),
+                                        text: text.clone(),
+                                    });
+                                    text_buffer.push_str(&text);
+                                }
+                                StreamEvent::ReasoningStart => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_start");
+                                }
+                                StreamEvent::ReasoningDelta { text } => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_delta");
+                                    self.event_bus.publish(Event::ReasoningDelta {
+                                        session_id: session_id.to_string(),
+                                        text: text.clone(),
+                                    });
+                                    reasoning_buffer.push_str(&text);
+                                }
+                                StreamEvent::ReasoningEnd => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_end");
+                                }
+                                StreamEvent::ToolCallStart { id, name } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_start");
+                                    tool_calls.push(PendingToolCall {
+                                        id,
+                                        name,
+                                        args_json: String::new(),
+                                    });
+                                }
+                                StreamEvent::ToolCallDelta { id, args_json } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_delta");
+                                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
+                                        tc.args_json.push_str(&args_json);
+                                    }
+                                }
+                                StreamEvent::ToolCallEnd { id } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_end");
+                                    if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                                        self.event_bus.publish(Event::ToolCallArgs {
+                                            session_id: session_id.to_string(),
+                                            call_id: tc.id.clone(),
+                                            tool: tc.name.clone(),
+                                            args: tc.args_json.clone(),
+                                        });
+                                    }
+                                }
+                                StreamEvent::Usage {
+                                    input_tokens,
+                                    output_tokens,
+                                } => {
+                                    let _scope = profiler.scope("loop.llm.handle.usage");
+                                    last_input_tokens = input_tokens;
+                                    last_output_tokens = output_tokens;
+                                    self.event_bus.publish(Event::TokenUsage {
+                                        session_id: session_id.to_string(),
+                                        input_tokens,
+                                        output_tokens,
+                                    });
+                                }
+                                StreamEvent::Error { message } => {
+                                    let _scope = profiler.scope("loop.llm.handle.error");
+                                    debug!(
+                                        "Stream error (attempt {}): {}",
+                                        attempt + 1,
+                                        redact_secrets(&message)
+                                    );
+                                    let is_retryable = is_retryable_stream_error(&message);
+                                    if is_retryable && attempt < max_retries {
+                                        self.event_bus.publish(Event::AgentError {
+                                            session_id: session_id.to_string(),
+                                            error: format!("{} — will retry", message),
+                                        });
+                                        had_retryable_error = true;
+                                    } else {
+                                        self.event_bus.publish(Event::AgentError {
+                                            session_id: session_id.to_string(),
+                                            error: message,
+                                        });
+                                    }
+                                }
+                                StreamEvent::RateLimit {
+                                    requests_used_pct,
+                                    tokens_used_pct,
+                                } => {
+                                    let _scope = profiler.scope("loop.llm.handle.rate_limit");
+                                    let percent = requests_used_pct.or(tokens_used_pct);
+                                    if let Some(pct) = percent {
+                                        self.event_bus.publish(Event::QuotaUpdate {
+                                            session_id: session_id.to_string(),
+                                            percent: pct,
+                                        });
+                                    }
+                                }
+                                StreamEvent::Finish { .. } => {
+                                    let _scope = profiler.scope("loop.llm.handle.finish");
+                                }
+                            }
+                        }
+                    }
+
+                    if had_retryable_error {
+                        continue 'retry;
+                    }
+                    break;
                 }
-                break;
             }
 
             // Collect parts from this turn
-            if !reasoning_buffer.is_empty() {
-                assistant_parts.push(MessagePart::Reasoning {
-                    text: reasoning_buffer.clone(),
-                });
-            }
-            if !text_buffer.is_empty() {
-                // Log the model response text
-                let response_preview = if text_buffer.len() > 200 {
-                    let mut end = 200;
-                    while end > 0 && !text_buffer.is_char_boundary(end) {
-                        end -= 1;
+            {
+                let _scope = profiler.scope("loop.response.process");
+                if !reasoning_buffer.is_empty() {
+                    let _scope = profiler.scope("loop.response.store_reasoning_part");
+                    assistant_parts.push(MessagePart::Reasoning {
+                        text: reasoning_buffer.clone(),
+                    });
+                }
+                if !text_buffer.is_empty() {
+                    // Log the model response text
+                    let response_preview = if text_buffer.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !text_buffer.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}…", &text_buffer[..end])
+                    } else {
+                        text_buffer.clone()
+                    };
+                    let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
+                    cumulative_model_wait_ms += model_elapsed_ms;
+                    {
+                        let _scope = profiler.scope("loop.response.publish_model_response");
+                        self.event_bus.publish(Event::ModelResponse {
+                            session_id: session_id.to_string(),
+                            text: response_preview,
+                            elapsed_ms: model_elapsed_ms,
+                            input_tokens: last_input_tokens,
+                            output_tokens: last_output_tokens,
+                        });
                     }
-                    format!("{}…", &text_buffer[..end])
-                } else {
-                    text_buffer.clone()
-                };
-                let model_elapsed_ms = llm_request_start.elapsed().as_millis() as u64;
-                cumulative_model_wait_ms += model_elapsed_ms;
-                self.event_bus.publish(Event::ModelResponse {
-                    session_id: session_id.to_string(),
-                    text: response_preview,
-                    elapsed_ms: model_elapsed_ms,
-                    input_tokens: last_input_tokens,
-                    output_tokens: last_output_tokens,
-                });
-                assistant_parts.push(MessagePart::Text {
-                    text: text_buffer.clone(),
-                });
+                    {
+                        let _scope = profiler.scope("loop.response.store_text_part");
+                        assistant_parts.push(MessagePart::Text {
+                            text: text_buffer.clone(),
+                        });
+                    }
+                }
             }
 
             // Execute tool calls if any were emitted, regardless of finish_reason.
             // Some Ollama models send tool calls but set done_reason to "stop" rather
             // than "tool_calls", so we cannot rely on finish_reason alone.
             if tool_calls.is_empty() {
-                // No tool calls — check whether an Ollama model wrote planning text
-                // instead of calling a tool, and inject a nudge to make it act.
-                let is_ollama = matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
-                let trimmed_text = text_buffer.trim();
-                // Detect "stall" responses: model output is only dots/whitespace,
-                // indicating it was thinking out loud and didn't produce tool calls.
-                let looks_like_stall = !trimmed_text.is_empty()
-                    && !tool_definitions.is_empty()
-                    && trimmed_text
-                        .chars()
-                        .all(|c| c == '.' || c == ' ' || c == '\n');
-                let looks_like_planning = !text_buffer.is_empty()
-                    && !tool_definitions.is_empty()
-                    && (text_buffer.contains("Let me")
-                        || text_buffer.contains("I'll")
-                        || text_buffer.contains("I will")
-                        || text_buffer.contains("I'm going to")
-                        || text_buffer.contains("let me")
-                        || text_buffer.contains("start by")
-                        || text_buffer.contains("begin by")
-                        || text_buffer.contains("First,")
-                        || text_buffer.contains("First I")
-                        || text_buffer.contains("exploring")
-                        || text_buffer.contains("examine")
-                        || text_buffer.contains("analyze"));
-                // Only nudge on early steps to avoid infinite loops.
-                // Stall responses (dots-only) are nudged for any provider; planning
-                // text nudges are limited to Ollama which commonly narrates before acting.
-                let should_nudge_stall = looks_like_stall && step <= 8;
-                let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
+                let _scope = profiler.scope("loop.no_tool_decision");
+                let (should_nudge_stall, should_nudge_planning, should_nudge_incomplete) = {
+                    let _scope = profiler.scope("loop.no_tool_decision.detect");
+                    // No tool calls — check whether an Ollama model wrote planning text
+                    // instead of calling a tool, and inject a nudge to make it act.
+                    let is_ollama =
+                        matches!(model_ref.provider_id.as_str(), "ollama" | "ollama_cloud");
+                    let trimmed_text = text_buffer.trim();
+                    // Detect "stall" responses: model output is only dots/whitespace,
+                    // indicating it was thinking out loud and didn't produce tool calls.
+                    let looks_like_stall = !trimmed_text.is_empty()
+                        && !tool_definitions.is_empty()
+                        && trimmed_text
+                            .chars()
+                            .all(|c| c == '.' || c == ' ' || c == '\n');
+                    let looks_like_planning = !text_buffer.is_empty()
+                        && !tool_definitions.is_empty()
+                        && (text_buffer.contains("Let me")
+                            || text_buffer.contains("I'll")
+                            || text_buffer.contains("I will")
+                            || text_buffer.contains("I'm going to")
+                            || text_buffer.contains("let me")
+                            || text_buffer.contains("start by")
+                            || text_buffer.contains("begin by")
+                            || text_buffer.contains("First,")
+                            || text_buffer.contains("First I")
+                            || text_buffer.contains("exploring")
+                            || text_buffer.contains("examine")
+                            || text_buffer.contains("analyze"));
+                    // Only nudge on early steps to avoid infinite loops.
+                    // Stall responses (dots-only) are nudged for any provider; planning
+                    // text nudges are limited to Ollama which commonly narrates before acting.
+                    let should_nudge_stall = looks_like_stall && step <= 8;
+                    let should_nudge_planning = is_ollama && looks_like_planning && step <= 3;
 
-                // Task completeness check: if the user requested a file output
-                // (e.g. "create hugplan.md") but no write tool was used, nudge
-                // the model to finish. This fires once, at any step, for all
-                // providers, to catch cases where sub-agent results were consumed
-                // but the model stopped without producing the requested artefact.
-                let should_nudge_incomplete = !task_completeness_nudged
-                    && !tool_definitions.is_empty()
-                    && detect_incomplete_file_task(&user_msg.text_content(), &assistant_parts);
+                    // Task completeness check: if the user requested a file output
+                    // (e.g. "create hugplan.md") but no write tool was used, nudge
+                    // the model to finish. This fires once, at any step, for all
+                    // providers, to catch cases where sub-agent results were consumed
+                    // but the model stopped without producing the requested artefact.
+                    let should_nudge_incomplete = !task_completeness_nudged
+                        && !tool_definitions.is_empty()
+                        && detect_incomplete_file_task(&user_msg.text_content(), &assistant_parts);
+
+                    (
+                        should_nudge_stall,
+                        should_nudge_planning,
+                        should_nudge_incomplete,
+                    )
+                };
 
                 if should_nudge_stall || should_nudge_planning || should_nudge_incomplete {
+                    let _scope = profiler.scope("loop.no_tool_decision.nudge");
                     let reason = if should_nudge_stall {
                         "stall (dots-only output)"
                     } else if should_nudge_planning {
@@ -1344,528 +1479,591 @@ impl SessionProcessor {
                 break;
             }
 
-            // Build assistant message content for history
-            let mut assistant_content_parts: Vec<ContentPart> = Vec::new();
-            if !text_buffer.is_empty() {
-                assistant_content_parts.push(ContentPart::Text {
-                    text: text_buffer.clone(),
-                });
-            }
+            {
+                let _scope = profiler.scope("loop.tool_phase.total");
 
-            // Execute tool calls sequentially by default. Parallel fan-out can be
-            // re-enabled with experimental.parallel_tool_calls.
-            let parallel_tool_calls = session_config.experimental.parallel_tool_calls;
-            let mut tool_result_parts: Vec<ContentPart> = Vec::new();
+                // Build assistant message content for history
+                let mut assistant_content_parts: Vec<ContentPart> = Vec::new();
+                if !text_buffer.is_empty() {
+                    assistant_content_parts.push(ContentPart::Text {
+                        text: text_buffer.clone(),
+                    });
+                }
 
-            let mut futures = Vec::new();
-            type ToolExecutionResult = Result<
-                (
-                    PendingToolCall,
-                    Value,
-                    ToolCallStatus,
-                    Option<Value>,
-                    Option<String>,
-                    u64,
-                    String,
-                    Option<Value>,
-                ),
-                tokio::task::JoinError,
-            >;
-            let mut handle_tool_execution_result = |result: ToolExecutionResult| match result {
-                Ok((
-                    tc,
-                    input,
-                    status,
-                    output_value,
-                    error,
-                    duration_ms,
-                    result_content,
-                    tool_metadata,
-                )) => {
-                    assistant_parts.push(MessagePart::ToolCall {
-                        tool: tc.name.clone(),
-                        call_id: tc.id.clone(),
-                        state: ToolCallState {
-                            status,
+                // Execute tool calls sequentially by default. Parallel fan-out can be
+                // re-enabled with experimental.parallel_tool_calls.
+                let parallel_tool_calls = session_config.experimental.parallel_tool_calls;
+                let mut tool_result_parts: Vec<ContentPart> = Vec::new();
+
+                let mut futures = Vec::new();
+                type ToolExecutionResult = Result<
+                    (
+                        PendingToolCall,
+                        Value,
+                        ToolCallStatus,
+                        Option<Value>,
+                        Option<String>,
+                        u64,
+                        String,
+                        Option<Value>,
+                    ),
+                    tokio::task::JoinError,
+                >;
+                let result_profiler = profiler.clone();
+                let mut handle_tool_execution_result = |result: ToolExecutionResult| {
+                    let _scope = result_profiler.scope("loop.tool_phase.handle_result");
+                    match result {
+                        Ok((
+                            tc,
                             input,
-                            output: output_value,
+                            status,
+                            output_value,
                             error,
-                            duration_ms: Some(duration_ms),
-                        },
-                    });
+                            duration_ms,
+                            result_content,
+                            tool_metadata,
+                        )) => {
+                            assistant_parts.push(MessagePart::ToolCall {
+                                tool: tc.name.clone(),
+                                call_id: tc.id.clone(),
+                                state: ToolCallState {
+                                    status,
+                                    input,
+                                    output: output_value,
+                                    error,
+                                    duration_ms: Some(duration_ms),
+                                },
+                            });
 
-                    tool_result_parts.push(ContentPart::ToolResult {
-                        tool_use_id: tc.id.clone(),
-                        content: result_content,
-                    });
+                            tool_result_parts.push(ContentPart::ToolResult {
+                                tool_use_id: tc.id.clone(),
+                                content: result_content,
+                            });
 
-                    if let Some(meta) = tool_metadata.as_ref() {
-                        if meta.get("agent_switch").is_some() || meta.get("agent_restore").is_some()
-                        {
-                            agent_switch_requested = true;
-                            return true;
+                            if let Some(meta) = tool_metadata.as_ref() {
+                                if meta.get("agent_switch").is_some()
+                                    || meta.get("agent_restore").is_some()
+                                {
+                                    agent_switch_requested = true;
+                                    return true;
+                                }
+                                if meta.get("task_complete").is_some() {
+                                    task_complete_requested = true;
+                                    return true;
+                                }
+                            }
+                            false
                         }
-                        if meta.get("task_complete").is_some() {
-                            task_complete_requested = true;
-                            return true;
+                        Err(e) => {
+                            warn!(error = %e, "Tool execution task panicked");
+                            false
                         }
                     }
-                    false
-                }
-                Err(e) => {
-                    warn!(error = %e, "Tool execution task panicked");
-                    false
-                }
-            };
+                };
 
-            for tc in &tool_calls {
-                let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
+                for tc in &tool_calls {
+                    let _scope = profiler.scope("loop.tool_phase.prepare_call");
+                    let input: Value = serde_json::from_str(&tc.args_json).unwrap_or_else(|e| {
                     warn!(error = %e, args = %tc.args_json, "Failed to parse tool call arguments");
                     json!({})
                 });
 
-                assistant_content_parts.push(ContentPart::ToolUse {
-                    id: tc.id.clone(),
-                    name: tc.name.clone(),
-                    input: input.clone(),
-                });
-
-                let tool_ctx = ToolContext {
-                    session_id: session_id.to_string(),
-                    working_dir: working_dir.clone(),
-                    event_bus: self.event_bus.clone(),
-                    storage: Some(self.session_manager.storage().clone()),
-                    task_manager: self.task_manager.get().cloned(),
-                    lsp_manager: self.lsp_manager.get().cloned(),
-                    active_model: Some(model_ref.clone()),
-                    team_context: team_context_for_session.clone(),
-                    team_manager: self
-                        .team_manager
-                        .get()
-                        .cloned()
-                        .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                    code_index: self.code_index.get().cloned(),
-                };
-
-                let tc_clone = tc.clone();
-                let registry = self.tool_registry.clone();
-                let permission_checker = self.permission_checker.clone();
-                let event_bus = self.event_bus.clone();
-                let event_bus_clone = self.event_bus.clone();
-                let session_id_str = session_id.to_string();
-                let session_id_for_perm = session_id.to_string();
-                let hook_working_dir = working_dir.clone();
-                let hook_configs = session_config.hooks.clone();
-                let extraction_engine = self.extraction_engine.clone();
-                let storage_clone = self.session_manager.storage().clone();
-                let auto_approve = self.auto_approve; // Spawn each tool execution as a future — the tool semaphore
-                // inside the spawned task bounds concurrency.
-                let fut = tokio::spawn(async move {
-                    event_bus.publish(Event::ToolCallStart {
-                        session_id: session_id_str.clone(),
-                        call_id: tc_clone.id.clone(),
-                        tool: tc_clone.name.clone(),
+                    assistant_content_parts.push(ContentPart::ToolUse {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        input: input.clone(),
                     });
 
-                    // Check PreToolUse hooks first
-                    let pre_hook_result = crate::hooks::run_pre_tool_use_hooks(
-                        &hook_configs,
-                        &hook_working_dir,
-                        &tc_clone.name,
-                        &tc_clone.args_json,
-                    );
-
-                    // Apply hook result
-                    let tool_input = match pre_hook_result {
-                        crate::hooks::PreToolUseResult::Allow => {
-                            // Hook approved - skip the UI prompt but still execute
-                            serde_json::from_str(&tc_clone.args_json)
-                                .unwrap_or_else(|_| serde_json::json!({}))
-                        }
-                        crate::hooks::PreToolUseResult::Deny { reason } => {
-                            // Hook denied - return error without executing
-                            tracing::info!(
-                                tool = %tc_clone.name,
-                                reason = %reason,
-                                "PreToolUse hook denied tool execution"
-                            );
-                            let err_msg = format!("Permission denied by hook: {}", reason);
-                            event_bus.publish(Event::ToolCallEnd {
-                                session_id: session_id_str.clone(),
-                                call_id: tc_clone.id.clone(),
-                                tool: tc_clone.name.clone(),
-                                error: Some(err_msg.clone()),
-                                duration_ms: 0,
-                            });
-                            let input_val: Value = serde_json::from_str(&tc_clone.args_json)
-                                .unwrap_or_else(|_| serde_json::json!({}));
-                            return (
-                                tc_clone.clone(),
-                                input_val,
-                                ToolCallStatus::Error,
-                                None,
-                                Some(err_msg),
-                                0u64,
-                                String::new(),
-                                None,
-                            );
-                        }
-                        crate::hooks::PreToolUseResult::ModifiedInput { input } => {
-                            // Hook modified the input - use the modified input
-                            tracing::debug!(
-                                tool = %tc_clone.name,
-                                "PreToolUse hook modified tool input"
-                            );
-                            input
-                        }
-                        crate::hooks::PreToolUseResult::NoDecision => {
-                            // No hook decision - use original input
-                            serde_json::from_str(&tc_clone.args_json)
-                                .unwrap_or_else(|_| serde_json::json!({}))
-                        }
+                    let tool_ctx = ToolContext {
+                        session_id: session_id.to_string(),
+                        working_dir: working_dir.clone(),
+                        event_bus: self.event_bus.clone(),
+                        storage: Some(self.session_manager.storage().clone()),
+                        task_manager: self.task_manager.get().cloned(),
+                        lsp_manager: self.lsp_manager.get().cloned(),
+                        active_model: Some(model_ref.clone()),
+                        team_context: team_context_for_session.clone(),
+                        team_manager: self
+                            .team_manager
+                            .get()
+                            .cloned()
+                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                        code_index: self.code_index.get().cloned(),
                     };
 
-                    let _permit = crate::resource::acquire_tool_permit()
-                        .await
-                        .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
-                    let start = Instant::now();
+                    let tc_clone = tc.clone();
+                    let registry = self.tool_registry.clone();
+                    let permission_checker = self.permission_checker.clone();
+                    let event_bus = self.event_bus.clone();
+                    let event_bus_clone = self.event_bus.clone();
+                    let session_id_str = session_id.to_string();
+                    let session_id_for_perm = session_id.to_string();
+                    let hook_working_dir = working_dir.clone();
+                    let hook_configs = session_config.hooks.clone();
+                    let extraction_engine = self.extraction_engine.clone();
+                    let storage_clone = self.session_manager.storage().clone();
+                    let profiler = profiler.clone();
+                    let auto_approve = self.auto_approve; // Spawn each tool execution as a future — the tool semaphore
+                    // inside the spawned task bounds concurrency.
+                    let fut = tokio::spawn(async move {
+                        let _tool_total_scope =
+                            profiler.scope_with(|| format!("tool.total:{}", tc_clone.name));
+                        event_bus.publish(Event::ToolCallStart {
+                            session_id: session_id_str.clone(),
+                            call_id: tc_clone.id.clone(),
+                            tool: tc_clone.name.clone(),
+                        });
 
-                    // D3 fix: Serialize tool_input before it's moved for PostToolUse hooks
-                    let tool_input_for_post_hook = serde_json::to_string(&tool_input)
-                        .unwrap_or_else(|_| tc_clone.args_json.clone());
+                        // Check PreToolUse hooks first
+                        let pre_hook_result = {
+                            let _scope =
+                                profiler.scope_with(|| format!("tool.pre_hooks:{}", tc_clone.name));
+                            crate::hooks::run_pre_tool_use_hooks(
+                                &hook_configs,
+                                &hook_working_dir,
+                                &tc_clone.name,
+                                &tc_clone.args_json,
+                            )
+                        };
 
-                    let result = registry
-                        .get(&tc_clone.name)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
-                    let result = match result {
-                        Ok(tool) => {
-                            // Check permission before executing tool
-                            let perm_category = tool.permission_category();
-                            if !perm_category.is_empty() && perm_category != "none" {
-                                // Extract resource identifier from tool input
-                                let resource =
-                                    extract_resource_from_input(&tool_input, &tc_clone.name);
+                        // Apply hook result
+                        let tool_input = match pre_hook_result {
+                            crate::hooks::PreToolUseResult::Allow => {
+                                // Hook approved - skip the UI prompt but still execute
+                                serde_json::from_str(&tc_clone.args_json)
+                                    .unwrap_or_else(|_| serde_json::json!({}))
+                            }
+                            crate::hooks::PreToolUseResult::Deny { reason } => {
+                                // Hook denied - return error without executing
+                                tracing::info!(
+                                    tool = %tc_clone.name,
+                                    reason = %reason,
+                                    "PreToolUse hook denied tool execution"
+                                );
+                                let err_msg = format!("Permission denied by hook: {}", reason);
+                                event_bus.publish(Event::ToolCallEnd {
+                                    session_id: session_id_str.clone(),
+                                    call_id: tc_clone.id.clone(),
+                                    tool: tc_clone.name.clone(),
+                                    error: Some(err_msg.clone()),
+                                    duration_ms: 0,
+                                });
+                                let input_val: Value = serde_json::from_str(&tc_clone.args_json)
+                                    .unwrap_or_else(|_| serde_json::json!({}));
+                                return (
+                                    tc_clone.clone(),
+                                    input_val,
+                                    ToolCallStatus::Error,
+                                    None,
+                                    Some(err_msg),
+                                    0u64,
+                                    String::new(),
+                                    None,
+                                );
+                            }
+                            crate::hooks::PreToolUseResult::ModifiedInput { input } => {
+                                // Hook modified the input - use the modified input
+                                tracing::debug!(
+                                    tool = %tc_clone.name,
+                                    "PreToolUse hook modified tool input"
+                                );
+                                input
+                            }
+                            crate::hooks::PreToolUseResult::NoDecision => {
+                                // No hook decision - use original input
+                                serde_json::from_str(&tc_clone.args_json)
+                                    .unwrap_or_else(|_| serde_json::json!({}))
+                            }
+                        };
 
-                                // For bash tool, split command on delimiters and check each sub-command
-                                if tc_clone.name == "bash"
-                                    || tc_clone.name == "execute_bash"
-                                    || tc_clone.name == "run_shell_command"
-                                    || tc_clone.name == "run_terminal_cmd"
-                                {
-                                    let sub_commands = split_bash_command(&resource);
+                        let _permit = crate::resource::acquire_tool_permit()
+                            .await
+                            .map_err(|e| anyhow::anyhow!("tool permit: {e}"));
+                        let start = Instant::now();
 
-                                    // Check if all commands are in the safe whitelist
-                                    use crate::tool::bash::is_safe_command;
-                                    let all_safe = sub_commands.iter().all(|cmd| {
-                                        let cmd_name = extract_command_name(cmd);
-                                        is_safe_command(&cmd_name)
-                                    });
+                        // D3 fix: Serialize tool_input before it's moved for PostToolUse hooks
+                        let tool_input_for_post_hook = serde_json::to_string(&tool_input)
+                            .unwrap_or_else(|_| tc_clone.args_json.clone());
 
-                                    if all_safe {
-                                        // All commands are safe, skip permission check entirely
-                                        tracing::debug!(
-                                            "All bash commands are safe, skipping permission prompt: {:?}",
-                                            sub_commands
-                                        );
-                                        tool.execute(tool_input, &tool_ctx).await
+                        let result = registry
+                            .get(&tc_clone.name)
+                            .ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", tc_clone.name));
+                        let result = match result {
+                            Ok(tool) => {
+                                // Check permission before executing tool
+                                let perm_category = tool.permission_category();
+                                if !perm_category.is_empty() && perm_category != "none" {
+                                    // Extract resource identifier from tool input
+                                    let resource =
+                                        extract_resource_from_input(&tool_input, &tc_clone.name);
+
+                                    // For bash tool, split command on delimiters and check each sub-command
+                                    if tc_clone.name == "bash"
+                                        || tc_clone.name == "execute_bash"
+                                        || tc_clone.name == "run_shell_command"
+                                        || tc_clone.name == "run_terminal_cmd"
+                                    {
+                                        let sub_commands = split_bash_command(&resource);
+
+                                        // Check if all commands are in the safe whitelist
+                                        use crate::tool::bash::is_safe_command;
+                                        let all_safe = sub_commands.iter().all(|cmd| {
+                                            let cmd_name = extract_command_name(cmd);
+                                            is_safe_command(&cmd_name)
+                                        });
+
+                                        if all_safe {
+                                            // All commands are safe, skip permission check entirely
+                                            tracing::debug!(
+                                                "All bash commands are safe, skipping permission prompt: {:?}",
+                                                sub_commands
+                                            );
+                                            tool.execute(tool_input, &tool_ctx).await
+                                        } else {
+                                            // At least one command is not safe, check permissions
+                                            let mut all_approved = true;
+
+                                            for sub_cmd in &sub_commands {
+                                                // Extract just the command name for permission matching
+                                                let cmd_name = extract_command_name(sub_cmd);
+
+                                                let permission_action = {
+                                                    let _scope = profiler.scope_with(|| {
+                                                        format!("tool.permission:{}", tc_clone.name)
+                                                    });
+                                                    check_permission_with_prompt(
+                                                        &permission_checker,
+                                                        &event_bus,
+                                                        &session_id_for_perm,
+                                                        perm_category,
+                                                        &cmd_name,
+                                                        &tc_clone.name,
+                                                        auto_approve,
+                                                    )
+                                                    .await
+                                                };
+                                                match permission_action {
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Allow,
+                                                    ) => {
+                                                        // This sub-command is approved, continue
+                                                        continue;
+                                                    }
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Deny,
+                                                    ) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
+                                                    Ok(
+                                                        crate::permission::PermissionAction::Ask,
+                                                    ) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
+                                                    Err(_) => {
+                                                        all_approved = false;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+
+                                            if all_approved {
+                                                let _scope = profiler.scope_with(|| {
+                                                    format!("tool.execute:{}", tc_clone.name)
+                                                });
+                                                tool.execute(tool_input, &tool_ctx).await
+                                            } else {
+                                                Err(anyhow::anyhow!(
+                                                    "Permission denied for one or more sub-commands"
+                                                ))
+                                            }
+                                        }
                                     } else {
-                                        // At least one command is not safe, check permissions
-                                        let mut all_approved = true;
-
-                                        for sub_cmd in &sub_commands {
-                                            // Extract just the command name for permission matching
-                                            let cmd_name = extract_command_name(sub_cmd);
-
-                                            match check_permission_with_prompt(
+                                        // Non-bash tool: single permission check
+                                        let permission_action = {
+                                            let _scope = profiler.scope_with(|| {
+                                                format!("tool.permission:{}", tc_clone.name)
+                                            });
+                                            check_permission_with_prompt(
                                                 &permission_checker,
                                                 &event_bus,
                                                 &session_id_for_perm,
                                                 perm_category,
-                                                &cmd_name,
+                                                &resource,
                                                 &tc_clone.name,
                                                 auto_approve,
                                             )
                                             .await
-                                            {
-                                                Ok(crate::permission::PermissionAction::Allow) => {
-                                                    // This sub-command is approved, continue
-                                                    continue;
-                                                }
-                                                Ok(crate::permission::PermissionAction::Deny) => {
-                                                    all_approved = false;
-                                                    break;
-                                                }
-                                                Ok(crate::permission::PermissionAction::Ask) => {
-                                                    all_approved = false;
-                                                    break;
-                                                }
-                                                Err(_) => {
-                                                    all_approved = false;
-                                                    break;
-                                                }
+                                        };
+                                        match permission_action {
+                                            Ok(crate::permission::PermissionAction::Allow) => {
+                                                let _scope = profiler.scope_with(|| {
+                                                    format!("tool.execute:{}", tc_clone.name)
+                                                });
+                                                tool.execute(tool_input, &tool_ctx).await
                                             }
-                                        }
-
-                                        if all_approved {
-                                            tool.execute(tool_input, &tool_ctx).await
-                                        } else {
-                                            Err(anyhow::anyhow!(
-                                                "Permission denied for one or more sub-commands"
-                                            ))
+                                            Ok(crate::permission::PermissionAction::Deny) => {
+                                                Err(anyhow::anyhow!(
+                                                    "Permission denied by user or policy"
+                                                ))
+                                            }
+                                            Ok(crate::permission::PermissionAction::Ask) => {
+                                                Err(anyhow::anyhow!(
+                                                    "Permission check returned Ask (internal error)"
+                                                ))
+                                            }
+                                            Err(e) => Err(e),
                                         }
                                     }
                                 } else {
-                                    // Non-bash tool: single permission check
-                                    match check_permission_with_prompt(
-                                        &permission_checker,
-                                        &event_bus,
-                                        &session_id_for_perm,
-                                        perm_category,
-                                        &resource,
-                                        &tc_clone.name,
-                                        auto_approve,
-                                    )
-                                    .await
-                                    {
-                                        Ok(crate::permission::PermissionAction::Allow) => {
-                                            tool.execute(tool_input, &tool_ctx).await
-                                        }
-                                        Ok(crate::permission::PermissionAction::Deny) => Err(
-                                            anyhow::anyhow!("Permission denied by user or policy"),
-                                        ),
-                                        Ok(crate::permission::PermissionAction::Ask) => {
-                                            Err(anyhow::anyhow!(
-                                                "Permission check returned Ask (internal error)"
-                                            ))
-                                        }
-                                        Err(e) => Err(e),
-                                    }
+                                    // No permission required, execute directly
+                                    let _scope = profiler
+                                        .scope_with(|| format!("tool.execute:{}", tc_clone.name));
+                                    tool.execute(tool_input, &tool_ctx).await
                                 }
-                            } else {
-                                // No permission required, execute directly
-                                tool.execute(tool_input, &tool_ctx).await
                             }
-                        }
-                        Err(e) => Err(e),
-                    };
-                    let duration_ms = start.elapsed().as_millis() as u64;
+                            Err(e) => Err(e),
+                        };
+                        let duration_ms = start.elapsed().as_millis() as u64;
 
-                    // Run PostToolUse hooks after execution
-                    let output_content = result
-                        .as_ref()
-                        .map(|o| o.content.clone())
-                        .unwrap_or_default();
-                    let output_json = result
-                        .as_ref()
-                        .ok()
-                        .and_then(|o| o.metadata.clone())
-                        .unwrap_or_else(|| serde_json::json!({"content": output_content}));
-                    let success = result.is_ok();
+                        // Run PostToolUse hooks after execution
+                        let output_content = result
+                            .as_ref()
+                            .map(|o| o.content.clone())
+                            .unwrap_or_default();
+                        let output_json = result
+                            .as_ref()
+                            .ok()
+                            .and_then(|o| o.metadata.clone())
+                            .unwrap_or_else(|| serde_json::json!({"content": output_content}));
+                        let success = result.is_ok();
 
-                    let modified_output = crate::hooks::run_post_tool_use_hooks(
-                        &hook_configs,
-                        &hook_working_dir,
-                        &tc_clone.name,
-                        &tool_input_for_post_hook, // Use modified input here
-                        &output_json.to_string(),
-                        success,
-                    )
-                    .await;
+                        let modified_output = {
+                            let _scope = profiler
+                                .scope_with(|| format!("tool.post_hooks:{}", tc_clone.name));
+                            crate::hooks::run_post_tool_use_hooks(
+                                &hook_configs,
+                                &hook_working_dir,
+                                &tc_clone.name,
+                                &tool_input_for_post_hook, // Use modified input here
+                                &output_json.to_string(),
+                                success,
+                            )
+                            .await
+                        };
 
-                    // If hook modified the output, create a new ToolOutput with the modified content
-                    let result = if let Some(modified) = modified_output {
-                        if let Some(modified_content) =
-                            modified.get("content").and_then(|v| v.as_str())
-                        {
-                            Ok(crate::tool::ToolOutput {
-                                content: modified_content.to_string(),
-                                metadata: Some(modified.clone()),
-                            })
+                        // If hook modified the output, create a new ToolOutput with the modified content
+                        let result = if let Some(modified) = modified_output {
+                            if let Some(modified_content) =
+                                modified.get("content").and_then(|v| v.as_str())
+                            {
+                                Ok(crate::tool::ToolOutput {
+                                    content: modified_content.to_string(),
+                                    metadata: Some(modified.clone()),
+                                })
+                            } else {
+                                result
+                            }
                         } else {
                             result
+                        };
+                        let (output_value, error) = match &result {
+                            Ok(output) => {
+                                // Merge metadata into the output value so the
+                                // renderer can access line counts, summaries, etc.
+                                let val = match &output.metadata {
+                                    Some(meta) if meta.is_object() => {
+                                        let mut obj = meta.clone();
+                                        obj.as_object_mut()
+                                            .unwrap()
+                                            .insert("content".to_string(), json!(output.content));
+                                        obj
+                                    }
+                                    _ => json!({ "content": output.content }),
+                                };
+                                (Some(val), None)
+                            }
+                            Err(e) => (None, Some(format!("{e:#}"))),
+                        };
+
+                        // Fire on_permission_denied hook when a tool returns a permission error
+                        if let Some(err_msg) = &error
+                            && err_msg.contains("permission denied")
+                        {
+                            crate::hooks::fire_hooks(
+                                &hook_configs,
+                                crate::hooks::HookTrigger::OnPermissionDenied,
+                                &hook_working_dir,
+                                &[("RAGENT_ERROR", err_msg.as_str())],
+                            );
                         }
-                    } else {
-                        result
-                    };
-                    let (output_value, error) = match &result {
-                        Ok(output) => {
-                            // Merge metadata into the output value so the
-                            // renderer can access line counts, summaries, etc.
-                            let val = match &output.metadata {
-                                Some(meta) if meta.is_object() => {
-                                    let mut obj = meta.clone();
-                                    obj.as_object_mut()
-                                        .unwrap()
-                                        .insert("content".to_string(), json!(output.content));
-                                    obj
-                                }
-                                _ => json!({ "content": output.content }),
-                            };
-                            (Some(val), None)
-                        }
-                        Err(e) => (None, Some(format!("{e:#}"))),
-                    };
 
-                    // Fire on_permission_denied hook when a tool returns a permission error
-                    if let Some(err_msg) = &error
-                        && err_msg.contains("permission denied")
-                    {
-                        crate::hooks::fire_hooks(
-                            &hook_configs,
-                            crate::hooks::HookTrigger::OnPermissionDenied,
-                            &hook_working_dir,
-                            &[("RAGENT_ERROR", err_msg.as_str())],
-                        );
-                    }
+                        let status = if result.is_ok() {
+                            ToolCallStatus::Completed
+                        } else {
+                            ToolCallStatus::Error
+                        };
+                        let success = status == ToolCallStatus::Completed;
 
-                    let status = if result.is_ok() {
-                        ToolCallStatus::Completed
-                    } else {
-                        ToolCallStatus::Error
-                    };
-                    let success = status == ToolCallStatus::Completed;
+                        event_bus.publish(Event::ToolCallEnd {
+                            session_id: session_id_str.clone(),
+                            call_id: tc_clone.id.clone(),
+                            tool: tc_clone.name.clone(),
+                            error: error.clone(),
+                            duration_ms,
+                        });
 
-                    event_bus.publish(Event::ToolCallEnd {
-                        session_id: session_id_str.clone(),
-                        call_id: tc_clone.id.clone(),
-                        tool: tc_clone.name.clone(),
-                        error: error.clone(),
-                        duration_ms,
-                    });
+                        let result_content = match &result {
+                            Ok(output) => output.content.clone(),
+                            Err(e) => format!("Error: {e}"),
+                        };
 
-                    let result_content = match &result {
-                        Ok(output) => output.content.clone(),
-                        Err(e) => format!("Error: {e}"),
-                    };
+                        // Use metadata "lines" field when available (e.g. write/edit
+                        // tools report the actual file line count there), otherwise
+                        // fall back to counting lines in the result content.
+                        let content_line_count = result
+                            .as_ref()
+                            .ok()
+                            .and_then(|o| o.metadata.as_ref())
+                            .and_then(|m| m.get("lines"))
+                            .and_then(serde_json::Value::as_u64)
+                            .map_or_else(|| result_content.lines().count(), |n| n as usize);
 
-                    // Use metadata "lines" field when available (e.g. write/edit
-                    // tools report the actual file line count there), otherwise
-                    // fall back to counting lines in the result content.
-                    let content_line_count = result
-                        .as_ref()
-                        .ok()
-                        .and_then(|o| o.metadata.as_ref())
-                        .and_then(|m| m.get("lines"))
-                        .and_then(serde_json::Value::as_u64)
-                        .map_or_else(|| result_content.lines().count(), |n| n as usize);
+                        // Log the tool result (truncate at a char boundary)
+                        let result_preview = if result_content.len() > 200 {
+                            let end = result_content
+                                .char_indices()
+                                .map(|(i, _)| i)
+                                .take_while(|&i| i <= 200)
+                                .last()
+                                .unwrap_or(0);
+                            format!("{}…", &result_content[..end])
+                        } else {
+                            result_content.clone()
+                        };
+                        let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
 
-                    // Log the tool result (truncate at a char boundary)
-                    let result_preview = if result_content.len() > 200 {
-                        let end = result_content
-                            .char_indices()
-                            .map(|(i, _)| i)
-                            .take_while(|&i| i <= 200)
-                            .last()
-                            .unwrap_or(0);
-                        format!("{}…", &result_content[..end])
-                    } else {
-                        result_content.clone()
-                    };
-                    let tool_metadata = result.as_ref().ok().and_then(|o| o.metadata.clone());
-
-                    event_bus.publish(Event::ToolResult {
-                        session_id: session_id_str.clone(),
-                        call_id: tc_clone.id.clone(),
-                        tool: tc_clone.name.clone(),
-                        content: result_preview,
-                        content_line_count,
-                        metadata: tool_metadata.clone(),
-                        success,
-                    });
-
-                    // ── Memory extraction hook ────────────��────────────
-                    // After the tool result is processed, invoke the
-                    // extraction engine (if initialised) to propose memory
-                    // candidates from the tool usage.
-                    if let Some(engine) = extraction_engine.get() {
-                        let sid = session_id_str.clone();
-                        engine.on_tool_result(
-                            &tc_clone.name,
-                            &input,
-                            &result_content,
+                        event_bus.publish(Event::ToolResult {
+                            session_id: session_id_str.clone(),
+                            call_id: tc_clone.id.clone(),
+                            tool: tc_clone.name.clone(),
+                            content: result_preview,
+                            content_line_count,
+                            metadata: tool_metadata.clone(),
                             success,
-                            &sid,
-                            &storage_clone,
-                            &event_bus_clone,
-                            &hook_working_dir,
-                        );
-                    } // Return all the info we need to reconstruct state
-                    (
-                        tc_clone,
-                        input,
-                        status,
-                        output_value,
-                        error,
-                        duration_ms,
-                        result_content,
-                        tool_metadata,
-                    )
-                });
+                        });
 
-                if parallel_tool_calls {
-                    futures.push(fut);
-                } else if handle_tool_execution_result(fut.await) {
-                    break;
-                }
-            }
+                        // ── Memory extraction hook ────────────��────────────
+                        // After the tool result is processed, invoke the
+                        // extraction engine (if initialised) to propose memory
+                        // candidates from the tool usage.
+                        if let Some(engine) = extraction_engine.get() {
+                            let sid = session_id_str.clone();
+                            engine.on_tool_result(
+                                &tc_clone.name,
+                                &input,
+                                &result_content,
+                                success,
+                                &sid,
+                                &storage_clone,
+                                &event_bus_clone,
+                                &hook_working_dir,
+                            );
+                        } // Return all the info we need to reconstruct state
+                        (
+                            tc_clone,
+                            input,
+                            status,
+                            output_value,
+                            error,
+                            duration_ms,
+                            result_content,
+                            tool_metadata,
+                        )
+                    });
 
-            if parallel_tool_calls {
-                // Wait for all tool calls to complete (concurrency bounded by semaphore)
-                let results = futures::future::join_all(futures).await;
-
-                // Process results in order
-                for result in results {
-                    if handle_tool_execution_result(result) {
+                    if parallel_tool_calls {
+                        futures.push(fut);
+                    } else if handle_tool_execution_result(fut.await) {
                         break;
                     }
                 }
-            }
 
-            // If an agent switch or task completion was requested, exit the main loop too
-            if agent_switch_requested || task_complete_requested {
-                break;
-            }
+                if parallel_tool_calls {
+                    // Wait for all tool calls to complete (concurrency bounded by semaphore)
+                    let results = {
+                        let _scope = profiler.scope("loop.tool_phase.join_parallel");
+                        futures::future::join_all(futures).await
+                    };
 
-            // Add assistant message with tool uses to chat history
-            chat_messages.push(ChatMessage {
-                role: "assistant".to_string(),
-                content: ChatContent::Parts(assistant_content_parts),
-            });
-
-            // Add tool results to chat history
-            chat_messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Parts(tool_result_parts),
-            });
-
-            // Inject completed background task results (F14 result injection)
-            if let Some(tm) = self.task_manager.get() {
-                let completed = tm.drain_completed(session_id).await;
-                if !completed.is_empty() {
-                    let mut bg_parts: Vec<ContentPart> = Vec::new();
-                    for task in &completed {
-                        let status_label = match task.status {
-                            crate::task::TaskStatus::Completed => "completed",
-                            crate::task::TaskStatus::Failed => "failed",
-                            crate::task::TaskStatus::Cancelled => "cancelled",
-                            crate::task::TaskStatus::Running => "running", // shouldn't happen
-                        };
-                        let body = task
-                            .result
-                            .as_deref()
-                            .or(task.error.as_deref())
-                            .unwrap_or("(no output)");
-                        let text = format!(
-                            "[Background Task {status_label}: {} — {}]\n\n{body}",
-                            task.agent_name,
-                            &task.id[..8.min(task.id.len())]
-                        );
-                        bg_parts.push(ContentPart::Text { text });
+                    // Process results in order
+                    for result in results {
+                        if handle_tool_execution_result(result) {
+                            break;
+                        }
                     }
+                }
+
+                // If an agent switch or task completion was requested, exit the main loop too
+                if agent_switch_requested || task_complete_requested {
+                    break;
+                }
+
+                // Add assistant message with tool uses to chat history
+                {
+                    let _scope = profiler.scope("loop.tool_phase.append_assistant_history");
+                    chat_messages.push(ChatMessage {
+                        role: "assistant".to_string(),
+                        content: ChatContent::Parts(assistant_content_parts),
+                    });
+                }
+
+                // Add tool results to chat history
+                {
+                    let _scope = profiler.scope("loop.tool_phase.append_tool_results_history");
                     chat_messages.push(ChatMessage {
                         role: "user".to_string(),
-                        content: ChatContent::Parts(bg_parts),
+                        content: ChatContent::Parts(tool_result_parts),
                     });
+                }
+            }
+
+            // Inject completed background task results (F14 result injection)
+            {
+                let _scope = profiler.scope("loop.background.total");
+                if let Some(tm) = self.task_manager.get() {
+                    let completed = {
+                        let _scope = profiler.scope("loop.background.drain_completed");
+                        tm.drain_completed(session_id).await
+                    };
+                    if !completed.is_empty() {
+                        let _scope = profiler.scope("loop.background.inject_completed");
+                        let mut bg_parts: Vec<ContentPart> = Vec::new();
+                        for task in &completed {
+                            let status_label = match task.status {
+                                crate::task::TaskStatus::Completed => "completed",
+                                crate::task::TaskStatus::Failed => "failed",
+                                crate::task::TaskStatus::Cancelled => "cancelled",
+                                crate::task::TaskStatus::Running => "running", // shouldn't happen
+                            };
+                            let body = task
+                                .result
+                                .as_deref()
+                                .or(task.error.as_deref())
+                                .unwrap_or("(no output)");
+                            let text = format!(
+                                "[Background Task {status_label}: {} — {}]\n\n{body}",
+                                task.agent_name,
+                                &task.id[..8.min(task.id.len())]
+                            );
+                            bg_parts.push(ContentPart::Text { text });
+                        }
+                        chat_messages.push(ChatMessage {
+                            role: "user".to_string(),
+                            content: ChatContent::Parts(bg_parts),
+                        });
+                    }
                 }
             }
 
@@ -1873,6 +2071,7 @@ impl SessionProcessor {
             // the teammate output overlay) can show steps while the agent is
             // still running.  Fire-and-forget on a blocking thread.
             {
+                let _scope = profiler.scope("storage.assistant_interim.update");
                 let mut interim =
                     Message::new(session_id, Role::Assistant, assistant_parts.clone());
                 interim.id = assistant_msg_id.clone();
@@ -1884,6 +2083,7 @@ impl SessionProcessor {
         let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
         assistant_msg.id = assistant_msg_id;
         {
+            let _scope = profiler.scope("storage.assistant_final.update");
             let msg = assistant_msg.clone();
             self.storage_op(move |s| s.update_message(&msg)).await?;
         }
@@ -1908,12 +2108,15 @@ impl SessionProcessor {
             reason: FinishReason::Stop,
         });
 
-        crate::hooks::fire_hooks(
-            &session_config.hooks,
-            crate::hooks::HookTrigger::OnSessionEnd,
-            &working_dir,
-            &[],
-        );
+        {
+            let _scope = profiler.scope("hooks.on_session_end");
+            crate::hooks::fire_hooks(
+                &session_config.hooks,
+                crate::hooks::HookTrigger::OnSessionEnd,
+                &working_dir,
+                &[],
+            );
+        }
 
         Ok(assistant_msg)
     }
@@ -2589,7 +2792,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_non_hardwired_tool_still_uses_permission_rules() {
+    async fn test_hardwired_question_tool_is_auto_approved() {
         let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
@@ -2597,14 +2800,14 @@ mod tests {
             &checker,
             &event_bus,
             "session-1",
-            "bash",
-            "cargo build",
-            "bash",
+            "question",
+            "Which provider?",
+            "question",
             false,
         )
         .await
         .expect("permission check should succeed");
 
-        assert_eq!(action, PermissionAction::Ask);
+        assert_eq!(action, PermissionAction::Allow);
     }
 }

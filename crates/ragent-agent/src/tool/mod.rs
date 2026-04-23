@@ -374,15 +374,28 @@ fn convert_extracted_event(event: ragent_tools_core::event::Event) -> Option<Eve
             request_id,
             permission,
             description,
+            options,
         } => Some(Event::PermissionRequested {
             session_id,
             request_id,
             permission,
             description,
+            options,
         }),
         ragent_tools_core::event::Event::ShellCwdChanged { session_id, cwd } => {
             Some(Event::ShellCwdChanged { session_id, cwd })
         }
+        ragent_tools_core::event::Event::QuestionRequested {
+            session_id,
+            request_id,
+            question,
+            options,
+        } => Some(Event::QuestionRequested {
+            session_id,
+            request_id,
+            question,
+            options,
+        }),
         _ => None,
     }
 }
@@ -394,6 +407,15 @@ fn convert_core_event(event: Event) -> Option<ragent_tools_core::event::Event> {
             request_id,
             response,
         } => Some(ragent_tools_core::event::Event::UserInput {
+            session_id,
+            request_id,
+            response,
+        }),
+        Event::QuestionAnswered {
+            session_id,
+            request_id,
+            response,
+        } => Some(ragent_tools_core::event::Event::QuestionAnswered {
             session_id,
             request_id,
             response,
@@ -930,11 +952,13 @@ fn convert_extracted_extended_event(event: ragent_tools_extended::event::Event) 
             request_id,
             permission,
             description,
+            options,
         } => Some(Event::PermissionRequested {
             session_id,
             request_id,
             permission,
             description,
+            options,
         }),
         ragent_tools_extended::event::Event::ShellCwdChanged { session_id, cwd } => {
             Some(Event::ShellCwdChanged { session_id, cwd })

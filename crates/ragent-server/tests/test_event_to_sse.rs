@@ -207,6 +207,7 @@ fn test_permission_requested() {
         request_id: "r1".into(),
         permission: "file:write".into(),
         description: "Write to /tmp/out".into(),
+        options: vec![],
     });
     assert_eq!(name, "permission_requested");
     assert_eq!(v["permission"], "file:write");
@@ -223,6 +224,31 @@ fn test_permission_replied() {
     });
     assert_eq!(name, "permission_replied");
     assert_eq!(v["allowed"], true);
+}
+
+#[test]
+fn test_question_requested() {
+    let (name, v) = parse_data(&Event::QuestionRequested {
+        session_id: "s1".into(),
+        request_id: "q1".into(),
+        question: "Pick one".into(),
+        options: vec!["a".into(), "b".into()],
+    });
+    assert_eq!(name, "question_requested");
+    assert_eq!(v["question"], "Pick one");
+    assert_eq!(v["options"][0], "a");
+}
+
+#[test]
+fn test_question_answered() {
+    let (name, v) = parse_data(&Event::QuestionAnswered {
+        session_id: "s1".into(),
+        request_id: "q1".into(),
+        response: "a".into(),
+    });
+    assert_eq!(name, "question_answered");
+    assert_eq!(v["request_id"], "q1");
+    assert_eq!(v["response"], "a");
 }
 
 // ── Agent events ─────────────────────────────────────────────────────────

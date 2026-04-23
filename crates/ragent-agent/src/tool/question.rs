@@ -1,8 +1,8 @@
 //! User interaction tool for asking questions.
 //!
-//! Provides [`QuestionTool`], which publishes a permission-request event to
-//! prompt the user for free-text input during an agent session, then blocks
-//! until the user submits a response.
+//! Provides [`QuestionTool`], which publishes a dedicated question event to
+//! prompt the user for input during an agent session, then blocks until the
+//! user submits a response.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -11,8 +11,8 @@ use tokio::sync::broadcast::error::RecvError;
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
 
-/// Asks the user a question by publishing a [`Event::PermissionRequested`] event
-/// with `permission == "question"` and waits for a [`Event::UserInput`] response.
+/// Asks the user a question by publishing a [`Event::QuestionRequested`] event
+/// and waits for a [`Event::QuestionAnswered`] response.
 pub struct QuestionTool;
 
 #[async_trait::async_trait]
@@ -38,6 +38,11 @@ impl Tool for QuestionTool {
                 "question": {
                     "type": "string",
                     "description": "The question to ask the user"
+                },
+                "options": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional multiple-choice options. When provided, the user selects one instead of typing free text."
                 }
             },
             "required": ["question"]
@@ -62,22 +67,31 @@ impl Tool for QuestionTool {
             .as_str()
             .context("Missing required 'question' parameter")?;
 
+        let options: Vec<String> = input["options"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let request_id = uuid::Uuid::new_v4().to_string();
 
         // Subscribe before publishing so we don't miss the reply.
         let mut rx = ctx.event_bus.subscribe();
 
-        ctx.event_bus.publish(Event::PermissionRequested {
+        ctx.event_bus.publish(Event::QuestionRequested {
             session_id: ctx.session_id.clone(),
             request_id: request_id.clone(),
-            permission: "question".to_string(),
-            description: question.to_string(),
+            question: question.to_string(),
+            options,
         });
 
-        // Wait for a matching UserInput event from the TUI.
+        // Wait for a matching QuestionAnswered event from the TUI.
         let response = loop {
             match rx.recv().await {
-                Ok(Event::UserInput {
+                Ok(Event::QuestionAnswered {
                     session_id: ref s,
                     request_id: ref rid,
                     response: ref r,

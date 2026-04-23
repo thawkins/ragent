@@ -476,7 +476,9 @@ impl App {
             agent_name,
             status: "ready".to_string(),
             permission_queue: VecDeque::new(),
+            question_queue: VecDeque::new(),
             pending_question_input: String::new(),
+            question_selected_index: 0,
             token_usage: (0, 0),
             llm_request_stats: Vec::new(),
             last_input_tokens: 0,
@@ -508,12 +510,16 @@ impl App {
             history_index: None,
             history_draft: String::new(),
             show_log,
+            show_profile: false,
             log_entries: Vec::new(),
             log_scroll_offset: 0,
+            profile_scroll_offset: 0,
             message_area: Rect::default(),
             log_area: Rect::default(),
+            profile_area: Rect::default(),
             message_max_scroll: 0,
             log_max_scroll: 0,
+            profile_max_scroll: 0,
             active_agents_scroll_offset: 0,
             active_agents_max_scroll: 0,
             active_agents_area: Rect::default(),
@@ -521,6 +527,7 @@ impl App {
             text_selection: None,
             message_content_lines: Vec::new(),
             log_content_lines: Vec::new(),
+            profile_content_lines: Vec::new(),
             input_area: Rect::default(),
             teams_area: Rect::default(),
             output_view_area: Rect::default(),
@@ -1389,6 +1396,7 @@ impl App {
         match pane {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
+            SelectionPane::Profile => self.profile_area,
             SelectionPane::Input => self.input_area,
         }
     }
@@ -3019,7 +3027,10 @@ impl App {
         } else {
             report.push_str("\n_Metadata could not be resolved from the provider registry._\n");
             if let Some(context_window) = self.selected_model_context_window() {
-                report.push_str(&format!("\n- **Cached context window:** {} tokens\n", context_window));
+                report.push_str(&format!(
+                    "\n- **Cached context window:** {} tokens\n",
+                    context_window
+                ));
             }
         }
 
@@ -3732,6 +3743,25 @@ impl App {
         );
     }
 
+    fn set_profile_panel_enabled(&mut self, enabled: bool) {
+        let profiler = ragent_core::session::profiler::agent_loop_profiler();
+        profiler.set_enabled(enabled);
+        self.show_profile = enabled;
+        self.status = if enabled {
+            "profile panel visible".to_string()
+        } else {
+            "profile panel hidden".to_string()
+        };
+        self.push_log_no_agent(
+            LogLevel::Info,
+            if enabled {
+                "Agent loop profiler enabled".to_string()
+            } else {
+                "Agent loop profiler disabled".to_string()
+            },
+        );
+    }
+
     // Original implementation moved to an inner function. Keep its signature
     // private so the public API has a single-entry single-exit wrapper.
     fn execute_slash_command_inner(&mut self, raw: &str) {
@@ -4235,6 +4265,20 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     "log panel hidden".to_string()
                 };
             }
+            "profile" => match args {
+                "on" => {
+                    self.set_profile_panel_enabled(true);
+                }
+                "off" => {
+                    self.set_profile_panel_enabled(false);
+                }
+                _ => {
+                    self.append_assistant_text(
+                        "From: /profile\nUsage: `/profile on` or `/profile off`\n",
+                    );
+                    self.status = "profile usage".to_string();
+                }
+            },
             "llmstats" => {
                 let Some(model_ref) = self.active_model_ref_string() else {
                     self.status = "⚠ No active model selected".to_string();
@@ -4284,39 +4328,36 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.input_cursor = 0;
                 }
             }
-            "model" => {
-                match args.trim() {
-                    "" => {
-                        if let Some(ref prov) = self.configured_provider {
-                            let models = self.models_for_provider(&prov.id.clone());
-                            let prov_name = prov.name.clone();
-                            let prov_id = prov.id.clone();
-                            self.provider_setup = Some(ProviderSetupStep::SelectModel {
-                                provider_id: prov_id,
-                                provider_name: prov_name,
-                                models,
-                                selected: 0,
-                            });
-                        } else {
-                            self.status =
-                                "⚠ No provider configured — use /provider first".to_string();
-                        }
-                    }
-                    "show" => {
-                        if !self.ensure_session() {
-                            self.status = "⚠ Failed to create session".to_string();
-                        } else if let Some(report) = self.active_model_metadata_report() {
-                            self.append_assistant_text(&report);
-                            self.status = "active model metadata".to_string();
-                        } else {
-                            self.status = "⚠ No active model selected".to_string();
-                        }
-                    }
-                    _ => {
-                        self.status = "Usage: /model [show]".to_string();
+            "model" => match args.trim() {
+                "" => {
+                    if let Some(ref prov) = self.configured_provider {
+                        let models = self.models_for_provider(&prov.id.clone());
+                        let prov_name = prov.name.clone();
+                        let prov_id = prov.id.clone();
+                        self.provider_setup = Some(ProviderSetupStep::SelectModel {
+                            provider_id: prov_id,
+                            provider_name: prov_name,
+                            models,
+                            selected: 0,
+                        });
+                    } else {
+                        self.status = "⚠ No provider configured — use /provider first".to_string();
                     }
                 }
-            }
+                "show" => {
+                    if !self.ensure_session() {
+                        self.status = "⚠ Failed to create session".to_string();
+                    } else if let Some(report) = self.active_model_metadata_report() {
+                        self.append_assistant_text(&report);
+                        self.status = "active model metadata".to_string();
+                    } else {
+                        self.status = "⚠ No active model selected".to_string();
+                    }
+                }
+                _ => {
+                    self.status = "Usage: /model [show]".to_string();
+                }
+            },
             "provider" => {
                 self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
             }
@@ -9384,6 +9425,10 @@ Type `/swarm help` for more info.\n";
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_output_view_by(-3);
+                } else if self.show_profile
+                    && self.profile_area.contains((event.column, event.row).into())
+                {
+                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
                 } else if self.show_log && self.log_area.contains((event.column, event.row).into())
                 {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
@@ -9398,6 +9443,10 @@ Type `/swarm help` for more info.\n";
                         .contains((event.column, event.row).into())
                 {
                     self.scroll_output_view_by(3);
+                } else if self.show_profile
+                    && self.profile_area.contains((event.column, event.row).into())
+                {
+                    self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
                 } else if self.show_log && self.log_area.contains((event.column, event.row).into())
                 {
                     self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
@@ -9548,6 +9597,15 @@ Type `/swarm help` for more info.\n";
                     self.scrollbar_drag = Some(ScrollbarDragPane::Log);
                     self.text_selection = None;
                     self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Log);
+                } else if self.show_profile
+                    && self.profile_area.height > 0
+                    && event.column == self.profile_area.right().saturating_sub(1)
+                    && self.profile_area.contains(pos.into())
+                    && self.profile_max_scroll > 0
+                {
+                    self.scrollbar_drag = Some(ScrollbarDragPane::Profile);
+                    self.text_selection = None;
+                    self.apply_scrollbar_drag(event.row, ScrollbarDragPane::Profile);
                 } else {
                     // If the file menu is open and the click falls within its popup,
                     // handle file/directory selection via mouse.
@@ -9717,6 +9775,11 @@ Type `/swarm help` for more info.\n";
         let pos = (col, row).into();
         if self.message_area.area() > 0 && self.message_area.contains(pos) {
             Some(SelectionPane::Messages)
+        } else if self.show_profile
+            && self.profile_area.area() > 0
+            && self.profile_area.contains(pos)
+        {
+            Some(SelectionPane::Profile)
         } else if self.show_log && self.log_area.area() > 0 && self.log_area.contains(pos) {
             Some(SelectionPane::Log)
         } else if self.input_area.area() > 0 && self.input_area.contains(pos) {
@@ -9742,6 +9805,7 @@ Type `/swarm help` for more info.\n";
         let lines: &[String] = match sel.pane {
             SelectionPane::Messages => &self.message_content_lines,
             SelectionPane::Log => &self.log_content_lines,
+            SelectionPane::Profile => &self.profile_content_lines,
             SelectionPane::Input => {
                 // For input widgets, build a single-line content from app.input
                 let input_text = format!("> {}", self.input);
@@ -9775,6 +9839,7 @@ Type `/swarm help` for more info.\n";
         let area = match sel.pane {
             SelectionPane::Messages => self.message_area,
             SelectionPane::Log => self.log_area,
+            SelectionPane::Profile => self.profile_area,
             _ => unreachable!(),
         };
 
@@ -9787,7 +9852,7 @@ Type `/swarm help` for more info.\n";
         let inner_y = if sel.pane == SelectionPane::Messages {
             area.y // no top border on messages (LEFT|RIGHT only)
         } else {
-            area.y + 1 // ALL borders on log panel
+            area.y + 1 // ALL borders on side panels
         };
 
         let text = Self::extract_text_from_lines(
@@ -10022,6 +10087,7 @@ Type `/swarm help` for more info.\n";
         let (area, max_scroll) = match pane {
             ScrollbarDragPane::Messages => (self.message_area, self.message_max_scroll),
             ScrollbarDragPane::Log => (self.log_area, self.log_max_scroll),
+            ScrollbarDragPane::Profile => (self.profile_area, self.profile_max_scroll),
         };
 
         if area.height <= 1 || max_scroll == 0 {
@@ -10041,6 +10107,7 @@ Type `/swarm help` for more info.\n";
         match pane {
             ScrollbarDragPane::Messages => self.scroll_offset = offset.min(max_scroll),
             ScrollbarDragPane::Log => self.log_scroll_offset = offset.min(max_scroll),
+            ScrollbarDragPane::Profile => self.profile_scroll_offset = offset.min(max_scroll),
         }
     }
 
@@ -10162,10 +10229,18 @@ Type `/swarm help` for more info.\n";
                     self.scroll_offset = self.scroll_offset.saturating_sub(3);
                 }
                 InputAction::LogScrollUp => {
-                    self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                    if self.show_log {
+                        self.log_scroll_offset = self.log_scroll_offset.saturating_add(3);
+                    } else if self.show_profile {
+                        self.profile_scroll_offset = self.profile_scroll_offset.saturating_add(3);
+                    }
                 }
                 InputAction::LogScrollDown => {
-                    self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                    if self.show_log {
+                        self.log_scroll_offset = self.log_scroll_offset.saturating_sub(3);
+                    } else if self.show_profile {
+                        self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
+                    }
                 }
                 InputAction::ToggleLog => {
                     self.show_log = !self.show_log;
@@ -10174,6 +10249,9 @@ Type `/swarm help` for more info.\n";
                     } else {
                         "log panel hidden".to_string()
                     };
+                }
+                InputAction::ToggleProfile => {
+                    self.set_profile_panel_enabled(!self.show_profile);
                 }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
@@ -10842,6 +10920,7 @@ Type `/swarm help` for more info.\n";
                 ref request_id,
                 ref permission,
                 ref description,
+                ref options,
             } => {
                 if self.is_current_session(session_id) {
                     // Deduplicate: skip if this request_id is already queued.
@@ -10869,9 +10948,11 @@ Type `/swarm help` for more info.\n";
                             metadata: serde_json::json!({
                                 "created_at": created_at,
                                 "timeout_secs": 120u64,
+                                "options": options,
                             }),
                             tool_call_id: None,
                         });
+                        self.question_selected_index = 0;
                         self.status = "awaiting permission".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
@@ -10887,6 +10968,46 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             }
+            Event::QuestionRequested {
+                ref session_id,
+                ref request_id,
+                ref question,
+                ref options,
+            } => {
+                if self.is_current_session(session_id) {
+                    if self.question_queue.iter().any(|r| r.id == *request_id) {
+                        tracing::warn!(
+                            request_id = %request_id,
+                            "Duplicate QuestionRequested ignored"
+                        );
+                    } else {
+                        tracing::info!(
+                            session_id = %session_id,
+                            request_id = %request_id,
+                            "TUI received QuestionRequested, showing dialog"
+                        );
+                        self.question_queue.push_back(QuestionRequest {
+                            id: request_id.clone(),
+                            session_id: session_id.clone(),
+                            question: question.clone(),
+                            options: options.clone(),
+                        });
+                        self.pending_question_input.clear();
+                        self.question_selected_index = 0;
+                        self.status = "awaiting question".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            format!("question requested: {}", question),
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        expected_session = %self.session_id.as_deref().unwrap_or("none"),
+                        received_session = %session_id,
+                        "Ignoring QuestionRequested for different session"
+                    );
+                }
+            }
             Event::PermissionReplied {
                 ref session_id,
                 ref request_id,
@@ -10897,6 +11018,7 @@ Type `/swarm help` for more info.\n";
                     // Remove the specific answered request from the queue.
                     self.permission_queue.retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
+                    self.question_selected_index = 0;
                     if self.permission_queue.is_empty() {
                         self.set_status_working("processing");
                     }
@@ -10904,6 +11026,20 @@ Type `/swarm help` for more info.\n";
                         LogLevel::Info,
                         format!("permission {}", if allowed { "granted" } else { "denied" }),
                     );
+                }
+            }
+            Event::QuestionAnswered {
+                ref session_id,
+                ref request_id,
+                ..
+            } => {
+                if self.is_current_session(session_id) {
+                    self.question_queue.retain(|r| r.id != *request_id);
+                    self.pending_question_input.clear();
+                    self.question_selected_index = 0;
+                    if self.question_queue.is_empty() {
+                        self.set_status_working("processing");
+                    }
                 }
             }
             Event::AgentSwitched {
@@ -11492,18 +11628,9 @@ Type `/swarm help` for more info.\n";
                     self.shell_cwd = Some(cwd.clone());
                 }
             }
-            Event::UserInput {
-                ref session_id,
-                ref request_id,
-                ..
-            } => {
+            Event::UserInput { ref session_id, .. } => {
                 if self.is_current_session(session_id) {
-                    // The tool is unblocked; remove the answered question from the queue.
-                    self.permission_queue.retain(|r| r.id != *request_id);
-                    self.pending_question_input.clear();
-                    if self.permission_queue.is_empty() {
-                        self.set_status_working("processing");
-                    }
+                    self.set_status_working("processing");
                 }
             }
             _ => {}

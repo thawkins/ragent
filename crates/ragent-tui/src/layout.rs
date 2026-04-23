@@ -1292,9 +1292,9 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_teammate_strip(frame, app, chunks[1]);
     }
 
-    // Split the middle area horizontally when the log panel is visible.
-    // Use responsive log split based on terminal width.
-    if app.show_log {
+    // Split the middle area horizontally when an auxiliary side panel is visible.
+    // Use responsive split based on terminal width.
+    if app.show_log || app.show_profile {
         let (msg_pct, log_pct) = breakpoint.log_split();
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -1305,14 +1305,42 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
             .split(chunks[2]);
 
         app.message_area = h_chunks[0];
-        app.log_area = h_chunks[1];
         render_messages(frame, app, h_chunks[0]);
         apply_selection_highlight(frame, app, SelectionPane::Messages, h_chunks[0]);
-        render_log_panel(frame, app, h_chunks[1]);
-        apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
+
+        match (app.show_log, app.show_profile) {
+            (true, true) => {
+                let side_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+                    .split(h_chunks[1]);
+                app.log_area = side_chunks[0];
+                app.profile_area = side_chunks[1];
+                render_log_panel(frame, app, side_chunks[0]);
+                apply_selection_highlight(frame, app, SelectionPane::Log, side_chunks[0]);
+                render_profile_panel(frame, app, side_chunks[1]);
+                apply_selection_highlight(frame, app, SelectionPane::Profile, side_chunks[1]);
+            }
+            (true, false) => {
+                app.log_area = h_chunks[1];
+                app.profile_area = Rect::default();
+                render_log_panel(frame, app, h_chunks[1]);
+                apply_selection_highlight(frame, app, SelectionPane::Log, h_chunks[1]);
+            }
+            (false, true) => {
+                app.log_area = Rect::default();
+                app.profile_area = h_chunks[1];
+                app.active_agents_area = Rect::default();
+                app.teams_area = Rect::default();
+                render_profile_panel(frame, app, h_chunks[1]);
+                apply_selection_highlight(frame, app, SelectionPane::Profile, h_chunks[1]);
+            }
+            (false, false) => {}
+        }
     } else {
         app.message_area = chunks[2];
         app.log_area = Rect::default();
+        app.profile_area = Rect::default();
         app.active_agents_area = Rect::default();
         app.teams_area = Rect::default();
         render_messages(frame, app, chunks[2]);
@@ -1337,6 +1365,10 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     // File menu dropdown (above the chat input, if active)
     if app.file_menu.is_some() {
         render_file_menu(frame, app, input_chunks[1]);
+    }
+
+    if !app.question_queue.is_empty() {
+        render_question_dialog(frame, app);
     }
 
     if !app.permission_queue.is_empty() {
@@ -1562,6 +1594,90 @@ fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Color::DarkGray));
         frame.render_stateful_widget(scrollbar, log_inner, &mut scrollbar_state);
+    }
+}
+
+fn render_profile_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            " Profile ",
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let snapshot = ragent_core::session::profiler::agent_loop_profiler().snapshot();
+    if !snapshot.enabled {
+        app.profile_max_scroll = 0;
+        app.profile_content_lines = vec!["Profiler is disabled".to_string()];
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "Profiler is disabled",
+                Style::default().fg(Color::DarkGray),
+            ))),
+            inner,
+        );
+        return;
+    }
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("uptime ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{:.1}s", snapshot.running_for_ms as f64 / 1000.0)),
+            Span::raw("  "),
+            Span::styled("samples ", Style::default().fg(Color::DarkGray)),
+            Span::raw(snapshot.total_samples.to_string()),
+        ]),
+        Line::from(vec![
+            Span::styled("ops ", Style::default().fg(Color::DarkGray)),
+            Span::raw(snapshot.operations.len().to_string()),
+            Span::raw("  "),
+            Span::styled("sorted by self time", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(Span::styled(
+            "count     avg ms    total ms     self ms     max ms    last ms  operation",
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+
+    if snapshot.operations.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Waiting for agent loop activity...",
+            Style::default().fg(Color::DarkGray),
+        )));
+    } else {
+        for op in snapshot.operations {
+            lines.push(Line::from(format!(
+                "{:>5}  {:>10.2}  {:>10.2}  {:>10.2}  {:>9.2}  {:>9.2}  {}",
+                op.count, op.avg_ms, op.total_ms, op.self_total_ms, op.max_ms, op.last_ms, op.name
+            )));
+        }
+    }
+
+    let profile_inner_width = inner.width as usize;
+    app.profile_content_lines = build_wrapped_content_lines(&lines, profile_inner_width);
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total_lines = paragraph.line_count(inner.width) as u16;
+    let visible_height = inner.height;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    app.profile_max_scroll = max_scroll;
+    let scroll = app.profile_scroll_offset.min(max_scroll);
+    let paragraph = paragraph.scroll((max_scroll.saturating_sub(scroll), 0));
+    frame.render_widget(paragraph, inner);
+
+    if total_lines > visible_height {
+        let scroll_position = max_scroll.saturating_sub(scroll) as usize;
+        let mut scrollbar_state =
+            ScrollbarState::new(max_scroll as usize).position(scroll_position);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
     }
 }
 
@@ -2581,6 +2697,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+K", "Delete to end of line"),
     ("Alt+V", "Paste image from clipboard as attachment"),
     ("Alt+L", "Toggle log panel visibility"),
+    ("Alt+P", "Toggle profiler panel visibility"),
     // ── Sending ─────────────────────────────────────────────────────────
     ("Enter", "Send message / confirm"),
     ("Ctrl+C, Ctrl+D", "Quit application (guarded sequence)"),
@@ -2731,53 +2848,6 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
     let Some(ref req) = app.permission_queue.front() else {
         return;
     };
-
-    if req.permission == "question" {
-        // Question-type: show a text-input dialog so the user can type a response.
-        let area = centered_rect(70, 40, frame.area());
-        frame.render_widget(Clear, area);
-
-        let question_text = req.patterns.first().map(|s| s.as_str()).unwrap_or("");
-        let input_display = format!("▶ {}_", app.pending_question_input);
-
-        let text = vec![
-            Line::from(Span::styled(
-                "Agent Question",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                question_text,
-                Style::default().fg(Color::White),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                input_display,
-                Style::default().fg(Color::Green),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Enter to submit  Esc to dismiss",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ];
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Question ")
-            .style(Style::default().fg(Color::Cyan));
-
-        let paragraph = Paragraph::new(text)
-            .block(block)
-            .alignment(Alignment::Left)
-            .wrap(ratatui::widgets::Wrap { trim: false });
-
-        frame.render_widget(paragraph, area);
-        return;
-    }
-
     // Standard permission dialog: y/a/n with countdown timer.
     let area = centered_rect(60, 40, frame.area()); // Increased height for better visibility
     frame.render_widget(Clear, area);
@@ -2847,6 +2917,111 @@ fn render_permission_dialog(frame: &mut Frame, app: &App) {
     let paragraph = Paragraph::new(text)
         .block(block)
         .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, area);
+}
+
+fn render_question_dialog(frame: &mut Frame, app: &App) {
+    let Some(req) = app.question_queue.front() else {
+        return;
+    };
+
+    if !req.options.is_empty() {
+        let question_lines = req.question.lines().count().max(1);
+        let option_count = req.options.len();
+        let total_lines = question_lines + option_count + 7;
+        let height_percent = ((total_lines * 100) / frame.area().height as usize)
+            .min(60)
+            .max(20) as u16;
+        let area = centered_rect(70, height_percent, frame.area());
+        frame.render_widget(Clear, area);
+
+        let mut text: Vec<Line> = vec![
+            Line::from(Span::styled(
+                "Agent Question",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                req.question.as_str(),
+                Style::default().fg(Color::White),
+            )),
+            Line::from(""),
+        ];
+
+        for (i, option) in req.options.iter().enumerate() {
+            let is_selected = i == app.question_selected_index;
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let prefix = if is_selected { "▶ " } else { "  " };
+            text.push(Line::from(Span::styled(format!("{prefix}{option}"), style)));
+        }
+
+        text.push(Line::from(""));
+        text.push(Line::from(Span::styled(
+            "↑/↓ or j/k to navigate  Enter to select  Esc to dismiss",
+            Style::default().fg(Color::DarkGray),
+        )));
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" Question ")
+            .style(Style::default().fg(Color::Cyan));
+
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .alignment(Alignment::Left)
+            .wrap(ratatui::widgets::Wrap { trim: false });
+
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
+    let area = centered_rect(70, 40, frame.area());
+    frame.render_widget(Clear, area);
+
+    let input_display = format!("▶ {}_", app.pending_question_input);
+    let text = vec![
+        Line::from(Span::styled(
+            "Agent Question",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            req.question.as_str(),
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            input_display,
+            Style::default().fg(Color::Green),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Enter to submit  Esc to dismiss",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Question ")
+        .style(Style::default().fg(Color::Cyan));
+
+    let paragraph = Paragraph::new(text)
+        .block(block)
+        .alignment(Alignment::Left)
+        .wrap(ratatui::widgets::Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 }

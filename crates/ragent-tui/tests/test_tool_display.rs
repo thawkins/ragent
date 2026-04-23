@@ -43,6 +43,21 @@ fn test_input_summary_bash_tool() {
 }
 
 #[test]
+fn test_input_summary_bash_tool_uses_120_char_truncation() {
+    let command = format!("echo {}", "x".repeat(110));
+    let input = json!({ "command": command });
+    let summary = tool_input_summary("bash", &input, "/home/user/project");
+    assert!(
+        summary.contains(&"x".repeat(100)),
+        "Should preserve long command text up to the wider truncation limit: {summary}"
+    );
+    assert!(
+        !summary.ends_with("..."),
+        "Should not truncate a command shorter than 120 characters: {summary}"
+    );
+}
+
+#[test]
 fn test_input_summary_grep_tool() {
     let input = json!({"pattern": "fn main", "path": "src"});
     let summary = tool_input_summary("grep", &input, "/home/user/project");

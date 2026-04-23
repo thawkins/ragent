@@ -166,6 +166,32 @@ fn test_mouse_scroll_down_on_log() {
     assert_eq!(app.log_scroll_offset, 6);
 }
 
+// ---------- Mouse scroll on profile area ----------
+
+#[test]
+fn test_mouse_scroll_up_on_profile() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.show_profile = true;
+    app.profile_area = Rect::new(80, 1, 30, 20);
+
+    app.handle_mouse_event(mouse_scroll_up(90, 10));
+    assert_eq!(app.profile_scroll_offset, 3);
+    assert_eq!(app.scroll_offset, 0);
+}
+
+#[test]
+fn test_mouse_scroll_down_on_profile() {
+    let mut app = make_app();
+    app.message_area = Rect::new(0, 1, 80, 20);
+    app.show_profile = true;
+    app.profile_area = Rect::new(80, 1, 30, 20);
+    app.profile_scroll_offset = 9;
+
+    app.handle_mouse_event(mouse_scroll_down(90, 10));
+    assert_eq!(app.profile_scroll_offset, 6);
+}
+
 // ---------- Mouse scroll outside panes ----------
 
 #[test]

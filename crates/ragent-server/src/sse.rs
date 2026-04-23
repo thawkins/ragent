@@ -61,6 +61,7 @@ struct PermReqP<'a> {
     request_id: &'a str,
     permission: &'a str,
     description: &'a str,
+    options: &'a [String],
 }
 
 #[derive(Serialize)]
@@ -68,6 +69,21 @@ struct PermRepP<'a> {
     session_id: &'a str,
     request_id: &'a str,
     allowed: bool,
+}
+
+#[derive(Serialize)]
+struct QuestionReqP<'a> {
+    session_id: &'a str,
+    request_id: &'a str,
+    question: &'a str,
+    options: &'a [String],
+}
+
+#[derive(Serialize)]
+struct QuestionAnswerP<'a> {
+    session_id: &'a str,
+    request_id: &'a str,
+    response: &'a str,
 }
 
 #[derive(Serialize)]
@@ -254,6 +270,8 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::MessageEnd { .. } => "message_end",
         Event::PermissionRequested { .. } => "permission_requested",
         Event::PermissionReplied { .. } => "permission_replied",
+        Event::QuestionRequested { .. } => "question_requested",
+        Event::QuestionAnswered { .. } => "question_answered",
         Event::AgentSwitched { .. } => "agent_switched",
         Event::AgentSwitchRequested { .. } => "agent_switch_requested",
         Event::AgentRestoreRequested { .. } => "agent_restore_requested",
@@ -359,13 +377,14 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             request_id,
             permission,
             description,
+            options,
         } => to_data(&PermReqP {
             session_id,
             request_id,
             permission,
             description,
+            options,
         }),
-
         Event::PermissionReplied {
             session_id,
             request_id,
@@ -375,6 +394,26 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             session_id,
             request_id,
             allowed: *allowed,
+        }),
+        Event::QuestionRequested {
+            session_id,
+            request_id,
+            question,
+            options,
+        } => to_data(&QuestionReqP {
+            session_id,
+            request_id,
+            question,
+            options,
+        }),
+        Event::QuestionAnswered {
+            session_id,
+            request_id,
+            response,
+        } => to_data(&QuestionAnswerP {
+            session_id,
+            request_id,
+            response,
         }),
 
         Event::AgentSwitched {
@@ -653,11 +692,11 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             session_id,
             request_id,
             response,
-        } => to_data(&serde_json::json!({
-            "session_id": session_id,
-            "request_id": request_id,
-            "response": response,
-        })),
+        } => to_data(&QuestionAnswerP {
+            session_id,
+            request_id,
+            response,
+        }),
 
         Event::JournalEntryCreated {
             session_id,

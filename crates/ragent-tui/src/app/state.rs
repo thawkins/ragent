@@ -479,6 +479,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Toggle the log panel on/off",
     },
     SlashCommandDef {
+        trigger: "profile",
+        description: "Toggle the agent-loop profiler panel (/profile on|off)",
+    },
+    SlashCommandDef {
         trigger: "llmstats",
         description: "Show average LLM response time and token throughput",
     },
@@ -711,6 +715,8 @@ pub enum ScrollbarDragPane {
     Messages,
     /// Dragging the log pane scrollbar.
     Log,
+    /// Dragging the profile pane scrollbar.
+    Profile,
 }
 
 /// Identifies which pane a text selection lives in.
@@ -720,6 +726,8 @@ pub enum SelectionPane {
     Messages,
     /// Selection in the log pane.
     Log,
+    /// Selection in the profile pane.
+    Profile,
     /// Selection in the chat-screen input widget.
     Input,
 }
@@ -876,6 +884,20 @@ pub struct McpDiscoverState {
 
 /// Core TUI application state.
 ///
+#[derive(Debug, Clone)]
+pub struct QuestionRequest {
+    /// Unique id for this question request.
+    pub id: String,
+    /// Session the question belongs to.
+    pub session_id: String,
+    /// Prompt shown to the user.
+    pub question: String,
+    /// Optional multiple-choice options.
+    pub options: Vec<String>,
+}
+
+/// Core TUI application state.
+///
 /// Holds the message list, input buffer, scroll offset, permission dialogs,
 /// token usage counters, and a reference to the shared [`EventBus`].
 pub struct App {
@@ -903,9 +925,12 @@ pub struct App {
     /// The front of the queue is the currently displayed dialog; subsequent
     /// requests are shown one-at-a-time as earlier ones are resolved.
     pub permission_queue: VecDeque<PermissionRequest>,
-    /// Text typed by the user in response to a `question`-type permission dialog.
-    /// Only active when the front permission request has `permission == "question"`.
+    /// Queue of pending direct question requests awaiting user answers.
+    pub question_queue: VecDeque<QuestionRequest>,
+    /// Text typed by the user in response to the active question dialog.
     pub pending_question_input: String,
+    /// Selected index for multiple-choice question dialogs.
+    pub question_selected_index: usize,
     /// Cumulative (input, output) token counts.
     pub token_usage: (u64, u64),
     /// Completed LLM request samples used to compute `/llmstats`.
@@ -980,18 +1005,26 @@ pub struct App {
     pub kb_select_anchor: Option<usize>,
     /// Whether the log panel is visible.
     pub show_log: bool,
+    /// Whether the realtime profiling panel is visible.
+    pub show_profile: bool,
     /// Log entries displayed in the log panel.
     pub log_entries: Vec<LogEntry>,
     /// Scroll offset for the log panel (lines from bottom).
     pub log_scroll_offset: u16,
+    /// Scroll offset for the profile panel (lines from bottom).
+    pub profile_scroll_offset: u16,
     /// Cached area of the messages pane (set during render for mouse hit-testing).
     pub message_area: Rect,
     /// Cached area of the log panel (set during render for mouse hit-testing).
     pub log_area: Rect,
+    /// Cached area of the profiler panel.
+    pub profile_area: Rect,
     /// Maximum scroll value for the messages pane (set during render).
     pub message_max_scroll: u16,
     /// Maximum scroll value for the log pane (set during render).
     pub log_max_scroll: u16,
+    /// Maximum scroll value for the profile pane (set during render).
+    pub profile_max_scroll: u16,
     /// Scroll offset for the active-agents subpanel (lines from top).
     pub active_agents_scroll_offset: u16,
     /// Maximum scroll value for the active-agents subpanel (set during render).
@@ -1006,6 +1039,8 @@ pub struct App {
     pub message_content_lines: Vec<String>,
     /// Plain-text lines from the last log pane render (for copy).
     pub log_content_lines: Vec<String>,
+    /// Plain-text lines from the last profile pane render (for copy).
+    pub profile_content_lines: Vec<String>,
     /// Cached area of the chat-screen input widget (set during render).
     pub input_area: Rect,
     /// Cached area of the teams subpanel.

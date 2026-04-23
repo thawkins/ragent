@@ -154,6 +154,25 @@ the current state of all subsystems.
 - [Appendix B: Documentation](#appendix-b-documentation)
 - [Appendix C: Project Contact & Repository](#appendix-c-project-contact--repository)
 - [Appendix D: Changelog (2025-01-16)](#appendix-d-changelog-2025-01-16)
+
+### List of Diagrams
+
+| # | Diagram | Section | Description |
+|---|---------|---------|-------------|
+| 1 | [Core Execution Loop](#how-it-works) | Executive Summary | High-level session/agent/tool flow |
+| 2 | [System Architecture](#2-architecture) | Architecture | Full crate and component topology |
+| 3 | [Crate Dependency Graph](#22-crate-dependency-graph) | Workspace Crates | Inter-crate dependency relationships |
+| 4 | [Event Bus Flow](#23-event-bus-flow) | Architecture | Internal pub/sub message routing |
+| 5 | [Session & Tool Execution Flow](#35-session--tool-execution-flow) | Core Features | LLM call → permission → tool dispatch loop |
+| 6 | [Provider Selection Flow](#36-provider-selection-flow) | Core Features | Multi-provider routing and health checks |
+| 7 | [TUI Component Architecture](#44-tui-component-architecture) | Terminal User Interface | UI layout and event wiring |
+| 8 | [HTTP API Request Flow](#54-http-api-request-flow) | HTTP Server & API | REST + SSE lifecycle |
+| 9 | [Code Index Pipeline](#62-architecture) | Code Index | File scan → parse → index → search |
+| 10 | [Permission Security Layers](#241-permission-security-layers) | Security & Permissions | 5-layer defense-in-depth |
+| 11 | [Bash Security — 7 Layers](#242-bash-security--7-layers) | Security & Permissions | Bash command defense flow |
+| 12 | [Permission Request Flow](#243-permission-request-flow) | Security & Permissions | From tool call to user decision |
+| 13 | [Permission Rules Evaluation](#244-permission-rules-evaluation) | Security & Permissions | Rule matching and resolution |
+
 ---
 
 
@@ -212,7 +231,50 @@ graph TB
     Tool --> BgAgents
 ```
 
-### 2.1 Workspace Crates
+### 2.3 Event Bus Flow
+
+The event bus is a central tokio broadcast channel that connects all subsystems. Every component publishes events and subscribes to events it cares about.
+
+```mermaid
+graph LR
+    subgraph Events["Event Bus (tokio broadcast)"]
+        EB[EventBus
+        rx/tx channels]
+    end
+
+    TUI -- publishes --> EB
+    HTTP -- publishes --> EB
+    Session -- publishes --> EB
+    Tool -- publishes --> EB
+    Agent -- publishes --> EB
+    EB -- subscribed --> TUI
+    EB -- subscribed --> HTTP
+    EB -- subscribed --> Session
+    EB -- subscribed --> Tool
+    EB -- subscribed --> Agent
+
+    subgraph EventTypes["Core Event Types"]
+        E1[MessageAdded]
+        E2[ToolCallStarted / ToolCallCompleted]
+        E3[PermissionRequested / PermissionReplied]
+        E4[AgentStatusChanged]
+        E5[StreamToken / StreamComplete]
+        E6[SessionSaved]
+        E7[TaskSpawned / TaskCompleted]
+    end
+
+    EB --> EventTypes
+```
+
+**Event Flow Example — Tool Execution:**
+1. `Session` sends tool call request to `Tool`
+2. `Tool` publishes `ToolCallStarted` event
+3. `TUI` receives event → updates log panel
+4. `Tool` executes and publishes `ToolCallCompleted` with result
+5. `Session` receives result → adds to conversation history
+6. `Session` publishes `MessageAdded` → TUI updates chat panel
+
+---
 
 | Crate | LOC % | Purpose |
 |-------|------:|---------|
@@ -232,6 +294,74 @@ graph TB
 | `ragent-types` | 1.21% | Shared IDs, events, messages, and sanitization primitives |
 
 Percentages are based on a fresh count of current Rust `.rs` lines across workspace crates (167,466 total).
+
+### 2.2 Crate Dependency Graph
+
+```mermaid
+graph LR
+    subgraph Foundation["Foundation Crates"]
+        TYPES["ragent-types"]
+        CONFIG["ragent-config"]
+    end
+
+    subgraph Data["Data & Storage"]
+        STORAGE["ragent-storage"]
+        CODEIDX["ragent-codeindex"]
+        AIWIKI["ragent-aiwiki"]
+    end
+
+    subgraph Logic["Logic & Orchestration"]
+        LLM["ragent-llm"]
+        AGENT["ragent-agent"]
+        TEAM["ragent-team"]
+        PROMPT["ragent-prompt_opt"]
+    end
+
+    subgraph Interface["User Interface"]
+        TUI["ragent-tui"]
+        SERVER["ragent-server"]
+    end
+
+    subgraph Tools["Tool Crates"]
+        TCORE["ragent-tools-core"]
+        TEXT["ragent-tools-extended"]
+        TVCS["ragent-tools-vcs"]
+    end
+
+    TYPES --> CONFIG
+    TYPES --> STORAGE
+    TYPES --> LLM
+    TYPES --> TCORE
+    CONFIG --> AGENT
+    CONFIG --> TUI
+    STORAGE --> AGENT
+    STORAGE --> CODEIDX
+    STORAGE --> AIWIKI
+    LLM --> AGENT
+    TCORE --> AGENT
+    TEXT --> AGENT
+    TVCS --> AGENT
+    CODEIDX --> TEXT
+    AIWIKI --> TEXT
+    AGENT --> TEAM
+    AGENT --> SERVER
+    AGENT --> TUI
+    TEAM --> TUI
+    PROMPT --> TUI
+    PROMPT --> SERVER
+```
+
+**Dependency Rules:**
+- Foundation crates (`types`, `config`) have no internal dependencies
+- `storage` depends only on `types`
+- `llm` depends on `types` and `config`
+- Tool crates depend on `types` (and `codeindex` for extended tools)
+- `agent` is the integration layer — it depends on most other crates
+- `team` depends on `agent` types
+- `tui` and `server` are terminal layers that depend on `agent` and `team`
+- Circular dependencies are prohibited; the graph is strictly acyclic
+
+---
 
 ---
 
@@ -583,7 +713,68 @@ git remote get-url origin
 
 Falls back to explicit `--owner` and `--repo` parameters if detection fails.
 
-### 3.4 Session Management
+### 3.5 Session & Tool Execution Flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant TUI as TUI / HTTP
+    participant SP as Session Processor
+    participant LLM as LLM Provider
+    participant PC as Permission Checker
+    participant TR as Tool Registry
+    participant Tool as Tool Impl
+
+    User->>TUI: Send message
+    TUI->>SP: process_message()
+    SP->>LLM: Build chat request
+    LLM-->>SP: Stream tool call(s)
+    loop For each tool call
+        SP->>PC: check_permission(tool, params)
+        alt Permission required
+            PC->>TUI: Event::PermissionRequested
+            TUI-->>User: Show permission dialog
+            User-->>TUI: Approve / Deny / Always
+            TUI->>PC: PermissionReplied
+        end
+        PC-->>SP: Decision (Allow / Deny)
+        alt Allowed
+            SP->>TR: dispatch(tool, params)
+            TR->>Tool: execute()
+            Tool-->>TR: Result
+            TR-->>SP: ToolResult
+            SP-->>TUI: Event::ToolCallCompleted
+        else Denied
+            SP-->>LLM: Error result (permission denied)
+        end
+    end
+    SP->>LLM: Continue conversation with results
+    LLM-->>SP: Assistant response
+    SP-->>TUI: Event::MessageAdded
+    TUI-->>User: Display response
+```
+
+---
+
+### 3.6 Provider Selection Flow
+
+```mermaid
+graph TD
+    Start([User Request]) --> Health{Health Check}
+    Health -- Healthy --> ModelDiscovery[Query /models endpoint]
+    Health -- Unhealthy --> Fallback[Try next provider]
+    ModelDiscovery --> CacheModel[Cache metadata in SQLite]
+    CacheModel --> Capabilities{Supports tools?}
+    Capabilities -- Yes --> Streaming[Enable SSE streaming]
+    Capabilities -- No --> NonStreaming[Disable streaming]
+    Streaming --> Execute[Send request]
+    NonStreaming --> Execute
+    Execute --> TokenStream[Stream tokens via EventBus]
+    TokenStream --> TUI_Update[Update TUI / HTTP clients]
+    Fallback --> Health
+```
+
+---
 
 - **Persistent storage** — SQLite-backed conversation history
 - **Session commands** — `ragent session list`, `resume`, `export`, `import`
@@ -1060,7 +1251,54 @@ Various inline widgets rendered within the message panel.
 | `p` | Open provider setup |
 | `?` (empty input) | Show keybindings help |
 
-### 4.4 TUI Features
+### 4.4 TUI Component Architecture
+
+```mermaid
+graph TB
+    subgraph TUILayer["TUI Layer (ratatui)"]
+        App["App State Machine"]
+        App --> Layout["Layout Engine"]
+        
+        subgraph Panels["Panels"]
+            StatusBar1["Status Bar (Line 1)\nSession / Agent / Dir / Git"]
+            StatusBar2["Status Bar (Line 2)\nProvider / Quota / Context / Services"]
+            Messages["Messages Panel\nMarkdown + Syntax Highlight"]
+            Input["Input Area\nMulti-line + Autocomplete"]
+            LogPanel["Log Panel\nStep-numbered JSON"]
+            Sidebar["Sidebar\nAgents + Teams"]
+        end
+        
+        subgraph Overlays["Overlays / Modals"]
+            ProviderSetup["Provider Setup"]
+            PermissionDlg["Permission Dialog\n+ Countdown"]
+            SlashMenu["Slash Command Menu"]
+            FileMenu["@ File Menu"]
+            HistoryPicker["History Picker"]
+            MemoryBrowser["Memory Browser"]
+            JournalViewer["Journal Viewer"]
+            PlanApproval["Plan Approval"]
+            ForceCleanup["Force-Cleanup"]
+            LSPDiscovery["LSP Discovery"]
+            MCPDiscovery["MCP Discovery"]
+            OutputView["Output View"]
+            Keybindings["Keybindings Help"]
+        end
+    end
+
+    subgraph EventHandling["Event Handling"]
+        KeyEvents["Keyboard Events"]
+        MouseEvents["Mouse Events"]
+        Tick["100ms Tick Timer"]
+    end
+
+    EventHandling --> App
+    App -- renders --> Panels
+    App -- renders --> Overlays
+    App -- publishes --> EventBus["Event Bus"]
+    EventBus -- subscribed --> App
+```
+
+---
 
 - **Streaming responses** — Real-time token streaming from LLM
 - **Responsive two-line status bar** — Adapts between full, compact, and minimal layouts based on terminal width
@@ -1239,6 +1477,41 @@ ragent serve --port 8080  # Custom port
 - Bearer token generated on server startup
 - Token displayed in console: `Server token: {token}`
 - Include in requests: `Authorization: Bearer {token}`
+
+---
+
+### 5.4 HTTP API Request Flow
+
+```mermaid
+sequenceDiagram
+    participant Client as HTTP Client
+    participant Axum as Axum Router
+    participant Auth as Bearer Auth Middleware
+    participant State as AppState (Shared)
+    participant Session as Session Processor
+    participant EventBus as Event Bus
+    participant SSE as SSE Stream
+
+    Client->>Axum: POST /sessions/{id}/messages
+    Axum->>Auth: Validate Bearer token
+    Auth-->>Axum: OK / 401
+    Axum->>State: Lock session state
+    State->>Session: process_message(body)
+    Session->>EventBus: Subscribe to events
+    Session->>LLM: Send chat request
+    LLM-->>Session: Stream tokens
+    loop Stream tokens
+        Session->>EventBus: Publish StreamToken
+        EventBus->>SSE: Forward to client
+        SSE-->>Client: data: {...}
+    end
+    Session->>EventBus: Publish StreamComplete
+    EventBus->>SSE: Close stream
+    SSE-->>Client: event: complete
+    Session->>State: Unlock
+```
+
+---
 
 ---
 
@@ -1651,3 +1924,256 @@ A `PermissionRequest` is published as an event to the TUI:
 **Permission Dialog Timeout:**
 
 Permission requests have a 120-second timeout (2 minutes). The TUI displays a countdown timer in the dialog title (format: `M:SS remaining`) that updates in real time via continuous redraw polling, even when the user is idle. When the timeout expires, the dialog shows `EXPIRED` and the request is automatically denied.
+
+---
+
+# Part VII: Security & Operations
+
+---
+
+## 24. Security & Permissions
+
+### 24.1 Permission Security Layers
+
+The permission system is a multi-layered defense-in-depth architecture that controls every tool invocation.
+
+```mermaid
+graph TD
+    subgraph Layer0["Layer 0: Hardwired Rules"]
+        H1[CodeIndex tools → Always Allow]
+    end
+
+    subgraph Layer1["Layer 1: Permission Rules"]
+        R1[Config rules: allow / deny / ask]
+        R2[Per-agent rules]
+        R3[YOLO mode bypass]
+    end
+
+    subgraph Layer2["Layer 2: Bash Security (7 Layers)"]
+        B1[Safe Command Whitelist]
+        B2[Banned Commands]
+        B3[Denied Patterns]
+        B4[Directory Escape Prevention]
+        B5[Syntax Validation]
+        B6[Obfuscation Detection]
+        B7[User Allowlist/Denylist]
+    end
+
+    subgraph Layer3["Layer 3: File Path Guards"]
+        F1[Path canonicalization]
+        F2[Directory escape check]
+        F3[Symlink resolution]
+        F4[Workspace boundary enforcement]
+    end
+
+    subgraph Layer4["Layer 4: Resource Limits"]
+        L1[Token budget tracking]
+        L2[Context window limits]
+        L3[Max iterations]
+        L4[Timeout enforcement]
+    end
+
+    subgraph Layer5["Layer 5: Secret Redaction"]
+        S1[API key masking in logs]
+        S2[Credential storage encryption]
+    end
+
+    ToolCall["Tool Call"] --> Layer0
+    Layer0 -->|if not hardwired| Layer1
+    Layer1 -->|bash command| Layer2
+    Layer1 -->|file operation| Layer3
+    Layer1 -->|all calls| Layer4
+    Layer1 -->|logging| Layer5
+    Layer2 -->|pass| Decision{Allow?}
+    Layer3 -->|pass| Decision
+    Decision -->|Yes| Execute["Execute Tool"]
+    Decision -->|Ask| UserPrompt["Show Permission Dialog"]
+    UserPrompt -->|Approve| Execute
+    UserPrompt -->|Deny| Reject["Return Denied Error"]
+    Decision -->|No| Reject
+```
+
+---
+
+### 24.2 Bash Security — 7 Layers
+
+```mermaid
+graph LR
+    A[bash command] --> B{Layer 1<br/>Safe Command?}
+    B -- Yes --> Z[Always Grant]
+    B -- No --> C{Layer 2<br/>Banned Command?}
+    C -- Yes --> X[Deny]
+    C -- No --> D{Layer 3<br/>Denied Pattern?}
+    D -- Yes --> X
+    D -- No --> E{Layer 4<br/>Directory Escape?}
+    E -- Yes --> X
+    E -- No --> F{Layer 5<br/>Syntax Valid?}
+    F -- No --> X
+    F -- Yes --> G{Layer 6<br/>Obfuscated?}
+    G -- Yes --> X
+    G -- No --> H{Layer 7<br/>User List Match?}
+    H -- Deny --> X
+    H -- Allow --> Y[Permission Check]
+    Y --> Z
+```
+
+**Layer Details:**
+
+| Layer | Name | Description | Test Count |
+|-------|------|-------------|-----------:|
+| 1 | Safe Command Whitelist | 51 commands auto-approved (cat, ls, git, cargo, etc.) | 15 |
+| 2 | Banned Commands | 22 commands always blocked (mkfs, fdisk, useradd, etc.) | 6 |
+| 3 | Denied Patterns | 46 destructive patterns (rm -rf /, fork bombs, etc.) | 8 |
+| 4 | Directory Escape Prevention | Blocks cd/pushd outside workspace | 4 |
+| 5 | Syntax Validation | Runs `sh -n -c` with 1s timeout | 3 |
+| 6 | Obfuscation Detection | Detects base64\|bash, python exec, hex escapes | 5 |
+| 7 | User Allowlist/Denylist | User-configurable via `/bash allow/deny` | 4 |
+
+---
+
+### 24.3 Permission Request Flow
+
+```mermaid
+sequenceDiagram
+    participant SP as Session Processor
+    participant PC as PermissionChecker
+    participant EB as Event Bus
+    participant TUI as TUI / HTTP
+    participant User as User
+
+    SP->>PC: check_permission(tool, params)
+    PC->>PC: Evaluate rules (last match wins)
+    alt Action = Allow
+        PC-->>SP: Decision::Allow
+    else Action = Deny
+        PC-->>SP: Decision::Deny
+    else Action = Ask
+        PC->>EB: Event::PermissionRequested
+        EB->>TUI: Show permission dialog
+        TUI-->>User: Display countdown (M:SS)
+        loop Every 100ms
+            TUI->>TUI: Redraw dialog
+        end
+        User-->>TUI: y / n / always
+        TUI->>EB: Event::PermissionReplied
+        EB->>PC: Forward decision
+        alt Timeout (120s)
+            TUI->>TUI: Show EXPIRED
+            TUI->>EB: Auto-deny
+        end
+        PC-->>SP: Decision::Once / Always / Deny
+    end
+```
+
+---
+
+### 24.4 Permission Rules Evaluation
+
+Rules are evaluated in order, with **last match wins** semantics:
+
+```mermaid
+graph TD
+    A[Permission Request] --> B[Load Default Rules]
+    B --> C[Load Global Config Rules]
+    C --> D[Load Agent-Specific Rules]
+    D --> E{Rule Matches?}
+    E -->|No| F[Next Rule]
+    F --> E
+    E -->|Yes| G{Action}
+    G -->|Allow| H[Grant]
+    G -->|Deny| I[Reject]
+    G -->|Ask| J[Prompt User]
+```
+
+**Default Rules:**
+- Read operations → Allow
+- Edit operations → Ask
+- Bash execution → Ask
+- Web access → Ask
+- Todo management → Allow
+
+---
+
+## 25. Auto-Update Mechanism
+
+*(To be documented)*
+
+---
+
+# Appendices
+
+---
+
+## Appendix A: Version History
+
+| Version | Date | Highlights |
+|---------|------|------------|
+| v0.1.0-alpha.49 | 2025-01-17 | Permission dialog live countdown, config parse error enhancement, codeindex hardwired permissions, crate extraction milestones |
+| v0.1.0-alpha.48 | 2025-01-17 | Permission milestones complete, bash security layers, more permissions fixes |
+| v0.1.0-alpha.47 | 2025-01-17 | Crate reorganisation (ragent-types, ragent-config, ragent-storage, ragent-llm) |
+
+---
+
+## Appendix B: Documentation
+
+All documentation markdown files are located in `docs/` except for these root files:
+
+| File | Purpose |
+|------|---------|
+| `README.md` | Project overview |
+| `QUICKSTART.md` | Quick start guide |
+| `SPEC.md` | This specification |
+| `AGENTS.md` | Agent guidelines |
+| `CHANGELOG.md` | Change log |
+| `RELEASE.md` | Release notes |
+| `STATS.md` | Project statistics |
+
+---
+
+## Appendix C: Project Contact & Repository
+
+- **Repository:** https://github.com/thawkins/ragent
+- **License:** MIT
+- **Author:** Tim Hawkins
+
+---
+
+## Appendix D: Changelog (2025-01-16 → 2025-01-17)
+
+### Added
+- Permission dialog countdown timer with live TUI updates (120-second timeout)
+- Config parse error reporting with file path, line, column, and caret marker
+- Codeindex tools hardwired as always-allowed (read-only, no permission prompts)
+- Crate extraction milestones: `ragent-types`, `ragent-config`, `ragent-storage`, `ragent-llm`
+- `ollama_cloud` provider with dynamic model discovery and vision support
+- `gemini` provider with massive context windows (up to 2M tokens)
+- `huggingface` provider with dynamic model discovery and rate limit tracking
+- GitLab integration with issues, merge requests, pipelines, and jobs
+- Team coordination tools (21 tools for team lifecycle, tasks, messaging)
+- AIWiki knowledge base with multi-format ingestion and web interface
+- LSP integration with hover, definition, references, symbols, diagnostics
+- MCP (Model Context Protocol) client support
+- Skills system for loadable skill packs
+- Custom agent profiles via OASF format
+- Autopilot mode for autonomous operation
+- Prompt optimization (`/opt` command with 12 methods)
+- Memory system with three tiers (file blocks, SQLite store, semantic search)
+- Journal system for insights and decisions
+- Background agent spawning and management
+- Swarm mode for parallel task decomposition
+- Plan agent with human-in-the-loop approval
+
+### Changed
+- Improved TUI slash-command autocomplete with safe `Esc` handling
+- Updated workspace crate organization
+- Enhanced bash security with 7 layers and word-boundary matching
+- Permission system now supports per-agent rules and YOLO mode
+
+### Fixed
+- Permission dialog timeout now correctly uses 120 seconds
+- Countdown timer visually decrements in real time
+- Bash command name extraction for permission matching
+- Denied pattern matching with word boundaries
+- Safe command display in `/bash show` output
+
+---

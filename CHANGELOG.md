@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.0-alpha.50] - 2026-04-22
+
+### Added
+- **Profiler module** — Added a new profiler in `crates/ragent-agent/src/session/profiler.rs` for performance instrumentation of agent session processing, with corresponding tests in `crates/ragent-agent/tests/test_profiler.rs`.
+
+### Fixed
+- **Question tool multiple-choice support** — Fixed the `question` tool to correctly handle multiple-choice prompts and updated TUI rendering/tests accordingly (new `test_question_multiple_choice.rs`).
+
 ## [0.1.0-alpha.49] - 2026-04-22
 
 ### Added

@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.49
+## Current Version: 0.1.0-alpha.50
+
+### Added
+- **Profiler module** — Added a new profiler in `crates/ragent-agent/src/session/profiler.rs` for performance instrumentation of agent session processing, with corresponding tests in `crates/ragent-agent/tests/test_profiler.rs`.
+
+### Fixed
+- **Question tool multiple-choice support** — Fixed the `question` tool to correctly handle multiple-choice prompts and updated TUI rendering/tests accordingly (new `test_question_multiple_choice.rs`).
+
+## Previous: 0.1.0-alpha.49
 
 ### Added
 - **`/model show` slash command** — Added an in-chat model metadata display for the active provider/model, including capabilities, context window, output limits, and cost information.

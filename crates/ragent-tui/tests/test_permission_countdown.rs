@@ -199,6 +199,7 @@ fn test_permission_requested_event_queues_120_second_timeout() {
         request_id: "req-1".to_string(),
         permission: "file:write".to_string(),
         description: "create: crates/ragent-tui/tests/test_permission_countdown.rs".to_string(),
+        options: vec![],
     });
 
     let request = app

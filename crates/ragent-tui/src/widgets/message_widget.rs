@@ -170,8 +170,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             .unwrap_or_default()
     };
 
-    // Helper: keep inline tool summaries compact.
-    let trunc50 = |s: &str| truncate_str(s, 50);
+    // Helper: keep inline tool summaries compact without hiding too much of
+    // the tool arguments in the chat transcript.
+    let trunc120 = |s: &str| truncate_str(s, 120);
 
     match tool {
         // ═══════════════════════════════════════════════════════════════════
@@ -303,8 +304,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .as_deref()
                 .map(|p| make_relative_path(p, cwd));
             match path {
-                Some(p) if !p.is_empty() => format!("🔍 \"{}\" in {}", trunc50(&query), p),
-                _ => format!("🔍 \"{}\"", trunc50(&query)),
+                Some(p) if !p.is_empty() => format!("🔍 \"{}\" in {}", trunc120(&query), p),
+                _ => format!("🔍 \"{}\"", trunc120(&query)),
             }
         }
         "grep" => {
@@ -315,9 +316,9 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|p| make_relative_path(p, cwd));
             match path {
                 Some(p) if !p.is_empty() => {
-                    format!("🔍 \"{}\" in {}", trunc50(pattern), p)
+                    format!("🔍 \"{}\" in {}", trunc120(pattern), p)
                 }
-                _ => format!("🔍 \"{}\"", trunc50(pattern)),
+                _ => format!("🔍 \"{}\"", trunc120(pattern)),
             }
         }
         "glob" => {
@@ -337,7 +338,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             get_str(&["command", "code", "cmd"])
                 .as_deref()
                 .and_then(|s| s.lines().next())
-                .map(|s| format!("⚡ $ {}", trunc50(s)))
+                .map(|s| format!("⚡ $ {}", trunc120(s)))
                 .unwrap_or_else(|| "⚡ bash".to_string())
         }
         "execute_python" => {
@@ -345,7 +346,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             get_str(&["code", "script"])
                 .as_deref()
                 .and_then(|s| s.lines().find(|l| !l.trim().is_empty()))
-                .map(|l| format!("⚡ py: {}", trunc50(l)))
+                .map(|l| format!("⚡ py: {}", trunc120(l)))
                 .unwrap_or_else(|| "⚡ python".to_string())
         }
         "str_replace_editor" => {
@@ -355,7 +356,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "calculator" => {
             let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
-            format!("⚡ {}", trunc50(&expr))
+            format!("⚡ {}", trunc120(&expr))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -364,17 +365,17 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "http_request" | "web_request" => {
             let method = get_str(&["method"]).unwrap_or_else(|| "GET".to_string());
             let url = get_str(&["url"]).unwrap_or_default();
-            format!("🌐 {} {}", method, trunc50(&url))
+            format!("🌐 {} {}", method, trunc120(&url))
         }
         "webfetch" => input
             .get("url")
             .and_then(|v| v.as_str())
-            .map(|u| format!("🌐 {}", trunc50(u)))
+            .map(|u| format!("🌐 {}", trunc120(u)))
             .unwrap_or_else(|| "🌐 fetch".to_string()),
         "websearch" => input
             .get("query")
             .and_then(|v| v.as_str())
-            .map(|q| format!("🌐 \"{}\"", trunc50(q)))
+            .map(|q| format!("🌐 \"{}\"", trunc120(q)))
             .unwrap_or_else(|| "🌐 search".to_string()),
 
         // ═══════════════════════════════════════════════════════════════════
@@ -395,7 +396,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "question" | "ask_user" => {
             let q = get_str(&["question", "query"]).unwrap_or_default();
-            format!("❓ {}", trunc50(&q))
+            format!("❓ {}", trunc120(&q))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -403,7 +404,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "think" => {
             let thought = get_str(&["thought", "thinking", "text"]).unwrap_or_default();
-            format!("💭 {}", trunc50(&thought))
+            format!("💭 {}", trunc120(&thought))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -411,11 +412,11 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         "plan_enter" => {
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📝 → {}", trunc50(task))
+            format!("📝 → {}", trunc120(task))
         }
         "plan_exit" => {
             let summary = input.get("summary").and_then(|v| v.as_str()).unwrap_or("");
-            format!("📝 ← {}", trunc50(summary))
+            format!("📝 ← {}", trunc120(summary))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -433,8 +434,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let id = input.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
             match action {
-                "add" => format!("📋 +{}", trunc50(&title)),
-                "update" if !title.is_empty() => format!("📋 ~{} \"{}\"", id, trunc50(&title)),
+                "add" => format!("📋 +{}", trunc120(&title)),
+                "update" if !title.is_empty() => format!("📋 ~{} \"{}\"", id, trunc120(&title)),
                 "update" => format!("📋 ~{}", id),
                 "complete" => format!("📋 ✓{}", id),
                 "remove" => format!("📋 -{}", id),
@@ -448,7 +449,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "new_task" => {
             let agent = input.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
             let task = input.get("task").and_then(|v| v.as_str()).unwrap_or("");
-            format!("🤖 {} → {}", agent, trunc50(&task))
+            format!("🤖 {} → {}", agent, trunc120(&task))
         }
         "cancel_task" => {
             let task_id = input.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
@@ -496,18 +497,18 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             if content.is_empty() {
                 "👥 broadcast".to_string()
             } else {
-                format!("👥 broadcast: {}", trunc50(content))
+                format!("👥 broadcast: {}", trunc120(content))
             }
         }
         "team_message" => {
             let to = input.get("to").and_then(|v| v.as_str()).unwrap_or("?");
             let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            format!("👥 msg to {}: {}", to, trunc50(content))
+            format!("👥 msg to {}: {}", to, trunc120(content))
         }
         "team_read_messages" => "👥 read messages".to_string(),
         "team_task_create" => {
             let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-            format!("👥 task: {}", trunc50(&title))
+            format!("👥 task: {}", trunc120(&title))
         }
         "team_task_list" => "👥 list tasks".to_string(),
         "team_task_claim" => {
@@ -600,7 +601,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let query = get_str(&["query"]).unwrap_or_default();
             let kind = get_str(&["kind"]);
             let lang = get_str(&["language"]);
-            let mut label = format!("📇 \"{}\"", trunc50(&query));
+            let mut label = format!("📇 \"{}\"", trunc120(&query));
             if let Some(k) = kind {
                 label.push_str(&format!(" kind:{}", k));
             }
@@ -615,7 +616,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let file = get_str(&["file_path"]);
             let mut parts = Vec::new();
             if let Some(n) = name {
-                parts.push(format!("name:{}", trunc50(&n)));
+                parts.push(format!("name:{}", trunc120(&n)));
             }
             if let Some(k) = kind {
                 parts.push(format!("kind:{}", k));
@@ -631,7 +632,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "codeindex_references" => {
             let symbol = get_str(&["symbol"]).unwrap_or_default();
-            format!("📇 refs: {}", trunc50(&symbol))
+            format!("📇 refs: {}", trunc120(&symbol))
         }
 
         // ═══════════════════════════════════════════════════════════════════
@@ -1818,7 +1819,7 @@ mod tests {
 
     #[test]
     fn test_team_tool_summary_truncates_long_strings_with_three_dots() {
-        let long = "x".repeat(60);
+        let long = "x".repeat(160);
         let input = json!({
             "team_name": "alpha",
             "content": long
@@ -1826,9 +1827,9 @@ mod tests {
         let summary = tool_input_summary("team_broadcast", &input, "/tmp");
         // New format: "👥 broadcast: {content}" with truncation
         assert!(summary.contains("👥 broadcast:"));
-        // The string should be truncated (50 chars + "...")
+        // The string should be truncated (120 chars + "...")
         assert!(
-            summary.len() <= 70, // "👥 broadcast: " is ~14 chars + 50 + "..." = ~67
+            summary.len() <= 140, // "👥 broadcast: " + 120 + "..." with a little headroom
             "summary should be truncated, got: {summary} (len: {})",
             summary.len()
         );

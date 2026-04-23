@@ -125,6 +125,7 @@ impl Tool for TeamSpawnTool {
                 request_id: request_id.clone(),
                 permission: "team:spawn_override".to_string(),
                 description,
+                options: vec![],
             });
 
             // Wait for the user's decision with a timeout to prevent indefinite blocking.

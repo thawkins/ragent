@@ -13,7 +13,7 @@ use ragent_core::{
     event::EventBus,
     permission::PermissionChecker,
     provider,
-    session::{SessionManager, processor::SessionProcessor},
+    session::{SessionManager, processor::SessionProcessor, profiler::agent_loop_profiler},
     storage::Storage,
     tool,
 };
@@ -265,6 +265,60 @@ fn test_slash_log_toggles_panel() {
     assert_eq!(app.status, "log panel hidden");
 }
 
+// ── /profile ────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_profile_on_enables_profiler_panel() {
+    agent_loop_profiler().set_enabled(false);
+
+    let mut app = make_app();
+    assert!(!app.show_profile, "profile should be hidden initially");
+
+    app.execute_slash_command("/profile on");
+
+    assert!(app.show_profile, "profile should be visible after enabling");
+    assert_eq!(app.status, "profile panel visible");
+
+    agent_loop_profiler().set_enabled(false);
+}
+
+#[test]
+fn test_slash_profile_off_disables_profiler_panel() {
+    agent_loop_profiler().set_enabled(true);
+
+    let mut app = make_app();
+    app.show_profile = true;
+
+    app.execute_slash_command("/profile off");
+
+    assert!(
+        !app.show_profile,
+        "profile should be hidden after disabling"
+    );
+    assert_eq!(app.status, "profile panel hidden");
+}
+
+#[test]
+fn test_alt_p_toggles_profiler_panel() {
+    agent_loop_profiler().set_enabled(false);
+
+    let mut app = make_app();
+    assert!(!app.show_profile, "profile should be hidden initially");
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    assert!(app.show_profile, "profile should be visible after Alt+P");
+    assert_eq!(app.status, "profile panel visible");
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    assert!(
+        !app.show_profile,
+        "profile should be hidden after second Alt+P"
+    );
+    assert_eq!(app.status, "profile panel hidden");
+
+    agent_loop_profiler().set_enabled(false);
+}
+
 // ── /llmstats ───────────────────────────────────────────────────────
 
 #[test]
@@ -408,7 +462,11 @@ fn test_slash_model_show_without_selected_model_uses_agent_model() {
     app.execute_slash_command("/model show");
 
     assert_eq!(app.status, "active model metadata");
-    let text = app.messages.last().expect("metadata message").text_content();
+    let text = app
+        .messages
+        .last()
+        .expect("metadata message")
+        .text_content();
     assert!(text.contains("From: /model show"));
     assert!(text.contains("Model Ref"));
 }
@@ -428,7 +486,11 @@ fn test_slash_model_show_displays_metadata_for_active_model() {
     app.execute_slash_command("/model show");
 
     assert_eq!(app.status, "active model metadata");
-    let text = app.messages.last().expect("metadata message").text_content();
+    let text = app
+        .messages
+        .last()
+        .expect("metadata message")
+        .text_content();
     assert!(text.contains("From: /model show"));
     assert!(text.contains("OpenAI (GPT)"));
     assert!(text.contains("gpt-4o-mini"));

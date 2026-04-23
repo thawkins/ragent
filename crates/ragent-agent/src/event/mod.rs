@@ -107,6 +107,12 @@ pub enum Event {
         permission: String,
         /// Human-readable description of what is being requested.
         description: String,
+        /// Optional multiple-choice options for the user.
+        /// When present, the TUI renders a pick-list instead of a free-text
+        /// input field.  The user selects one option and the chosen string is
+        /// returned as the response.
+        #[serde(default)]
+        options: Vec<String>,
     },
     /// The user has replied to a permission request.
     PermissionReplied {
@@ -118,6 +124,27 @@ pub enum Event {
         allowed: bool,
         /// The decision type (Once, Always, or Deny).
         decision: crate::permission::PermissionDecision,
+    },
+    /// A tool is asking the user a direct question.
+    QuestionRequested {
+        /// Session making the request.
+        session_id: String,
+        /// Unique id for this question request (used in the reply).
+        request_id: String,
+        /// Human-readable question prompt.
+        question: String,
+        /// Optional multiple-choice options for the user.
+        #[serde(default)]
+        options: Vec<String>,
+    },
+    /// The user has answered a direct question request.
+    QuestionAnswered {
+        /// Session the answer belongs to.
+        session_id: String,
+        /// The request id that was answered.
+        request_id: String,
+        /// The selected or typed response.
+        response: String,
     },
     /// The active agent was switched during a session.
     AgentSwitched {
@@ -404,7 +431,7 @@ pub enum Event {
     },
 
     // ── User input events ────────────────────────────────────────────────
-    /// The user submitted a free-text response to a `question` tool call.
+    /// The user submitted generic free-text input to the running session.
     UserInput {
         /// Session this response belongs to.
         session_id: String,
@@ -516,6 +543,8 @@ impl Event {
             Self::MessageEnd { .. } => "MessageEnd",
             Self::PermissionRequested { .. } => "PermissionRequested",
             Self::PermissionReplied { .. } => "PermissionReplied",
+            Self::QuestionRequested { .. } => "QuestionRequested",
+            Self::QuestionAnswered { .. } => "QuestionAnswered",
             Self::AgentSwitched { .. } => "AgentSwitched",
             Self::AgentSwitchRequested { .. } => "AgentSwitchRequested",
             Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
@@ -573,6 +602,8 @@ impl Event {
             | Self::MessageEnd { session_id, .. }
             | Self::PermissionRequested { session_id, .. }
             | Self::PermissionReplied { session_id, .. }
+            | Self::QuestionRequested { session_id, .. }
+            | Self::QuestionAnswered { session_id, .. }
             | Self::AgentSwitched { session_id, .. }
             | Self::AgentSwitchRequested { session_id, .. }
             | Self::AgentRestoreRequested { session_id, .. }

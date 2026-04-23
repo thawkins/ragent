@@ -112,6 +112,8 @@ pub enum InputAction {
     PasteFromClipboard,
     /// Toggle the log panel visibility (Alt+L).
     ToggleLog,
+    /// Toggle the profiler panel visibility and profiler state (Alt+P).
+    ToggleProfile,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -187,57 +189,110 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         return None;
     }
 
-    // If permission dialog is active, intercept keys
-    if !app.permission_queue.is_empty() {
-        let is_question = app
-            .permission_queue
+    // If question dialog is active, intercept keys.
+    if !app.question_queue.is_empty() {
+        let has_options = app
+            .question_queue
             .front()
-            .map(|r| r.permission == "question")
+            .map(|r| !r.options.is_empty())
             .unwrap_or(false);
 
-        if is_question {
-            // Question-type: accept free-text input, submit on Enter, cancel on Esc.
+        if has_options {
             return match key.code {
-                KeyCode::Enter => {
-                    if let Some(req) = app.permission_queue.front().cloned() {
-                        let response = app.pending_question_input.trim().to_string();
-                        if !response.is_empty() {
-                            app.event_bus.publish(ragent_core::event::Event::UserInput {
-                                session_id: req.session_id.clone(),
-                                request_id: req.id.clone(),
-                                response,
-                            });
-                            app.permission_queue.pop_front();
-                            app.pending_question_input.clear();
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if app.question_selected_index > 0 {
+                        app.question_selected_index -= 1;
+                    }
+                    None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(req) = app.question_queue.front() {
+                        if app.question_selected_index + 1 < req.options.len() {
+                            app.question_selected_index += 1;
                         }
                     }
                     None
                 }
-                KeyCode::Esc => {
-                    // Cancel — send empty string so the tool can return gracefully.
-                    if let Some(req) = app.permission_queue.front().cloned() {
-                        app.event_bus.publish(ragent_core::event::Event::UserInput {
-                            session_id: req.session_id.clone(),
-                            request_id: req.id.clone(),
-                            response: "[User dismissed question]".to_string(),
-                        });
+                KeyCode::Enter => {
+                    if let Some(req) = app.question_queue.front().cloned() {
+                        let response = req
+                            .options
+                            .get(app.question_selected_index)
+                            .cloned()
+                            .unwrap_or_default();
+                        app.event_bus
+                            .publish(ragent_core::event::Event::QuestionAnswered {
+                                session_id: req.session_id.clone(),
+                                request_id: req.id.clone(),
+                                response,
+                            });
+                        app.question_queue.pop_front();
+                        app.question_selected_index = 0;
                     }
-                    app.permission_queue.pop_front();
-                    app.pending_question_input.clear();
                     None
                 }
-                KeyCode::Backspace => {
-                    app.pending_question_input.pop();
-                    None
-                }
-                KeyCode::Char(c) => {
-                    app.pending_question_input.push(c);
+                KeyCode::Esc => {
+                    if let Some(req) = app.question_queue.front().cloned() {
+                        app.event_bus
+                            .publish(ragent_core::event::Event::QuestionAnswered {
+                                session_id: req.session_id.clone(),
+                                request_id: req.id.clone(),
+                                response: "[User dismissed question]".to_string(),
+                            });
+                    }
+                    app.question_queue.pop_front();
+                    app.question_selected_index = 0;
                     None
                 }
                 _ => None,
             };
         }
 
+        // Free-text question: accept typed input, submit on Enter, cancel on Esc.
+        return match key.code {
+            KeyCode::Enter => {
+                if let Some(req) = app.question_queue.front().cloned() {
+                    let response = app.pending_question_input.trim().to_string();
+                    if !response.is_empty() {
+                        app.event_bus
+                            .publish(ragent_core::event::Event::QuestionAnswered {
+                                session_id: req.session_id.clone(),
+                                request_id: req.id.clone(),
+                                response,
+                            });
+                        app.question_queue.pop_front();
+                        app.pending_question_input.clear();
+                    }
+                }
+                None
+            }
+            KeyCode::Esc => {
+                if let Some(req) = app.question_queue.front().cloned() {
+                    app.event_bus
+                        .publish(ragent_core::event::Event::QuestionAnswered {
+                            session_id: req.session_id.clone(),
+                            request_id: req.id.clone(),
+                            response: "[User dismissed question]".to_string(),
+                        });
+                }
+                app.question_queue.pop_front();
+                app.pending_question_input.clear();
+                None
+            }
+            KeyCode::Backspace => {
+                app.pending_question_input.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                app.pending_question_input.push(c);
+                None
+            }
+            _ => None,
+        };
+    }
+
+    // If permission dialog is active, intercept keys
+    if !app.permission_queue.is_empty() {
         // Standard permission dialog: y/a/n only.
         return match key.code {
             KeyCode::Char('y') => {
@@ -640,6 +695,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         }
         KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleLog)
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleProfile)
         }
         KeyCode::Char(c) => {
             // Typing a character replaces the active keyboard selection.
