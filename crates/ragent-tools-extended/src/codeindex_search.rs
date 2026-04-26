@@ -17,7 +17,7 @@ fn not_available() -> ToolOutput {
             .to_string(),
         metadata: Some(json!({
             "error": "codeindex_disabled",
-            "fallback_tools": ["grep", "glob", "lsp_symbols", "lsp_references"]
+            "fallback_tools": ["grep", "glob"]
         })),
     }
 }

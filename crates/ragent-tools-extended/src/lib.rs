@@ -1,13 +1,8 @@
-//! Extended document, web, memory, code index, and LSP tools for ragent.
+//! Extended document, web, memory, and code index tools for ragent.
 //!
 //! This crate owns the Milestone 5 extracted tool set while keeping a small
 //! compatibility surface for the extracted runtime crates.
 
-pub mod aiwiki_export;
-pub mod aiwiki_import;
-pub mod aiwiki_ingest;
-pub mod aiwiki_search;
-pub mod aiwiki_status;
 pub mod codeindex_dependencies;
 pub mod codeindex_references;
 pub mod codeindex_reindex;
@@ -20,11 +15,6 @@ pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
 pub mod libreoffice_write;
-pub mod lsp_definition;
-pub mod lsp_diagnostics;
-pub mod lsp_hover;
-pub mod lsp_references;
-pub mod lsp_symbols;
 pub mod memory_migrate;
 pub mod memory_replace;
 pub mod memory_search;
@@ -187,29 +177,6 @@ pub mod storage {
     pub type Storage = dyn StorageBackend;
 }
 
-/// LSP adapter used by the extracted tools so they stay independent of the runtime crate.
-pub mod lsp {
-    use anyhow::Result;
-    use lsp_types::{Diagnostic, DocumentSymbolResponse, Hover, Location};
-    use std::path::Path;
-
-    /// Backend interface for LSP-backed tools.
-    #[async_trait::async_trait]
-    pub trait LspBackend: Send + Sync {
-        async fn hover(&self, path: &Path, line: u32, column: u32) -> Result<Option<Hover>>;
-        async fn definition(&self, path: &Path, line: u32, column: u32) -> Result<Vec<Location>>;
-        async fn references(
-            &self,
-            path: &Path,
-            line: u32,
-            column: u32,
-            include_declaration: bool,
-        ) -> Result<Vec<Location>>;
-        async fn document_symbols(&self, path: &Path) -> Result<Option<DocumentSymbolResponse>>;
-        async fn diagnostics(&self, path: Option<&Path>) -> Result<Vec<(String, Vec<Diagnostic>)>>;
-    }
-}
-
 /// The result of a tool execution, including optional structured metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolOutput {
@@ -234,7 +201,6 @@ pub struct ToolContext {
     pub event_bus: Arc<EventBus>,
     pub storage: Option<Arc<dyn storage::StorageBackend>>,
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
-    pub lsp_backend: Option<Arc<dyn lsp::LspBackend>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -392,22 +358,12 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(journal::JournalReadTool));
     registry.register(Arc::new(todo::TodoReadTool));
     registry.register(Arc::new(todo::TodoWriteTool));
-    registry.register(Arc::new(aiwiki_search::AiwikiSearchTool));
-    registry.register(Arc::new(aiwiki_status::AiwikiStatusTool));
-    registry.register(Arc::new(aiwiki_ingest::AiwikiIngestTool));
-    registry.register(Arc::new(aiwiki_export::AiwikiExportTool));
-    registry.register(Arc::new(aiwiki_import::AiwikiImportTool));
     registry.register(Arc::new(codeindex_search::CodeIndexSearchTool));
     registry.register(Arc::new(codeindex_status::CodeIndexStatusTool));
     registry.register(Arc::new(codeindex_symbols::CodeIndexSymbolsTool));
     registry.register(Arc::new(codeindex_references::CodeIndexReferencesTool));
     registry.register(Arc::new(codeindex_dependencies::CodeIndexDependenciesTool));
     registry.register(Arc::new(codeindex_reindex::CodeIndexReindexTool));
-    registry.register(Arc::new(lsp_hover::LspHoverTool));
-    registry.register(Arc::new(lsp_definition::LspDefinitionTool));
-    registry.register(Arc::new(lsp_references::LspReferencesTool));
-    registry.register(Arc::new(lsp_symbols::LspSymbolsTool));
-    registry.register(Arc::new(lsp_diagnostics::LspDiagnosticsTool));
 
     registry
 }

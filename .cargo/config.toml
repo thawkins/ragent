@@ -1,0 +1,3 @@
+# Build environment configuration for ragent.
+# No special environment variables are required; callm is pure Rust and
+# does not use bindgen or LLVM.

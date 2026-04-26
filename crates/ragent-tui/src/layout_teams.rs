@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
 use ragent_team::team::{MemberStatus, TaskStatus, TaskStore, TeamStore};
@@ -359,7 +359,6 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 )
                 .border_style(Style::default().fg(Color::Blue)),
         )
-        .wrap(Wrap { trim: false })
         .scroll((app.teams_scroll_offset, 0));
 
     frame.render_widget(paragraph, area);

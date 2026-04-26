@@ -26,6 +26,10 @@ use crate::session::SessionManager;
 use crate::tool::{McpToolWrapper, TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
 
+const MAX_TOOL_RESULT_CHARS_FOR_LLM: usize = 12_000;
+const TOOL_RESULT_HEAD_CHARS_FOR_LLM: usize = 8_000;
+const TOOL_RESULT_TAIL_CHARS_FOR_LLM: usize = 4_000;
+
 /// Additional system-prompt guidance injected for Ollama sessions.
 pub const OLLAMA_TOOL_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
 IMPORTANT: When you need to take any action, call the appropriate tool IMMEDIATELY.\n\
@@ -36,65 +40,6 @@ When you need file contents, use the `read` tool with arguments like \
 Prefer small line ranges (100 lines max) for large files; iterate with `start_line`/`end_line`.\n\
 Never invent or guess file contents — always read them with the tool.\n\n\
 Rule: every response where you need information or need to act MUST start with a tool call.\n\n";
-
-/// Build a system-prompt section for LSP code-intelligence tools listing only
-/// the LSP servers that are currently connected. Returns an empty string if no
-/// servers are connected so no misleading guidance is injected.
-async fn build_lsp_guidance_section(lsp_manager: &crate::lsp::SharedLspManager) -> String {
-    use crate::lsp::LspStatus;
-
-    let guard = lsp_manager.read().await;
-    let connected: Vec<&crate::lsp::server::LspServer> = guard
-        .servers()
-        .iter()
-        .filter(|s| s.status == LspStatus::Connected)
-        .collect();
-
-    if connected.is_empty() {
-        return String::new();
-    }
-
-    let mut section = String::from(
-        "\n## Code Intelligence — LSP Tools\n\n\
-        The following Language Server Protocol (LSP) servers are **currently connected**. \
-        For source files in these languages, you MUST use LSP tools instead of `grep`/`glob` — \
-        they are semantic and understand types, scopes, and cross-file relationships. \
-        `grep` does NOT understand code structure.\n\n\
-        **Connected servers and their file extensions:**\n",
-    );
-
-    for server in &connected {
-        let exts: Vec<String> = server
-            .config
-            .extensions
-            .iter()
-            .map(|e| format!("`.{e}`"))
-            .collect();
-        let caps = server
-            .capabilities_summary
-            .as_deref()
-            .unwrap_or("connected");
-        section.push_str(&format!(
-            "- **{}** ({}) — {}\n",
-            server.language,
-            exts.join(", "),
-            caps
-        ));
-    }
-
-    section.push_str(
-        "\n**Use the right tool for each task:**\n\
-        - Find where a symbol is defined → `lsp_definition` (args: `path`, `line`, `column`)\n\
-        - Find all usages of a symbol → `lsp_references` (args: `path`, `line`, `column`)\n\
-        - Get type info / docs for a symbol → `lsp_hover` (args: `path`, `line`, `column`)\n\
-        - List all symbols in a file → `lsp_symbols` (arg: `path`)\n\
-        - Show compiler errors and warnings → `lsp_diagnostics` (optional arg: `path`)\n\n\
-        **Do NOT use grep for these tasks** when an LSP server is connected for that \
-        language. Use `grep` or `glob` only for languages not listed above, \
-        or when searching for arbitrary text patterns across many files.\n\n",
-    );
-    section
-}
 
 /// Build a system-prompt section describing the codebase index tools
 /// when the index **is** active.
@@ -477,10 +422,6 @@ pub struct SessionProcessor {
     /// Optional task manager for sub-agent spawning (F13/F14).
     /// Uses `OnceLock` to break the circular dependency with `TaskManager`.
     pub task_manager: std::sync::OnceLock<Arc<crate::task::TaskManager>>,
-    /// Optional LSP manager for code-intelligence tool context.
-    /// Uses `OnceLock` so it can be set after the processor is constructed
-    /// (the `LspManager` is created after the processor in `run_tui`).
-    pub lsp_manager: std::sync::OnceLock<crate::lsp::SharedLspManager>,
     /// Optional team manager for spawning and coordinating teammate sessions.
     /// Uses `OnceLock` to break the circular dependency with `TeamManager`.
     pub team_manager: std::sync::OnceLock<Arc<crate::team::TeamManager>>,
@@ -807,8 +748,8 @@ impl SessionProcessor {
         system_prompt.push_str(&tool_reference);
 
         // Inject question-tool guidance so the model knows how to present
-      // multiple-choice prompts effectively.
-      system_prompt.push_str(
+        // multiple-choice prompts effectively.
+        system_prompt.push_str(
           "\n## Question Tool Usage\n\
            When you need to ask the user a question, use the `question` tool. \
            If the answer should be one of a fixed set of choices, provide the `options` \
@@ -823,14 +764,6 @@ impl SessionProcessor {
            question(question: \"What is your name?\")\n\
            ```\n\n",
       );
-
-      // Inject LSP guidance only for the servers that are actually connected.
-        // This avoids telling the model it can use rust-analyzer when none is running.
-        if let Some(lsp) = self.lsp_manager.get() {
-            let _scope = profiler.scope("prompt.build_lsp_guidance");
-            let lsp_guidance = build_lsp_guidance_section(lsp).await;
-            system_prompt.push_str(&lsp_guidance);
-        }
 
         // Inject codebase index guidance. When the index is active, emit strong
         // directives to use codeindex over grep/search. When disabled, inform the
@@ -984,6 +917,10 @@ impl SessionProcessor {
                     stream_timeout_secs: None,
                 };
 
+                self.event_bus.publish(Event::RequestStarted {
+                    session_id: session_id.to_string(),
+                    outbound_bytes: chat_request_payload_bytes(&init_request),
+                });
                 match client.chat(init_request).await {
                     Ok(mut stream) => {
                         while let Some(ev) = stream.next().await {
@@ -1178,6 +1115,10 @@ impl SessionProcessor {
                         stream_timeout_secs: Some(self.stream_config.timeout_secs),
                     };
 
+                    self.event_bus.publish(Event::RequestStarted {
+                        session_id: session_id.to_string(),
+                        outbound_bytes: chat_request_payload_bytes(&attempt_request),
+                    });
                     let mut stream = {
                         let _scope = profiler.scope("loop.llm.create_stream");
                         match client.chat(attempt_request).await {
@@ -1537,7 +1478,11 @@ impl SessionProcessor {
 
                             tool_result_parts.push(ContentPart::ToolResult {
                                 tool_use_id: tc.id.clone(),
-                                content: result_content,
+                                content: tool_result_content_for_llm(
+                                    &tc.name,
+                                    &result_content,
+                                    tool_metadata.as_ref(),
+                                ),
                             });
 
                             if let Some(meta) = tool_metadata.as_ref() {
@@ -1580,7 +1525,6 @@ impl SessionProcessor {
                         event_bus: self.event_bus.clone(),
                         storage: Some(self.session_manager.storage().clone()),
                         task_manager: self.task_manager.get().cloned(),
-                        lsp_manager: self.lsp_manager.get().cloned(),
                         active_model: Some(model_ref.clone()),
                         team_context: team_context_for_session.clone(),
                         team_manager: self
@@ -2242,6 +2186,10 @@ impl SessionProcessor {
 
         let mut ack_text = String::new();
 
+        self.event_bus.publish(Event::RequestStarted {
+            session_id: session_id.to_string(),
+            outbound_bytes: chat_request_payload_bytes(&init_request),
+        });
         match client.chat(init_request).await {
             Ok(mut stream) => {
                 while let Some(ev) = stream.next().await {
@@ -2463,16 +2411,32 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 .parts
                 .iter()
                 .filter_map(|part| match part {
-                    MessagePart::ToolCall { call_id, state, .. } => {
+                    MessagePart::ToolCall {
+                        tool,
+                        call_id,
+                        state,
+                    } => {
                         let result_text = state
                             .output
                             .as_ref()
-                            .and_then(|v| v.as_str().map(std::string::ToString::to_string))
+                            .and_then(|v| {
+                                v.as_str()
+                                    .map(std::string::ToString::to_string)
+                                    .or_else(|| {
+                                        v.get("content")
+                                            .and_then(Value::as_str)
+                                            .map(std::string::ToString::to_string)
+                                    })
+                            })
                             .or_else(|| state.error.clone())
                             .unwrap_or_default();
                         Some(ContentPart::ToolResult {
                             tool_use_id: call_id.clone(),
-                            content: result_text,
+                            content: tool_result_content_for_llm(
+                                tool,
+                                &result_text,
+                                state.output.as_ref(),
+                            ),
                         })
                     }
                     _ => None,
@@ -2620,6 +2584,70 @@ fn compact_history_with_atomic_tool_calls(
     trimmed
 }
 
+fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+
+    let byte_idx = text
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    &text[..byte_idx]
+}
+
+fn trailing_at_char_boundary(text: &str, max_chars: usize) -> &str {
+    let total_chars = text.chars().count();
+    if total_chars <= max_chars {
+        return text;
+    }
+
+    let start_char = total_chars.saturating_sub(max_chars);
+    let byte_idx = text
+        .char_indices()
+        .nth(start_char)
+        .map(|(idx, _)| idx)
+        .unwrap_or(0);
+    &text[byte_idx..]
+}
+
+fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&Value>) -> String {
+    if content.chars().count() <= MAX_TOOL_RESULT_CHARS_FOR_LLM {
+        return content.to_string();
+    }
+
+    let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
+    let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
+    let omitted_chars = content
+        .chars()
+        .count()
+        .saturating_sub(head.chars().count() + tail.chars().count());
+
+    let line_info = metadata
+        .and_then(|m| {
+            m.get("total_lines")
+                .or_else(|| m.get("line_count"))
+                .or_else(|| m.get("lines"))
+                .and_then(Value::as_u64)
+        })
+        .map(|lines| format!(", {lines} lines"))
+        .unwrap_or_default();
+
+    format!(
+        "[tool result truncated for context: tool={tool}, {} chars{line_info}. \
+         Showing start and end segments; request narrower output if more detail is needed.]\n\n\
+         {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}",
+        content.chars().count()
+    )
+}
+
+fn chat_request_payload_bytes(request: &ChatRequest) -> u64 {
+    serde_json::to_vec(request)
+        .map(|payload| payload.len() as u64)
+        .unwrap_or(0)
+}
+
 /// Determines whether a stream error message represents a transient failure
 /// that should be retried rather than treated as fatal.
 ///
@@ -2749,7 +2777,9 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::tool_family_names;
     use crate::permission::{PermissionAction, PermissionChecker};
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_hardwired_team_tool_is_auto_approved() {
@@ -2809,5 +2839,132 @@ mod tests {
         .expect("permission check should succeed");
 
         assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[test]
+    fn test_tool_result_content_for_llm_truncates_large_payloads() {
+        let content = format!("{}{}", "a".repeat(9_000), "b".repeat(9_000));
+        let truncated =
+            tool_result_content_for_llm("read", &content, Some(&json!({"total_lines": 600})));
+
+        assert!(truncated.contains("tool=read"));
+        assert!(truncated.contains("600 lines"));
+        assert!(truncated.contains("[... "));
+        assert!(truncated.contains(&"a".repeat(200)));
+        assert!(truncated.contains(&"b".repeat(200)));
+        assert!(truncated.len() < content.len());
+    }
+
+    #[test]
+    fn test_history_to_chat_messages_uses_tool_output_content_field() {
+        let message = Message::new(
+            "session-1",
+            Role::Assistant,
+            vec![MessagePart::ToolCall {
+                tool: "read".to_string(),
+                call_id: "call-1".to_string(),
+                state: ToolCallState {
+                    status: ToolCallStatus::Completed,
+                    input: json!({"path": "src/lib.rs"}),
+                    output: Some(json!({
+                        "content": "fn main() {}\n",
+                        "line_count": 1
+                    })),
+                    error: None,
+                    duration_ms: Some(3),
+                },
+            }],
+        );
+
+        let chat = history_to_chat_messages(&[message]);
+        assert_eq!(chat.len(), 2);
+
+        let ChatContent::Parts(parts) = &chat[1].content else {
+            panic!("expected tool result parts");
+        };
+        let ContentPart::ToolResult { content, .. } = &parts[0] else {
+            panic!("expected tool result content");
+        };
+        assert_eq!(content, "fn main() {}\n");
+    }
+
+    #[test]
+    fn test_chat_request_payload_bytes_counts_serialized_request() {
+        let request = ChatRequest {
+            model: "demo".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: Vec::new(),
+            temperature: Some(0.2),
+            top_p: None,
+            max_tokens: Some(64),
+            system: Some("system".to_string()),
+            options: HashMap::new(),
+            session_id: Some("session-1".to_string()),
+            request_id: Some("request-1".to_string()),
+            stream_timeout_secs: None,
+        };
+
+        assert!(chat_request_payload_bytes(&request) >= 40);
+    }
+
+    #[test]
+    fn test_hidden_tool_families_are_excluded_from_prompt_and_request_tools() {
+        let registry = crate::tool::create_default_registry();
+        let hidden = tool_family_names("github")
+            .expect("github family should exist")
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect::<Vec<_>>();
+        registry.set_hidden(&hidden);
+
+        let prompt_section = build_tool_reference_section(&registry);
+        assert!(!prompt_section.contains("github_list_issues"));
+        assert!(!prompt_section.contains("github_review_pr"));
+
+        let tool_definitions = registry.definitions();
+        assert!(
+            !tool_definitions
+                .iter()
+                .any(|tool| tool.name == "github_list_issues")
+        );
+        assert!(
+            !tool_definitions
+                .iter()
+                .any(|tool| tool.name == "github_review_pr")
+        );
+        assert!(tool_definitions.iter().any(|tool| tool.name == "read"));
+
+        let request = ChatRequest {
+            model: "demo".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: tool_definitions,
+            temperature: Some(0.2),
+            top_p: None,
+            max_tokens: None,
+            system: Some(prompt_section),
+            options: HashMap::new(),
+            session_id: Some("session-1".to_string()),
+            request_id: Some("request-1".to_string()),
+            stream_timeout_secs: None,
+        };
+
+        assert!(
+            !request
+                .tools
+                .iter()
+                .any(|tool| tool.name == "github_list_issues")
+        );
+        assert!(
+            !request
+                .tools
+                .iter()
+                .any(|tool| tool.name == "github_review_pr")
+        );
     }
 }

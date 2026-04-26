@@ -7,7 +7,6 @@
 
 use ragent_agent as ragent_core;
 use ragent_core::event::{Event, FinishReason};
-use ragent_core::lsp::LspStatus;
 use ragent_server::sse::event_to_parts;
 use serde_json::Value;
 
@@ -335,34 +334,6 @@ fn test_copilot_device_flow_complete_empty_token() {
         api_base: "https://api.github.com".into(),
     });
     assert_eq!(v["token_present"], false);
-}
-
-#[test]
-fn test_lsp_status_changed() {
-    let (name, v) = parse_data(&Event::LspStatusChanged {
-        server_id: "rust".into(),
-        status: LspStatus::Connected,
-    });
-    assert_eq!(name, "lsp_status_changed");
-    assert_eq!(v["server_id"], "rust");
-    // Status uses Debug format
-    assert_eq!(v["status"], "Connected");
-}
-
-#[test]
-fn test_lsp_status_failed() {
-    let (_, v) = parse_data(&Event::LspStatusChanged {
-        server_id: "ts".into(),
-        status: LspStatus::Failed {
-            error: "crash".into(),
-        },
-    });
-    // Debug format includes variant + fields
-    let status = v["status"].as_str().unwrap();
-    assert!(
-        status.contains("Failed"),
-        "expected Debug format, got: {status}"
-    );
 }
 
 // ── Quota / usage events ─────────────────────────────────────────────────

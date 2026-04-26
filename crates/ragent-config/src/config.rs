@@ -5,7 +5,7 @@
 //! `RAGENT_CONFIG_CONTENT` env. Provider, agent, MCP server, and permission
 //! settings are all configured here.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,9 +34,6 @@ pub struct Config {
     /// MCP server definitions keyed by server id.
     #[serde(default)]
     pub mcp: HashMap<String, McpServerConfig>,
-    /// LSP server definitions keyed by language id (e.g. `"rust"`, `"typescript"`).
-    #[serde(default)]
-    pub lsp: HashMap<String, LspServerConfig>,
     /// Additional instruction strings appended to agent prompts.
     #[serde(default)]
     pub instructions: Vec<String>,
@@ -61,15 +58,19 @@ pub struct Config {
     /// LLM streaming configuration (timeouts, retries).
     #[serde(default)]
     pub stream: StreamConfig,
+    /// Embedded internal LLM configuration for local helper tasks.
+    #[serde(default)]
+    pub internal_llm: InternalLlmConfig,
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
-    /// AIWiki automatic sync on startup (default: true).
-    #[serde(default = "default_aiwiki_autosync")]
-    pub aiwiki_autosync: bool,
+    /// Tool-family visibility switches.
+    /// When a switch is `false`, all tools in that family are hidden from the LLM.
+    #[serde(default)]
+    pub tool_visibility: ToolVisibilityConfig,
     /// Tool names to hide from the LLM (excluded from tool definitions and system-prompt listings).
     /// Hidden tools remain registered and executable; they are simply not advertised to the model.
     ///
@@ -81,13 +82,170 @@ pub struct Config {
     pub hidden_tools: Vec<String>,
 }
 
-const fn default_aiwiki_autosync() -> bool {
-    true
-}
-/// Configuration for LLM streaming behaviour (timeouts, retries).
+/// Tool-family visibility configuration.
 ///
-/// Override in `ragent.json`:
-/// ```json
+/// Controls which tool families are advertised to the LLM. Each switch
+/// corresponds to a group of related tools. When a switch is `false`,
+/// all tools in that family are suppressed from `ToolRegistry::definitions()`.
+/// Tools remain registered and executable regardless of visibility.
+#[derive(Debug, Clone, Default)]
+struct ToolVisibilitySpecified {
+    office: bool,
+    journal: bool,
+    github: bool,
+    gitlab: bool,
+    codeindex: bool,
+}
+
+/// Tool-family visibility configuration.
+///
+/// The config loader tracks which switches were explicitly present in the
+/// source JSON so merge operations can preserve base values for omitted fields.
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolVisibilityConfig {
+    /// Office document tools (office_read, office_write, office_info, libre_read, etc.).
+    #[serde(default = "default_false")]
+    pub office: bool,
+    /// Journal tools (journal_write, journal_search, journal_read).
+    #[serde(default = "default_false")]
+    pub journal: bool,
+    /// GitHub tools (github_list_issues, github_get_issue, github_create_issue, etc.).
+    #[serde(default = "default_false")]
+    pub github: bool,
+    /// GitLab tools (gitlab_list_issues, gitlab_get_issue, gitlab_create_mr, etc.).
+    #[serde(default = "default_false")]
+    pub gitlab: bool,
+    /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
+    /// Default `true` — codeindex tools are visible when the subsystem is enabled.
+    #[serde(default = "default_true")]
+    pub codeindex: bool,
+    #[serde(skip)]
+    specified: ToolVisibilitySpecified,
+}
+
+impl Default for ToolVisibilityConfig {
+    fn default() -> Self {
+        Self {
+            office: false,
+            journal: false,
+            github: false,
+            gitlab: false,
+            codeindex: true,
+            specified: ToolVisibilitySpecified::default(),
+        }
+    }
+}
+
+impl ToolVisibilityConfig {
+    /// Iterate over every tool-visibility switch and its enabled state.
+    pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
+        [
+            ("office", self.office),
+            ("journal", self.journal),
+            ("github", self.github),
+            ("gitlab", self.gitlab),
+            ("codeindex", self.codeindex),
+        ]
+        .into_iter()
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolVisibilityConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        struct RawToolVisibilityConfig {
+            office: Option<bool>,
+            journal: Option<bool>,
+            github: Option<bool>,
+            gitlab: Option<bool>,
+            codeindex: Option<bool>,
+        }
+
+        let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
+        Ok(Self {
+            office: raw.office.unwrap_or_else(default_false),
+            journal: raw.journal.unwrap_or_else(default_false),
+            github: raw.github.unwrap_or_else(default_false),
+            gitlab: raw.gitlab.unwrap_or_else(default_false),
+            codeindex: raw.codeindex.unwrap_or_else(default_true),
+            specified: ToolVisibilitySpecified {
+                office: raw.office.is_some(),
+                journal: raw.journal.is_some(),
+                github: raw.github.is_some(),
+                gitlab: raw.gitlab.is_some(),
+                codeindex: raw.codeindex.is_some(),
+            },
+        })
+    }
+}
+
+const fn default_false() -> bool {
+    false
+}
+
+/// Map a visibility switch to the list of tool names it governs.
+pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
+    match switch {
+        "office" => Some(&[
+            "office_read",
+            "office_write",
+            "office_info",
+            "libre_read",
+            "libre_write",
+            "libre_info",
+            "pdf_read",
+            "pdf_write",
+        ]),
+        "journal" => Some(&["journal_write", "journal_search", "journal_read"]),
+        "github" => Some(&[
+            "github_list_issues",
+            "github_get_issue",
+            "github_create_issue",
+            "github_comment_issue",
+            "github_close_issue",
+            "github_list_prs",
+            "github_get_pr",
+            "github_create_pr",
+            "github_merge_pr",
+            "github_review_pr",
+        ]),
+        "gitlab" => Some(&[
+            "gitlab_list_issues",
+            "gitlab_get_issue",
+            "gitlab_create_issue",
+            "gitlab_comment_issue",
+            "gitlab_close_issue",
+            "gitlab_list_mrs",
+            "gitlab_get_mr",
+            "gitlab_create_mr",
+            "gitlab_merge_mr",
+            "gitlab_approve_mr",
+            "gitlab_list_pipelines",
+            "gitlab_get_pipeline",
+            "gitlab_cancel_pipeline",
+            "gitlab_retry_pipeline",
+            "gitlab_list_jobs",
+            "gitlab_get_job",
+            "gitlab_get_job_log",
+            "gitlab_cancel_job",
+            "gitlab_retry_job",
+        ]),
+        "codeindex" => Some(&[
+            "codeindex_search",
+            "codeindex_status",
+            "codeindex_symbols",
+            "codeindex_references",
+            "codeindex_dependencies",
+            "codeindex_reindex",
+        ]),
+        _ => None,
+    }
+}
+
+/// Configuration for LLM streaming behaviour (timeouts, retries)./// ```json
 /// {
 ///   "stream": {
 ///     "timeout_secs": 600,
@@ -136,7 +294,15 @@ impl Default for StreamConfig {
 ///
 /// Runtime-derived fields like `project_root` and `index_dir` are
 /// resolved at startup, not stored in the config file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
+struct CodeIndexSpecified {
+    enabled: bool,
+    max_file_size: bool,
+    extra_exclude_dirs: bool,
+    extra_exclude_patterns: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct CodeIndexConfig {
     /// Whether code indexing is enabled.
     #[serde(default = "default_code_index_enabled")]
@@ -150,6 +316,8 @@ pub struct CodeIndexConfig {
     /// Additional glob patterns to exclude from scanning.
     #[serde(default)]
     pub extra_exclude_patterns: Vec<String>,
+    #[serde(skip_serializing, default)]
+    specified: CodeIndexSpecified,
 }
 
 const fn default_code_index_enabled() -> bool {
@@ -167,7 +335,49 @@ impl Default for CodeIndexConfig {
             max_file_size: default_max_file_size(),
             extra_exclude_dirs: Vec::new(),
             extra_exclude_patterns: Vec::new(),
+            specified: CodeIndexSpecified::default(),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for CodeIndexConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawCodeIndexConfig {
+            #[serde(default)]
+            enabled: Option<bool>,
+            #[serde(default)]
+            max_file_size: Option<u64>,
+            #[serde(default)]
+            extra_exclude_dirs: Option<Vec<String>>,
+            #[serde(default)]
+            extra_exclude_patterns: Option<Vec<String>>,
+        }
+
+        let raw = RawCodeIndexConfig::deserialize(deserializer)?;
+        let mut config = Self::default();
+
+        if let Some(enabled) = raw.enabled {
+            config.enabled = enabled;
+            config.specified.enabled = true;
+        }
+        if let Some(max_file_size) = raw.max_file_size {
+            config.max_file_size = max_file_size;
+            config.specified.max_file_size = true;
+        }
+        if let Some(extra_exclude_dirs) = raw.extra_exclude_dirs {
+            config.extra_exclude_dirs = extra_exclude_dirs;
+            config.specified.extra_exclude_dirs = true;
+        }
+        if let Some(extra_exclude_patterns) = raw.extra_exclude_patterns {
+            config.extra_exclude_patterns = extra_exclude_patterns;
+            config.specified.extra_exclude_patterns = true;
+        }
+
+        Ok(config)
     }
 }
 
@@ -377,66 +587,6 @@ pub enum McpTransport {
     Http,
 }
 
-// ── LSP configuration ────────────────────────────────────────────────────────
-
-/// Configuration for a single Language Server Protocol server.
-///
-/// Servers communicate over stdio JSON-RPC. The server is started as a child
-/// process and the standard LSP initialize handshake is performed.
-///
-/// Example `ragent.json` entry:
-/// ```json
-/// {
-///   "lsp": {
-///     "rust": {
-///       "command": "rust-analyzer",
-///       "extensions": ["rs"]
-///     }
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LspServerConfig {
-    /// Executable name or full path (e.g. `"rust-analyzer"`).
-    pub command: Option<String>,
-    /// Command-line arguments (e.g. `["--stdio"]` for some servers).
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// Environment variable overrides injected into the server process.
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    /// File extensions this server handles (e.g. `["rs"]` for Rust).
-    #[serde(default)]
-    pub extensions: Vec<String>,
-    /// If `true`, this server is configured but will not be started.
-    #[serde(default)]
-    pub disabled: bool,
-    /// Maximum milliseconds to wait for an LSP response (default: 10 000 ms).
-    #[serde(default = "LspServerConfig::default_timeout_ms")]
-    pub timeout_ms: u64,
-}
-
-impl LspServerConfig {
-    /// Default LSP response timeout in milliseconds.
-    #[must_use]
-    pub const fn default_timeout_ms() -> u64 {
-        10_000
-    }
-}
-
-impl Default for LspServerConfig {
-    fn default() -> Self {
-        Self {
-            command: None,
-            args: Vec::new(),
-            env: HashMap::new(),
-            extensions: Vec::new(),
-            disabled: false,
-            timeout_ms: Self::default_timeout_ms(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// Flags for experimental features that are not yet stable.
 pub struct ExperimentalFlags {
@@ -589,8 +739,65 @@ impl Config {
         Ok(config)
     }
 
-    /// Deep merge two configs, with overlay taking precedence for set fields.
+    /// Save the config back to a file.
     ///
+    /// Writes the current config as pretty-printed JSON. The path is
+    /// the project-local config file (`.ragent/ragent.json`) if
+    /// `prefer_project` is true and the project directory exists,
+    /// otherwise the global config file (`~/.config/ragent/ragent.json`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written.
+    pub fn save(&self, prefer_project: bool) -> anyhow::Result<()> {
+        let path = if prefer_project {
+            let project = PathBuf::from(".ragent/ragent.json");
+            if project.parent().map_or(false, |p| p.exists()) {
+                project
+            } else {
+                dirs::config_dir()
+                    .map(|d| d.join("ragent").join("ragent.json"))
+                    .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
+            }
+        } else {
+            dirs::config_dir()
+                .map(|d| d.join("ragent").join("ragent.json"))
+                .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
+        };
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
+
+        std::fs::write(&path, json)
+            .map_err(|e| anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e))
+    }
+
+    /// Compute the complete hidden-tool set from both legacy per-tool overrides
+    /// and the tool-family visibility switches.
+    #[must_use]
+    pub fn effective_hidden_tools(&self) -> Vec<String> {
+        let mut hidden: std::collections::HashSet<String> =
+            self.hidden_tools.iter().cloned().collect();
+
+        for (switch, enabled) in self.tool_visibility.iter_switches() {
+            if enabled {
+                continue;
+            }
+            if let Some(names) = tool_family_names(switch) {
+                hidden.extend(names.iter().map(|name| (*name).to_string()));
+            }
+        }
+
+        let mut hidden: Vec<String> = hidden.into_iter().collect();
+        hidden.sort();
+        hidden
+    }
+
+    /// Deep merge two configs, with overlay taking precedence for set fields.    ///
     /// # Examples
     ///
     /// ```
@@ -626,9 +833,6 @@ impl Config {
         }
         for (k, v) in overlay.mcp {
             base.mcp.insert(k, v);
-        }
-        for (k, v) in overlay.lsp {
-            base.lsp.insert(k, v);
         }
         // Permissions, instructions, and skill dirs append
         base.permission.extend(overlay.permission);
@@ -668,16 +872,90 @@ impl Config {
             base.gitlab.username = overlay.gitlab.username;
         }
 
-        // AIWiki autosync: overlay takes precedence
-        if overlay.aiwiki_autosync != default_aiwiki_autosync() {
-            base.aiwiki_autosync = overlay.aiwiki_autosync;
-        }
-
         // hidden_tools: union of base and overlay (both lists are honoured)
         for name in overlay.hidden_tools {
             if !base.hidden_tools.contains(&name) {
                 base.hidden_tools.push(name);
             }
+        }
+
+        // code_index: overlay takes precedence only for explicitly set fields
+        if overlay.code_index.specified.enabled {
+            base.code_index.enabled = overlay.code_index.enabled;
+        }
+        if overlay.code_index.specified.max_file_size {
+            base.code_index.max_file_size = overlay.code_index.max_file_size;
+        }
+        if overlay.code_index.specified.extra_exclude_dirs {
+            base.code_index.extra_exclude_dirs = overlay.code_index.extra_exclude_dirs;
+        }
+        if overlay.code_index.specified.extra_exclude_patterns {
+            base.code_index.extra_exclude_patterns = overlay.code_index.extra_exclude_patterns;
+        }
+
+        // internal_llm: overlay takes precedence only for explicitly set fields
+        if overlay.internal_llm.specified.enabled {
+            base.internal_llm.enabled = overlay.internal_llm.enabled;
+        }
+        if overlay.internal_llm.specified.backend {
+            base.internal_llm.backend = overlay.internal_llm.backend;
+        }
+        if overlay.internal_llm.specified.model_id {
+            base.internal_llm.model_id = overlay.internal_llm.model_id;
+        }
+        if overlay.internal_llm.specified.artifact_max_bytes {
+            base.internal_llm.artifact_max_bytes = overlay.internal_llm.artifact_max_bytes;
+        }
+        if overlay.internal_llm.specified.threads {
+            base.internal_llm.threads = overlay.internal_llm.threads;
+        }
+        if overlay.internal_llm.specified.gpu_layers {
+            base.internal_llm.gpu_layers = overlay.internal_llm.gpu_layers;
+        }
+        if overlay.internal_llm.specified.context_window {
+            base.internal_llm.context_window = overlay.internal_llm.context_window;
+        }
+        if overlay.internal_llm.specified.max_output_tokens {
+            base.internal_llm.max_output_tokens = overlay.internal_llm.max_output_tokens;
+        }
+        if overlay.internal_llm.specified.timeout_ms {
+            base.internal_llm.timeout_ms = overlay.internal_llm.timeout_ms;
+        }
+        if overlay.internal_llm.specified.max_parallel_requests {
+            base.internal_llm.max_parallel_requests = overlay.internal_llm.max_parallel_requests;
+        }
+        if overlay.internal_llm.specified.download_policy {
+            base.internal_llm.download_policy = overlay.internal_llm.download_policy;
+        }
+        if overlay.internal_llm.specified.allowed_tasks {
+            base.internal_llm.allowed_tasks = overlay.internal_llm.allowed_tasks;
+        }
+        if overlay.internal_llm.specified.session_title_enabled {
+            base.internal_llm.session_title_enabled = overlay.internal_llm.session_title_enabled;
+        }
+        if overlay.internal_llm.specified.prompt_context_enabled {
+            base.internal_llm.prompt_context_enabled = overlay.internal_llm.prompt_context_enabled;
+        }
+        if overlay.internal_llm.specified.memory_extraction_enabled {
+            base.internal_llm.memory_extraction_enabled =
+                overlay.internal_llm.memory_extraction_enabled;
+        }
+
+        // tool_visibility: overlay takes precedence only for explicitly set fields
+        if overlay.tool_visibility.specified.office {
+            base.tool_visibility.office = overlay.tool_visibility.office;
+        }
+        if overlay.tool_visibility.specified.journal {
+            base.tool_visibility.journal = overlay.tool_visibility.journal;
+        }
+        if overlay.tool_visibility.specified.github {
+            base.tool_visibility.github = overlay.tool_visibility.github;
+        }
+        if overlay.tool_visibility.specified.gitlab {
+            base.tool_visibility.gitlab = overlay.tool_visibility.gitlab;
+        }
+        if overlay.tool_visibility.specified.codeindex {
+            base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
         }
 
         base
@@ -710,6 +988,297 @@ pub struct GitLabIntegrationConfig {
     pub token: Option<String>,
     /// GitLab username / identity.
     pub username: Option<String>,
+}
+
+// ── Embedded internal LLM configuration ───────────────────────────────────────
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct InternalLlmSpecified {
+    enabled: bool,
+    backend: bool,
+    model_id: bool,
+    artifact_max_bytes: bool,
+    threads: bool,
+    gpu_layers: bool,
+    context_window: bool,
+    max_output_tokens: bool,
+    timeout_ms: bool,
+    max_parallel_requests: bool,
+    download_policy: bool,
+    allowed_tasks: bool,
+    session_title_enabled: bool,
+    prompt_context_enabled: bool,
+    memory_extraction_enabled: bool,
+}
+
+/// Download policy for embedded internal-LLM assets.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InternalLlmDownloadPolicy {
+    /// Download missing artifacts only when the runtime first needs them.
+    #[default]
+    OnDemand,
+    /// Never download automatically; require the files to already exist locally.
+    Never,
+    /// Download proactively during future startup/setup flows.
+    Prefetch,
+}
+
+/// Embedded internal-LLM configuration.
+///
+/// Controls the dormant local-runtime scaffold used for internal helper tasks.
+/// The runtime stays disabled unless `enabled` is set to `true`, and later
+/// phases decide which internal call sites may consume it.
+///
+/// ```json
+/// {
+///   "internal_llm": {
+///     "enabled": false,
+///     "backend": "embedded",
+///     "model_id": "smollm2-360m-instruct-q4",
+///     "artifact_max_bytes": 1073741824,
+///     "threads": 4,
+///     "gpu_layers": 0,
+///     "context_window": 4096,
+///     "max_output_tokens": 1024,
+///     "timeout_ms": 300000,
+///     "max_parallel_requests": 2,
+///     "download_policy": "on_demand",
+///     "allowed_tasks": ["session_title", "summarize_tool_output"],
+///     "session_title_enabled": false,
+///     "prompt_context_enabled": false,
+///     "memory_extraction_enabled": false
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct InternalLlmConfig {
+    /// Whether the embedded internal LLM is enabled.
+    #[serde(default = "default_internal_llm_enabled")]
+    pub enabled: bool,
+    /// Backend identifier for the embedded runtime.
+    #[serde(default = "default_internal_llm_backend")]
+    pub backend: String,
+    /// Model identifier used by the embedded runtime.
+    #[serde(default = "default_internal_llm_model_id")]
+    pub model_id: String,
+    /// Maximum allowed artifact size in bytes.
+    #[serde(default = "default_internal_llm_artifact_max_bytes")]
+    pub artifact_max_bytes: u64,
+    /// Requested CPU thread count for Candle's Rayon-backed CPU execution path.
+    ///
+    /// The effective value is reported at startup and in `/internal-llm show`
+    /// because the process-global Rayon pool can only be configured once.
+    #[serde(default = "default_internal_llm_threads")]
+    pub threads: usize,
+    /// Requested number of model layers to place on the GPU.
+    ///
+    /// The current internal Candle runtime does not implement GGUF layer
+    /// offload, so non-zero values are surfaced in status output but forced to
+    /// `0` effective GPU layers.
+    #[serde(default)]
+    pub gpu_layers: u32,
+    /// Maximum context window reserved for the internal model.
+    #[serde(default = "default_internal_llm_context_window")]
+    pub context_window: usize,
+    /// Maximum tokens the internal model may generate.
+    #[serde(default = "default_internal_llm_max_output_tokens")]
+    pub max_output_tokens: u32,
+    /// Per-request timeout in milliseconds.
+    #[serde(default = "default_internal_llm_timeout_ms")]
+    pub timeout_ms: u64,
+    /// Maximum active + queued requests allowed against the single-worker runtime.
+    #[serde(default = "default_internal_llm_max_parallel_requests")]
+    pub max_parallel_requests: usize,
+    /// Policy for obtaining model artifacts.
+    #[serde(default)]
+    pub download_policy: InternalLlmDownloadPolicy,
+    /// Allowlisted internal tasks that may use the embedded model.
+    #[serde(default = "default_internal_llm_allowed_tasks")]
+    pub allowed_tasks: Vec<String>,
+    /// Whether session titles may be generated with the embedded model.
+    #[serde(default = "default_internal_llm_session_title_enabled")]
+    pub session_title_enabled: bool,
+    /// Whether prompt/context compaction may use the embedded model.
+    #[serde(default = "default_internal_llm_prompt_context_enabled")]
+    pub prompt_context_enabled: bool,
+    /// Whether memory extraction prefiltering may use the embedded model.
+    #[serde(default = "default_internal_llm_memory_extraction_enabled")]
+    pub memory_extraction_enabled: bool,
+    #[serde(skip_serializing, default)]
+    specified: InternalLlmSpecified,
+}
+
+impl Default for InternalLlmConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_internal_llm_enabled(),
+            backend: default_internal_llm_backend(),
+            model_id: default_internal_llm_model_id(),
+            artifact_max_bytes: default_internal_llm_artifact_max_bytes(),
+            threads: default_internal_llm_threads(),
+            gpu_layers: 0,
+            context_window: default_internal_llm_context_window(),
+            max_output_tokens: default_internal_llm_max_output_tokens(),
+            timeout_ms: default_internal_llm_timeout_ms(),
+            max_parallel_requests: default_internal_llm_max_parallel_requests(),
+            download_policy: InternalLlmDownloadPolicy::default(),
+            allowed_tasks: default_internal_llm_allowed_tasks(),
+            session_title_enabled: default_internal_llm_session_title_enabled(),
+            prompt_context_enabled: default_internal_llm_prompt_context_enabled(),
+            memory_extraction_enabled: default_internal_llm_memory_extraction_enabled(),
+            specified: InternalLlmSpecified::default(),
+        }
+    }
+}
+
+impl InternalLlmConfig {
+    /// Returns `true` when the named internal task is allowlisted.
+    #[must_use]
+    pub fn allows_task(&self, task: &str) -> bool {
+        self.allowed_tasks.iter().any(|allowed| allowed == task)
+    }
+}
+
+impl<'de> Deserialize<'de> for InternalLlmConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize, Default)]
+        struct RawInternalLlmConfig {
+            enabled: Option<bool>,
+            backend: Option<String>,
+            model_id: Option<String>,
+            artifact_max_bytes: Option<u64>,
+            threads: Option<usize>,
+            gpu_layers: Option<u32>,
+            context_window: Option<usize>,
+            max_output_tokens: Option<u32>,
+            timeout_ms: Option<u64>,
+            max_parallel_requests: Option<usize>,
+            download_policy: Option<InternalLlmDownloadPolicy>,
+            allowed_tasks: Option<Vec<String>>,
+            session_title_enabled: Option<bool>,
+            prompt_context_enabled: Option<bool>,
+            memory_extraction_enabled: Option<bool>,
+        }
+
+        let raw = RawInternalLlmConfig::deserialize(deserializer)?;
+        let specified = InternalLlmSpecified {
+            enabled: raw.enabled.is_some(),
+            backend: raw.backend.is_some(),
+            model_id: raw.model_id.is_some(),
+            artifact_max_bytes: raw.artifact_max_bytes.is_some(),
+            threads: raw.threads.is_some(),
+            gpu_layers: raw.gpu_layers.is_some(),
+            context_window: raw.context_window.is_some(),
+            max_output_tokens: raw.max_output_tokens.is_some(),
+            timeout_ms: raw.timeout_ms.is_some(),
+            max_parallel_requests: raw.max_parallel_requests.is_some(),
+            download_policy: raw.download_policy.is_some(),
+            allowed_tasks: raw.allowed_tasks.is_some(),
+            session_title_enabled: raw.session_title_enabled.is_some(),
+            prompt_context_enabled: raw.prompt_context_enabled.is_some(),
+            memory_extraction_enabled: raw.memory_extraction_enabled.is_some(),
+        };
+        Ok(Self {
+            enabled: raw.enabled.unwrap_or_else(default_internal_llm_enabled),
+            backend: raw.backend.unwrap_or_else(default_internal_llm_backend),
+            model_id: raw.model_id.unwrap_or_else(default_internal_llm_model_id),
+            artifact_max_bytes: raw
+                .artifact_max_bytes
+                .unwrap_or_else(default_internal_llm_artifact_max_bytes),
+            threads: raw.threads.unwrap_or_else(default_internal_llm_threads),
+            gpu_layers: raw.gpu_layers.unwrap_or_default(),
+            context_window: raw
+                .context_window
+                .unwrap_or_else(default_internal_llm_context_window),
+            max_output_tokens: raw
+                .max_output_tokens
+                .unwrap_or_else(default_internal_llm_max_output_tokens),
+            timeout_ms: raw
+                .timeout_ms
+                .unwrap_or_else(default_internal_llm_timeout_ms),
+            max_parallel_requests: raw
+                .max_parallel_requests
+                .unwrap_or_else(default_internal_llm_max_parallel_requests),
+            download_policy: raw.download_policy.unwrap_or_default(),
+            allowed_tasks: raw
+                .allowed_tasks
+                .unwrap_or_else(default_internal_llm_allowed_tasks),
+            session_title_enabled: raw
+                .session_title_enabled
+                .unwrap_or_else(default_internal_llm_session_title_enabled),
+            prompt_context_enabled: raw
+                .prompt_context_enabled
+                .unwrap_or_else(default_internal_llm_prompt_context_enabled),
+            memory_extraction_enabled: raw
+                .memory_extraction_enabled
+                .unwrap_or_else(default_internal_llm_memory_extraction_enabled),
+            specified,
+        })
+    }
+}
+
+fn default_internal_llm_enabled() -> bool {
+    false
+}
+
+fn default_internal_llm_backend() -> String {
+    "embedded".to_string()
+}
+
+fn default_internal_llm_model_id() -> String {
+    "smollm2-360m-instruct-q4".to_string()
+}
+
+const fn default_internal_llm_artifact_max_bytes() -> u64 {
+    1_073_741_824
+}
+
+const fn default_internal_llm_threads() -> usize {
+    4
+}
+
+const fn default_internal_llm_context_window() -> usize {
+    4096
+}
+
+const fn default_internal_llm_max_output_tokens() -> u32 {
+    1_024
+}
+
+const fn default_internal_llm_timeout_ms() -> u64 {
+    // 300 seconds: must cover cold model load plus slower local helper tasks on
+    // constrained CPUs.
+    300_000
+}
+
+const fn default_internal_llm_max_parallel_requests() -> usize {
+    2
+}
+
+fn default_internal_llm_allowed_tasks() -> Vec<String> {
+    vec![
+        "session_title".to_string(),
+        "summarize_tool_output".to_string(),
+        "prompt_compaction".to_string(),
+        "memory_prefilter".to_string(),
+        "chat".to_string(),
+    ]
+}
+
+const fn default_internal_llm_session_title_enabled() -> bool {
+    false
+}
+
+const fn default_internal_llm_prompt_context_enabled() -> bool {
+    false
+}
+
+const fn default_internal_llm_memory_extraction_enabled() -> bool {
+    false
 }
 
 // ── Memory configuration ─────────────────────────────────────────────────────

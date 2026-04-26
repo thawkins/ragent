@@ -21,11 +21,11 @@ impl Tool for QuestionTool {
         "question"
     }
 
-          /// # Errors
-          ///
-          /// Returns an error if the description string cannot be converted or returned.
-          fn description(&self) -> &'static str {
-              "Ask the user a question and wait for their typed response. \
+    /// # Errors
+    ///
+    /// Returns an error if the description string cannot be converted or returned.
+    fn description(&self) -> &'static str {
+        "Ask the user a question and wait for their typed response. \
                Use this when you need clarification, prioritisation help, or confirmation \
                before proceeding. \
                \
@@ -34,7 +34,7 @@ impl Tool for QuestionTool {
                The user will see a multiple-choice dialog instead of a free-text input, \
                and their selection is returned as the result. \
                If `options` is omitted the user sees a plain text-input dialog."
-          }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Tim Hawkins"]
-description = "Extended document, web, memory, code index, and LSP tools for ragent"
+description = "Extended document, web, memory, and code index tools for ragent"
 repository = "https://github.com/thawkins/ragent"
 
 [dependencies]
@@ -12,7 +12,6 @@ ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-storage = { path = "../ragent-storage" }
 ragent-types = { path = "../ragent-types" }
-ragent-aiwiki = { path = "../ragent-aiwiki" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -44,13 +43,22 @@ spreadsheet-ods = { workspace = true }
 printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }
-
-lsp-types = { workspace = true }
 url = { workspace = true }
-
 [dev-dependencies]
 tempfile = "3.14"
 
+[dependencies.ort]
+workspace = true
+optional = true
+
+[dependencies.tokenizers]
+workspace = true
+optional = true
+
+[dependencies.ndarray]
+workspace = true
+optional = true
+
 [features]
 default = []
-embeddings = []
+embeddings = ["dep:ort", "dep:tokenizers", "dep:ndarray"]

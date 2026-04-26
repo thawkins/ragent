@@ -3,6 +3,11 @@
 use std::sync::Arc;
 
 use crate::ToolRegistry;
+use crate::git::{
+    GitAddTool, GitBranchTool, GitCheckoutTool, GitCherryPickTool, GitCloneTool, GitCommitTool,
+    GitDiffTool, GitFetchTool, GitLogTool, GitMergeTool, GitPullTool, GitPushTool, GitRemoteTool,
+    GitResetTool, GitShowTool, GitStashTool, GitStatusTool, GitTagTool,
+};
 use crate::github::{
     GithubCloseIssueTool, GithubCommentIssueTool, GithubCreateIssueTool, GithubCreatePrTool,
     GithubGetIssueTool, GithubGetPrTool, GithubListIssuesTool, GithubListPrsTool,
@@ -31,6 +36,32 @@ pub fn create_vcs_registry() -> ToolRegistry {
     registry.register(Arc::new(GithubCreatePrTool));
     registry.register(Arc::new(GithubMergePrTool));
     registry.register(Arc::new(GithubReviewPrTool));
+
+    // --- Git local workspace tools (Milestone 1) ---
+    registry.register(Arc::new(GitStatusTool));
+    registry.register(Arc::new(GitLogTool));
+    registry.register(Arc::new(GitDiffTool));
+    registry.register(Arc::new(GitBranchTool));
+    registry.register(Arc::new(GitShowTool));
+    registry.register(Arc::new(GitRemoteTool));
+    registry.register(Arc::new(GitTagTool));
+
+    // --- Git local workspace tools (Milestone 2) ---
+    registry.register(Arc::new(GitAddTool));
+    registry.register(Arc::new(GitResetTool));
+    registry.register(Arc::new(GitCheckoutTool));
+    registry.register(Arc::new(GitCommitTool));
+    registry.register(Arc::new(GitStashTool));
+    registry.register(Arc::new(GitCherryPickTool));
+
+    // --- Git local workspace tools (Milestone 3) ---
+    registry.register(Arc::new(GitPushTool));
+    registry.register(Arc::new(GitPullTool));
+    registry.register(Arc::new(GitFetchTool));
+    registry.register(Arc::new(GitCloneTool));
+
+    // --- Git local workspace tools (Milestone 4) ---
+    registry.register(Arc::new(GitMergeTool));
 
     registry.register(Arc::new(GitlabListIssuesTool));
     registry.register(Arc::new(GitlabGetIssueTool));

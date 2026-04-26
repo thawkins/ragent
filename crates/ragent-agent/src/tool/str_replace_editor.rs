@@ -14,6 +14,20 @@
 //! | `str_replace`| Replace an exact substring in a file               |
 //! | `insert`     | Insert text after a specific line number           |
 //! | `delete`     | Delete a range of lines                            |
+//!
+//! ## File Reading Best Practices
+//!
+//! When reading files with the `str_replace_editor` view command:
+//! - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters
+//!   to read the file in focused sections rather than all at once.
+//! - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.
+//!   The tool will return an error if they do.
+//! - Strategy:
+//!   1. Read the file without start_line/end_line first — for large files this returns
+//!      the first 100 lines plus a section map of the file's structure.
+//!   2. Use the total_lines from the response to plan your subsequent reads.
+//!   3. Then read specific sections using valid line ranges.
+//!   4. Never read an entire file >100 lines in a single call.
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -33,14 +47,25 @@ impl Tool for StrReplaceEditorTool {
 
     fn description(&self) -> &'static str {
         "Multi-command file editor compatible with Anthropic's str_replace_based_edit_tool. \
-         Supports commands: 'view' (read file), 'create' (new file), 'str_replace' \
-         (exact text replacement), 'insert' (insert after line N), 'delete' (remove lines). \
-         Use 'path' for the file and 'command' to select the operation. \
-         IMPORTANT: The 'str_replace' command REQUIRES both 'old_str' and 'new_str' parameters. \
-         The 'old_str' parameter must contain the exact text to find and replace. \
-         Do NOT call str_replace without providing old_str — the call will fail."
+               Supports commands: 'view' (read file), 'create' (new file), 'str_replace' \
+               (exact text replacement), 'insert' (insert after line N), 'delete' (remove lines). \
+               Use 'path' for the file and 'command' to select the operation. \
+               IMPORTANT: The 'str_replace' command REQUIRES both 'old_str' and 'new_str' parameters. \
+               The 'old_str' parameter must contain the exact text to find and replace. \
+               Do NOT call str_replace without providing old_str — the call will fail. \
+               \
+               For the 'view' command: \
+               - REQUIRED for files larger than 100 lines: Always use start_line and end_line parameters \
+                 to read the file in focused sections rather than all at once. \
+               - CRITICAL: start_line and end_line must NOT exceed the file's total line count. \
+                 The tool will return an error if they do. \
+               - Strategy: \
+                 1. Read the file without start_line/end_line first — for large files this returns \
+                    the first 100 lines plus a section map of the file's structure. \
+                 2. Use the total_lines from the response to plan your subsequent reads. \
+                 3. Then read specific sections using valid line ranges. \
+                 4. Never read an entire file >100 lines in a single call."
     }
-
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",

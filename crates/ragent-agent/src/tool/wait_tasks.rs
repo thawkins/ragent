@@ -60,7 +60,7 @@ impl Tool for WaitTasksTool {
     ///
     /// Returns an error if the category string cannot be converted or returned.
     fn permission_category(&self) -> &'static str {
-        "agent:spawn"
+        "agent:control"
     }
 
     /// # Errors

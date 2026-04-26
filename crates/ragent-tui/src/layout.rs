@@ -5,7 +5,7 @@
 //!
 //! The status bar is organized into 2 lines for better readability:
 //! - Line 1: Session, agent, working directory, git branch, and status message
-//! - Line 2: Provider, token usage, active tasks, LSP status, code index, and log indicator
+//! - Line 2: Provider, token usage, active tasks, code index, and log indicator
 
 use ratatui::{
     Frame,
@@ -1385,16 +1385,6 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         render_provider_setup_dialog(frame, app);
     }
 
-    // LSP discover dialog overlay
-    if app.lsp_discover.is_some() {
-        render_lsp_discover_dialog(frame, app);
-    }
-
-    // LSP edit dialog overlay
-    if app.lsp_edit.is_some() {
-        render_lsp_edit_dialog(frame, app);
-    }
-
     // MCP discover dialog overlay
     if app.mcp_discover.is_some() {
         render_mcp_discover_dialog(frame, app);
@@ -1427,6 +1417,11 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
     } else {
         app.memory_browser_close_area = Rect::default();
         app.memory_browser_area = Rect::default();
+    }
+
+    // Internal-LLM chat overlay (rendered above everything except output view).
+    if app.internal_llm_chat_panel.is_some() {
+        crate::panels::render_internal_llm_chat(frame, app);
     }
 
     // Journal viewer overlay
@@ -2006,80 +2001,8 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         ));
     }
 
-    // Status message and AIWiki on the right
+    // Status message on the right
     let mut row1_right: Vec<Span<'_>> = Vec::new();
-
-    // ── AIWiki indicator ────────────────────────────────────────────────────
-    {
-        // Record x-offset before adding AIWiki spans for click detection.
-        let aiwiki_x_offset: u16 = row1_left.iter().map(|s| s.width() as u16).sum();
-
-        let (tick, tick_color) = if app.aiwiki_enabled {
-            ("✓", Color::Green)
-        } else {
-            ("✗", Color::Red)
-        };
-        row1_right.push(Span::styled(
-            "AIWiki: ",
-            Style::default().fg(Color::DarkGray),
-        ));
-        row1_right.push(Span::styled(
-            format!("{tick} "),
-            Style::default().fg(tick_color).add_modifier(Modifier::BOLD),
-        ));
-        if app.aiwiki_enabled {
-            let (raw_count, ref_count, pages) = app.aiwiki_stats_cache.unwrap_or((0, 0, 0));
-            let label = if ref_count > 0 {
-                format!("{}src(+{}ref)/{}pg", raw_count, ref_count, pages)
-            } else {
-                format!("{}src/{}pg", raw_count, pages)
-            };
-            row1_right.push(Span::styled(label, Style::default().fg(Color::Cyan)));
-
-            // Sync status indicators
-            let sync_icon = if app.aiwiki_sync_progress.is_some() {
-                "⟳" // Sync is active
-            } else {
-                " "
-            };
-
-            let autosync_icon = if app.aiwiki_autosync {
-                "⊙" // Autosync enabled
-            } else {
-                "○" // Autosync disabled
-            };
-
-            row1_right.push(Span::styled(
-                format!("[{}{}]", sync_icon, autosync_icon),
-                Style::default().fg(if app.aiwiki_sync_progress.is_some() {
-                    Color::Yellow
-                } else {
-                    Color::DarkGray
-                }),
-            ));
-
-            // Show sync progress if active
-            if let Some(ref progress) = app.aiwiki_sync_progress {
-                let current = progress.current.load(std::sync::atomic::Ordering::Relaxed);
-                let total = progress.total.load(std::sync::atomic::Ordering::Relaxed);
-                if total > 0 {
-                    row1_right.push(Span::styled(
-                        format!(" {}/{}", current, total),
-                        Style::default().fg(Color::Yellow),
-                    ));
-                } else {
-                    row1_right.push(Span::styled(" ...", Style::default().fg(Color::Yellow)));
-                }
-            }
-            row1_right.push(Span::raw(" "));
-        } else {
-            row1_right.push(Span::raw(" "));
-        }
-
-        // Width of the AIWiki spans we just added for click detection.
-        let aiwiki_w: u16 = row1_right.iter().map(|s| s.width() as u16).sum();
-        app.aiwiki_status_area = Rect::new(rows[0].x + aiwiki_x_offset, rows[0].y, aiwiki_w, 1);
-    }
 
     if !app.status.is_empty() && app.status != "Ready" {
         row1_right.push(Span::styled(
@@ -2101,7 +2024,7 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     row1_left.extend(row1_right);
     let line1 = Line::from(row1_left);
     frame.render_widget(Paragraph::new(line1), rows[0]);
-    // Row 2: Resources and system state (provider, tokens, tasks, LSP, log)
+    // Row 2: Resources and system state (provider, tokens, tasks, log)
     let mut row2_left: Vec<Span<'_>> = Vec::new();
 
     // Provider with health indicator
@@ -2168,14 +2091,12 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Stream bytes received counter
-    if app.stream_bytes > 0 {
-        let bytes_text = if app.stream_bytes >= 1_048_576 {
-            format!("↓ {:.1}M", app.stream_bytes as f64 / 1_048_576.0)
-        } else if app.stream_bytes >= 1024 {
-            format!("↓ {:.1}K", app.stream_bytes as f64 / 1024.0)
-        } else {
-            format!("↓ {}B", app.stream_bytes)
-        };
+    if app.stream_out_bytes > 0 || app.stream_in_bytes > 0 {
+        let bytes_text = format!(
+            "↑ {:.1}KB ↓ {:.1}KB",
+            app.stream_out_bytes as f64 / 1024.0,
+            app.stream_in_bytes as f64 / 1024.0
+        );
         row2_left.push(Span::styled(
             format!("[{}] ", bytes_text),
             Style::default()
@@ -2195,30 +2116,6 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
             format!("│ ⚙ {}/{} tasks ", running, app.active_tasks.len()),
             Style::default().fg(Color::Magenta),
         ));
-    }
-
-    // LSP servers
-    {
-        use ragent_core::lsp::LspStatus;
-        let connected = app
-            .lsp_servers
-            .iter()
-            .filter(|s| s.status == LspStatus::Connected)
-            .count();
-        let total = app.lsp_servers.len();
-        if total > 0 {
-            let (icon, color) = if connected == total {
-                ("⬡", Color::Cyan)
-            } else if connected > 0 {
-                ("⬡", Color::Yellow)
-            } else {
-                ("⬡", Color::DarkGray)
-            };
-            row2_left.push(Span::styled(
-                format!("│ {} LSP {}/{} ", icon, connected, total),
-                Style::default().fg(color),
-            ));
-        }
     }
 
     // Code index indicator (uses cached stats to avoid per-frame SQL/FTS queries)
@@ -2483,10 +2380,19 @@ fn messages_to_lines<'a>(
                             } else {
                                 Style::default().fg(Color::DarkGray)
                             };
-                            lines.push(Line::from(Span::styled(
-                                format!("  └ {}", result),
-                                result_style,
-                            )));
+                            if canonical_tool_name(tool) == "think" {
+                                for line in result.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  └ {}", line),
+                                        result_style,
+                                    )));
+                                }
+                            } else {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    result_style,
+                                )));
+                            }
                         }
                     }
 
@@ -2642,7 +2548,12 @@ fn render_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(title, title_style));
+        .title(Span::styled(title, title_style))
+        .border_style(Style::default().fg(if app.is_input_blocked() {
+            Color::Red
+        } else {
+            Color::White
+        }));
 
     if app.input.is_empty() {
         // Show "> " prompt with dimmed placeholder text so the line doesn't jump.
@@ -3066,290 +2977,6 @@ fn render_force_cleanup_dialog(frame: &mut Frame, app: &App) {
             .alignment(Alignment::Center);
         frame.render_widget(paragraph, area);
     }
-}
-
-/// Render the interactive LSP discovery dialog overlay.
-fn render_lsp_discover_dialog(frame: &mut Frame, app: &App) {
-    let Some(state) = app.lsp_discover.as_ref() else {
-        return;
-    };
-
-    // Fixed dialog height — scrollable content fits inside.
-    let dialog_height = 24u16;
-    let area = {
-        let full = frame.area();
-        let h = dialog_height.min(full.height.saturating_sub(4));
-        let w = full.width.min(82);
-        ratatui::layout::Rect {
-            x: (full.width.saturating_sub(w)) / 2,
-            y: (full.height.saturating_sub(h)) / 2,
-            width: w,
-            height: h,
-        }
-    };
-    frame.render_widget(Clear, area);
-
-    let mut lines: Vec<Line<'_>> = vec![
-        Line::from(Span::styled(
-            "LSP Server Discovery",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-
-    if state.servers.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  No language servers detected.",
-            Style::default().fg(Color::DarkGray),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  Install a server on PATH (e.g. rust-analyzer, gopls) and retry.",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        // Load current config once so we can flag already-enabled servers.
-        let enabled_ids: std::collections::HashSet<String> = ragent_core::config::Config::load()
-            .map(|c| c.lsp.into_keys().collect())
-            .unwrap_or_default();
-
-        // Column header
-        lines.push(Line::from(vec![Span::styled(
-            format!(
-                "  {:<3}  {:<18}  {:<10}  {:<20}  {}",
-                "#", "Name", "Version", "Extensions", "Executable"
-            ),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )]));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", "─".repeat(74)),
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        for (i, srv) in state.servers.iter().enumerate() {
-            let already_enabled = enabled_ids.contains(&srv.id);
-            let num = format!("{}", i + 1);
-            let exts = srv.extensions.join(", ");
-            let version = srv.version.as_deref().unwrap_or("—");
-            let exe = {
-                let s = srv.executable.to_string_lossy();
-                if s.len() > 22 {
-                    format!("…{}", &s[s.len().saturating_sub(21)..])
-                } else {
-                    s.into_owned()
-                }
-            };
-            let (num_color, name_color, ext_color, exe_color) = if already_enabled {
-                (Color::Yellow, Color::Yellow, Color::Yellow, Color::Yellow)
-            } else {
-                (Color::Cyan, Color::White, Color::Green, Color::DarkGray)
-            };
-            let enabled_tag = if already_enabled { " ✓" } else { "" };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<3}", num),
-                    Style::default().fg(num_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("  {:<18}", format!("{}{}", srv.id, enabled_tag)),
-                    Style::default().fg(name_color),
-                ),
-                Span::styled(
-                    format!("  {:<10}", version),
-                    Style::default().fg(Color::Magenta),
-                ),
-                Span::styled(format!("  {:<20}", exts), Style::default().fg(ext_color)),
-                Span::styled(format!("  {}", exe), Style::default().fg(exe_color)),
-            ]));
-        }
-
-        lines.push(Line::from(Span::styled(
-            "  (yellow = already enabled in ragent.json)",
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        // Scroll hint if list overflows visible area
-        let fixed_rows = 7u16; // header + sep + legend + blank + feedback(2) + prompt lines
-        let visible_rows = area.height.saturating_sub(fixed_rows + 2); // +2 for border
-        if state.servers.len() as u16 > visible_rows {
-            lines.push(Line::from(Span::styled(
-                "  ↑/↓ PgUp/PgDn to scroll",
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
-    }
-
-    lines.push(Line::from(""));
-
-    // Feedback line (error or success)
-    if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with('✓') {
-            Color::Green
-        } else {
-            Color::Red
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  {msg}"),
-            Style::default().fg(color),
-        )));
-        lines.push(Line::from(""));
-    }
-
-    // Input prompt
-    if state.servers.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  Press Esc to close",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        lines.push(Line::from(vec![
-            Span::styled("  Enable server #: ", Style::default().fg(Color::White)),
-            Span::styled(
-                with_cursor_marker(state.number_input.as_str(), state.number_cursor),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(Span::styled(
-            "  Enter to enable  Esc to cancel",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" /lsp discover ")
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .alignment(Alignment::Left)
-        .scroll((state.scroll_offset, 0));
-    frame.render_widget(paragraph, area);
-}
-
-/// Render the interactive LSP edit dialog overlay.
-///
-/// Shows all configured LSP servers. ↑/↓ moves the cursor; Space/Enter toggles
-/// enabled/disabled; Esc closes the dialog.
-fn render_lsp_edit_dialog(frame: &mut Frame, app: &App) {
-    let Some(state) = app.lsp_edit.as_ref() else {
-        return;
-    };
-
-    let dialog_height = 24u16;
-    let area = {
-        let full = frame.area();
-        let h = dialog_height.min(full.height.saturating_sub(4));
-        let w = full.width.min(72);
-        ratatui::layout::Rect {
-            x: (full.width.saturating_sub(w)) / 2,
-            y: (full.height.saturating_sub(h)) / 2,
-            width: w,
-            height: h,
-        }
-    };
-    frame.render_widget(Clear, area);
-
-    let mut lines: Vec<Line<'_>> = vec![
-        Line::from(Span::styled(
-            "LSP Server Configuration",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-
-    // Column header
-    lines.push(Line::from(vec![Span::styled(
-        format!("  {:<20}  {}", "Server ID", "Status"),
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::from(Span::styled(
-        format!("  {}", "─".repeat(46)),
-        Style::default().fg(Color::DarkGray),
-    )));
-
-    // Compute visible window for scrolling (account for header/footer rows)
-    let fixed_rows = 8u16; // title + blank + header + sep + blank + feedback + hint + border
-    let visible_rows = area.height.saturating_sub(fixed_rows) as usize;
-    // Clamp scroll so selected row is always visible
-    let scroll = state.scroll_offset as usize;
-
-    for (i, (id, disabled)) in state.servers.iter().enumerate() {
-        let is_selected = i == state.selected;
-        let (status_str, status_color) = if *disabled {
-            ("⚪ disabled", Color::DarkGray)
-        } else {
-            ("🟢 enabled ", Color::Green)
-        };
-
-        let row_style = if is_selected {
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-
-        let cursor = if is_selected { "▶ " } else { "  " };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{}{:<20}", cursor, id),
-                row_style.fg(if is_selected {
-                    Color::White
-                } else {
-                    Color::White
-                }),
-            ),
-            Span::styled(format!("  {}", status_str), row_style.fg(status_color)),
-        ]));
-    }
-
-    lines.push(Line::from(""));
-
-    // Feedback line
-    if let Some(ref msg) = state.feedback {
-        let color = if msg.starts_with('✗') {
-            Color::Red
-        } else {
-            Color::Green
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  {msg}"),
-            Style::default().fg(color),
-        )));
-        lines.push(Line::from(""));
-    }
-
-    // Hint row
-    let scroll_hint = if state.servers.len() > visible_rows {
-        "  ↑/↓ scroll  Space/Enter toggle  Esc close"
-    } else {
-        "  ↑/↓ move  Space/Enter toggle  Esc close"
-    };
-    lines.push(Line::from(Span::styled(
-        scroll_hint,
-        Style::default().fg(Color::DarkGray),
-    )));
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" /lsp edit ")
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let paragraph = Paragraph::new(lines)
-        .block(block)
-        .alignment(Alignment::Left)
-        .scroll((scroll as u16, 0));
-    frame.render_widget(paragraph, area);
 }
 
 /// Render the interactive MCP discovery dialog overlay.

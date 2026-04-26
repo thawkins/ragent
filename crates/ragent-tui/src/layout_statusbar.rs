@@ -131,8 +131,6 @@ pub mod abbreviations {
             "tasks" => "t",
             "health" => "hlth",
             "code_index" => "idx",
-            "lsp" => "lsp",
-            "aiwiki" => "wiki",
             "memory" => "mem",
             "git" => "git",
             "branch" => "br",
@@ -144,9 +142,7 @@ pub mod abbreviations {
     /// Get abbreviated service name.
     pub fn service(service: &str) -> &str {
         match service {
-            "lsp_servers" => "LSP",
             "code_index" => "Idx",
-            "aiwiki" => "Wiki",
             "memory" => "Mem",
             _ => service,
         }
@@ -431,6 +427,10 @@ fn build_line2_center(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
+    fn format_kilobytes(bytes: u64) -> String {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    }
+
     // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
     let display_text = if let Some(quota) = app.quota_percent {
         // Rate limit quota percentage (from provider headers)
@@ -481,32 +481,54 @@ fn build_line2_center(
     ));
 
     // Context window percentage from the most recent request.
-    let ctx_pct = if let Some(ctx_window) = app.selected_model_ctx_window {
-        let input_tokens = app.last_input_tokens;
-        if ctx_window > 0 {
-            ((input_tokens as f32 / ctx_window as f32) * 100.0).min(100.0) as u32
+    if let Some(ctx_detail) = app.context_window_display() {
+        let ctx_pct = ctx_detail
+            .split_whitespace()
+            .next()
+            .and_then(|p| p.trim_end_matches('%').parse::<u32>().ok())
+            .unwrap_or(0);
+
+        let ctx_color = if ctx_pct >= 95 {
+            colors::ERROR
+        } else if ctx_pct >= 80 {
+            colors::WARNING
         } else {
-            0
-        }
-    } else {
-        0
-    };
+            colors::HEALTHY
+        };
 
-    let ctx_color = if ctx_pct >= 95 {
-        colors::ERROR
-    } else if ctx_pct >= 80 {
-        colors::WARNING
-    } else {
-        colors::HEALTHY
-    };
+        let ctx_label = match mode {
+            ResponsiveMode::Full => format!(" | ctx: {ctx_detail}"),
+            ResponsiveMode::Compact => format!(" | ctx: {ctx_detail}"),
+            ResponsiveMode::Minimal => format!(" {}%", ctx_pct),
+        };
 
-    let ctx_label = match mode {
-        ResponsiveMode::Full => format!(" | ctx: {}%", ctx_pct),
-        ResponsiveMode::Compact => format!(" | {}%", ctx_pct),
-        ResponsiveMode::Minimal => format!(" {}%", ctx_pct),
-    };
+        spans.push(Span::styled(ctx_label, Style::default().fg(ctx_color)));
+    }
 
-    spans.push(Span::styled(ctx_label, Style::default().fg(ctx_color)));
+    if app.stream_out_bytes > 0 || app.stream_in_bytes > 0 {
+        let io_label = match mode {
+            ResponsiveMode::Full => format!(
+                " | io: ↑{} ↓{}",
+                format_kilobytes(app.stream_out_bytes),
+                format_kilobytes(app.stream_in_bytes)
+            ),
+            ResponsiveMode::Compact => format!(
+                " | ↑{} ↓{}",
+                format_kilobytes(app.stream_out_bytes),
+                format_kilobytes(app.stream_in_bytes)
+            ),
+            ResponsiveMode::Minimal => format!(
+                " ↑{} ↓{}",
+                app.stream_out_bytes / 1024,
+                app.stream_in_bytes / 1024
+            ),
+        };
+
+        spans.push(Span::styled(
+            io_label,
+            Style::default().fg(colors::IN_PROGRESS),
+        ));
+    }
 
     spans
 }
@@ -523,32 +545,6 @@ fn build_line2_right(
         return spans; // Defer to `/status` in minimal/compact
     }
 
-    // LSP status
-    {
-        use ragent_core::lsp::LspStatus;
-        let connected = app
-            .lsp_servers
-            .iter()
-            .filter(|s| s.status == LspStatus::Connected)
-            .count();
-        let total = app.lsp_servers.len();
-
-        if total > 0 {
-            let (icon, color) = if connected == total {
-                (indicators::SUCCESS, colors::HEALTHY)
-            } else if connected > 0 {
-                (indicators::PARTIAL, colors::WARNING)
-            } else {
-                (indicators::ERROR, colors::ERROR)
-            };
-
-            spans.push(Span::styled(
-                format!("LSP:{icon}  "),
-                Style::default().fg(color),
-            ));
-        }
-    }
-
     // Code Index status
     {
         let (icon, color) = if app.code_index_enabled {
@@ -563,29 +559,33 @@ fn build_line2_right(
         ));
     }
 
-    // AIWiki status
+    // Internal LLM status
     {
-        let (icon, color) = if app.aiwiki_enabled {
-            (indicators::SUCCESS, colors::HEALTHY)
+        let (icon, color, label) = if app.internal_llm_config.enabled {
+            if app.internal_llm_init_error.is_some() {
+                // Enabled but failed to initialize
+                (indicators::ERROR, colors::ERROR, "InternalLLM:err")
+            } else if app.internal_llm_service.is_none() {
+                // Enabled but still loading
+                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM:...")
+            } else if app.internal_llm_title_pending {
+                // Enabled, loaded, but has pending work
+                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM:busy")
+            } else {
+                // Enabled and ready
+                (indicators::SUCCESS, colors::HEALTHY, "InternalLLM:on")
+            }
         } else {
-            (indicators::ERROR, colors::ERROR)
+            // Disabled
+            (indicators::ERROR, colors::ERROR, "InternalLLM:off")
         };
 
         spans.push(Span::styled(
-            format!("AIWiki:{icon} "),
+            format!(" {label}:{icon}"),
             Style::default().fg(color),
         ));
     }
 
-    // AIWiki autosync status - only show when enabled
-    if app.aiwiki_autosync {
-        let (icon, color) = (indicators::SUCCESS, colors::HEALTHY);
-
-        spans.push(Span::styled(
-            format!("AutoSync:{icon}"),
-            Style::default().fg(color),
-        ));
-    }
     spans
 }
 

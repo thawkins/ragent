@@ -99,9 +99,7 @@ impl Drop for TerminalGuard {
 }
 
 use ragent_core::agent::AgentInfo;
-use ragent_core::config::Config;
 use ragent_core::event::EventBus;
-use ragent_core::lsp::{LspManager, SharedLspManager};
 use ragent_core::provider::ProviderRegistry;
 use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
@@ -253,7 +251,7 @@ pub async fn run_tui(
     app.append_assistant_text("\n✔ Input history loaded");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // Subscribe to the event bus BEFORE starting LSP so no status events are dropped.
+    // Subscribe to the event bus before starting background services.
     // Bridge the broadcast channel to an unbounded mpsc channel so the TUI never
     // loses events.  The broadcast channel can drop events for slow receivers
     // (Lagged error) during burst scenarios (many parallel tool calls, rapid
@@ -279,30 +277,6 @@ pub async fn run_tui(
             }
         });
     }
-
-    // -- LSP startup --
-    app.status = "starting LSP…".to_string();
-    terminal.draw(|frame| layout::render(frame, &mut app))?;
-
-    let lsp_manager: SharedLspManager = {
-        let cwd = std::env::current_dir().unwrap_or_default();
-        let mgr = LspManager::new(cwd, event_bus.clone());
-        Arc::new(tokio::sync::RwLock::new(mgr))
-    };
-    {
-        let mut mgr = lsp_manager.write().await;
-        let lsp_configs = Config::load().map(|c| c.lsp).unwrap_or_default();
-        if !lsp_configs.is_empty() {
-            mgr.connect_all(lsp_configs).await;
-        }
-        app.lsp_servers = mgr.servers().to_vec();
-    }
-    app.set_lsp_manager(lsp_manager.clone());
-    let _ = session_processor.lsp_manager.set(lsp_manager);
-
-    let lsp_count = app.lsp_servers.len();
-    app.append_assistant_text(&format!("\n✔ LSP: {lsp_count} server(s)"));
-    terminal.draw(|frame| layout::render(frame, &mut app))?;
 
     // -- Code index startup --
     app.status = "starting code index…".to_string();
@@ -376,77 +350,6 @@ pub async fn run_tui(
         }
     };
 
-    // -- AIWiki startup --
-    // If AIWiki is initialized and autosync is enabled, start sync and watcher
-    if app.aiwiki_autosync {
-        let current_dir = std::env::current_dir().unwrap_or_default();
-        if ragent_aiwiki::Aiwiki::exists(&current_dir) {
-            app.status = "starting aiwiki sync…".to_string();
-            terminal.draw(|frame| layout::render(frame, &mut app))?;
-
-            match tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(ragent_aiwiki::Aiwiki::new(&current_dir))
-            }) {
-                Ok(wiki) => {
-                    if wiki.config.enabled {
-                        app.aiwiki_enabled = true;
-                        app.aiwiki = Some(wiki);
-
-                        // Build LLM extractor from current provider/model
-                        let model_label = app.aiwiki_model_label();
-                        let (pid, mid) = model_label.split_once('/').unwrap_or(("", &model_label));
-                        let extractor: Arc<
-                            dyn ragent_aiwiki::extraction::LlmExtractor + Send + Sync,
-                        > = Arc::new(app::TuiLlmExtractor {
-                            registry: Arc::clone(&app.provider_registry),
-                            storage: Arc::clone(&app.storage),
-                            provider_id: pid.to_string(),
-                            model_id: mid.to_string(),
-                        });
-
-                        // Start initial sync in background
-                        let wiki_for_sync = app.aiwiki.take().unwrap();
-                        let progress = Arc::new(ragent_aiwiki::sync::SyncProgress::new());
-                        let progress_clone = Arc::clone(&progress);
-
-                        let handle = tokio::spawn(async move {
-                            let result = ragent_aiwiki::sync::sync(
-                                &wiki_for_sync,
-                                false, // force=false
-                                Some(&*extractor),
-                                Some(&progress_clone),
-                            )
-                            .await;
-                            // Wrap in AiwikiSyncOutcome
-                            crate::app::AiwikiSyncOutcome {
-                                result: result.map_err(|e| e.to_string()),
-                            }
-                        });
-
-                        app.aiwiki_sync_progress = Some(progress);
-                        app.aiwiki_sync_handle = Some(handle);
-                        // Wiki is being used by sync, will be None until sync completes
-                        app.aiwiki = None;
-
-                        app.append_assistant_text("\n✔ AIWiki: auto-sync starting");
-                        tracing::info!("AIWiki auto-sync started");
-                    } else {
-                        app.append_assistant_text("\n✔ AIWiki: initialized but disabled");
-                        app.aiwiki_enabled = false;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to initialize AIWiki");
-                    app.append_assistant_text("\n✘ AIWiki: failed to initialize");
-                }
-            }
-        } else {
-            app.append_assistant_text("\n✔ AIWiki: not initialized");
-        }
-    } else {
-        app.append_assistant_text("\n✔ AIWiki: auto-sync disabled");
-    }
-
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {
         app.status = "resuming session…".to_string();
@@ -496,6 +399,9 @@ pub async fn run_tui(
         // Check for completed /opt LLM results.
         app.poll_pending_opt();
 
+        // Check for completed internal-LLM UI tasks.
+        app.poll_pending_internal_llm();
+
         // Check for completed /swarm LLM decomposition results.
         app.poll_pending_swarm();
 
@@ -516,12 +422,6 @@ pub async fn run_tui(
 
         // Refresh cached memory/journal stats for the status bar.
         app.refresh_memory_stats();
-
-        // Refresh cached AIWiki stats for the status bar.
-        app.refresh_aiwiki_stats();
-
-        // Check if background AIWiki sync has completed.
-        app.poll_aiwiki_sync();
 
         // Always draw so time-based UI elements (for example permission countdowns)
         // continue to update even when the user is idle.
@@ -593,17 +493,6 @@ pub async fn run_tui(
     // Stop code index watcher (if running) - this has a Drop impl that calls stop()
     if let Some(session) = app.code_index_watch_session.take() {
         drop(session);
-    }
-
-    // Disconnect LSP servers gracefully (with timeout)
-    if let Some(mgr) = app.lsp_manager.take() {
-        let mgr_clone = mgr.clone();
-        let lsp_shutdown = async {
-            if let Ok(mut guard) = mgr_clone.try_write() {
-                guard.disconnect_all().await;
-            }
-        };
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), lsp_shutdown).await;
     }
 
     // Wait for fallback reindex thread to complete (with timeout)

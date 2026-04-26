@@ -48,7 +48,10 @@ impl Tool for ThinkTool {
 
         Ok(ToolOutput {
             content: String::new(),
-            metadata: Some(json!({"thinking": true})),
+            metadata: Some(json!({
+                "thinking": true,
+                "thought": thought
+            })),
         })
     }
 }

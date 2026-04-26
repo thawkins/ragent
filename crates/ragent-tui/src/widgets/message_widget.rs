@@ -1069,8 +1069,18 @@ pub fn tool_result_summary(
         // 💭 REASONING
         // ═══════════════════════════════════════════════════════════════════
         "think" => {
-            // The think tool records reasoning; show a brief note.
-            Some("Thinking ...".to_string())
+            let thought = out
+                .get("thought")
+                .and_then(|v| v.as_str())
+                .or_else(|| out.get("thinking").and_then(|v| v.as_str()))
+                .or_else(|| out.get("text").and_then(|v| v.as_str()))
+                .or_else(|| input.get("thought").and_then(|v| v.as_str()))
+                .unwrap_or("");
+            if thought.is_empty() {
+                Some("Thinking ...".to_string())
+            } else {
+                Some(thought.to_string())
+            }
         }
         // ═══════════════════════════════════════════════════════════════════
         // 📝 PLANNING
@@ -1751,10 +1761,20 @@ impl<'a> MessageWidget<'a> {
                                 } else {
                                     Style::default().fg(Color::Gray)
                                 };
-                                lines.push(Line::from(Span::styled(
-                                    format!("  └ {}", result),
-                                    result_style,
-                                )));
+                                // Split think results by newlines to render correctly
+                                if canonical_tool_name(tool) == "think" {
+                                    for line in result.lines() {
+                                        lines.push(Line::from(Span::styled(
+                                            format!("  └ {}", line),
+                                            result_style,
+                                        )));
+                                    }
+                                } else {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  └ {}", result),
+                                        result_style,
+                                    )));
+                                }
                             }
                         }
                     }

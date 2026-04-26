@@ -254,7 +254,7 @@ These tools should return empty string or "none" from `permission_category()`:
 
 | Permission Category | Tools |
 |---------------------|-------|
-| `read` | read, open_file, view_file, get_file_contents, list, list_directory, glob, grep, search, pdf_read, office_read, libre_read, lsp_* |
+| `read` | read, open_file, view_file, get_file_contents, list, list_directory, glob, grep, search, pdf_read, office_read, libre_read |
 | `edit` | write, create, edit, multiedit, patch, rm, append_to_file, move_file, copy_file, mkdir, pdf_write, office_write, libre_write |
 | `bash` | bash, execute_bash, run_shell_command, run_terminal_cmd, bash_reset |
 | `web` | webfetch, websearch, http_request |

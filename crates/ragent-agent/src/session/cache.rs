@@ -103,8 +103,6 @@ pub struct SystemPromptCache {
     agent_prompts: Mutex<HashMap<AgentPromptKey, Cached<String>>>,
     /// Tool reference section - changes only on tool registration
     tool_reference: Mutex<Cached<String>>,
-    /// LSP guidance section - changes only on LSP connection state change
-    lsp_guidance: Mutex<Cached<String>>,
     /// Codeindex guidance section - changes only on index state change
     codeindex_guidance: Mutex<Cached<String>>,
     /// Team guidance section - changes only on team membership change
@@ -115,8 +113,6 @@ pub struct SystemPromptCache {
     last_tool_registry_hash: Mutex<u64>,
     /// Last known code index state
     last_codeindex_active: Mutex<bool>,
-    /// Last known LSP state hash
-    last_lsp_hash: Mutex<u64>,
     /// Last known team context hash
     last_team_hash: Mutex<u64>,
 }
@@ -134,13 +130,11 @@ impl SystemPromptCache {
         Self {
             agent_prompts: Mutex::new(HashMap::new()),
             tool_reference: Mutex::new(Cached::new()),
-            lsp_guidance: Mutex::new(Cached::new()),
             codeindex_guidance: Mutex::new(Cached::new()),
             team_guidance: Mutex::new(Cached::new()),
             cache_version: AtomicU64::new(current_cache_version()),
             last_tool_registry_hash: Mutex::new(0),
             last_codeindex_active: Mutex::new(false),
-            last_lsp_hash: Mutex::new(0),
             last_team_hash: Mutex::new(0),
         }
     }
@@ -231,37 +225,6 @@ impl SystemPromptCache {
         Some(value)
     }
 
-    /// Get or compute the cached LSP guidance section.
-    pub fn get_lsp_guidance<F>(
-        &self,
-        lsp_manager: Option<&crate::lsp::SharedLspManager>,
-        compute: F,
-    ) -> Option<String>
-    where
-        F: FnOnce(Option<&crate::lsp::SharedLspManager>) -> String,
-    {
-        self.refresh_version();
-        let version = self.version();
-
-        // Compute hash of LSP state
-        let current_hash = Self::hash_lsp_state(lsp_manager);
-
-        let mut last_hash = self.last_lsp_hash.lock().ok()?;
-        let mut cache = self.lsp_guidance.lock().ok()?;
-
-        if *last_hash == current_hash {
-            if let Some(value) = cache.get(version) {
-                return Some(value);
-            }
-        }
-
-        let value = compute(lsp_manager);
-        cache.set(value.clone());
-        *last_hash = current_hash;
-
-        Some(value)
-    }
-
     /// Get or compute the cached codeindex guidance section.
     pub fn get_codeindex_guidance<F>(
         &self,
@@ -336,9 +299,6 @@ impl SystemPromptCache {
         if let Ok(mut cache) = self.tool_reference.lock() {
             cache.invalidate();
         }
-        if let Ok(mut cache) = self.lsp_guidance.lock() {
-            cache.invalidate();
-        }
         if let Ok(mut cache) = self.codeindex_guidance.lock() {
             cache.invalidate();
         }
@@ -356,16 +316,6 @@ impl SystemPromptCache {
             cache.invalidate();
         }
         if let Ok(mut hash) = self.last_tool_registry_hash.lock() {
-            *hash = 0; // Force recompute
-        }
-    }
-
-    /// Invalidate only the LSP guidance cache (call when LSP state changes).
-    pub fn invalidate_lsp_cache(&self) {
-        if let Ok(mut cache) = self.lsp_guidance.lock() {
-            cache.invalidate();
-        }
-        if let Ok(mut hash) = self.last_lsp_hash.lock() {
             *hash = 0; // Force recompute
         }
     }
@@ -394,22 +344,6 @@ impl SystemPromptCache {
         for def in registry.definitions() {
             def.name.hash(&mut hasher);
             def.description.hash(&mut hasher);
-        }
-        hasher.finish()
-    }
-
-    /// Compute a hash of the LSP state for change detection.
-    fn hash_lsp_state(lsp_manager: Option<&crate::lsp::SharedLspManager>) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        if let Some(manager) = lsp_manager {
-            // Use try_lock to avoid blocking
-            if let Ok(guard) = manager.try_read() {
-                guard.servers().len().hash(&mut hasher);
-                for server in guard.servers() {
-                    server.language.hash(&mut hasher);
-                    server.status.hash(&mut hasher);
-                }
-            }
         }
         hasher.finish()
     }

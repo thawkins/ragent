@@ -198,31 +198,6 @@ This document provides a comprehensive reference of all keyboard shortcuts avail
 
 ---
 
-## LSP Discover Dialog Shortcuts
-
-| Shortcut | Action | Description |
-|----------|--------|-------------|
-| `↑` / `↓` | Navigate | Navigate server list |
-| `Enter` | Select | Select/deselect server |
-| `s` | Select all | Select all servers |
-| `c` | Clear | Clear all selections |
-| `Esc` | Cancel | Close dialog |
-
----
-
-## LSP Edit Dialog Shortcuts
-
-| Shortcut | Action | Description |
-|----------|--------|-------------|
-| `↑` / `↓` | Navigate | Navigate edit list |
-| `Enter` | Toggle | Toggle edit selection |
-| `s` | Select all | Select all edits |
-| `c` | Clear | Clear all selections |
-| `a` | Accept | Accept selected edits |
-| `Esc` | Cancel | Close dialog |
-
----
-
 ## MCP Discover Dialog Shortcuts
 
 | Shortcut | Action | Description |
@@ -312,4 +287,3 @@ When adding new keyboard shortcuts:
 | 2025-01 | Initial documentation created |
 | 2025-01 | Fixed navigation inconsistencies (j/k → ↑/↓) |
 | 2025-01 | Standardized confirmation patterns |
-

@@ -310,6 +310,32 @@ fn test_result_summary_no_metadata() {
     assert!(result.is_none(), "Should return None for empty metadata");
 }
 
+#[test]
+fn test_result_summary_think_uses_full_thought_text() {
+    let thought = "SPEC.md is missing many sections referenced in the TOC. I need to find what's implemented and add missing sections.";
+    let output = Some(json!({
+        "thinking": true,
+        "thought": thought
+    }));
+    let input = json!({"thought": thought});
+
+    let result = tool_result_summary("think", &output, &input, "/project");
+    assert_eq!(result.as_deref(), Some(thought));
+}
+
+#[test]
+fn test_result_summary_think_preserves_multiline_text() {
+    let thought = "First line.\nSecond line.\nThird line.";
+    let output = Some(json!({
+        "thinking": true,
+        "thought": thought
+    }));
+    let input = json!({"thought": thought});
+
+    let result = tool_result_summary("think", &output, &input, "/project");
+    assert_eq!(result.as_deref(), Some(thought));
+}
+
 // =============================================================================
 // Pluralization Tests
 // =============================================================================

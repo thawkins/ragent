@@ -3,7 +3,7 @@
 //! Maps terminal key events to high-level [`InputAction`]s, handling both
 //! normal editing mode and the permission dialog intercept.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::app::{
     App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
@@ -138,6 +138,10 @@ pub enum InputAction {
 /// # }
 /// ```
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
+    if matches!(key.kind, KeyEventKind::Release) {
+        return None;
+    }
+
     // Always check for quit commands first, before any modal interception.
     // This ensures Ctrl+C (arm quit) and Ctrl+D (confirm quit) work globally.
     if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -168,18 +172,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
     // If provider setup dialog is active, route all keys there
     if app.provider_setup.is_some() {
         handle_provider_setup_key(app, key);
-        return None;
-    }
-
-    // If LSP discover dialog is active, route all keys there
-    if app.lsp_discover.is_some() {
-        handle_lsp_discover_key(app, key);
-        return None;
-    }
-
-    // If LSP edit dialog is active, route all keys there
-    if app.lsp_edit.is_some() {
-        handle_lsp_edit_key(app, key);
         return None;
     }
 
@@ -401,8 +393,8 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             KeyCode::Enter => {
                 // Select the highlighted command, or use the typed text.
-                // If the user typed more than just the trigger (e.g. "/lsp discover"
-                // vs. "/lsp"), preserve the full input so subcommands are not lost.
+                // If the user typed more than just the trigger, preserve the full
+                // input so subcommands and arguments are not lost.
                 let command = if let Some(ref menu) = app.slash_menu {
                     let raw = app.input.trim_end().to_string();
                     if let Some(entry) = menu.matches.get(menu.selected) {
@@ -613,6 +605,74 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
+    // Internal-LLM chat panel captures all input when open.
+    if app.internal_llm_chat_panel.is_some() {
+        match key.code {
+            KeyCode::Esc => {
+                app.internal_llm_chat_panel = None;
+                app.status = "ready".to_string();
+            }
+            KeyCode::Enter => {
+                // Send the message if not already thinking.
+                let thinking = app
+                    .internal_llm_chat_panel
+                    .as_ref()
+                    .map(|p| p.thinking)
+                    .unwrap_or(false);
+                if !thinking {
+                    if let Some(panel) = &mut app.internal_llm_chat_panel {
+                        if let Some(prompt) = panel.take_input() {
+                            panel.push_user(&prompt);
+                            panel.thinking = true;
+                            // Fire the async request.
+                            if !app.start_internal_llm_chat(&prompt) {
+                                if let Some(p) = &mut app.internal_llm_chat_panel {
+                                    p.push_error("Internal LLM service is unavailable.");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    if !panel.thinking {
+                        panel.backspace();
+                    }
+                }
+            }
+            KeyCode::Left => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    panel.cursor_left();
+                }
+            }
+            KeyCode::Right => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    panel.cursor_right();
+                }
+            }
+            KeyCode::Up => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    panel.scroll_up(3);
+                }
+            }
+            KeyCode::Down => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    panel.scroll_down(3, u16::MAX);
+                }
+            }
+            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(panel) = &mut app.internal_llm_chat_panel {
+                    if !panel.thinking {
+                        panel.insert_char(ch);
+                    }
+                }
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     // Memory browser: Esc closes the panel
     if app.memory_browser.is_some() {
         return match key.code {
@@ -636,11 +696,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             None
         }
         KeyCode::Enter => {
-            if app.is_processing
-                || app.compact_in_progress
-                || app.auto_compact_in_progress
-                || app.pending_send_after_compact.is_some()
-            {
+            if app.is_input_blocked() {
                 app.status = "busy - wait for the current turn to finish".to_string();
                 return None;
             }
@@ -700,6 +756,10 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             Some(InputAction::ToggleProfile)
         }
         KeyCode::Char(c) => {
+            if app.is_input_blocked() {
+                app.status = "busy - wait for the current turn to finish".to_string();
+                return None;
+            }
             // Typing a character replaces the active keyboard selection.
             if let Some((start, end)) = app.kb_selection_char_range() {
                 app.remove_input_char_range(start, end);
@@ -1686,229 +1746,6 @@ fn start_gitlab_validation(app: &mut App, instance_url: String, token: String) {
             }
         }
     });
-}
-
-/// Handle key events when the LSP discover dialog is active.
-fn handle_lsp_discover_key(app: &mut App, key: KeyEvent) {
-    match key.code {
-        // Dismiss on Escape
-        KeyCode::Esc => {
-            app.lsp_discover = None;
-        }
-
-        // Scroll the server list up/down
-        KeyCode::Up => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.scroll_offset = state.scroll_offset.saturating_sub(1);
-            }
-        }
-        KeyCode::Down => {
-            if let Some(ref mut state) = app.lsp_discover {
-                let max = state.servers.len().saturating_sub(1) as u16;
-                state.scroll_offset = (state.scroll_offset + 1).min(max);
-            }
-        }
-        KeyCode::PageUp => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.scroll_offset = state.scroll_offset.saturating_sub(10);
-            }
-        }
-        KeyCode::PageDown => {
-            if let Some(ref mut state) = app.lsp_discover {
-                let max = state.servers.len().saturating_sub(1) as u16;
-                state.scroll_offset = (state.scroll_offset + 10).min(max);
-            }
-        }
-
-        // Confirm selection on Enter
-        KeyCode::Enter => {
-            let Some(state) = app.lsp_discover.as_mut() else {
-                return;
-            };
-            let input = state.number_input.trim().to_string();
-            if input.is_empty() {
-                // Empty input = close dialog
-                app.lsp_discover = None;
-                return;
-            }
-            match input.parse::<usize>() {
-                Ok(n) if n >= 1 => {
-                    // Take the server (avoids borrow issues)
-                    let server = app
-                        .lsp_discover
-                        .as_ref()
-                        .and_then(|s| s.servers.get(n - 1).cloned());
-                    match server {
-                        Some(srv) => {
-                            let result = app.enable_discovered_server(&srv);
-                            if let Some(state) = app.lsp_discover.as_mut() {
-                                match result {
-                                    Ok(msg) => {
-                                        state.feedback = Some(msg);
-                                    }
-                                    Err(e) => {
-                                        state.feedback = Some(format!("✗ {e}"));
-                                    }
-                                }
-                                state.number_input.clear();
-                                state.number_cursor = 0;
-                            }
-                        }
-                        None => {
-                            if let Some(state) = app.lsp_discover.as_mut() {
-                                let count = state.servers.len();
-                                state.feedback =
-                                    Some(format!("✗ Invalid number — enter 1..{count}"));
-                                state.number_input.clear();
-                                state.number_cursor = 0;
-                            }
-                        }
-                    }
-                }
-                _ => {
-                    if let Some(state) = app.lsp_discover.as_mut() {
-                        let count = state.servers.len();
-                        state.feedback = Some(format!("✗ Invalid number — enter 1..{count}"));
-                        state.number_input.clear();
-                        state.number_cursor = 0;
-                    }
-                }
-            }
-        }
-
-        // Backspace in number input
-        KeyCode::Backspace => {
-            if let Some(ref mut state) = app.lsp_discover {
-                if state.number_cursor > 0 {
-                    let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor - 1);
-                    state.number_input.remove(remove_pos);
-                    state.number_cursor -= 1;
-                }
-            }
-        }
-
-        KeyCode::Delete => {
-            if let Some(ref mut state) = app.lsp_discover
-                && state.number_cursor < state.number_input.chars().count()
-            {
-                let remove_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
-                state.number_input.remove(remove_pos);
-            }
-        }
-
-        KeyCode::Left => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.number_cursor = state.number_cursor.saturating_sub(1);
-            }
-        }
-
-        KeyCode::Right => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.number_cursor =
-                    (state.number_cursor + 1).min(state.number_input.chars().count());
-            }
-        }
-
-        KeyCode::Home => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.number_cursor = 0;
-            }
-        }
-
-        KeyCode::End => {
-            if let Some(ref mut state) = app.lsp_discover {
-                state.number_cursor = state.number_input.chars().count();
-            }
-        }
-
-        // Digit character for number input
-        KeyCode::Char(c) if c.is_ascii_digit() => {
-            if let Some(ref mut state) = app.lsp_discover {
-                let insert_pos = cursor_byte_pos(&state.number_input, state.number_cursor);
-                state.number_input.insert(insert_pos, c);
-                state.number_cursor += 1;
-            }
-        }
-
-        _ => {}
-    }
-}
-
-/// Handle key events when the LSP edit dialog is active.
-fn handle_lsp_edit_key(app: &mut App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Esc => {
-            app.lsp_edit = None;
-        }
-
-        KeyCode::Up => {
-            if let Some(ref mut state) = app.lsp_edit {
-                if state.selected > 0 {
-                    state.selected -= 1;
-                    if (state.selected as u16) < state.scroll_offset {
-                        state.scroll_offset = state.selected as u16;
-                    }
-                }
-            }
-        }
-
-        KeyCode::Down => {
-            if let Some(ref mut state) = app.lsp_edit {
-                let max = state.servers.len().saturating_sub(1);
-                if state.selected < max {
-                    state.selected += 1;
-                    // Keep selected row visible (assume ~14 visible rows in dialog)
-                    let visible: u16 = 14;
-                    if state.selected as u16 >= state.scroll_offset + visible {
-                        state.scroll_offset = (state.selected as u16).saturating_sub(visible - 1);
-                    }
-                }
-            }
-        }
-
-        KeyCode::PageUp => {
-            if let Some(ref mut state) = app.lsp_edit {
-                state.selected = state.selected.saturating_sub(10);
-                state.scroll_offset = state.scroll_offset.saturating_sub(10);
-            }
-        }
-
-        KeyCode::PageDown => {
-            if let Some(ref mut state) = app.lsp_edit {
-                let max = state.servers.len().saturating_sub(1);
-                state.selected = (state.selected + 10).min(max);
-            }
-        }
-
-        // Space or Enter = toggle selected server
-        KeyCode::Char(' ') | KeyCode::Enter => {
-            let selected = app.lsp_edit.as_ref().map(|s| s.selected);
-            let id = selected.and_then(|i| {
-                app.lsp_edit
-                    .as_ref()
-                    .and_then(|s| s.servers.get(i).map(|(id, _)| id.clone()))
-            });
-            if let Some(id) = id {
-                let result = app.toggle_lsp_server_enabled(&id);
-                if let Some(ref mut state) = app.lsp_edit {
-                    match result {
-                        Ok(msg) => {
-                            // Flip the local disabled flag so the UI updates immediately
-                            if let Some(entry) = state.servers.get_mut(state.selected) {
-                                entry.1 = !entry.1;
-                            }
-                            state.feedback = Some(msg);
-                        }
-                        Err(e) => {
-                            state.feedback = Some(format!("✗ {e}"));
-                        }
-                    }
-                }
-            }
-        }
-
-        _ => {}
-    }
 }
 
 /// Handle key events when the MCP discover dialog is active.

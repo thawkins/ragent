@@ -6,6 +6,7 @@
 //! - HTTP client utilities
 //! - Model metadata and capabilities
 
+pub mod embedded;
 pub mod llm;
 pub mod providers;
 
@@ -27,4 +28,10 @@ pub use providers::{
     copilot::CopilotProvider, create_default_registry, gemini::GeminiProvider,
     generic_openai::GenericOpenAiProvider, huggingface::HuggingFaceProvider,
     ollama::OllamaProvider, ollama_cloud::OllamaCloudProvider, openai::OpenAiProvider,
+};
+
+pub use embedded::{
+    ChatTemplate, EmbeddedBackend, EmbeddedModelArtifact, EmbeddedModelManifest, EmbeddedRuntime,
+    EmbeddedRuntimeLifecycle, EmbeddedRuntimeSettings, EmbeddedRuntimeStatus, RuntimeAvailability,
+    SUB_1G_MAX_BYTES,
 };

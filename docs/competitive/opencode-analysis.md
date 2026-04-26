@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-OpenCode is an open-source AI coding agent built with TypeScript/Bun, offering both TUI (Terminal UI) and desktop/web interfaces. It emphasizes provider-agnostic operation, LSP integration, MCP (Model Context Protocol) support, and a client/server architecture. The project has strong adoption metrics (806K+ total downloads as of Oct 2025) and active development.
+OpenCode is an open-source AI coding agent built with TypeScript/Bun, offering both TUI (Terminal UI) and desktop/web interfaces. It emphasizes provider-agnostic operation, semantic code intelligence, MCP (Model Context Protocol) support, and a client/server architecture. The project has strong adoption metrics (806K+ total downloads as of Oct 2025) and active development.
 
 ---
 
@@ -15,7 +15,7 @@ OpenCode is an open-source AI coding agent built with TypeScript/Bun, offering b
 - **Backend**: Hono framework for REST/WebSocket API server
 - **State Management**: Effect library for functional composition
 - **Database**: SQLite via Drizzle ORM
-- **LSP**: Built-in Language Server Protocol client support
+- **Code intelligence**: Built-in semantic navigation and diagnostics support
 - **MCP**: Native Model Context Protocol integration
 
 ### Client/Server Design
@@ -67,13 +67,13 @@ Unlike Claude Code (locked to Anthropic), OpenCode supports:
 
 **Model-specific prompt optimization**: Different system prompts for different models (anthropic.txt, gpt.txt, gemini.txt, etc.)
 
-### 3. Native LSP (Language Server Protocol) Integration
-Out-of-the-box LSP support with:
-- `lsp_definition`: Jump to symbol definitions
-- `lsp_hover`: Get type information and docs
-- `lsp_references`: Find all symbol usages
-- `lsp_symbols`: List file symbols
-- `lsp_diagnostics`: Access compiler errors/warnings
+### 3. Native Semantic Code Intelligence
+Out-of-the-box semantic code support with:
+- Definition lookup
+- Hover-style type information and docs
+- Reference search
+- File symbol browsing
+- Diagnostic access for compiler errors/warnings
 
 Agents can introspect code semantically without relying solely on grep/text search.
 
@@ -123,7 +123,7 @@ Rule-based permission model with `allow`, `ask`, and `deny`:
 | Tool Category | Examples |
 |--------------|----------|
 | File Operations | `read`, `write`, `edit`, `multiedit`, `glob`, `grep`, `ls` |
-| Code Intelligence | `lsp_*`, `codesearch` |
+| Code Intelligence | semantic navigation, `codesearch` |
 | Execution | `bash`, `batch` (parallel commands) |
 | Patching | `apply_patch` (unified diff support) |
 | Web Access | `webfetch`, `websearch` (Tavily) |
@@ -167,7 +167,7 @@ Desktop/web apps include:
 - File diff viewer
 - Syntax highlighting via Shiki
 - Code symbol navigation
-- Integration with LSP for semantic navigation
+- Integration with semantic navigation tooling
 
 ### 15. Testing & Quality
 - **E2E tests**: Playwright tests for desktop app (~50+ test files)
@@ -190,7 +190,7 @@ OpenCode heavily uses the Effect library for:
 ### Instance-Based Architecture
 All operations scoped to an **Instance** (project + worktree):
 - Separate state per project
-- Isolated LSP servers per instance
+- Isolated code-intelligence services per instance
 - Per-instance plugin loading
 - Database partitioned by instance ID
 
@@ -261,7 +261,7 @@ Tools receive a rich execution context:
 - Directory listing with sorting
 - Symbolic link handling
 - File suggestion on "not found" errors
-- LSP integration for semantic understanding
+- Native semantic code understanding
 
 ### Code Search
 - `codesearch`: Semantic code search (likely using embeddings or AST-based)
@@ -303,7 +303,7 @@ Tools receive a rich execution context:
 |---------|----------|--------|
 | **Open Source** | ✅ MIT licensed | ❌ Mostly proprietary |
 | **Provider Choice** | ✅ Any provider | ⚠️ Limited or locked-in |
-| **LSP Integration** | ✅ Native, out-of-box | ⚠️ Limited or custom |
+| **Code Intelligence** | ✅ Native, out-of-box | ⚠️ Limited or custom |
 | **MCP Support** | ✅ Full native support | ⚠️ Emerging/limited |
 | **Multi-Agent Roles** | ✅ build/plan/general | ❌ Single agent mode |
 | **Skills System** | ✅ Doc-driven, auto-discover | ⚠️ Custom per product |
@@ -325,7 +325,7 @@ Tools receive a rich execution context:
 ### Community Engagement
 - Discord server active
 - GitHub issues with `help wanted`, `good first issue` labels
-- Contributing docs emphasize bug fixes, LSP additions, provider support
+- Contributing docs emphasize bug fixes, code-intelligence improvements, and provider support
 - Trust & vouch system for maintainer onboarding
 
 ### Distribution Channels
@@ -380,7 +380,7 @@ Full embrace of MCP standard early, positioning OpenCode as interoperable with f
 1. **Permission granularity**: File-pattern-based rules, doom loop detection
 2. **Multi-agent roles**: Dedicated "plan" mode for safe exploration
 3. **Skills system**: Doc-driven context injection
-4. **LSP tools**: Expose LSP to AI agents as first-class tools
+4. **Semantic code tools**: Expose definition, reference, symbol, and diagnostic queries as first-class tools
 5. **Client/server split**: Enable remote access scenarios
 6. **MCP support**: Interoperability with tool ecosystem
 7. **Truncation intelligence**: Section maps for large files instead of naive truncation
@@ -391,7 +391,7 @@ Full embrace of MCP standard early, positioning OpenCode as interoperable with f
 - **Provider agnostic wins**: Users want choice, not lock-in
 - **Open source trust**: MIT license + transparency builds adoption
 - **Multiple UIs**: Don't assume users want only desktop or only CLI
-- **Standards adoption**: MCP, LSP adoption future-proofs the product
+- **Standards adoption**: MCP and other interoperable standards future-proof the product
 
 ---
 
@@ -403,7 +403,7 @@ OpenCode demonstrates that **open-source, provider-agnostic, standard-based AI c
 2. **Extensibility**: Plugins, skills, MCP
 3. **Developer experience**: Fast builds, good defaults, keyboard-driven
 4. **Community**: Open contribution, transparent roadmap
-5. **Standards**: LSP, MCP, OAuth, OpenAPI
+5. **Standards**: MCP, OAuth, OpenAPI
 
 **For competitors**: OpenCode sets a high bar for openness and interoperability. Proprietary products must justify their lock-in with significantly better UX, reliability, or enterprise features.
 
@@ -450,7 +450,7 @@ OpenCode demonstrates that **open-source, provider-agnostic, standard-based AI c
 
 OpenCode is a **well-architected, community-driven alternative** to proprietary AI coding assistants. Its emphasis on:
 - Provider choice
-- LSP/MCP standards
+- MCP and interoperability standards
 - Multi-agent workflows
 - Extensibility via plugins/skills
 - Client/server flexibility

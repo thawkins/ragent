@@ -14,7 +14,6 @@ pub mod event;
 pub mod id;
 pub mod intern;
 pub mod llm;
-pub mod lsp_status;
 pub mod message;
 pub mod permission;
 pub mod resource;

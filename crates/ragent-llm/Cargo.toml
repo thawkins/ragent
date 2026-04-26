@@ -7,6 +7,16 @@ authors = ["Tim Hawkins"]
 description = "LLM provider implementations for ragent (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI)"
 repository = "https://github.com/thawkins/ragent"
 
+[features]
+default = []
+embedded-llm = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:rayon",
+    "dep:tokenizers",
+]
+
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 ragent-config = { path = "../ragent-config" }
@@ -36,6 +46,30 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 regex = "1.11"
 dirs = "5.0"
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dependencies.candle-core]
+version = "0.10"
+optional = true
+
+[dependencies.candle-nn]
+version = "0.10"
+optional = true
+
+[dependencies.candle-transformers]
+version = "0.10"
+optional = true
+
+[dependencies.tokenizers]
+version = "0.21"
+optional = true
+default-features = false
+features = ["onig"]
+
+[dependencies.rayon]
+version = "1.10"
+optional = true
 
 [dev-dependencies]
 tempfile = "3.14"

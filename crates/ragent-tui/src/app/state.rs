@@ -13,8 +13,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8};
 
 use ragent_core::agent::{AgentInfo, CustomAgentDef};
+use ragent_core::config::{InternalLlmConfig, ToolVisibilityConfig};
 use ragent_core::event::EventBus;
-use ragent_core::lsp::{LspServer, SharedLspManager, discovery::DiscoveredServer};
+use ragent_core::internal_llm::InternalLlmService;
 use ragent_core::mcp::{McpServer, discovery::DiscoveredMcpServer};
 use ragent_core::message::Message;
 use ragent_core::permission::PermissionRequest;
@@ -535,10 +536,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Show background task status and cancel tasks",
     },
     SlashCommandDef {
-        trigger: "lsp",
-        description: "Show LSP server status (/lsp discover | /lsp edit | /lsp connect <id> | /lsp disconnect <id>)",
-    },
-    SlashCommandDef {
         trigger: "mcp",
         description: "Show MCP server status (/mcp discover | /mcp connect <id> | /mcp disconnect <id>)",
     },
@@ -611,6 +608,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
     SlashCommandDef {
+        trigger: "internal-llm",
+        description: "Manage the embedded internal LLM: /internal-llm show|on|off|chat|sessiontitle|promptcontext|memoryextraction",
+    },
+    SlashCommandDef {
         trigger: "codeindex",
         description: "Manage codebase index: /codeindex on|off|show|reindex|help",
     },
@@ -631,11 +632,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Toggle mouse support: /mouse on | off",
     },
     SlashCommandDef {
-        trigger: "aiwiki",
-        description: "AIWiki: /aiwiki init | on | off | show | reset | sync [--force] | status | help",
+        trigger: "tools",
+        description: "Toggle tool visibility: /tools [office|journal|github|gitlab|codeindex] [on|off]",
     },
 ];
-
 /// A single entry in the slash-command autocomplete menu.
 #[derive(Debug, Clone)]
 pub struct SlashMenuEntry {
@@ -831,40 +831,6 @@ pub struct OutputViewState {
     pub max_scroll: u16,
 }
 
-///
-/// Shown as an overlay that lists discovered language servers with numbered
-/// rows. The user types a number and presses Enter to enable a server, or
-/// presses Esc to dismiss.
-#[derive(Debug, Clone)]
-pub struct LspDiscoverState {
-    /// Servers found during discovery.
-    pub servers: Vec<DiscoveredServer>,
-    /// Number being typed by the user (e.g. `"2"`).
-    pub number_input: String,
-    /// Cursor position (char index) inside `number_input`.
-    pub number_cursor: usize,
-    /// Feedback message shown after an enable action or on error.
-    pub feedback: Option<String>,
-    /// Vertical scroll offset for the server list (rows scrolled past the top).
-    pub scroll_offset: u16,
-}
-
-/// State for the interactive `/lsp edit` dialog.
-///
-/// Shows all configured LSP servers (from ragent.json) with their enabled/disabled
-/// status. Arrow keys move the cursor; Space or Enter toggles enabled/disabled.
-#[derive(Debug, Clone)]
-pub struct LspEditState {
-    /// Configured servers: (id, disabled flag).
-    pub servers: Vec<(String, bool)>,
-    /// Index of the currently highlighted row.
-    pub selected: usize,
-    /// Vertical scroll offset.
-    pub scroll_offset: u16,
-    /// Feedback message shown after a toggle action.
-    pub feedback: Option<String>,
-}
-
 /// State for the interactive `/mcp discover` dialog.
 ///
 /// Shown as an overlay that lists discovered MCP servers with numbered
@@ -894,6 +860,34 @@ pub struct QuestionRequest {
     pub question: String,
     /// Optional multiple-choice options.
     pub options: Vec<String>,
+}
+
+/// Completion payload from an async internal-LLM UI task.
+#[derive(Debug, Clone)]
+pub enum InternalLlmUiCompletion {
+    /// Internal-LLM chat turn completed.
+    Chat {
+        /// Prompt text (for logging).
+        prompt: String,
+        /// Result text or a surfaced error.
+        result: std::result::Result<String, String>,
+    },
+    /// Internal compaction request completed.
+    Compaction {
+        /// Session being compacted.
+        session_id: String,
+        /// Whether compaction was auto-triggered.
+        auto_triggered: bool,
+        /// Result text or a surfaced error.
+        result: std::result::Result<String, String>,
+    },
+    /// Session title generation completed.
+    SessionTitle {
+        /// Session being titled.
+        session_id: String,
+        /// Result text or a surfaced error.
+        result: std::result::Result<String, String>,
+    },
 }
 
 /// Core TUI application state.
@@ -938,10 +932,14 @@ pub struct App {
     /// Input token count from the most recent LLM request (used for context-window % display).
     pub last_input_tokens: u64,
     /// Bytes received from the current LLM streaming response (reset per request).
-    pub stream_bytes: u64,
+    pub stream_in_bytes: u64,
+    /// Bytes sent in the current LLM request payload (reset per request).
+    pub stream_out_bytes: u64,
     /// Latest quota usage percentage from provider rate-limit headers (0.0–100.0).
     /// `None` if the provider has not returned rate-limit information yet.
     pub quota_percent: Option<f32>,
+    /// Current persisted tool-family visibility switches.
+    pub tool_visibility: ToolVisibilityConfig,
     /// Which screen is currently displayed.
     pub current_screen: ScreenMode,
     /// Randomly selected tip shown on the home screen.
@@ -1051,8 +1049,6 @@ pub struct App {
     pub agents_button_area: Rect,
     /// Cached area of the Teams button beside chat input.
     pub teams_button_area: Rect,
-    /// Cached area of the AIWiki status indicator (for click-to-open-browser).
-    pub aiwiki_status_area: Rect,
     /// Whether the Agents popup window is visible.
     pub show_agents_window: bool,
     /// Whether the Teams popup window is visible.
@@ -1063,10 +1059,6 @@ pub struct App {
     pub teams_close_button_area: Rect,
     /// Snapshot of discovered MCP servers (populated by `/mcp discover`).
     pub mcp_servers: Vec<McpServer>,
-    /// Snapshot of LSP server descriptors (populated via `LspStatusChanged` events).
-    pub lsp_servers: Vec<LspServer>,
-    /// Handle to the running LSP manager (kept alive for the lifetime of the TUI).
-    pub lsp_manager: Option<SharedLspManager>,
     /// Optional code index for codebase search and symbol lookup.
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
     /// Whether code indexing is enabled in configuration.
@@ -1079,30 +1071,6 @@ pub struct App {
     pub code_index_busy: bool,
     /// Active file watcher + background worker session for the code index.
     pub code_index_watch_session: Option<ragent_codeindex::WatchSession>,
-    /// Optional AIWiki instance for project knowledge base.
-    pub aiwiki: Option<ragent_aiwiki::Aiwiki>,
-    /// Whether AIWiki is enabled for the current project.
-    pub aiwiki_enabled: bool,
-    /// Cached AIWiki stats for the status bar.
-    pub aiwiki_stats_cache: Option<(usize, usize, usize)>, // (raw_sources, ref_sources, pages)
-    /// When the cached AIWiki stats were last refreshed.
-    pub aiwiki_stats_last_refresh: std::time::Instant,
-    /// Handle for the spawned AIWiki web server task.
-    pub aiwiki_web_server: Option<tokio::task::JoinHandle<()>>,
-    /// Port the AIWiki web server is listening on.
-    pub aiwiki_web_port: u16,
-    /// Handle for a background AIWiki sync task.
-    pub aiwiki_sync_handle: Option<tokio::task::JoinHandle<super::AiwikiSyncOutcome>>,
-    /// Shared progress counter for the active sync, if any.
-    pub aiwiki_sync_progress: Option<std::sync::Arc<ragent_aiwiki::sync::SyncProgress>>,
-    /// Active file watcher session for AIWiki source folders.
-    pub aiwiki_watch_session: Option<ragent_aiwiki::sync::AiwikiWatchSession>,
-    /// Whether AIWiki should auto-sync on startup and watch for changes.
-    pub aiwiki_autosync: bool,
-    /// Active LSP discovery dialog, if any.
-    pub lsp_discover: Option<LspDiscoverState>,
-    /// Active LSP edit dialog (enable/disable configured servers), if any.
-    pub lsp_edit: Option<LspEditState>,
     /// Active MCP discovery dialog, if any.
     pub mcp_discover: Option<McpDiscoverState>,
     /// When true, the next assistant text delta starts a new message instead
@@ -1200,6 +1168,18 @@ pub struct App {
     pub output_view: Option<OutputViewState>,
     /// Pending result from an async `/opt` LLM call.
     pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Persisted internal-LLM config currently active in the TUI.
+    pub internal_llm_config: InternalLlmConfig,
+    /// Internal-LLM service used for chat, compaction, and title generation.
+    pub internal_llm_service: Option<Arc<InternalLlmService>>,
+    /// Last service-construction error, if the embedded config could not be activated.
+    pub internal_llm_init_error: Option<String>,
+    /// Pending results from async internal-LLM UI tasks.
+    pub internal_llm_results: Arc<std::sync::Mutex<Vec<InternalLlmUiCompletion>>>,
+    /// Active internal-LLM chat overlay panel. `None` when the panel is closed.
+    pub internal_llm_chat_panel: Option<crate::panels::InternalLlmChatState>,
+    /// Whether a background title generation request is currently active.
+    pub internal_llm_title_pending: bool,
     /// Whether input history has been modified since last save.
     pub history_dirty: bool,
     /// Deadline after which a dirty history should be flushed to disk.

@@ -50,7 +50,6 @@ printpdf = { workspace = true }
 pdf-extract = { workspace = true }
 lopdf = { workspace = true }
 serde_yaml = { workspace = true }
-lsp-types = { workspace = true }
 url = { workspace = true }
 rand = { workspace = true }
 grep-regex = { workspace = true }
@@ -59,7 +58,6 @@ ignore = { workspace = true }
 dashmap = { workspace = true }
 lru = { workspace = true }
 rayon = { workspace = true }
-ragent-aiwiki = { path = "../ragent-aiwiki" }
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-llm = { path = "../ragent-llm" }
@@ -72,6 +70,7 @@ ragent-types = { path = "../ragent-types" }
 [features]
 default = []
 embeddings = ["ort", "tokenizers", "ndarray"]
+embedded-llm = ["ragent-llm/embedded-llm"]
 
 [dependencies.ort]
 version = "2.0.0-rc.12"

@@ -14,11 +14,11 @@ pub struct CodeIndexSymbolsTool;
 fn not_available() -> ToolOutput {
     ToolOutput {
         content: "Code index is not available. It may be disabled or not yet initialised. \
-                  Use `lsp_symbols` or `grep` as fallback tools."
+                  Use `grep` as a fallback tool."
             .to_string(),
         metadata: Some(json!({
             "error": "codeindex_disabled",
-            "fallback_tools": ["lsp_symbols", "grep"]
+            "fallback_tools": ["grep"]
         })),
     }
 }

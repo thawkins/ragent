@@ -218,12 +218,11 @@ The project is a Cargo workspace built from focused crates:
 
 | Crate | Purpose |
 |-------|---------|
-| `ragent-agent` | Agent/runtime layer: sessions, orchestration, MCP/LSP, memory, tool registry |
+| `ragent-agent` | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
 | `ragent-team` | Team coordination runtime and team tools |
 | `ragent-storage` | SQLite-backed storage, snapshots, encrypted credentials |
 | `ragent-config` | Configuration types, defaults, and parsing |
 | `ragent-types` | Shared IDs, events, messages, and sanitization primitives |
-| `ragent-aiwiki` | Embedded wiki knowledge base, extraction, and web interface |
 | `ragent-llm` | Provider clients and model/provider registry |
 | `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
 | `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |

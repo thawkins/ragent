@@ -189,7 +189,7 @@ The `/fleet` slash command enables Copilot to decompose complex tasks into indep
 
 **Tool Management:**
 - `/mcp [show|add|edit|delete|disable|enable]` - Manage MCP servers
-- `/lsp [show|test|reload|help]` - Manage language server configuration
+- IDE-backed code intelligence controls
 - `/plugin` - Manage plugins and marketplaces
 - `/ide` - Connect to IDE workspace
 
@@ -631,11 +631,10 @@ Custom agents can specify their preferred AI model, which subagents will use whe
 - `/ide` command connects to VS Code workspace
 - Bidirectional communication
 - Copilot can read/modify files in open workspace
-- Leverage IDE LSP servers for code intelligence
+- Leverage IDE-backed code intelligence from the connected workspace
 
-**Language Server Protocol (LSP):**
-- `/lsp show|test|reload|help [SERVER-NAME]` - Manage LSP configuration
-- Enables code intelligence (definitions, references, symbols)
+**Code Intelligence:**
+- IDE-backed definitions, references, symbols, and diagnostics
 - Type information and documentation
 - Better code understanding and modification
 
@@ -823,7 +822,7 @@ Standard Mode → Plan Mode → Review Plan → Autopilot + /fleet → Completio
 - File operations
 - Shell command execution
 - Git operations
-- LSP interactions
+- IDE-backed code intelligence interactions
 
 **Remote:**
 - AI model inference
@@ -847,7 +846,7 @@ Standard Mode → Plan Mode → Review Plan → Autopilot + /fleet → Completio
 | **Security** | Granular tool permissions, trusted dirs | Balance automation with safety |
 | **Models** | Multiple AI models, per-task selection | Cost/quality/speed optimization |
 | **Session Management** | Named sessions, resume, checkpoints, chronicle | Work continuity across time |
-| **Dev Tool Integration** | LSP, IDE connection, ACP protocol | Leverage existing tooling |
+| **Dev Tool Integration** | IDE connection, ACP protocol, code intelligence | Leverage existing tooling |
 
 ---
 

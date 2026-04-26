@@ -253,7 +253,7 @@ impl FtsIndex {
     // ── Private helpers ─────────────────────────────────────────────────
 
     /// Escape Tantivy query-parser special characters so that raw
-    /// code identifiers such as `Aiwiki::new`, `std::io`, or `foo<T>`
+    /// code identifiers such as `Widget::new`, `std::io`, or `foo<T>`
     /// are treated as literal search terms.  Language scope operators
     /// (`::`) are replaced with spaces so each path segment becomes a
     /// separate search term.
@@ -651,11 +651,11 @@ mod tests {
         let fts = FtsIndex::open_in_memory().unwrap();
         let syms = vec![FtsSymbol {
             name: "new",
-            qualified_name: Some("Aiwiki::new"),
+            qualified_name: Some("Widget::new"),
             kind: "function",
-            file_path: "src/aiwiki.rs",
+            file_path: "src/widget.rs",
             signature: Some("fn new() -> Self"),
-            doc_comment: Some("Create a new Aiwiki instance."),
+            doc_comment: Some("Create a new Widget instance."),
             body_snippet: Some("Self { }"),
             start_line: 10,
             end_line: 15,
@@ -663,15 +663,15 @@ mod tests {
         fts.add_symbols(&syms).unwrap();
 
         // Query with :: should not cause a parse error
-        let results = fts.search("Aiwiki::new", 10).unwrap();
-        assert!(!results.is_empty(), "should find Aiwiki::new");
+        let results = fts.search("Widget::new", 10).unwrap();
+        assert!(!results.is_empty(), "should find Widget::new");
     }
 
     #[test]
     fn test_sanitize_query_escapes_special_chars() {
         // :: is replaced with space so path segments become separate terms
-        let escaped = FtsIndex::sanitize_query("Aiwiki::new");
-        assert_eq!(escaped, "Aiwiki new");
+        let escaped = FtsIndex::sanitize_query("Widget::new");
+        assert_eq!(escaped, "Widget new");
 
         let escaped2 = FtsIndex::sanitize_query("Result<Config>");
         assert!(escaped2.contains("Result"));

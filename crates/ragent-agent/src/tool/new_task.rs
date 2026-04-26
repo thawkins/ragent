@@ -7,7 +7,6 @@ use anyhow::Result;
 use serde_json::{Value, json};
 
 use super::{Tool, ToolContext, ToolOutput};
-use crate::message::Role;
 
 /// Spawns a sub-agent to perform a focused task.
 ///
@@ -95,20 +94,6 @@ impl Tool for NewTaskTool {
                     "team_name": team.team_name,
                     "agent_id": team.agent_id,
                     "is_lead": team.is_lead
-                })),
-            });
-        }
-
-        if session_recently_requested_team(ctx)? {
-            return Ok(ToolOutput {
-                content: "This session appears to be in team-orchestration mode based on recent \
-                          user instructions. Do not use `new_task` yet. Create/open a team with \
-                          `team_create`, then delegate with `team_spawn`, `team_task_create`, and \
-                          `team_assign_task` so teammate activity is visible in the Teams window."
-                    .to_string(),
-                metadata: Some(json!({
-                    "blocked": true,
-                    "reason": "team_requested_no_active_team"
                 })),
             });
         }
@@ -201,23 +186,75 @@ impl Tool for NewTaskTool {
     }
 }
 
-fn session_recently_requested_team(ctx: &ToolContext) -> Result<bool> {
-    let Some(storage) = ctx.storage.as_ref() else {
-        return Ok(false);
-    };
-    let messages = storage.get_messages(&ctx.session_id)?;
-    let latest_user = messages.into_iter().rev().find(|m| m.role == Role::User);
-    let Some(msg) = latest_user else {
-        return Ok(false);
-    };
-    let txt = msg.text_content().to_lowercase();
-    let markers = [
-        "ask the team",
-        "use a team",
-        "create a team",
-        "team member",
-        "teammate",
-        "team to",
-    ];
-    Ok(markers.iter().any(|m| txt.contains(m)))
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::EventBus;
+    use crate::tool::TeamContext;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn base_ctx() -> ToolContext {
+        ToolContext {
+            session_id: "session-1".to_string(),
+            working_dir: PathBuf::from("/tmp"),
+            event_bus: Arc::new(EventBus::new(16)),
+            storage: None,
+            task_manager: None,
+            active_model: None,
+            team_context: None,
+            team_manager: None,
+            code_index: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_new_task_without_team_context_tries_to_spawn() {
+        let tool = NewTaskTool;
+        let ctx = base_ctx();
+        let err = tool
+            .execute(
+                json!({
+                    "agent": "explore",
+                    "task": "inspect the repository"
+                }),
+                &ctx,
+            )
+            .await
+            .expect_err("missing task manager should be the first failure");
+
+        assert!(
+            err.to_string()
+                .contains("TaskManager has not been initialised"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_new_task_blocks_for_active_team_sessions() {
+        let tool = NewTaskTool;
+        let mut ctx = base_ctx();
+        ctx.team_context = Some(Arc::new(TeamContext {
+            team_name: "alpha".to_string(),
+            agent_id: "lead".to_string(),
+            is_lead: true,
+        }));
+
+        let output = tool
+            .execute(
+                json!({
+                    "agent": "explore",
+                    "task": "inspect the repository"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("team-context guard should return a blocked result");
+
+        let metadata = output
+            .metadata
+            .expect("blocked result should include metadata");
+        assert_eq!(metadata["blocked"], true);
+        assert_eq!(metadata["reason"], "team_context_active");
+    }
 }

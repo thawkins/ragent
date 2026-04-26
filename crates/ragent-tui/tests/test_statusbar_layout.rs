@@ -315,9 +315,7 @@ fn test_abbreviations_label_unknown() {
 fn test_abbreviations_service() {
     use ragent_tui::layout_statusbar::abbreviations;
 
-    assert_eq!(abbreviations::service("lsp_servers"), "LSP");
     assert_eq!(abbreviations::service("code_index"), "Idx");
-    assert_eq!(abbreviations::service("aiwiki"), "Wiki");
     assert_eq!(abbreviations::service("memory"), "Mem");
     assert_eq!(abbreviations::service("unknown"), "unknown");
 }

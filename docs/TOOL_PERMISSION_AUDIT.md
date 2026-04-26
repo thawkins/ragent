@@ -163,16 +163,9 @@ These tools use permission categories not mentioned in SECREVIEW.md:
 **Codeindex Tools:**
 - All codeindex_* tools: `codeindex:read` or `codeindex:write`
 
-**LSP Tools:**
-- All lsp_* tools: `lsp:read`
-
 **Office/Document Tools:**
 - office_info.rs, office_read.rs, libre*.rs, pdf_read.rs: `file:read`
 - office_write.rs, libreoffice_write.rs, pdf_write.rs: `file:write`
-
-**AIWiki Tools:**
-- aiwiki_search.rs, aiwiki_status.rs, aiwiki_export.rs: `aiwiki:read`
-- aiwiki_import.rs, aiwiki_ingest.rs: `aiwiki:write`
 
 **GitHub/GitLab Tools:**
 - All github_* and gitlab_* tools: `github:read` or `gitlab:read`
@@ -200,7 +193,7 @@ These tools use permission categories not mentioned in SECREVIEW.md:
 
 2. **Inconsistent naming:** The actual implementation uses namespaced categories (e.g., `file:read`, `bash:execute`) while SECREVIEW.md expects flat capitalized names.
 
-3. **Missing definitions:** Many tools (team, codeindex, LSP, memory, etc.) use categories not mentioned in SECREVIEW.md at all.
+3. **Missing definitions:** Many tools (team, codeindex, memory, etc.) use categories not mentioned in SECREVIEW.md at all.
 
 ---
 

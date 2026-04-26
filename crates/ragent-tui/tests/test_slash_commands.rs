@@ -5,7 +5,7 @@
 //! Verifies each slash command updates app state correctly, handles arguments,
 //! and provides user feedback via status bar and log entries.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_core::{
@@ -38,7 +38,6 @@ fn make_app() -> App {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
-        lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -57,6 +56,26 @@ fn make_app() -> App {
         agent_info,
         false,
     )
+}
+
+struct CwdGuard(std::path::PathBuf);
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.0);
+    }
+}
+
+fn enter_temp_config_dir() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::env::set_current_dir(temp.path()).expect("set cwd");
+    std::fs::create_dir_all(temp.path().join(".ragent")).expect("create .ragent");
+    temp
+}
+
+fn cwd_test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 // ── /clear ──────────────────────────────────────────────────────────
@@ -116,6 +135,10 @@ fn test_slash_help_shows_commands() {
     assert!(text.contains("/compact"), "help should mention /compact");
     assert!(text.contains("/agent"), "help should mention /agent");
     assert!(text.contains("/model"), "help should mention /model");
+    assert!(
+        text.contains("/internal-llm"),
+        "help should mention /internal-llm"
+    );
     assert!(
         text.contains("/inputdiag"),
         "help should mention /inputdiag"
@@ -209,6 +232,49 @@ fn test_slash_system_replaces_existing() {
 
     app.execute_slash_command("/system Second prompt");
     assert_eq!(app.agent_info.prompt.as_deref(), Some("Second prompt"));
+}
+
+#[test]
+fn test_slash_internal_llm_toggle_and_feature_switch_persist() {
+    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _guard = CwdGuard(original_cwd);
+    let _temp = enter_temp_config_dir();
+
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/internal-llm on");
+    assert!(app.internal_llm_config.enabled);
+    assert_eq!(app.status, "internal-llm: on");
+
+    app.execute_slash_command("/internal-llm sessiontitle on");
+    assert!(app.internal_llm_config.session_title_enabled);
+    assert_eq!(app.status, "internal-llm: sessiontitle on");
+
+    let cfg = ragent_core::config::Config::load().expect("load saved config");
+    assert!(cfg.internal_llm.enabled);
+    assert!(cfg.internal_llm.session_title_enabled);
+}
+
+#[test]
+fn test_slash_internal_llm_show_displays_feature_switches() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.internal_llm_config.enabled = true;
+    app.internal_llm_config.session_title_enabled = true;
+    app.internal_llm_config.prompt_context_enabled = false;
+    app.internal_llm_config.memory_extraction_enabled = true;
+
+    app.execute_slash_command("/internal-llm show");
+
+    let text = app.messages.last().expect("message").text_content();
+    assert!(text.contains("enabled"));
+    assert!(text.contains("session title"));
+    assert!(text.contains("prompt/context compaction"));
+    assert!(text.contains("memory extraction prefilter"));
+    assert!(text.contains("off"));
+    assert!(text.matches("on").count() >= 3);
 }
 
 // ── /agent ──────────────────────────────────────────────────────────
@@ -1398,9 +1464,10 @@ fn test_slash_system_preserves_argument_whitespace() {
 // ── /tools ──────────────────────────────────────────────────────────
 
 #[test]
-fn test_slash_tools_lists_builtin_tools() {
+fn test_slash_tools_lists_visibility_switches() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
 
     app.execute_slash_command("/tools");
 
@@ -1408,60 +1475,95 @@ fn test_slash_tools_lists_builtin_tools() {
     assert!(!app.messages.is_empty());
     let text = app.messages.last().unwrap().text_content();
     assert!(
-        text.contains("Built-in Tools:"),
-        "should have built-in heading"
+        text.contains("Tool Family Visibility"),
+        "should show visibility heading"
     );
-    assert!(text.contains("read"), "should list 'read' tool");
-    assert!(text.contains("bash"), "should list 'bash' tool");
-    assert!(text.contains("edit"), "should list 'edit' tool");
-    assert!(text.contains("grep"), "should list 'grep' tool");
+    assert!(text.contains("office"), "should list office switch");
+    assert!(text.contains("journal"), "should list journal switch");
+    assert!(text.contains("github"), "should list github switch");
+    assert!(text.contains("codeindex"), "should list codeindex switch");
 }
 
 #[test]
-fn test_slash_tools_shows_no_mcp_when_empty() {
+fn test_slash_tools_shows_single_switch_state() {
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools");
+    app.execute_slash_command("/tools office");
 
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("MCP Tools:"), "should have MCP heading");
-    assert!(
-        text.contains("no MCP servers connected"),
-        "should indicate no MCP servers"
-    );
+    assert!(text.contains("`office` is currently **off**"));
 }
 
 #[test]
-fn test_slash_tools_shows_mcp_tools() {
-    use ragent_core::mcp::{McpServer, McpStatus, McpToolDef};
+fn test_slash_tools_help_shows_usage() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+
+    app.execute_slash_command("/tools help");
+
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("`/tools show`"));
+    assert!(text.contains("`/tools help`"));
+    assert!(text.contains("`/tools <switch> on|off`"));
+    assert!(text.contains("`office`, `journal`, `github`, `gitlab`, `codeindex`"));
+}
+
+#[test]
+fn test_slash_tools_show_alias_lists_visibility_switches() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+
+    app.execute_slash_command("/tools show");
+
+    assert_eq!(app.status, "tools");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Tool Family Visibility"));
+    assert!(text.contains("office"));
+    assert!(text.contains("codeindex"));
+}
+
+#[test]
+fn test_slash_tools_office_on_shows_office_tools() {
+    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _guard = CwdGuard(original_cwd);
+    let _temp = enter_temp_config_dir();
 
     let mut app = make_app();
     app.session_id = Some("test-session".to_string());
-    app.mcp_servers = vec![McpServer {
-        id: "github".to_string(),
-        config: Default::default(),
-        status: McpStatus::Connected,
-        tools: vec![McpToolDef {
-            name: "search_repos".to_string(),
-            description: "Search GitHub repositories".to_string(),
-            parameters: serde_json::json!({}),
-        }],
-    }];
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
 
-    app.execute_slash_command("/tools");
+    let hidden = ragent_core::config::tool_family_names("office")
+        .expect("office family")
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+    app.session_processor.tool_registry.set_hidden(&hidden);
+    assert!(
+        !app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "office_read")
+    );
 
+    app.execute_slash_command("/tools office on");
+
+    assert!(app.tool_visibility.office);
+    assert_eq!(app.status, "tools: office on");
+    assert!(
+        app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "office_read")
+    );
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("search_repos"), "should list MCP tool name");
-    assert!(text.contains("[github]"), "should show MCP server name");
-    assert!(
-        text.contains("Search GitHub repositories"),
-        "should show MCP tool description"
-    );
-    assert!(
-        !text.contains("no MCP servers connected"),
-        "should not show empty message"
-    );
+    assert!(text.contains("`office` visibility is now **on**"));
 }
 
 #[test]

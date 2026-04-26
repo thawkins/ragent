@@ -578,7 +578,7 @@ Based on research, some areas where Roo Code could expand:
 - VS Code extension host process
 - WebView for chat UI
 - File system watchers
-- LSP integration for diagnostics
+- Native diagnostics integration
 
 **Server-Side Components (Cloud):**
 - Task execution workers

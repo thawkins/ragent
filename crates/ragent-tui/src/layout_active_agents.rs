@@ -11,7 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::theme::colors;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use ragent_core::task::TaskEntry;
 
@@ -209,9 +209,11 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         &mut lines,
     );
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    // NOTE: no text wrapping — ensures one display row per logical line
+    // so mouse clicks map 1:1 with agent list indices.
+    let total_lines = lines.len() as u16;
+    let paragraph = Paragraph::new(lines);
 
-    let total_lines = paragraph.line_count(area.width) as u16;
     let visible = area.height;
     let max_scroll = total_lines.saturating_sub(visible);
     app.active_agents_max_scroll = max_scroll;

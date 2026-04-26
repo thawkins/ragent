@@ -17,8 +17,8 @@ fn test_atomic_update_creates_new_file() {
     let config = dir.path().join("ragent.json");
 
     atomic_config_update(&config, |json| {
-        json["lsp"]["rust-analyzer"] = serde_json::json!({
-            "command": "rust-analyzer",
+        json["mcp"]["filesystem"] = serde_json::json!({
+            "command": "node",
             "disabled": false,
         });
         Ok(())
@@ -27,8 +27,8 @@ fn test_atomic_update_creates_new_file() {
 
     let content: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
-    assert_eq!(content["lsp"]["rust-analyzer"]["command"], "rust-analyzer");
-    assert_eq!(content["lsp"]["rust-analyzer"]["disabled"], false);
+    assert_eq!(content["mcp"]["filesystem"]["command"], "node");
+    assert_eq!(content["mcp"]["filesystem"]["disabled"], false);
 }
 
 #[test]
@@ -41,15 +41,15 @@ fn test_atomic_update_merges_existing() {
         &config,
         serde_json::to_string_pretty(&serde_json::json!({
             "username": "alice",
-            "lsp": { "tsserver": { "command": "tsserver" } }
+            "mcp": { "git": { "command": "git-mcp" } }
         }))
         .unwrap(),
     )
     .unwrap();
 
-    // Add a new LSP server.
+    // Add a new MCP server.
     atomic_config_update(&config, |json| {
-        json["lsp"]["rust-analyzer"] = serde_json::json!({ "command": "ra" });
+        json["mcp"]["filesystem"] = serde_json::json!({ "command": "fs-mcp" });
         Ok(())
     })
     .unwrap();
@@ -58,9 +58,9 @@ fn test_atomic_update_merges_existing() {
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
     // Original data preserved.
     assert_eq!(content["username"], "alice");
-    assert_eq!(content["lsp"]["tsserver"]["command"], "tsserver");
+    assert_eq!(content["mcp"]["git"]["command"], "git-mcp");
     // New data added.
-    assert_eq!(content["lsp"]["rust-analyzer"]["command"], "ra");
+    assert_eq!(content["mcp"]["filesystem"]["command"], "fs-mcp");
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn test_concurrent_writers_no_corruption() {
             let key = format!("server_{i}");
             let value = serde_json::json!({ "id": i });
             atomic_config_update(&path, |json| {
-                json["lsp"][&key] = value;
+                json["custom"][&key] = value;
                 Ok(())
             })
             .expect("atomic update should succeed");
@@ -161,7 +161,7 @@ fn test_concurrent_writers_no_corruption() {
     for i in 0..num_threads {
         let key = format!("server_{i}");
         assert_eq!(
-            content["lsp"][&key]["id"], i,
+            content["custom"][&key]["id"], i,
             "entry {key} should be present and correct"
         );
     }
@@ -173,7 +173,7 @@ fn test_concurrent_writers_different_sections() {
     let config = dir.path().join("ragent.json");
     std::fs::write(&config, "{}").unwrap();
 
-    let path_lsp: PathBuf = config.clone();
+    let path_custom: PathBuf = config.clone();
     let path_mcp: PathBuf = config.clone();
 
     let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
@@ -183,9 +183,9 @@ fn test_concurrent_writers_different_sections() {
     let h1 = std::thread::spawn(move || {
         b1.wait();
         for i in 0..5 {
-            let key = format!("lsp_{i}");
-            atomic_config_update(&path_lsp, |json| {
-                json["lsp"][&key] = serde_json::json!(true);
+            let key = format!("custom_{i}");
+            atomic_config_update(&path_custom, |json| {
+                json["custom"][&key] = serde_json::json!(true);
                 Ok(())
             })
             .unwrap();
@@ -211,7 +211,7 @@ fn test_concurrent_writers_different_sections() {
         serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
 
     for i in 0..5 {
-        assert_eq!(content["lsp"][format!("lsp_{i}")], true);
+        assert_eq!(content["custom"][format!("custom_{i}")], true);
         assert_eq!(content["mcp"][format!("mcp_{i}")], true);
     }
 }

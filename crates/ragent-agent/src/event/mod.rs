@@ -203,6 +203,13 @@ pub enum Event {
         /// Number of output (completion) tokens consumed.
         output_tokens: u64,
     },
+    /// A new LLM request has been sent, including its serialized outbound size.
+    RequestStarted {
+        /// Session this request belongs to.
+        session_id: String,
+        /// Approximate serialized request payload size in bytes.
+        outbound_bytes: u64,
+    },
     /// The set of tool definitions sent with an LLM request.
     ToolsSent {
         /// Session this request belongs to.
@@ -412,15 +419,6 @@ pub enum Event {
         preview: String,
     },
 
-    // ── LSP lifecycle events ─────────────────────────────────────────────
-    /// An LSP server's connection status changed.
-    LspStatusChanged {
-        /// The server id as declared in `ragent.json` (e.g. `"rust"`).
-        server_id: String,
-        /// The new status.
-        status: crate::lsp::LspStatus,
-    },
-
     // ── Shell state events ───────────────────────────────────────────────
     /// The shell working directory changed after a bash command.
     ShellCwdChanged {
@@ -552,6 +550,7 @@ impl Event {
             Self::AgentError { .. } => "AgentError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
+            Self::RequestStarted { .. } => "RequestStarted",
             Self::ToolsSent { .. } => "ToolsSent",
             Self::ModelResponse { .. } => "ModelResponse",
             Self::ToolCallArgs { .. } => "ToolCallArgs",
@@ -571,7 +570,6 @@ impl Event {
             Self::TeamTaskCompleted { .. } => "TeamTaskCompleted",
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
-            Self::LspStatusChanged { .. } => "LspStatusChanged",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
             Self::UserInput { .. } => "UserInput",
             Self::JournalEntryCreated { .. } => "JournalEntryCreated",
@@ -586,9 +584,8 @@ impl Event {
 
     /// Returns the session ID carried by this event, if any.
     ///
-    /// Infrastructure events (`McpStatusChanged`, `LspStatusChanged`,
-    /// `CopilotDeviceFlowComplete`) are not scoped to a session and return
-    /// `None`.
+    /// Infrastructure events (`McpStatusChanged`, `CopilotDeviceFlowComplete`,
+    /// `GitLabSetupComplete`) are not scoped to a session and return `None`.
     #[must_use]
     pub const fn session_id(&self) -> Option<&str> {
         match self {
@@ -610,6 +607,7 @@ impl Event {
             | Self::TaskCompleted { session_id, .. }
             | Self::AgentError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
+            | Self::RequestStarted { session_id, .. }
             | Self::ToolsSent { session_id, .. }
             | Self::ModelResponse { session_id, .. }
             | Self::ToolCallArgs { session_id, .. }
@@ -629,8 +627,7 @@ impl Event {
             | Self::TeammateP2PMessage { session_id, .. } => Some(session_id.as_str()),
             Self::McpStatusChanged { .. }
             | Self::CopilotDeviceFlowComplete { .. }
-            | Self::GitLabSetupComplete { .. }
-            | Self::LspStatusChanged { .. } => None,
+            | Self::GitLabSetupComplete { .. } => None,
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }

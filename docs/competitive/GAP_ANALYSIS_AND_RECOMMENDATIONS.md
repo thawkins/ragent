@@ -17,7 +17,7 @@ This document synthesizes competitive intelligence from four major AI coding ass
 - Rust implementation (performance, reliability, single binary)
 - Multi-provider support (no vendor lock-in)
 - Team/swarm orchestration system
-- LSP integration (native semantic code understanding)
+- Native code intelligence (semantic code understanding)
 - Office document and PDF tools
 - Terminal-first philosophy
 - No cloud dependencies
@@ -1242,7 +1242,7 @@ ClaudeCode:
 ### vs ClaudeCode
 - ✅ Multi-provider (not Anthropic-locked)
 - ✅ Team orchestration (no sub-agent limit)
-- ✅ LSP integration (semantic code understanding)
+- ✅ Native code intelligence (semantic code understanding)
 - ✅ Office/PDF tools
 - ❌ Need: Persistent shell, memory system
 
@@ -1292,7 +1292,7 @@ ClaudeCode:
 
 ## Conclusion
 
-ragent has strong foundational advantages (Rust performance, multi-provider support, team orchestration, LSP integration) but lags in key UX areas that competitors have refined:
+ragent has strong foundational advantages (Rust performance, multi-provider support, team orchestration, native code intelligence) but lags in key UX areas that competitors have refined:
 
 **Critical Gaps:**
 1. Persistent shell sessions (biggest UX gap)

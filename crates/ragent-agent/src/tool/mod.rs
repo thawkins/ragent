@@ -11,15 +11,6 @@
 pub mod mcp_tool;
 pub use mcp_tool::McpToolWrapper;
 
-/// AIWiki export tool for agents.
-pub mod aiwiki_export;
-/// AIWiki import tool for agents.
-pub mod aiwiki_import;
-pub mod aiwiki_ingest;
-/// AIWiki search tool for agents.
-pub mod aiwiki_search;
-/// AIWiki status tool for agents.
-pub mod aiwiki_status;
 /// Alias tools that map commonly hallucinated tool names to canonical implementations.
 pub mod aliases;
 /// File append tool.
@@ -83,11 +74,6 @@ pub mod libreoffice_read;
 pub mod libreoffice_write;
 pub mod list;
 pub mod list_tasks;
-pub mod lsp_definition;
-pub mod lsp_diagnostics;
-pub mod lsp_hover;
-pub mod lsp_references;
-pub mod lsp_symbols;
 /// Memory block migration tool.
 pub mod memory_migrate;
 /// Memory block replace tool.
@@ -153,7 +139,7 @@ pub mod metadata;
 /// Content truncation utilities for managing large tool outputs.
 pub mod truncate;
 
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -288,7 +274,6 @@ impl Default for ToolOutput {
 ///     event_bus: Arc::new(EventBus::new(128)),
 ///     storage: None,
 ///     task_manager: None,
-///     lsp_manager: None,
 ///     active_model: None,
 ///     team_context: None,
 ///     team_manager: None,
@@ -308,8 +293,6 @@ pub struct ToolContext {
     pub storage: Option<Arc<crate::storage::Storage>>,
     /// Optional task manager for spawning sub-agent tasks.
     pub task_manager: Option<Arc<crate::task::TaskManager>>,
-    /// Optional LSP manager for code-intelligence queries.
-    pub lsp_manager: Option<crate::lsp::SharedLspManager>,
     /// The active model (provider + model ID) used by the parent session.
     /// Sub-agent tools use this to inherit the parent's provider when no
     /// explicit model override is specified in the tool call.
@@ -748,183 +731,6 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
     }
 }
 
-struct CoreLspAdapter {
-    inner: crate::lsp::SharedLspManager,
-}
-
-impl CoreLspAdapter {
-    fn new(inner: crate::lsp::SharedLspManager) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait::async_trait]
-impl ragent_tools_extended::lsp::LspBackend for CoreLspAdapter {
-    async fn hover(
-        &self,
-        path: &std::path::Path,
-        line: u32,
-        column: u32,
-    ) -> anyhow::Result<Option<lsp_types::Hover>> {
-        let client = {
-            let guard = self.inner.read().await;
-            guard.client_for_path(path).with_context(|| {
-                format!(
-                    "No LSP server for '{}' files",
-                    path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                )
-            })?
-        };
-        client
-            .open_document(path)
-            .await
-            .with_context(|| format!("LSP: failed to open {}", path.display()))?;
-        let uri = client.text_document_id(path)?;
-        let params = lsp_types::HoverParams {
-            text_document_position_params: lsp_types::TextDocumentPositionParams {
-                text_document: uri,
-                position: lsp_types::Position {
-                    line,
-                    character: column,
-                },
-            },
-            work_done_progress_params: lsp_types::WorkDoneProgressParams::default(),
-        };
-        client
-            .request("textDocument/hover", params)
-            .await
-            .context("LSP hover request failed")
-    }
-
-    async fn definition(
-        &self,
-        path: &std::path::Path,
-        line: u32,
-        column: u32,
-    ) -> anyhow::Result<Vec<lsp_types::Location>> {
-        let client = {
-            let guard = self.inner.read().await;
-            guard.client_for_path(path).with_context(|| {
-                format!(
-                    "No LSP server for '{}' files",
-                    path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                )
-            })?
-        };
-        client
-            .open_document(path)
-            .await
-            .with_context(|| format!("LSP: failed to open {}", path.display()))?;
-        let uri = client.text_document_id(path)?;
-        let params = lsp_types::GotoDefinitionParams {
-            text_document_position_params: lsp_types::TextDocumentPositionParams {
-                text_document: uri,
-                position: lsp_types::Position {
-                    line,
-                    character: column,
-                },
-            },
-            work_done_progress_params: lsp_types::WorkDoneProgressParams::default(),
-            partial_result_params: lsp_types::PartialResultParams::default(),
-        };
-        let result: Option<lsp_types::GotoDefinitionResponse> = client
-            .request("textDocument/definition", params)
-            .await
-            .context("LSP definition request failed")?;
-        Ok(match result {
-            None => vec![],
-            Some(lsp_types::GotoDefinitionResponse::Scalar(loc)) => vec![loc],
-            Some(lsp_types::GotoDefinitionResponse::Array(locs)) => locs,
-            Some(lsp_types::GotoDefinitionResponse::Link(links)) => links
-                .into_iter()
-                .map(|link| lsp_types::Location {
-                    uri: link.target_uri,
-                    range: link.target_range,
-                })
-                .collect(),
-        })
-    }
-
-    async fn references(
-        &self,
-        path: &std::path::Path,
-        line: u32,
-        column: u32,
-        include_declaration: bool,
-    ) -> anyhow::Result<Vec<lsp_types::Location>> {
-        let client = {
-            let guard = self.inner.read().await;
-            guard.client_for_path(path).with_context(|| {
-                format!(
-                    "No LSP server for '{}' files",
-                    path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                )
-            })?
-        };
-        client
-            .open_document(path)
-            .await
-            .with_context(|| format!("LSP: failed to open {}", path.display()))?;
-        let uri = client.text_document_id(path)?;
-        let params = lsp_types::ReferenceParams {
-            text_document_position: lsp_types::TextDocumentPositionParams {
-                text_document: uri,
-                position: lsp_types::Position {
-                    line,
-                    character: column,
-                },
-            },
-            work_done_progress_params: lsp_types::WorkDoneProgressParams::default(),
-            partial_result_params: lsp_types::PartialResultParams::default(),
-            context: lsp_types::ReferenceContext {
-                include_declaration,
-            },
-        };
-        let result: Option<Vec<lsp_types::Location>> = client
-            .request("textDocument/references", params)
-            .await
-            .context("LSP references request failed")?;
-        Ok(result.unwrap_or_default())
-    }
-
-    async fn document_symbols(
-        &self,
-        path: &std::path::Path,
-    ) -> anyhow::Result<Option<lsp_types::DocumentSymbolResponse>> {
-        let client = {
-            let guard = self.inner.read().await;
-            guard.client_for_path(path).with_context(|| {
-                format!(
-                    "No LSP server for '{}' files — check your ragent.json 'lsp' configuration",
-                    path.extension().and_then(|e| e.to_str()).unwrap_or("?")
-                )
-            })?
-        };
-        client
-            .open_document(path)
-            .await
-            .with_context(|| format!("LSP: failed to open {}", path.display()))?;
-        let uri = client.text_document_id(path)?;
-        let params = lsp_types::DocumentSymbolParams {
-            text_document: uri,
-            work_done_progress_params: lsp_types::WorkDoneProgressParams::default(),
-            partial_result_params: lsp_types::PartialResultParams::default(),
-        };
-        client
-            .request("textDocument/documentSymbol", params)
-            .await
-            .context("LSP documentSymbol request failed")
-    }
-
-    async fn diagnostics(
-        &self,
-        path: Option<&std::path::Path>,
-    ) -> anyhow::Result<Vec<(String, Vec<lsp_types::Diagnostic>)>> {
-        let guard = self.inner.read().await;
-        Ok(guard.diagnostics_for(path).await)
-    }
-}
-
 struct ExtractedExtendedToolAdapter {
     inner: Arc<dyn ragent_tools_extended::Tool>,
 }
@@ -1076,11 +882,6 @@ impl Tool for ExtractedExtendedToolAdapter {
                 Arc::new(CoreStorageAdapter::new(storage.clone()))
             },
         );
-        let lsp_adapter = ctx.lsp_manager.as_ref().map(
-            |manager| -> Arc<dyn ragent_tools_extended::lsp::LspBackend> {
-                Arc::new(CoreLspAdapter::new(manager.clone()))
-            },
-        );
 
         let tool_ctx = ragent_tools_extended::ToolContext {
             session_id: ctx.session_id.clone(),
@@ -1088,9 +889,7 @@ impl Tool for ExtractedExtendedToolAdapter {
             event_bus: tool_bus,
             storage: storage_adapter,
             code_index: ctx.code_index.clone(),
-            lsp_backend: lsp_adapter,
         };
-
         let result = self
             .inner
             .execute(input, &tool_ctx)

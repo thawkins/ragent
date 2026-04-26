@@ -845,15 +845,6 @@ Type `/` in the input to open an autocomplete menu:
 | `/codeindex show` | Show index status and statistics |
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
-| `/aiwiki` | Open AIWiki in browser |
-| `/aiwiki init` | Initialize AIWiki |
-| `/aiwiki on` | Enable AIWiki |
-| `/aiwiki off` | Disable AIWiki |
-| `/aiwiki show` | Open web interface in browser |
-| `/aiwiki ingest [path]` | Ingest documents |
-| `/aiwiki sync` | Sync wiki |
-| `/aiwiki status` | Show wiki statistics |
-| `/aiwiki help` | Show AIWiki help |
 
 ### Key Bindings
 
@@ -989,48 +980,6 @@ curl http://localhost:3000/orchestrator/metrics \
   -H 'Authorization: Bearer <token>'
 # → {"active_jobs":0,"completed_jobs":3,"timeouts":0,"errors":0}
 ```
-
----
-
-## AIWiki
-
-AIWiki is an embedded, project-scoped knowledge base for managing documents and knowledge.
-
-### Quick Start
-
-```bash
-# In TUI
-/aiwiki init        # Initialize wiki structure
-/aiwiki             # Open web interface
-```
-
-### Add Documents
-
-```bash
-# Place files in aiwiki/raw/
-cp docs/*.pdf aiwiki/raw/
-```
-
-### Sync
-
-```
-/aiwiki sync        # Process documents into wiki pages
-```
-
-### Query
-
-```
-/aiwiki ask "What are the key requirements?"
-```
-
-### Export
-
-```
-/aiwiki export single_markdown my_wiki.md
-/aiwiki export obsidian my_vault/
-```
-
-See the full guide: `docs/userdocs/aiwiki.md`
 
 ---
 

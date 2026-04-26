@@ -263,11 +263,15 @@ async fn main() -> Result<()> {
             .init();
         None
     };
+    tracing::info!(log_level = %cli.log_level, tui_mode = tui_will_run, "Tracing initialized");
 
     // Load config
-    let config = if let Some(ref path) = cli.config {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| anyhow::anyhow!("Failed to read config file '{}': {}", path, e))?;
+    let config = if let Some(ref path_str) = cli.config {
+        let path = PathBuf::from(path_str);
+        tracing::info!(config_path = %path.display(), "Loading config from file");
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            anyhow::anyhow!("Failed to read config file '{}': {}", path.display(), e)
+        })?;
 
         serde_json::from_str(&content).map_err(|e| {
             let line = e.line();
@@ -279,13 +283,13 @@ async fn main() -> Result<()> {
 
             anyhow::anyhow!(
                 "Failed to parse config file '{}':\n\
-                 Error at line {}, column {}:\n\
-                 {}\n\
-                 Problematic line:\n\
-                 {}\n\
-                 {}^\n\
-                 Parse error: {}",
-                path,
+                           Error at line {}, column {}:\n\
+                           {}\n\
+                           Problematic line:\n\
+                           {}\n\
+                           {}^\n\
+                           Parse error: {}",
+                path.display(),
                 line,
                 column,
                 "─".repeat(80),
@@ -297,10 +301,49 @@ async fn main() -> Result<()> {
     } else {
         Config::load()?
     };
+    tracing::info!("Configuration loaded successfully");
+
+    let internal_llm_service =
+        ragent_core::internal_llm::InternalLlmService::from_config(config.internal_llm.clone())?
+            .map(Arc::new);
+    let auto_extract_config = config.memory.auto_extract.clone();
+    tracing::debug!(
+        internal_llm_enabled = internal_llm_service.is_some(),
+        "Internal LLM service initialized"
+    );
+    if let Some(service) = &internal_llm_service {
+        let snapshot = service.status_snapshot();
+        if let Some(runtime) = snapshot.runtime {
+            tracing::info!(
+                model_id = %snapshot.model_id,
+                backend = %snapshot.backend,
+                lifecycle = ?runtime.lifecycle,
+                execution_device = %runtime.settings.execution_device,
+                quantized_runtime = %runtime.settings.quantized_runtime,
+                requested_threads = runtime.settings.requested_threads,
+                effective_threads = runtime.settings.effective_threads,
+                requested_gpu_layers = runtime.settings.requested_gpu_layers,
+                effective_gpu_layers = runtime.settings.effective_gpu_layers,
+                gpu_offload = %runtime.settings.gpu_offload,
+                threading = %runtime.settings.threading,
+                "Internal LLM runtime settings"
+            );
+            if runtime.settings.requested_gpu_layers > runtime.settings.effective_gpu_layers {
+                tracing::warn!(
+                    requested_gpu_layers = runtime.settings.requested_gpu_layers,
+                    effective_gpu_layers = runtime.settings.effective_gpu_layers,
+                    gpu_offload = %runtime.settings.gpu_offload,
+                    "Internal LLM gpu_layers setting is not supported by the current runtime"
+                );
+            }
+        }
+    }
 
     // Initialize storage
     let db_path = data_dir().join("ragent.db");
+    tracing::info!(db_path = %db_path.display(), "Opening database");
     let storage = Arc::new(Storage::open(&db_path)?);
+    tracing::info!("Storage initialized successfully");
 
     // Seed the secret registry from stored provider credentials so that
     // redact_secrets() can mask them by exact match in all log output.
@@ -321,13 +364,23 @@ async fn main() -> Result<()> {
     }
     // Create event bus
     let event_bus = Arc::new(EventBus::new(2048));
+    tracing::debug!(capacity = 2048, "Event bus created");
 
     // Create registries
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());
-    // Apply configured tool-hiding rules so hidden tools are not advertised to the LLM.
-    if !config.hidden_tools.is_empty() {
-        tool_registry.set_hidden(&config.hidden_tools);
+    let provider_count = provider_registry.list().len();
+    let tool_count = tool_registry.list().len();
+    tracing::info!(
+        providers = provider_count,
+        tools = tool_count,
+        "Registries created"
+    );
+
+    let hidden_tools = config.effective_hidden_tools();
+    if !hidden_tools.is_empty() {
+        tracing::debug!(hidden_tools = ?hidden_tools, "Hiding tools from registry");
+        tool_registry.set_hidden(&hidden_tools);
     }
     let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(
         config.permission.clone(),
@@ -335,7 +388,9 @@ async fn main() -> Result<()> {
 
     // Resolve the active agent
     let agent_name = &cli.agent;
+    tracing::info!(agent = %agent_name, "Resolving agent");
     let mut resolved_agent = agent::resolve_agent(agent_name, &config)?;
+    tracing::info!(agent = %resolved_agent.name, model = ?resolved_agent.model, "Agent resolved");
 
     // Apply CLI --maxsteps override if provided
     if let Some(max) = cli.maxsteps {
@@ -380,6 +435,7 @@ async fn main() -> Result<()> {
 
     // Create session manager and processor
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
+    tracing::debug!("Session manager created");
     let session_processor = Arc::new(SessionProcessor {
         session_manager: session_manager.clone(),
         provider_registry: provider_registry.clone(),
@@ -387,7 +443,6 @@ async fn main() -> Result<()> {
         permission_checker,
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
-        lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
@@ -395,6 +450,15 @@ async fn main() -> Result<()> {
         stream_config,
         auto_approve: cli.yes,
     });
+    tracing::info!(auto_approve = cli.yes, "Session processor initialized");
+
+    if auto_extract_config.enabled {
+        let extraction_engine = Arc::new(ragent_core::memory::ExtractionEngine::with_internal_llm(
+            auto_extract_config,
+            internal_llm_service.clone(),
+        ));
+        let _ = session_processor.extraction_engine.set(extraction_engine);
+    }
 
     // Create TaskManager and wire it into the processor (breaks circular dep via OnceLock)
     let task_manager = Arc::new(ragent_core::task::TaskManager::new(
@@ -403,9 +467,12 @@ async fn main() -> Result<()> {
         max_background_agents,
     ));
     let _ = session_processor.task_manager.set(task_manager);
+    tracing::debug!(max_background_agents, "Task manager initialized");
 
     // Connect MCP servers from config and register their tools into the tool registry.
-    if !config.read().await.mcp.is_empty() {
+    let mcp_server_count = config.read().await.mcp.len();
+    if mcp_server_count > 0 {
+        tracing::info!(mcp_servers = mcp_server_count, "Connecting MCP servers");
         let mcp_configs: Vec<(String, ragent_core::config::McpServerConfig)> = config
             .read()
             .await
@@ -415,19 +482,28 @@ async fn main() -> Result<()> {
             .collect();
 
         let mut mcp_client = ragent_core::mcp::McpClient::new();
+        let mut mcp_connected = 0u32;
         for (id, cfg) in mcp_configs {
             if let Err(e) = mcp_client.connect(&id, cfg).await {
                 tracing::warn!(server_id = %id, error = %e, "MCP server connection failed at startup");
+            } else {
+                mcp_connected += 1;
             }
         }
         let shared_client = Arc::new(tokio::sync::RwLock::new(mcp_client));
         session_processor.set_mcp_client(shared_client).await;
+        tracing::info!(
+            connected = mcp_connected,
+            total = mcp_server_count,
+            "MCP servers initialized"
+        );
     }
 
     match cli.command {
         None => {
             // Default: run TUI
             if cli.no_tui {
+                tracing::info!("Starting interactive mode (plain, no TUI)");
                 use tokio::io::AsyncBufReadExt;
 
                 tracing::info!("Starting ragent interactive mode (plain)");
@@ -468,6 +544,7 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Run { prompt }) => {
+            tracing::info!("Starting headless run mode");
             let dir = std::fs::canonicalize(".")?;
             let session = session_manager.create_session(dir)?;
             match session_processor
@@ -489,6 +566,7 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::Serve { addr }) => {
+            tracing::info!(address = %addr, "Starting HTTP server");
             let auth_token = uuid::Uuid::new_v4().to_string();
             let orchestrator_registry = ragent_core::orchestrator::AgentRegistry::new();
             let coordinator = ragent_core::orchestrator::Coordinator::new(orchestrator_registry);
@@ -505,6 +583,7 @@ async fn main() -> Result<()> {
             ragent_server::start_server(&addr, state).await?;
         }
         Some(Commands::Orchestrate) => {
+            tracing::info!("Starting orchestration example");
             run_orchestration_example().await?;
         }
         Some(Commands::Session { command }) => match command {

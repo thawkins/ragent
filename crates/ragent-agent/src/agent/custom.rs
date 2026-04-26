@@ -457,7 +457,7 @@ pub fn record_to_agent_info(
         model,
         prompt: Some(payload.system_prompt.clone()),
         permission,
-                  max_steps: Some(payload.max_steps.unwrap_or(500)),
+        max_steps: Some(payload.max_steps.unwrap_or(500)),
         skills: payload.skills,
         memory,
         options,

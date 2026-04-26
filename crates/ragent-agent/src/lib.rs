@@ -13,7 +13,7 @@ pub mod event;
 pub mod file_ops;
 pub mod hooks;
 pub mod id;
-pub mod lsp;
+pub mod internal_llm;
 pub mod mcp;
 pub mod memory;
 pub mod message;
@@ -34,8 +34,16 @@ pub mod tool;
 pub mod updater;
 pub mod yolo;
 
-pub use ragent_llm::{llm, provider};
+pub use ragent_llm::{embedded, llm, provider};
 pub use ragent_tools_vcs::{github, gitlab};
+
+// Re-export config types that downstream crates (e.g. ragent-tui) need
+pub use config::{ToolVisibilityConfig, tool_family_names};
+pub use internal_llm::{
+    InternalLlmError, InternalLlmExecutionRequest, InternalLlmExecutor, InternalLlmMetricsSnapshot,
+    InternalLlmQueueStatus, InternalLlmResult, InternalLlmService, InternalLlmStatusSnapshot,
+    InternalLlmTaskKind, InternalTaskLimits,
+};
 
 pub use ragent_llm::{
     AnthropicProvider, CopilotProvider, GeminiProvider, GenericOpenAiProvider, HuggingFaceProvider,

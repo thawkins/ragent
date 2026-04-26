@@ -14,7 +14,7 @@ Ragent bridges the gap between conversational AI and hands-on software
 engineering. An agent can read and write files, execute shell commands, search
 codebases, manage Git and GitHub workflows, query language servers, read and
 write office documents, and coordinate with other agents — all through a
-library of **147+ built-in tools** organised across 18 categories. Every tool
+large built-in tool library organised across multiple categories. Every tool
 invocation passes through a multi-layered security and permission system that
 gives the user full control over what the agent can and cannot do.
 
@@ -37,6 +37,8 @@ graph LR
     TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, LSP, web, ...]
 ```
 
+**Figure 1:** Core Execution Loop — High-level session/agent/tool flow
+
 ### Key Capabilities
 
 | Capability | Summary |
@@ -44,7 +46,7 @@ graph LR
 | **Multi-provider LLM** | 7 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
-| **Tool System** | 147+ tools: file ops, shell, search, GitHub, GitLab, code index, memory, journal, teams, sub-agents, LSP, office/PDF, web, MCP |
+| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, journal, teams, sub-agents, LSP, office/PDF, web, and MCP |
 | **Code Intelligence** | Tree-sitter parsing (15+ languages), Tantivy FTS, symbol/reference search, and optional LSP integration |
 | **Persistent Memory** | Three-tier system — file blocks, structured SQLite store, and optional embedding-based semantic search — with automatic extraction, decay, compaction, and a knowledge graph |
 | **Teams & Swarms** | Multi-agent coordination with named teammates, shared task lists, mailbox messaging, and swarm decomposition for parallel work |
@@ -52,7 +54,6 @@ graph LR
 | **Skills** | Loadable skill packs (bundled or custom YAML) that inject tools, prompts, and file context into agent sessions |
 | **Custom Agents** | OASF-based agent profiles with configurable models, tools, permissions, and personality |
 | **Autopilot** | Autonomous operation mode with configurable iteration limits and permission auto-approval |
-| **AIWiki** | Project-scoped knowledge base with LLM-powered extraction, multi-format ingestion (MD/PDF/DOCX/ODT/TXT plus supported source code), optional autosync/watch mode, web interface, entity/concept graphs, and agent-accessible search |
 
 ### Who It's For
 
@@ -79,8 +80,8 @@ sessions and headless CI/CD integration via its HTTP API.
 ### Project Status
 
 Ragent is in **alpha** (v0.1.0-alpha.48). The core architecture, tool system,
-TUI, HTTP server, memory system, teams, security layer, and AIWiki knowledge base
-are functional and under active development. The specification below documents
+TUI, HTTP server, memory system, teams, and security layer are functional and
+under active development. The specification below documents
 the current state of all subsystems.
 
 **Current Release Highlights:**
@@ -92,7 +93,7 @@ the current state of all subsystems.
 - Config parse errors now report the file path, line, column, problematic line, and a caret marker for faster recovery
 - Codeindex tools are hardwired as always-allowed read-only tools and no longer trigger permission prompts
 - Workspace crate reorganisation milestones extracted `ragent-types`, `ragent-config`, `ragent-storage`, and `ragent-llm`
-- 147+ tools across 18 categories including comprehensive team coordination tools
+- Broad tool coverage including comprehensive team coordination tools
 - Native GitLab integration with issues, merge requests, and CI/CD pipeline management
 
 ---
@@ -114,8 +115,6 @@ the current state of all subsystems.
 
 6. [Code Index](#code-index)
 7. [Memory System](#memory-system)
-8. [AIWiki Knowledge Base](#aiwiki-knowledge-base)
-
 ### Part III: Multi-Agent Coordination
 
 9. [Teams](#teams)
@@ -172,6 +171,7 @@ the current state of all subsystems.
 | 11 | [Bash Security — 7 Layers](#242-bash-security--7-layers) | Security & Permissions | Bash command defense flow |
 | 12 | [Permission Request Flow](#243-permission-request-flow) | Security & Permissions | From tool call to user decision |
 | 13 | [Permission Rules Evaluation](#244-permission-rules-evaluation) | Security & Permissions | Rule matching and resolution |
+| 16 | [Agent Execution Loop Phases](#37-agent-execution-loop-phases) | Core Features | One complete turn from input to response |
 
 ---
 
@@ -190,7 +190,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 ### 1.1 Key Characteristics
 
 - **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Ollama, and Generic OpenAI-compatible APIs
-- **Comprehensive tool system** — 147+ tools covering file operations, code analysis, GitHub/GitLab integration, web access, office documents, memory, teams, and more
+- **Comprehensive tool system** — Extensive coverage across file operations, code analysis, GitHub/GitLab integration, web access, office documents, memory, teams, and more
 - **Built-in TUI** — Full-screen ratatui interface with streaming chat, slash commands, and real-time updates
 - **HTTP server** — REST + SSE API for external integrations
 - **Zero external dependencies** — Self-contained binary with SQLite, Tantivy, and tree-sitter compiled in
@@ -231,6 +231,8 @@ graph TB
     Tool --> BgAgents
 ```
 
+**Figure 2:** System Architecture — Full crate and component topology
+
 ### 2.3 Event Bus Flow
 
 The event bus is a central tokio broadcast channel that connects all subsystems. Every component publishes events and subscribes to events it cares about.
@@ -266,6 +268,8 @@ graph LR
     EB --> EventTypes
 ```
 
+**Figure 4:** Event Bus Flow — Internal pub/sub message routing
+
 **Event Flow Example — Tool Execution:**
 1. `Session` sends tool call request to `Tool`
 2. `Tool` publishes `ToolCallStarted` event
@@ -279,7 +283,6 @@ graph LR
 | Crate | LOC % | Purpose |
 |-------|------:|---------|
 | `ragent-agent` | 34.61% | Agent/runtime layer: sessions, orchestration, MCP/LSP, memory, tool registry |
-| `ragent-aiwiki` | 7.89% | Embedded wiki knowledge base, extraction pipeline, and web interface |
 | `ragent-codeindex` | 9.11% | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-config` | 1.29% | Configuration types, defaults, and parsing |
 | `ragent-llm` | 4.04% | Provider clients and model/provider registry |
@@ -307,7 +310,6 @@ graph LR
     subgraph Data["Data & Storage"]
         STORAGE["ragent-storage"]
         CODEIDX["ragent-codeindex"]
-        AIWIKI["ragent-aiwiki"]
     end
 
     subgraph Logic["Logic & Orchestration"]
@@ -336,13 +338,11 @@ graph LR
     CONFIG --> TUI
     STORAGE --> AGENT
     STORAGE --> CODEIDX
-    STORAGE --> AIWIKI
     LLM --> AGENT
     TCORE --> AGENT
     TEXT --> AGENT
     TVCS --> AGENT
     CODEIDX --> TEXT
-    AIWIKI --> TEXT
     AGENT --> TEAM
     AGENT --> SERVER
     AGENT --> TUI
@@ -350,6 +350,8 @@ graph LR
     PROMPT --> TUI
     PROMPT --> SERVER
 ```
+
+**Figure 3:** Crate Dependency Graph — Inter-crate dependency relationships
 
 **Dependency Rules:**
 - Foundation crates (`types`, `config`) have no internal dependencies
@@ -627,8 +629,6 @@ The following are aliases for commonly requested operations:
 | **MCP** | 1 | mcp_tool (McpToolWrapper) |
 | **Interactive** | 4 | question, think, todo_read/write |
 | **Utility** | 3 | calculator, get_env |
-| **TOTAL** | **147+** | All tools including aliases |
-
 #### Team Tools (21)
 
 | Tool | Purpose |
@@ -754,6 +754,8 @@ sequenceDiagram
     TUI-->>User: Display response
 ```
 
+**Figure 5:** Session & Tool Execution Flow — LLM call → permission → tool dispatch loop
+
 ---
 
 ### 3.6 Provider Selection Flow
@@ -773,6 +775,64 @@ graph TD
     TokenStream --> TUI_Update[Update TUI / HTTP clients]
     Fallback --> Health
 ```
+
+**Figure 6:** Provider Selection Flow — Multi-provider routing and health checks
+
+---
+
+### 3.7 Agent Execution Loop Phases
+
+Each turn of an agent session follows a fixed pipeline of phases. The loop repeats until the LLM returns a final assistant message (no further tool calls), the user interrupts the session, or a safety limit (`max_steps`, token budget, or timeout) is reached.
+
+```mermaid
+graph LR
+    A[1. Receive Input] --> B[2. Prepare Context]
+    B --> C[3. Send to LLM]
+    C --> D[4. Stream Response]
+    D --> E{Tool Call?}
+    E -- Yes --> F[5. Check Permission]
+    F --> G{Allowed?}
+    G -- Deny --> H[Inject Denied Error]
+    G -- Allow --> I[6. Execute Tool]
+    I --> J[7. Integrate Result]
+    J --> B
+    E -- No --> K[8. Finalise Turn]
+    K --> L[Wait for Next Input]
+```
+
+**Figure 16:** Agent Execution Loop Phases — One complete turn from input to response
+
+#### Phase Descriptions
+
+| Phase | What Happens | Key Components |
+|-------|-------------|----------------|
+| **1. Receive Input** | User message arrives via TUI (`Enter`) or HTTP POST. The session ID is resolved and the message is appended to the conversation history. | Session Processor, EventBus |
+| **2. Prepare Context** | Build the chat request payload: system prompt (agent profile + AGENTS.md + injected variables), conversation history, available tool schemas, and any compaction/summarisation if near the context-window limit. | Agent Profile, Tool Registry, Context Compaction |
+| **3. Send to LLM** | The configured provider client serialises the request (OpenAI, Anthropic, Gemini, etc. format), adds auth headers, and issues the HTTP request. | Provider Client, HTTP Client |
+| **4. Stream Response** | Tokens arrive via SSE. The session processor forwards them to the EventBus as `StreamToken` events. If a tool call is emitted, streaming pauses and the loop transitions to Phase 5. | EventBus, SSE Stream |
+| **5. Check Permission** | The permission checker evaluates the tool call against rules (hardwired → config → agent-specific → YOLO). Result can be `Allow`, `Deny`, or `Ask` (prompt user via TUI modal). | PermissionChecker, Permission Rules |
+| **6. Execute Tool** | The tool registry dispatches the call to the tool implementation. The tool runs (file op, bash, web fetch, code index query, etc.) and returns a structured result. | Tool Registry, Tool Impl |
+| **7. Integrate Result** | The tool result (or permission-denied error) is injected into the conversation history as a `tool` message. Control returns to Phase 2 for the next LLM call. | Session Processor |
+| **8. Finalise Turn** | When the LLM produces a plain-text response with no tool calls, the assistant message is persisted, token usage is recorded, and the TUI displays the final output. | Storage, EventBus |
+
+#### Safety Limits
+
+The loop is bounded by configurable guards:
+
+| Limit | Default | Behaviour When Hit |
+|-------|---------|-------------------|
+| `max_steps` | 500 | Halt and ask user whether to continue |
+| Token budget | Provider/model specific | Pause and warn; user can approve continuation |
+| Timeout | Per-request configurable | Abort the running request and surface error |
+| Context window | Model-specific | Trigger automatic compaction before sending |
+
+#### Streaming Semantics
+
+Responses are streamed token-by-token so the user sees progress in real time:
+1. `StreamToken` events fire for every chunk.
+2. If a tool call is detected mid-stream, the UI shows a collapsible tool-call summary.
+3. Tool results are streamed back as they complete (for async/multi-tool scenarios).
+4. `StreamComplete` signals the end of the turn.
 
 ---
 
@@ -797,7 +857,7 @@ The primary interface where all conversation happens.
 | Component | Description |
 |-----------|-------------|
 | **Status Bar (Line 1)** | Shows session ID, agent name, working directory, git branch, and current status message |
-| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as LSP, code index, AIWiki, and AIWiki autosync |
+| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as LSP and code index |
 | **Messages Panel** | Scrollable conversation history with syntax highlighting and formatted tool calls |
 | **Input Area** | Multi-line text input with autocomplete support for slash commands and file references |
 | **Log Panel** | Toggleable panel showing step-numbered tool calls with pretty-printed JSON |
@@ -1167,14 +1227,6 @@ Various inline widgets rendered within the message panel.
 | `/codeindex status` | Show index status |
 | **Memory** ||
 | `/memory` | Open memory browser |
-| **AIWiki** ||
-| `/aiwiki init` | Initialize AIWiki for current project |
-| `/aiwiki on` | Enable AIWiki |
-| `/aiwiki off` | Disable AIWiki |
-| `/aiwiki status` | Show AIWiki status |
-| `/aiwiki ingest <path>` | Ingest document(s) into AIWiki |
-| `/aiwiki sync` | Sync wiki with raw/ folder |
-| `/aiwiki clear` | Clear all AIWiki data |
 | **Team** ||
 | `/team create <name>` | Create new team |
 | `/team open <name>` | Open existing team |
@@ -1298,12 +1350,13 @@ graph TB
     EventBus -- subscribed --> App
 ```
 
+**Figure 7:** TUI Component Architecture — UI layout and event wiring
+
 ---
 
 - **Streaming responses** — Real-time token streaming from LLM
 - **Responsive two-line status bar** — Adapts between full, compact, and minimal layouts based on terminal width
 - **Provider-aware usage display** — Shows quota percentage when available, otherwise token totals and context usage; Copilot plan labels and Ollama context labels are surfaced when known
-- **AIWiki service indicators** — Status bar shows AIWiki enabled state and optional AutoSync state
 - **Step-numbered tool calls** — Cross-session tool call correlation
 - **Pretty-printed JSON** — Formatted tool parameters in log panel
 - **Image attachments** — Visual support with clipboard paste
@@ -1511,6 +1564,8 @@ sequenceDiagram
     Session->>State: Unlock
 ```
 
+**Figure 8:** HTTP API Request Flow — REST + SSE lifecycle
+
 ---
 
 ---
@@ -1576,6 +1631,8 @@ graph TB
     IndexStore --> FTS
     IndexStore --> Tools
 ```
+
+**Figure 9:** Code Index Pipeline — File scan → parse → index → search
 
 **Components:**
 | Component | Purpose |
@@ -1856,7 +1913,6 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
     "compaction": { "enabled": true, "block_size_limit": 4096 },
     "eviction": { "auto": false, "stale_days": 30 }
   },
-  "aiwiki_autosync": true,
   "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
   "bash": {
     "allowlist": [],
@@ -1870,7 +1926,6 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
 
 Additional top-level configuration keys:
 
-- `aiwiki_autosync` — When `true` (default), AIWiki auto-syncs on startup and can keep watching configured source folders for changes.
 - `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
 
 ### 16.3 Environment Variables
@@ -1993,6 +2048,8 @@ graph TD
     Decision -->|No| Reject
 ```
 
+**Figure 10:** Permission Security Layers — 5-layer defense-in-depth
+
 ---
 
 ### 24.2 Bash Security — 7 Layers
@@ -2016,6 +2073,8 @@ graph LR
     H -- Allow --> Y[Permission Check]
     Y --> Z
 ```
+
+**Figure 11:** Bash Security — 7 Layers — Bash command defense flow
 
 **Layer Details:**
 
@@ -2065,6 +2124,8 @@ sequenceDiagram
     end
 ```
 
+**Figure 12:** Permission Request Flow — From tool call to user decision
+
 ---
 
 ### 24.4 Permission Rules Evaluation
@@ -2084,6 +2145,8 @@ graph TD
     G -->|Deny| I[Reject]
     G -->|Ask| J[Prompt User]
 ```
+
+**Figure 13:** Permission Rules Evaluation — Rule matching and resolution
 
 **Default Rules:**
 - Read operations → Allow
@@ -2150,7 +2213,6 @@ All documentation markdown files are located in `docs/` except for these root fi
 - `huggingface` provider with dynamic model discovery and rate limit tracking
 - GitLab integration with issues, merge requests, pipelines, and jobs
 - Team coordination tools (21 tools for team lifecycle, tasks, messaging)
-- AIWiki knowledge base with multi-format ingestion and web interface
 - LSP integration with hover, definition, references, symbols, diagnostics
 - MCP (Model Context Protocol) client support
 - Skills system for loadable skill packs

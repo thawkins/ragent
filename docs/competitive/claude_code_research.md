@@ -910,7 +910,7 @@ npm install -g @anthropic-ai/claude-code
 
 **From Claude Code user feedback:**
 - Unclear usage limits and overage charges → ragent could provide transparent metering
-- Limited editor support → ragent could prioritize LSP-based approach for broad compatibility
+- Limited editor support → ragent could prioritize IDE/workspace integration for broad compatibility
 - Isolation (no team features) → ragent could build collaboration-first
 - Verbose responses → ragent could offer verbosity controls
 - Config file support → ragent could handle YAML, .env, etc.

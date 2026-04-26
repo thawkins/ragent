@@ -26,7 +26,6 @@ const EXCLUDED_DIRS: &[&str] = &[
     ".tox",
     ".mypy_cache",
     ".pytest_cache",
-    "aiwiki",
 ];
 
 /// Number of bytes to check for NUL to detect binary files.

@@ -204,8 +204,6 @@ rust_xlsxwriter = "0.94"
 spreadsheet-ods = "1.0"
 zip = { version = "7", default-features = false, features = ["deflate"] }
 
-# LSP client
-lsp-types = "0.97"
 url = "2"
 
 # Concurrent collections and parallelism

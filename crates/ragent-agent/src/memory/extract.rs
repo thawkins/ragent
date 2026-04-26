@@ -51,6 +51,7 @@ use tracing::{debug, info, warn};
 
 use crate::config::AutoExtractConfig;
 use crate::event::EventBus;
+use crate::internal_llm::{InternalLlmService, InternalLlmTaskKind, InternalTaskLimits};
 use crate::storage::Storage;
 
 // ── MemoryCandidate ──────────────────────────────────────────────────────────
@@ -99,6 +100,8 @@ pub struct MemoryCandidate {
 pub struct ExtractionEngine {
     /// Configuration controlling extraction behaviour.
     config: AutoExtractConfig,
+    /// Optional internal-LLM service used to prefilter session-end candidates.
+    internal_llm_service: Option<Arc<InternalLlmService>>,
     /// Per-session tracker for recent tool failures.
     /// Key: session_id, Value: list of recent failed tool calls.
     failure_tracker: std::sync::Mutex<Vec<FailedToolCall>>,
@@ -127,6 +130,21 @@ impl ExtractionEngine {
     pub fn new(config: AutoExtractConfig) -> Self {
         Self {
             config,
+            internal_llm_service: None,
+            failure_tracker: std::sync::Mutex::new(Vec::new()),
+            proposed_hashes: std::sync::Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Create a new extraction engine with optional internal-LLM prefiltering.
+    #[must_use]
+    pub fn with_internal_llm(
+        config: AutoExtractConfig,
+        internal_llm_service: Option<Arc<InternalLlmService>>,
+    ) -> Self {
+        Self {
+            config,
+            internal_llm_service,
             failure_tracker: std::sync::Mutex::new(Vec::new()),
             proposed_hashes: std::sync::Mutex::new(HashSet::new()),
         }
@@ -240,6 +258,7 @@ impl ExtractionEngine {
         debug!("Session end extraction for session {session_id}");
 
         let candidates = self.extract_session_summary(session_id, messages, working_dir);
+        let candidates = self.prefilter_session_candidates(candidates);
 
         for candidate in candidates {
             if !self.is_duplicate(&candidate.content, storage) {
@@ -249,6 +268,87 @@ impl ExtractionEngine {
 
         // Clean up failure tracker for this session.
         self.clear_failures(session_id);
+    }
+
+    fn prefilter_session_candidates(
+        &self,
+        candidates: Vec<MemoryCandidate>,
+    ) -> Vec<MemoryCandidate> {
+        let Some(service) = &self.internal_llm_service else {
+            return candidates;
+        };
+        if !service.config().memory_extraction_enabled || candidates.len() <= 1 {
+            return candidates;
+        }
+
+        let prompt = self.build_memory_prefilter_prompt(&candidates);
+        let prefilter_result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(service.run_internal_task(
+                InternalLlmTaskKind::MemoryPrefilter,
+                &prompt,
+                InternalTaskLimits::default(),
+            ))
+        });
+
+        let kept = match prefilter_result {
+            Ok(result) => match serde_json::from_str::<Vec<String>>(&result.output) {
+                Ok(values) => values,
+                Err(error) => {
+                    service.record_fallback(
+                        InternalLlmTaskKind::MemoryPrefilter,
+                        format!("invalid JSON from prefilter: {error}"),
+                    );
+                    warn!(error = %error, "Internal LLM memory prefilter returned invalid JSON");
+                    return candidates;
+                }
+            },
+            Err(error) => {
+                service.record_fallback(
+                    InternalLlmTaskKind::MemoryPrefilter,
+                    format!("prefilter unavailable: {error}"),
+                );
+                warn!(
+                    error = %error,
+                    "Internal LLM memory prefilter unavailable, using heuristic candidates"
+                );
+                return candidates;
+            }
+        };
+
+        if kept.is_empty() {
+            return Vec::new();
+        }
+
+        let keep_set: HashSet<String> = kept.into_iter().collect();
+        let filtered: Vec<MemoryCandidate> = candidates
+            .iter()
+            .filter(|candidate| keep_set.contains(&candidate.content))
+            .cloned()
+            .collect();
+
+        if filtered.is_empty() {
+            service.record_fallback(
+                InternalLlmTaskKind::MemoryPrefilter,
+                "prefilter kept no exact candidate matches".to_string(),
+            );
+            warn!("Internal LLM memory prefilter kept no exact candidate matches; falling back");
+            return candidates;
+        }
+
+        filtered
+    }
+
+    fn build_memory_prefilter_prompt(&self, candidates: &[MemoryCandidate]) -> String {
+        let mut prompt = String::from(
+            "Review the candidate memories below and keep only durable, reusable project memories. \
+             Return a JSON array containing exact candidate strings to keep, copied verbatim.\n\nCandidates:\n",
+        );
+        for candidate in candidates {
+            prompt.push_str("- ");
+            prompt.push_str(&candidate.content);
+            prompt.push('\n');
+        }
+        prompt
     }
 
     // ── Pattern extraction from file edits ──────────────────────────────

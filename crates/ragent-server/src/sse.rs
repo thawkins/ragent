@@ -127,6 +127,12 @@ struct TokenUsageP<'a> {
 }
 
 #[derive(Serialize)]
+struct RequestStartedP<'a> {
+    session_id: &'a str,
+    outbound_bytes: u64,
+}
+
+#[derive(Serialize)]
 struct ToolsSentP<'a> {
     session_id: &'a str,
     tools: &'a [String],
@@ -278,6 +284,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::AgentError { .. } => "agent_error",
         Event::McpStatusChanged { .. } => "mcp_status_changed",
         Event::TokenUsage { .. } => "token_usage",
+        Event::RequestStarted { .. } => "request_started",
         Event::ToolsSent { .. } => "tools_sent",
         Event::ModelResponse { .. } => "model_response",
         Event::ToolCallArgs { .. } => "tool_call_args",
@@ -296,7 +303,6 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::TeamTaskCompleted { .. } => "team_task_completed",
         Event::TeamCleanedUp { .. } => "team_cleaned_up",
         Event::TeammateP2PMessage { .. } => "teammate_p2p_message",
-        Event::LspStatusChanged { .. } => "lsp_status_changed",
         Event::TaskCompleted { .. } => "task_completed",
         Event::ShellCwdChanged { .. } => "shell_cwd_changed",
         Event::UserInput { .. } => "user_input",
@@ -460,6 +466,14 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             session_id,
             input_tokens: *input_tokens,
             output_tokens: *output_tokens,
+        }),
+
+        Event::RequestStarted {
+            session_id,
+            outbound_bytes,
+        } => to_data(&RequestStartedP {
+            session_id,
+            outbound_bytes: *outbound_bytes,
         }),
 
         Event::ToolsSent { session_id, tools } => to_data(&ToolsSentP { session_id, tools }),
@@ -666,14 +680,6 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             to,
             preview,
         }),
-
-        Event::LspStatusChanged { server_id, status } => {
-            let status_str = format!("{status:?}");
-            to_data(&ServerStatus {
-                server_id,
-                status: &status_str,
-            })
-        }
 
         Event::TaskCompleted {
             session_id,

@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.50"
+version = "0.1.0-alpha.52"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -206,8 +206,6 @@ printpdf = { version = "0.9", default-features = false, features = ["text_layout
 pdf-extract = "0.10"
 lopdf = "0.39"
 
-# ── LSP client ───────────────────────────────────────────────────────────
-lsp-types = "0.97"
 url = "2"
 
 # ── Concurrent collections ──────────────────────────────────────────────
@@ -229,6 +227,10 @@ ndarray = "0.17"
 [[bin]]
 name = "ragent"
 path = "src/main.rs"
+
+[features]
+default = ["embedded-llm"]
+embedded-llm = ["ragent-agent/embedded-llm"]
 
 [dependencies]
 ragent-agent = { workspace = true }
@@ -252,3 +254,26 @@ lto = true
 codegen-units = 1
 strip = true
 opt-level = "z"
+
+# ── Debug-build optimisation for compute-heavy crates ──────────────────────
+# Candle and tokenizers do heavy SIMD/tensor work that is unusably slow at
+# opt-level 0.  Compiling them at opt-level 3 even in dev builds keeps
+# debug builds responsive while the rest of the workspace remains
+# unoptimised for fast incremental builds and stack traces.
+[profile.dev.package.candle-core]
+opt-level = 3
+
+[profile.dev.package.candle-nn]
+opt-level = 3
+
+[profile.dev.package.candle-transformers]
+opt-level = 3
+
+[profile.dev.package.tokenizers]
+opt-level = 3
+
+[profile.dev.package.half]
+opt-level = 3
+
+[profile.dev.package.safetensors]
+opt-level = 3

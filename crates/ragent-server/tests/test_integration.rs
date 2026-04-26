@@ -32,7 +32,6 @@ fn test_state(token: &str) -> AppState {
         permission_checker: Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(vec![]))),
         event_bus: event_bus.clone(),
         task_manager: std::sync::OnceLock::new(),
-        lsp_manager: std::sync::OnceLock::new(),
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
