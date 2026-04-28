@@ -106,6 +106,8 @@ use ragent_core::storage::Storage;
 
 use tracing_layer::TuiLogReceiver;
 
+const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
+
 /// Run the TUI application.
 ///
 /// Enters the alternate screen, creates an [`App`], and runs the main event
@@ -197,6 +199,37 @@ pub async fn run_tui(
     app.status = "checking provider…".to_string();
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
+    // Subscribe to the event bus before starting background services.
+    //
+    // This includes the startup init exchange. If we spawn that exchange before
+    // subscribing, streamed startup deltas can be treated as "dropped" and
+    // produce a large burst of warning logs.
+    // Bridge the broadcast channel to an unbounded mpsc channel so the TUI never
+    // loses events.  The broadcast channel can drop events for slow receivers
+    // (Lagged error) during burst scenarios (many parallel tool calls, rapid
+    // streaming).  The mpsc channel is unbounded, so the TUI always receives
+    // every event regardless of drain speed.
+    let (event_tx, mut event_rx) =
+        tokio::sync::mpsc::unbounded_channel::<ragent_core::event::Event>();
+    {
+        let mut bus_rx = event_bus.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match bus_rx.recv().await {
+                    Ok(event) => {
+                        if event_tx.send(event).is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("{n} broadcast events skipped in TUI bridge task");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
     // -- Auto-initialize a session at startup if not resuming --
     if resume_session_id.is_none() {
         let dir = std::env::current_dir().unwrap_or_default();
@@ -250,33 +283,6 @@ pub async fn run_tui(
     }
     app.append_assistant_text("\n✔ Input history loaded");
     terminal.draw(|frame| layout::render(frame, &mut app))?;
-
-    // Subscribe to the event bus before starting background services.
-    // Bridge the broadcast channel to an unbounded mpsc channel so the TUI never
-    // loses events.  The broadcast channel can drop events for slow receivers
-    // (Lagged error) during burst scenarios (many parallel tool calls, rapid
-    // streaming).  The mpsc channel is unbounded, so the TUI always receives
-    // every event regardless of drain speed.
-    let (event_tx, mut event_rx) =
-        tokio::sync::mpsc::unbounded_channel::<ragent_core::event::Event>();
-    {
-        let mut bus_rx = event_bus.subscribe();
-        tokio::spawn(async move {
-            loop {
-                match bus_rx.recv().await {
-                    Ok(event) => {
-                        if event_tx.send(event).is_err() {
-                            break;
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!("{n} broadcast events skipped in TUI bridge task");
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                }
-            }
-        });
-    }
 
     // -- Code index startup --
     app.status = "starting code index…".to_string();
@@ -372,6 +378,7 @@ pub async fn run_tui(
     // Set up signal handlers for graceful shutdown (SIGINT, SIGTERM)
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
+    let mut last_draw = std::time::Instant::now();
 
     while app.is_running {
         // Drain ALL pending events before rendering so the screen
@@ -423,10 +430,13 @@ pub async fn run_tui(
         // Refresh cached memory/journal stats for the status bar.
         app.refresh_memory_stats();
 
-        // Always draw so time-based UI elements (for example permission countdowns)
-        // continue to update even when the user is idle.
-        terminal.draw(|frame| layout::render(frame, &mut app))?;
-        app.needs_redraw = false;
+        if app.needs_redraw
+            || last_draw.elapsed() >= std::time::Duration::from_millis(IDLE_REDRAW_INTERVAL_MS)
+        {
+            terminal.draw(|frame| layout::render(frame, &mut app))?;
+            app.needs_redraw = false;
+            last_draw = std::time::Instant::now();
+        }
         tokio::select! {
             // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
             _ = sigint.recv() => {

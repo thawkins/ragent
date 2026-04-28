@@ -125,9 +125,11 @@ with OpenCode's `opencode.json`.
 {
   "provider": {
     "anthropic": {
-      "apiKey": "sk-...",
+      "thinking": { "enabled": true, "level": "low" },
       "models": {
-        "claude-sonnet-4-20250514": { "max_tokens": 8192 }
+        "claude-sonnet-4-20250514": {
+          "thinking": { "enabled": true, "level": "high", "budget_tokens": 16000 }
+        }
       }
     }
   },

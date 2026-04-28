@@ -393,6 +393,10 @@ pub struct ProviderConfig {
     pub env: Vec<String>,
     /// Optional API endpoint and header overrides.
     pub api: Option<ApiConfig>,
+    /// Default thinking/reasoning configuration for models under this provider.
+    /// Used when a per-model `thinking` override is not present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ragent_types::ThinkingConfig>,
     /// Model definitions available through this provider.
     #[serde(default)]
     pub models: HashMap<String, ModelConfig>,
@@ -421,6 +425,11 @@ pub struct ModelConfig {
     pub cost: Option<Cost>,
     /// Feature capabilities of this model.
     pub capabilities: Option<Capabilities>,
+    /// Default thinking/reasoning configuration for this model.
+    /// When set, this overrides any provider-level default and acts as
+    /// the fallback if no user-level choice is made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ragent_types::ThinkingConfig>,
 }
 
 /// Per-token cost for a model (USD per million tokens).
@@ -447,6 +456,11 @@ pub struct Capabilities {
     /// Whether the model supports tool/function calling.
     #[serde(default = "default_true")]
     pub tool_use: bool,
+    /// Which thinking/reasoning levels this model supports.
+    /// Empty vec means no thinking support. Populated from built-in model
+    /// definitions and may be extended by provider discovery APIs.
+    #[serde(default)]
+    pub thinking_levels: Vec<ragent_types::ThinkingLevel>,
 }
 
 const fn default_true() -> bool {
@@ -460,6 +474,7 @@ impl Default for Capabilities {
             streaming: true,
             vision: false,
             tool_use: true,
+            thinking_levels: Vec::new(),
         }
     }
 }
@@ -821,9 +836,15 @@ impl Config {
         {
             base.default_agent = overlay.default_agent;
         }
-        // Merge hash maps by extending (overlay wins on conflicts)
+        // Merge provider config deeply so partial overlays do not discard model,
+        // API, or thinking defaults from lower-precedence config files.
         for (k, v) in overlay.provider {
-            base.provider.insert(k, v);
+            let merged = if let Some(existing) = base.provider.remove(&k) {
+                Self::merge_provider_config(existing, v)
+            } else {
+                v
+            };
+            base.provider.insert(k, merged);
         }
         for (k, v) in overlay.agent {
             base.agent.insert(k, v);
@@ -959,6 +980,69 @@ impl Config {
         }
 
         base
+    }
+
+    fn merge_provider_config(mut base: ProviderConfig, overlay: ProviderConfig) -> ProviderConfig {
+        if !overlay.env.is_empty() {
+            base.env = overlay.env;
+        }
+        if let Some(overlay_api) = overlay.api {
+            if let Some(base_api) = base.api.as_mut() {
+                if overlay_api.base_url.is_some() {
+                    base_api.base_url = overlay_api.base_url;
+                }
+                base_api.headers.extend(overlay_api.headers);
+            } else {
+                base.api = Some(overlay_api);
+            }
+        }
+        if overlay.thinking.is_some() {
+            base.thinking = overlay.thinking;
+        }
+        for (model_id, overlay_model) in overlay.models {
+            let merged = if let Some(existing) = base.models.remove(&model_id) {
+                Self::merge_model_config(existing, overlay_model)
+            } else {
+                overlay_model
+            };
+            base.models.insert(model_id, merged);
+        }
+        base.options.extend(overlay.options);
+        base
+    }
+
+    fn merge_model_config(mut base: ModelConfig, overlay: ModelConfig) -> ModelConfig {
+        if overlay.name.is_some() {
+            base.name = overlay.name;
+        }
+        if overlay.cost.is_some() {
+            base.cost = overlay.cost;
+        }
+        if overlay.capabilities.is_some() {
+            base.capabilities = overlay.capabilities;
+        }
+        if overlay.thinking.is_some() {
+            base.thinking = overlay.thinking;
+        }
+        base
+    }
+
+    /// Returns the configured thinking default for the given provider/model.
+    ///
+    /// Model-level configuration overrides provider-level configuration.
+    #[must_use]
+    pub fn thinking_config_for_model(
+        &self,
+        provider_id: &str,
+        model_id: &str,
+    ) -> Option<ragent_types::ThinkingConfig> {
+        self.provider.get(provider_id).and_then(|provider| {
+            provider
+                .models
+                .get(model_id)
+                .and_then(|model| model.thinking.clone())
+                .or_else(|| provider.thinking.clone())
+        })
     }
 }
 // ── GitLab integration configuration ─────────────────────────────────────────

@@ -30,6 +30,9 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Mutex;
 
+use super::thinking::{
+    full_reasoning_levels, reasoning_effort_from_request, reasoning_levels_from_supported_efforts,
+};
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
@@ -226,10 +229,12 @@ impl Provider for CopilotProvider {
                     streaming: true,
                     vision: true,
                     tool_use: true,
+                    thinking_levels: Vec::new(),
                 },
                 context_window: 128_000,
                 max_output: Some(16_384),
                 request_multiplier: Some(0.0),
+                thinking_config: None,
             },
             ModelInfo {
                 id: "gpt-4o-mini".to_string(),
@@ -244,10 +249,12 @@ impl Provider for CopilotProvider {
                     streaming: true,
                     vision: true,
                     tool_use: true,
+                    thinking_levels: Vec::new(),
                 },
                 context_window: 128_000,
                 max_output: Some(16_384),
                 request_multiplier: Some(0.0),
+                thinking_config: None,
             },
             ModelInfo {
                 id: "claude-sonnet-4".to_string(),
@@ -262,10 +269,12 @@ impl Provider for CopilotProvider {
                     streaming: true,
                     vision: true,
                     tool_use: true,
+                    thinking_levels: full_reasoning_levels(),
                 },
                 context_window: 200_000,
                 max_output: Some(64_000),
                 request_multiplier: Some(1.0),
+                thinking_config: None,
             },
             ModelInfo {
                 id: "o3-mini".to_string(),
@@ -280,10 +289,12 @@ impl Provider for CopilotProvider {
                     streaming: true,
                     vision: false,
                     tool_use: true,
+                    thinking_levels: full_reasoning_levels(),
                 },
                 context_window: 200_000,
                 max_output: Some(100_000),
                 request_multiplier: Some(1.0),
+                thinking_config: None,
             },
         ]
     }
@@ -341,25 +352,6 @@ struct CopilotClient {
 }
 
 impl CopilotClient {
-    /// Extract a valid Copilot reasoning effort from request options.
-    ///
-    /// Supported values are: `low`, `medium`, `high`, and `none`.
-    /// Accepts either `reasoning_effort` (preferred) or `reasoning_level`.
-    fn reasoning_effort_from_options(options: &HashMap<String, Value>) -> Option<&'static str> {
-        let raw = options
-            .get("reasoning_effort")
-            .or_else(|| options.get("reasoning_level"))
-            .and_then(Value::as_str)?;
-
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "low" => Some("low"),
-            "medium" => Some("medium"),
-            "high" => Some("high"),
-            "none" => Some("none"),
-            _ => None,
-        }
-    }
-
     /// Builds the JSON request body in `OpenAI` chat completions format.
     fn build_request_body(&self, request: &ChatRequest, tools: &[ToolDefinition]) -> Value {
         let mut messages = Vec::new();
@@ -492,18 +484,8 @@ impl CopilotClient {
             body["tools"] = json!(tool_defs);
         }
 
-        // Reasoning / thinking control via agent options.
-        // Explicit reasoning effort/level takes precedence.
-        if let Some(level) = Self::reasoning_effort_from_options(&request.options) {
-            body["reasoning_effort"] = json!(level);
-        }
-
-        // Backward-compatible toggle.
-        if let Some(thinking_val) = request.options.get("thinking")
-            && thinking_val.as_str() == Some("disabled")
-            && body["reasoning_effort"].is_null()
-        {
-            body["reasoning_effort"] = json!("none");
+        if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
+            body["reasoning_effort"] = json!(reasoning_effort);
         }
 
         body
@@ -1578,10 +1560,14 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
                     streaming: supports.is_none_or(|s| s.streaming),
                     vision: supports.is_some_and(|s| s.vision),
                     tool_use: supports.is_none_or(|s| s.tool_calls),
+                    thinking_levels: reasoning_levels_from_supported_efforts(
+                        supports.and_then(|s| s.reasoning_effort.as_deref()),
+                    ),
                 },
                 context_window,
                 max_output,
                 request_multiplier,
+                thinking_config: None,
             }
         })
         .collect();
@@ -1719,36 +1705,104 @@ mod tests {
     #[test]
     fn test_reasoning_effort_from_options_accepts_levels() {
         let mk = |v: &str| {
-            let mut m = HashMap::new();
-            m.insert("reasoning_effort".to_string(), json!(v));
-            m
+            let mut request = ChatRequest {
+                model: "o3-mini".to_string(),
+                messages: vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }],
+                tools: vec![],
+                temperature: None,
+                top_p: None,
+                max_tokens: None,
+                system: None,
+                options: HashMap::new(),
+                session_id: None,
+                request_id: None,
+                stream_timeout_secs: None,
+                thinking: None,
+            };
+            request
+                .options
+                .insert("reasoning_effort".to_string(), json!(v));
+            request
         };
-        assert_eq!(
-            CopilotClient::reasoning_effort_from_options(&mk("low")),
-            Some("low")
-        );
-        assert_eq!(
-            CopilotClient::reasoning_effort_from_options(&mk("medium")),
-            Some("medium")
-        );
-        assert_eq!(
-            CopilotClient::reasoning_effort_from_options(&mk("high")),
-            Some("high")
-        );
+        assert_eq!(reasoning_effort_from_request(&mk("low")), Some("low"));
+        assert_eq!(reasoning_effort_from_request(&mk("medium")), Some("medium"));
+        assert_eq!(reasoning_effort_from_request(&mk("high")), Some("high"));
     }
 
     #[test]
     fn test_reasoning_effort_from_options_alias_and_invalid() {
         let mut alias = HashMap::new();
         alias.insert("reasoning_level".to_string(), json!("HIGH"));
-        assert_eq!(
-            CopilotClient::reasoning_effort_from_options(&alias),
-            Some("high")
-        );
+        let alias_request = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options: alias,
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: None,
+            thinking: None,
+        };
+        assert_eq!(reasoning_effort_from_request(&alias_request), Some("high"));
 
-        let mut invalid = HashMap::new();
-        invalid.insert("reasoning_effort".to_string(), json!("turbo"));
-        assert_eq!(CopilotClient::reasoning_effort_from_options(&invalid), None);
+        let mut invalid_options = HashMap::new();
+        invalid_options.insert("reasoning_effort".to_string(), json!("turbo"));
+        let invalid_request = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options: invalid_options,
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: None,
+            thinking: None,
+        };
+        assert_eq!(reasoning_effort_from_request(&invalid_request), None);
+    }
+
+    #[test]
+    fn test_reasoning_effort_prefers_typed_thinking() {
+        let mut request = ChatRequest {
+            model: "o3-mini".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }],
+            tools: vec![],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            system: None,
+            options: HashMap::new(),
+            session_id: None,
+            request_id: None,
+            stream_timeout_secs: None,
+            thinking: Some(ragent_types::ThinkingConfig::new(
+                ragent_types::ThinkingLevel::High,
+            )),
+        };
+        request
+            .options
+            .insert("reasoning_effort".to_string(), json!("low"));
+
+        assert_eq!(reasoning_effort_from_request(&request), Some("high"));
     }
 
     #[test]
@@ -1775,6 +1829,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1805,6 +1860,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&req, &[]);
@@ -1836,6 +1892,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&req, &[]);

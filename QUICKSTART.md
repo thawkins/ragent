@@ -207,7 +207,11 @@ Ragent loads configuration from multiple sources (last wins):
   // Provider configuration
   "provider": {
     "anthropic": {
-      "env": ["ANTHROPIC_API_KEY"]
+      "env": ["ANTHROPIC_API_KEY"],
+      "thinking": {
+        "enabled": true,
+        "level": "low"
+      }
     },
     "generic_openai": {
       "env": ["GENERIC_OPENAI_API_KEY"],
@@ -224,7 +228,11 @@ Ragent loads configuration from multiple sources (last wins):
           "name": "Llama 3.2"
         },
         "qwen2.5-coder:32b": {
-          "name": "Qwen 2.5 Coder 32B"
+          "name": "Qwen 2.5 Coder 32B",
+          "thinking": {
+            "enabled": true,
+            "level": "high"
+          }
         }
       }
     }
@@ -834,6 +842,7 @@ Type `/` in the input to open an autocomplete menu:
 | `/help` | Show available commands |
 | `/log` | Toggle log panel |
 | `/model` | Switch model |
+| `/thinking auto|off|low|medium|high` | Switch reasoning level for the active model |
 | `/provider` | Change provider |
 | `/provider_reset` | Reset provider credentials |
 | `/quit` | Exit ragent |

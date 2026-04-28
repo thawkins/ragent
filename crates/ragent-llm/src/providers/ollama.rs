@@ -16,6 +16,9 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use super::thinking::{
+    binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
+};
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
@@ -191,10 +194,12 @@ impl Provider for OllamaProvider {
                 streaming: true,
                 vision: false,
                 tool_use: true,
+                thinking_levels: binary_thinking_levels_for_model("llama3.2"),
             },
             context_window: 131_072,
             max_output: None,
             request_multiplier: None,
+            thinking_config: None,
         }]
     }
 
@@ -391,11 +396,8 @@ impl OllamaClient {
             body["tools"] = json!(tool_defs);
         }
 
-        // Reasoning / thinking control via agent options
-        if let Some(thinking_val) = request.options.get("thinking")
-            && thinking_val.as_str() == Some("disabled")
-        {
-            body["think"] = json!(false);
+        if let Some(think) = think_flag_from_request(request) {
+            body["think"] = json!(think);
         }
 
         body
@@ -637,6 +639,8 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
         .map(|entry| {
             let display_name = format_model_name(&entry.name, &entry.details);
             let ctx = estimate_context_window(&entry.details.parameter_size);
+            let reasoning = model_supports_binary_thinking(&entry.name);
+            let thinking_levels = binary_thinking_levels_for_model(&entry.name);
 
             ModelInfo {
                 id: entry.name,
@@ -647,14 +651,16 @@ pub async fn list_ollama_models(base_url: Option<&str>) -> Result<Vec<ModelInfo>
                     output: 0.0,
                 },
                 capabilities: Capabilities {
-                    reasoning: false,
+                    reasoning,
                     streaming: true,
                     vision: false,
                     tool_use: true,
+                    thinking_levels,
                 },
                 context_window: ctx,
                 max_output: None,
                 request_multiplier: None,
+                thinking_config: None,
             }
         })
         .collect();

@@ -10,7 +10,7 @@
 //! `.ragent/agents/` directories.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use crate::permission::{Permission, PermissionAction, PermissionRule, PermissionRuleset};
+use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 pub mod custom;
 pub mod oasf;
@@ -389,6 +390,9 @@ pub struct AgentInfo {
     /// Persistent memory scope for this agent.
     #[serde(default)]
     pub memory: crate::team::config::MemoryScope,
+    /// Default thinking configuration for this agent's LLM requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
     /// Arbitrary key-value options forwarded to the provider.
     // TODO: Replace `Value` with typed agent option structs.
     pub options: HashMap<String, Value>,
@@ -426,6 +430,7 @@ impl AgentInfo {
             max_steps: None,
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         }
@@ -479,7 +484,8 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
-            options: HashMap::from([("thinking".to_string(), json!("disabled"))]),
+            thinking: Some(ThinkingConfig::off()),
+            options: HashMap::new(),
             model_pinned: false,
         },
         AgentInfo {
@@ -507,6 +513,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -532,6 +539,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -557,6 +565,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -582,6 +591,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -605,6 +615,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -628,6 +639,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -652,6 +664,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             max_steps: Some(500),
             skills: Vec::new(),
             memory: crate::team::config::MemoryScope::None,
+            thinking: None,
             options: HashMap::new(),
             model_pinned: false,
         },
@@ -722,6 +735,48 @@ fn read_only_permissions() -> PermissionRuleset {
         rule(Permission::Edit, "**", PermissionAction::Deny),
         rule(Permission::Bash, "*", PermissionAction::Deny),
     ]
+}
+
+/// Returns the default thinking configuration for a model's supported levels.
+#[must_use]
+pub fn default_thinking_config_for_levels(levels: &[ThinkingLevel]) -> ThinkingConfig {
+    let _ = levels;
+    ThinkingConfig::off()
+}
+
+/// Returns the fallback thinking configuration for a resolved provider/model.
+///
+/// Precedence: config per-model → config per-provider → model metadata → built-in default.
+#[must_use]
+pub fn fallback_thinking_for_model_ref(
+    config: &crate::config::Config,
+    provider_registry: &crate::provider::ProviderRegistry,
+    model_ref: &ModelRef,
+) -> Option<ThinkingConfig> {
+    config
+        .thinking_config_for_model(&model_ref.provider_id, &model_ref.model_id)
+        .or_else(|| {
+            provider_registry
+                .resolve_model(&model_ref.provider_id, &model_ref.model_id)
+                .map(|model| {
+                    model.thinking_config.unwrap_or_else(|| {
+                        default_thinking_config_for_levels(&model.capabilities.thinking_levels)
+                    })
+                })
+        })
+}
+
+/// Applies fallback thinking to an agent when it has a resolved model but no explicit default.
+pub fn apply_fallback_thinking(
+    agent: &mut AgentInfo,
+    config: &crate::config::Config,
+    provider_registry: &crate::provider::ProviderRegistry,
+) {
+    if agent.thinking.is_none()
+        && let Some(model_ref) = agent.model.as_ref()
+    {
+        agent.thinking = fallback_thinking_for_model_ref(config, provider_registry, model_ref);
+    }
 }
 
 /// Resolve an agent by name, merging built-in definition with config overrides.
@@ -1503,32 +1558,55 @@ pub fn build_system_prompt_with_storage(
 
     // Specific guidance on using line ranges for file reads
     prompt.push_str(
-        "## File Reading Best Practices\n\n\
-         When reading files with the `read` tool or `str_replace_editor` view command:\n\
-         - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
-           to read the file in focused sections rather than all at once\n\
-         - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
-           The tool will return an error if they do. The error message includes the total line count.\n\
-           When you read a file, the response metadata includes `total_lines` — use that value\n\
-           to stay within range on subsequent reads of the same file.\n\
-         - Strategy:\n\
-           1. Read the file without start_line/end_line first — for large files this returns\n\
-              the first 100 lines plus a section map with the total line count\n\
-           2. Use the total_lines from the response to plan your subsequent reads\n\
-           3. Then read specific sections using valid line ranges\n\
-           4. Never read an entire file >100 lines in a single call\n",
-    );
-
-    // Guidance on str_replace_editor to prevent missing old_str
-    prompt.push_str(
-        "\n## str_replace_editor Usage\n\n\
-         When using the `str_replace_editor` tool with `command: \"str_replace\"`:\n\
-         - You MUST always provide the `old_str` parameter containing the exact text to find\n\
-         - You MUST always provide the `new_str` parameter containing the replacement text\n\
-         - Calls to `str_replace` without `old_str` will fail with an error\n\
-         - The `old_str` must match exactly one location in the file\n\
-         - Read the relevant section of the file first to get the exact text for `old_str`\n",
-    );
-
+                  "## File Reading Best Practices\n\n\
+                   When reading files with the `read` tool:\n\
+                   - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
+                     to read the file in focused sections rather than all at once\n\
+                   - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
+                     The tool will return an error if they do. The error message includes the total line count.\n\
+                     When you read a file, the response metadata includes `total_lines` — use that value\n\
+                     to stay within range on subsequent reads of the same file.\n\
+                   - Strategy:\n\
+                     1. Read the file without start_line/end_line first — for large files this returns\n\
+                        the first 100 lines plus a section map with the total line count\n\
+                     2. Use the total_lines from the response to plan your subsequent reads\n\
+                     3. Then read specific sections using valid line ranges\n\
+                     4. Never read an entire file >100 lines in a single call\n",
+              );
+        
+              // Guidance on using edit / multiedit tools
+              prompt.push_str(
+                  "\n## Editing Files\n\n\
+                   Use the `edit` tool for single surgical text replacements in one file.\n\
+                   Use the `multiedit` tool when applying multiple edits across one or more files atomically.\n\
+                   \n\
+                   When using the `edit` tool:\n\
+                   - You MUST always provide the `old_str` parameter containing the exact text to find\n\
+                   - You MUST always provide the `new_str` parameter containing the replacement text\n\
+                   - Calls to `edit` without `old_str` will fail with an error\n\
+                   - The `old_str` must match exactly one location in the file\n\
+                   - Read the relevant section of the file first to get the exact text for `old_str`\n\
+                   \n\
+                   When using the `multiedit` tool:\n\
+                   - Provide an `edits` array, where each entry has `path`, `old_str`, and `new_str`\n\
+                   - All edits are validated before any files are written\n\
+                   - If any `old_str` match fails, no files are modified\n",
+              );
     prompt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ask_agent_defaults_thinking_off() {
+        let ask = create_builtin_agents()
+            .into_iter()
+            .find(|agent| agent.name == "ask")
+            .expect("ask agent");
+
+        assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
+        assert!(ask.options.is_empty());
+    }
 }

@@ -5,7 +5,7 @@
 //!
 //! The status bar consists of two lines:
 //! - Line 1: Working directory (left), git branch (center), session status (right)
-//! - Line 2: Provider info (left), token usage (center), service status (right)
+//! - Line 2: Provider info + context window + thinking level (left), token usage (center), service status (right)
 
 use ratatui::{
     Frame,
@@ -416,6 +416,22 @@ fn build_line2_left(
         Style::default().fg(colors::IN_PROGRESS),
     ));
 
+    // Thinking level indicator
+    if let Some(level) = app.selected_thinking_level {
+        let short = App::thinking_level_short(level);
+        let (level_color, level_icon) = if level.is_enabled() {
+            (colors::HEALTHY, "🧠")
+        } else {
+            (colors::LABEL, "💭")
+        };
+        let level_str = if mode == ResponsiveMode::Full || mode == ResponsiveMode::Compact {
+            format!("{} {} ", level_icon, short)
+        } else {
+            format!("{} ", level_icon)
+        };
+        spans.push(Span::styled(level_str, Style::default().fg(level_color)));
+    }
+
     spans
 }
 
@@ -425,15 +441,14 @@ fn build_line2_center(
     _config: &StatusBarConfig,
     mode: ResponsiveMode,
 ) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-
-    fn format_kilobytes(bytes: u64) -> String {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
-    }
-
-    // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
-    let display_text = if let Some(quota) = app.quota_percent {
-        // Rate limit quota percentage (from provider headers)
+              let mut spans = Vec::new();
+          
+              fn format_kilobytes(bytes: u64) -> String {
+                  format!("{:.1}KB", bytes as f64 / 1024.0)
+              }
+          
+              // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
+              let display_text = if let Some(quota) = app.quota_percent {        // Rate limit quota percentage (from provider headers)
         let percent = quota as u32;
         let color = if percent >= 95 {
             colors::ERROR

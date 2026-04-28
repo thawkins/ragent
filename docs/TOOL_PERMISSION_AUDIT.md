@@ -54,9 +54,7 @@ Based on SECREVIEW.md Table (lines 90-99):
 | `append_file.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
 | `copy_file.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
 | `move_file.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
-| `mkdir.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
-| `str_replace_editor.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
-
+  | `mkdir.rs` | `file:write` | `Edit` | ❌ **MISMATCH** |
 **Aliases:**
 - `ReplaceInFileTool` (aliases.rs): `file:write` → ❌ **MISMATCH**
 - `UpdateFileTool` (aliases.rs): `file:write` → ❌ **MISMATCH**

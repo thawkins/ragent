@@ -5,10 +5,14 @@
 
 use anyhow::{Context, Result, bail};
 use futures::StreamExt;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use super::thinking::{
+    full_reasoning_levels, gemini_thinking_config_from_request, gemini_thinking_levels_for_model,
+};
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
@@ -34,10 +38,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-2.5-flash-preview-05-20"),
             },
             context_window: 1_048_576,
             max_output: Some(65_536),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gemini-2.5-pro-preview-05-06".to_string(),
@@ -52,10 +58,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-2.5-pro-preview-05-06"),
             },
             context_window: 1_048_576,
             max_output: Some(65_536),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gemini-2.0-flash".to_string(),
@@ -70,10 +78,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-2.0-flash"),
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gemini-2.0-flash-lite".to_string(),
@@ -88,10 +98,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-2.0-flash-lite"),
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gemini-1.5-flash".to_string(),
@@ -106,10 +118,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-1.5-flash"),
             },
             context_window: 1_048_576,
             max_output: Some(8_192),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gemini-1.5-pro".to_string(),
@@ -124,10 +138,12 @@ pub fn gemini_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: gemini_thinking_levels_for_model("gemini-1.5-pro"),
             },
             context_window: 2_097_152,
             max_output: Some(8_192),
             request_multiplier: None,
+            thinking_config: None,
         },
     ]
 }
@@ -166,6 +182,152 @@ impl Provider for GeminiProvider {
         let client = GeminiClient::new(api_key, base_url.unwrap_or(GEMINI_API_BASE));
         Ok(Box::new(client))
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiModelsResponse {
+    #[serde(default)]
+    models: Vec<GeminiDiscoveredModel>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiDiscoveredModel {
+    name: String,
+    #[serde(default)]
+    base_model_id: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    input_token_limit: Option<u64>,
+    #[serde(default)]
+    output_token_limit: Option<u64>,
+    #[serde(default)]
+    supported_generation_methods: Vec<String>,
+    #[serde(default)]
+    thinking: Option<bool>,
+}
+
+fn gemini_discovered_model_to_info(
+    model: GeminiDiscoveredModel,
+    defaults: &HashMap<String, ModelInfo>,
+) -> Option<ModelInfo> {
+    let id = model
+        .base_model_id
+        .clone()
+        .or_else(|| model.name.strip_prefix("models/").map(ToOwned::to_owned))
+        .unwrap_or(model.name.clone());
+
+    let supports_generate_content = model.supported_generation_methods.iter().any(|method| {
+        matches!(
+            method.as_str(),
+            "generateContent"
+                | "streamGenerateContent"
+                | "GenerateContent"
+                | "StreamGenerateContent"
+        )
+    });
+    if !supports_generate_content {
+        return None;
+    }
+
+    let default = defaults.get(&id);
+    let thinking_levels = if model.thinking.unwrap_or(false) {
+        let heuristic = gemini_thinking_levels_for_model(&id);
+        if heuristic.is_empty() {
+            full_reasoning_levels()
+        } else {
+            heuristic
+        }
+    } else {
+        Vec::new()
+    };
+
+    let capabilities = default.map_or_else(
+        || Capabilities {
+            reasoning: !thinking_levels.is_empty(),
+            streaming: true,
+            vision: true,
+            tool_use: true,
+            thinking_levels: thinking_levels.clone(),
+        },
+        |existing| {
+            let mut capabilities = existing.capabilities.clone();
+            capabilities.reasoning = !thinking_levels.is_empty();
+            capabilities.thinking_levels = thinking_levels.clone();
+            capabilities
+        },
+    );
+
+    Some(ModelInfo {
+        id: id.clone(),
+        provider_id: "gemini".to_string(),
+        name: model
+            .display_name
+            .or_else(|| default.map(|existing| existing.name.clone()))
+            .unwrap_or(id),
+        cost: default
+            .map(|existing| existing.cost.clone())
+            .unwrap_or(Cost {
+                input: 0.0,
+                output: 0.0,
+            }),
+        capabilities,
+        context_window: model
+            .input_token_limit
+            .and_then(|limit| usize::try_from(limit).ok())
+            .or_else(|| default.map(|existing| existing.context_window))
+            .unwrap_or(1_048_576),
+        max_output: model
+            .output_token_limit
+            .and_then(|limit| usize::try_from(limit).ok())
+            .or_else(|| default.and_then(|existing| existing.max_output)),
+        request_multiplier: default.and_then(|existing| existing.request_multiplier),
+        thinking_config: default.and_then(|existing| existing.thinking_config.clone()),
+    })
+}
+
+/// Queries Gemini's `/v1beta/models` endpoint and converts the response into
+/// `ModelInfo` rows, using the live `thinking` capability flag when present.
+///
+/// # Errors
+///
+/// Returns an error if the HTTP request fails or the response cannot be parsed.
+pub async fn list_gemini_models(api_key: &str, base_url: Option<&str>) -> Result<Vec<ModelInfo>> {
+    let base_url = base_url.unwrap_or(GEMINI_API_BASE).trim_end_matches('/');
+    let url = format!("{base_url}/v1beta/models?key={api_key}");
+    let http = crate::provider::http_client::create_http_client();
+    let resp = http
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .context("Failed to fetch Gemini models")?;
+
+    if !resp.status().is_success() {
+        bail!("Gemini models endpoint returned HTTP {}", resp.status());
+    }
+
+    let payload: GeminiModelsResponse = resp
+        .json()
+        .await
+        .context("Failed to parse Gemini models response")?;
+    let defaults = gemini_default_models("gemini");
+    let defaults_by_id = defaults
+        .into_iter()
+        .map(|model| (model.id.clone(), model))
+        .collect::<HashMap<_, _>>();
+
+    let mut models: Vec<ModelInfo> = payload
+        .models
+        .into_iter()
+        .filter_map(|model| gemini_discovered_model_to_info(model, &defaults_by_id))
+        .collect();
+
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    models.dedup_by(|a, b| a.id == b.id);
+    Ok(models)
 }
 
 /// HTTP client for the Google Gemini API with streaming SSE support.
@@ -294,6 +456,13 @@ impl GeminiClient {
             .unwrap_or(false)
         {
             body["generationConfig"] = generation_config;
+        }
+
+        if let Some(thinking_config) = gemini_thinking_config_from_request(request) {
+            if body.get("generationConfig").is_none() || body["generationConfig"].is_null() {
+                body["generationConfig"] = json!({});
+            }
+            body["generationConfig"]["thinkingConfig"] = thinking_config;
         }
 
         // Add tools if present
@@ -499,5 +668,36 @@ impl LlmClient for GeminiClient {
         };
 
         Ok(Box::pin(event_stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gemini_discovered_model_to_info_uses_live_thinking_flag() {
+        let defaults = gemini_default_models("gemini")
+            .into_iter()
+            .map(|model| (model.id.clone(), model))
+            .collect::<HashMap<_, _>>();
+        let model = GeminiDiscoveredModel {
+            name: "models/gemini-2.5-pro-preview-05-06".to_string(),
+            base_model_id: Some("gemini-2.5-pro-preview-05-06".to_string()),
+            display_name: Some("Gemini 2.5 Pro Preview".to_string()),
+            input_token_limit: Some(2_000_000),
+            output_token_limit: Some(65_536),
+            supported_generation_methods: vec!["generateContent".to_string()],
+            thinking: Some(true),
+        };
+
+        let model = gemini_discovered_model_to_info(model, &defaults).expect("model info");
+        assert!(model.capabilities.reasoning);
+        assert_eq!(
+            model.capabilities.thinking_levels,
+            gemini_thinking_levels_for_model("gemini-2.5-pro-preview-05-06")
+        );
+        assert_eq!(model.context_window, 2_000_000);
+        assert_eq!(model.max_output, Some(65_536));
     }
 }

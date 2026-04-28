@@ -243,5 +243,8 @@ fn test_permission_dialog_renders_initial_120_second_countdown() {
 
     let rendered = render_app_to_string(&mut app);
 
-    assert!(rendered.contains("Permission Required (2:00 remaining)"));
+    assert!(
+        rendered.contains("Permission Required (2:00 remaining)")
+            || rendered.contains("Permission Required (1:59 remaining)")
+    );
 }

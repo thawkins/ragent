@@ -436,9 +436,17 @@ ragent models --provider ollama_cloud
 {
   "provider": {
     "ollama_cloud": {
-      "apiKey": "ollama_api_key_here",
+      "thinking": {
+        "enabled": true,
+        "level": "low"
+      },
       "models": {
-        "llama3.2": { "max_tokens": 8192 }
+        "llama3.2": {
+          "thinking": {
+            "enabled": true,
+            "level": "high"
+          }
+        }
       }
     }
   }
@@ -565,11 +573,9 @@ ragent models --provider huggingface
 | `diff_files` | Compare two files |
 | `glob` | Find files matching glob patterns |
 | `list` | List directory contents |
-| `multiedit` | Atomic multi-file edits |
-| `patch` | Apply unified diff patches |
-| `str_replace_editor` | Multi-command file editor |
-| `file_ops_tool` | Combined file operations |
-
+  | `multiedit` | Atomic multi-file edits |
+  | `patch` | Apply unified diff patches |
+  | `file_ops_tool` | Combined file operations |
 #### File Operation Aliases
 
 The following are aliases for commonly requested operations:
@@ -1203,6 +1209,7 @@ Various inline widgets rendered within the message panel.
 | `/system <prompt>` | Override agent system prompt |
 | **Provider & Model** ||
 | `/model` | Switch active model on current provider |
+| `/thinking auto\|off\|low\|medium\|high` | Switch the active reasoning level for the selected model |
 | `/provider` | Change LLM provider |
 | `/provider_reset` | Reset provider and remove stored credentials |
 | `/llmstats` | Show LLM response time and token throughput |
@@ -1893,7 +1900,12 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
   "provider": {
     "anthropic": {
       "env": ["ANTHROPIC_API_KEY"],
-      "api": { "max_tokens": 8192 }
+      "thinking": { "enabled": true, "level": "low" },
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "thinking": { "enabled": true, "level": "high", "budget_tokens": 16000 }
+        }
+      }
     },
     "openai": { /* ... */ },
     "copilot": { /* ... */ },
@@ -1927,6 +1939,17 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
 Additional top-level configuration keys:
 
 - `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
+- `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
+- `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
+
+Thinking configuration uses the shared `ThinkingConfig` type:
+
+- `level` — `auto`, `off`, `low`, `medium`, or `high`
+- `enabled` — explicit on/off switch for providers that separate enablement from effort
+- `budget_tokens` — optional Anthropic thinking budget
+- `display` — optional Anthropic display mode (`full`, `summarized`, `omitted`)
+
+`ThinkingLevel` defaults to `auto`. In the TUI, `/thinking` changes the current session's effective reasoning level while model picker defaults still follow the precedence above.
 
 ### 16.3 Environment Variables
 

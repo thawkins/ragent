@@ -327,6 +327,12 @@ impl Storage {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS discovered_models (
+                provider_id TEXT PRIMARY KEY,
+                models_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS todos (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -1064,6 +1070,52 @@ impl Storage {
             .query_row(params![key], |row| row.get::<_, String>(0))
             .optional()?;
         Ok(val)
+    }
+
+    /// Stores or replaces cached discovered model metadata for a provider.
+    ///
+    /// The payload should be a serialized JSON array of model metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the upsert fails.
+    pub fn set_discovered_models(&self, provider_id: &str, models_json: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO discovered_models (provider_id, models_json, updated_at) VALUES (?1, ?2, ?3)",
+            params![provider_id, models_json, now],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves cached discovered model metadata for a provider, or `None` if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_discovered_models(&self, provider_id: &str) -> Result<Option<String>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT models_json FROM discovered_models WHERE provider_id = ?1")?;
+        let val = stmt
+            .query_row(params![provider_id], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(val)
+    }
+
+    /// Deletes cached discovered model metadata for a provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_discovered_models(&self, provider_id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "DELETE FROM discovered_models WHERE provider_id = ?1",
+            params![provider_id],
+        )?;
+        Ok(())
     }
 
     // ── Todo CRUD ───────────────────────────────────────────────────

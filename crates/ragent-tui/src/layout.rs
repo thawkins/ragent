@@ -7,6 +7,7 @@
 //! - Line 1: Session, agent, working directory, git branch, and status message
 //! - Line 2: Provider, token usage, active tasks, code index, and log indicator
 
+use ragent_types::ThinkingLevel;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Direction, Layout, Position, Rect},
@@ -17,6 +18,7 @@ use ratatui::{
         Table, Wrap,
     },
 };
+use crate::widgets::message_widget::make_relative_path;
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
@@ -404,8 +406,34 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             selected,
             ..
         } => {
+            if models.is_empty() {
+                let paragraph = Paragraph::new(vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "No models are currently available for this provider.",
+                        Style::default().fg(Color::Yellow),
+                    )),
+                    Line::from(""),
+                    Line::from("Check provider setup, authentication, or model discovery."),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ])
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(format!(" Select Model - {} ", provider_name))
+                        .border_style(Style::default().fg(Color::Cyan)),
+                )
+                .alignment(Alignment::Center);
+                frame.render_widget(paragraph, area);
+                return;
+            }
+
             // Create header row
-            let header = Row::new(vec!["Model", "Context", "Cost", "Features"]).style(
+            let header = Row::new(vec!["Model", "Context", "Cost", "Thinking", "Features"]).style(
                 Style::default()
                     .add_modifier(Modifier::BOLD)
                     .fg(Color::Cyan),
@@ -449,6 +477,7 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
 
                     // Format cost: display tier (Free, Low, Medium, etc.) and multiplier (0x, 1x, 3x, etc.)
                     let cost_str = format!("{} · {}", entry.cost_tier, entry.cost_multiplier);
+                    let thinking_str = App::format_thinking_levels(&entry.thinking_levels);
 
                     // Format features
                     let mut features = Vec::new();
@@ -474,17 +503,25 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                         format!("  {}", entry.name)
                     };
 
-                    Row::new(vec![model_name, ctx_str, cost_str, features_str]).style(style)
+                    Row::new(vec![
+                        model_name,
+                        ctx_str,
+                        cost_str,
+                        thinking_str,
+                        features_str,
+                    ])
+                    .style(style)
                 })
                 .collect();
 
             let table = Table::new(
                 rows,
                 [
-                    Constraint::Percentage(45), // Model name
+                    Constraint::Percentage(35), // Model name
                     Constraint::Percentage(15), // Context window
-                    Constraint::Percentage(25), // Cost
-                    Constraint::Percentage(15), // Features
+                    Constraint::Percentage(20), // Cost
+                    Constraint::Percentage(18), // Thinking
+                    Constraint::Percentage(12), // Features
                 ],
             )
             .header(header)
@@ -531,6 +568,75 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     showing_area,
                 );
             }
+        }
+        ProviderSetupStep::SelectThinkingLevel {
+            model, selected, ..
+        } => {
+            let lines: Vec<Line<'_>> = model
+                .thinking_levels
+                .iter()
+                .enumerate()
+                .flat_map(|(i, level)| {
+                    let style = if i == *selected {
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    let label = match level {
+                        ThinkingLevel::Auto => "Auto",
+                        ThinkingLevel::Off => "Off",
+                        ThinkingLevel::Low => "Low",
+                        ThinkingLevel::Medium => "Medium",
+                        ThinkingLevel::High => "High",
+                    };
+                    let desc = match level {
+                        ThinkingLevel::Auto => "Use the model default reasoning depth",
+                        ThinkingLevel::Off => "Disable reasoning / thinking",
+                        ThinkingLevel::Low => "Use a light reasoning budget",
+                        ThinkingLevel::Medium => "Use a balanced reasoning budget",
+                        ThinkingLevel::High => "Use the deepest reasoning budget",
+                    };
+                    vec![
+                        Line::from(vec![
+                            Span::styled(if i == *selected { "▸ " } else { "  " }, style),
+                            Span::styled(label, style),
+                        ]),
+                        Line::from(Span::styled(
+                            format!("    {}", desc),
+                            Style::default().fg(Color::DarkGray),
+                        )),
+                    ]
+                })
+                .collect();
+
+            let mut content = vec![
+                Line::from(Span::styled(
+                    format!("Select thinking for {}", model.name),
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+            content.extend(lines);
+            content.push(Line::from(""));
+            content.push(Line::from(Span::styled(
+                "↑/↓ navigate  Enter select  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Select Thinking Level ")
+                .border_style(Style::default().fg(Color::Cyan));
+            frame.render_widget(
+                Paragraph::new(content)
+                    .block(block)
+                    .alignment(Alignment::Left),
+                area,
+            );
         }
         ProviderSetupStep::Done {
             provider_name,
@@ -2370,32 +2476,93 @@ fn messages_to_lines<'a>(
                     }
                     lines.push(Line::from(spans));
 
-                    if state.status == ToolCallStatus::Completed && tool != "edit" {
-                        // Skip result summary for edit tool (already shows inline diff)
-                        if let Some(result) =
-                            tool_result_summary(tool, &state.output, &state.input, cwd)
-                        {
-                            let result_style = if canonical_tool_name(tool) == "think" {
-                                theme::think_summary()
-                            } else {
-                                Style::default().fg(Color::DarkGray)
-                            };
-                            if canonical_tool_name(tool) == "think" {
-                                for line in result.lines() {
-                                    lines.push(Line::from(Span::styled(
-                                        format!("  └ {}", line),
-                                        result_style,
-                                    )));
-                                }
-                            } else {
-                                lines.push(Line::from(Span::styled(
-                                    format!("  └ {}", result),
-                                    result_style,
-                                )));
-                            }
-                        }
-                    }
-
+                                                                                      if state.status == ToolCallStatus::Completed && tool != "edit" && tool != "think" {
+                                                                                          if tool == "think" {
+                                                                                              // Render full thought text multi-line with 💭 prefix
+                                                                                              if let Some(thought) = state
+                                                                                                  .output
+                                                                                                  .as_ref()
+                                                                                                  .and_then(|out| out.get("thought"))
+                                                                                                  .and_then(|v| v.as_str())
+                                                                                                  .or_else(|| {
+                                                                                                      state
+                                                                                                          .output
+                                                                                                          .as_ref()
+                                                                                                          .and_then(|out| out.get("thinking"))
+                                                                                                          .and_then(|v| v.as_str())
+                                                                                                  })
+                                                                                                  .or_else(|| {
+                                                                                                      state
+                                                                                                          .output
+                                                                                                          .as_ref()
+                                                                                                          .and_then(|out| out.get("text"))
+                                                                                                          .and_then(|v| v.as_str())
+                                                                                                  })
+                                                                                              {
+                                                                                                  for line in thought.lines() {
+                                                                                                      lines.push(Line::from(Span::styled(
+                                                                                                          format!("  💭 {}", line),
+                                                                                                          theme::think(),
+                                                                                                      )));
+                                                                                                  }
+                                                                                              }
+                                                                                          } else if tool == "multiedit" {                                                  // Render per-file edit stats as a tabular list
+                                                  if let Some(file_stats) = state
+                                                      .output
+                                                      .as_ref()
+                                                      .and_then(|out| out.get("file_stats"))
+                                                      .and_then(|v| v.as_array())
+                                                  {
+                                                      let rel_paths: Vec<String> = file_stats
+                                                          .iter()
+                                                          .map(|fs| {
+                                                              fs.get("path")
+                                                                  .and_then(|p| p.as_str())
+                                                                  .map(|p| make_relative_path(p, cwd))
+                                                                  .unwrap_or_default()
+                                                          })
+                                                          .collect();
+                                                      let max_len = rel_paths.iter().map(|p| p.len()).max().unwrap_or(0);
+                                                      for (fs, rel_path) in file_stats.iter().zip(rel_paths.iter()) {
+                                                          let added =
+                                                              fs.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                          let removed =
+                                                              fs.get("removed").and_then(|v| v.as_u64()).unwrap_or(0);
+                                                          let padding =
+                                                              " ".repeat(max_len.saturating_sub(rel_path.len()));
+                                                          lines.push(Line::from(vec![
+                                                              Span::styled(
+                                                                  format!("  └ {}{} ", rel_path, padding),
+                                                                  Style::default().fg(Color::DarkGray),
+                                                              ),
+                                                              Span::styled(
+                                                                  format!("+{}", added),
+                                                                  Style::default().fg(Color::Green),
+                                                              ),
+                                                              Span::styled(" ", Style::default()),
+                                                              Span::styled(
+                                                                  format!("-{}", removed),
+                                                                  Style::default().fg(Color::Red),
+                                                              ),
+                                                          ]));
+                                                      }
+                                                  } else if let Some(result) =
+                                                      tool_result_summary(tool, &state.output, &state.input, cwd)
+                                                  {
+                                                      lines.push(Line::from(Span::styled(
+                                                          format!("  └ {}", result),
+                                                          Style::default().fg(Color::DarkGray),
+                                                      )));
+                                                  }
+                                              } else if let Some(result) =
+                                                  tool_result_summary(tool, &state.output, &state.input, cwd)
+                                              {
+                                                  lines.push(Line::from(Span::styled(
+                                                      format!("  └ {}", result),
+                                                      Style::default().fg(Color::DarkGray),
+                                                  )));
+                                              }
+                                          }
                     if state.status == ToolCallStatus::Error {
                         if let Some(ref err) = state.error {
                             lines.push(Line::from(Span::styled(

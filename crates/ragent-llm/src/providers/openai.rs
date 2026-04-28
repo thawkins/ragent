@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use super::thinking::{openai_thinking_levels_for_model, reasoning_effort_from_request};
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
@@ -34,10 +35,12 @@ pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: openai_thinking_levels_for_model("gpt-4o"),
             },
             context_window: 128_000,
             max_output: Some(16_384),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "gpt-4o-mini".to_string(),
@@ -52,10 +55,12 @@ pub fn openai_default_models(provider_id: &str) -> Vec<ModelInfo> {
                 streaming: true,
                 vision: true,
                 tool_use: true,
+                thinking_levels: openai_thinking_levels_for_model("gpt-4o-mini"),
             },
             context_window: 128_000,
             max_output: Some(16_384),
             request_multiplier: None,
+            thinking_config: None,
         },
     ]
 }
@@ -263,11 +268,8 @@ impl OpenAiClient {
             body["tools"] = json!(tools);
         }
 
-        // Reasoning / thinking control via agent options
-        if let Some(thinking_val) = request.options.get("thinking")
-            && thinking_val.as_str() == Some("disabled")
-        {
-            body["reasoning_effort"] = json!("none");
+        if let Some(reasoning_effort) = reasoning_effort_from_request(request) {
+            body["reasoning_effort"] = json!(reasoning_effort);
         }
 
         body

@@ -11,6 +11,7 @@ use std::time::Instant;
 
 use anyhow::{Result, bail};
 use futures::StreamExt;
+use ragent_types::ThinkingConfig;
 use serde_json::{Value, json};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -275,6 +276,8 @@ pub(crate) async fn check_permission_with_prompt(
         AUTO_APPROVED_CODEINDEX_TOOLS.contains(&tool_name)
             || tool_name.starts_with("team_")
             || tool_name.ends_with("_task")
+            || tool_name.starts_with("todo_")
+            || tool_name == "wait_tasks"
             || tool_name == "question"
     }
     use crate::permission::PermissionAction;
@@ -915,6 +918,7 @@ impl SessionProcessor {
                     session_id: Some(session_id.to_string()),
                     request_id: Some(Uuid::new_v4().to_string()),
                     stream_timeout_secs: None,
+                    thinking: agent.thinking.clone(),
                 };
 
                 self.event_bus.publish(Event::RequestStarted {
@@ -1113,6 +1117,7 @@ impl SessionProcessor {
                         session_id: Some(session_id.to_string()),
                         request_id: Some(Uuid::new_v4().to_string()),
                         stream_timeout_secs: Some(self.stream_config.timeout_secs),
+                        thinking: agent.thinking.clone(),
                     };
 
                     self.event_bus.publish(Event::RequestStarted {
@@ -2176,20 +2181,17 @@ impl SessionProcessor {
             tools: Vec::new(),
             temperature: agent.temperature,
             top_p: agent.top_p,
-            max_tokens: Some(200),
+            max_tokens: Some(64),
             system: Some(system_prompt),
             options: agent.options.clone(),
             session_id: Some(session_id.to_string()),
             request_id: Some(Uuid::new_v4().to_string()),
             stream_timeout_secs: None,
+            thinking: Some(ThinkingConfig::off()),
         };
 
         let mut ack_text = String::new();
 
-        self.event_bus.publish(Event::RequestStarted {
-            session_id: session_id.to_string(),
-            outbound_bytes: chat_request_payload_bytes(&init_request),
-        });
         match client.chat(init_request).await {
             Ok(mut stream) => {
                 while let Some(ev) = stream.next().await {
@@ -2199,20 +2201,6 @@ impl SessionProcessor {
                     match ev {
                         StreamEvent::TextDelta { text } => {
                             ack_text.push_str(&text);
-                            self.event_bus.publish(Event::TextDelta {
-                                session_id: session_id.to_string(),
-                                text,
-                            });
-                        }
-                        StreamEvent::Usage {
-                            input_tokens,
-                            output_tokens,
-                        } => {
-                            self.event_bus.publish(Event::TokenUsage {
-                                session_id: session_id.to_string(),
-                                input_tokens,
-                                output_tokens,
-                            });
                         }
                         _ => {}
                     }
@@ -2239,6 +2227,10 @@ impl SessionProcessor {
         // turn which many LLM APIs reject or mishandle, causing the model to
         // ignore tools or the system prompt on the follow-up turn.
         if !ack_text.is_empty() {
+            self.event_bus.publish(Event::TextDelta {
+                session_id: session_id.to_string(),
+                text: ack_text.clone(),
+            });
             let init_user_text = "AGENTS.md project guidelines have been loaded. \
                                   Please acknowledge them briefly.";
             let user_msg = Message::new(
@@ -2841,6 +2833,66 @@ mod tests {
         assert_eq!(action, PermissionAction::Allow);
     }
 
+    #[tokio::test]
+    async fn test_hardwired_todo_read_is_auto_approved() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "todo_read",
+            "list all",
+            "todo_read",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_hardwired_todo_write_is_auto_approved() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "todo_write",
+            "add item",
+            "todo_write",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
+    #[tokio::test]
+    async fn test_hardwired_wait_tasks_is_auto_approved() {
+        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let event_bus = Arc::new(EventBus::new(16));
+
+        let action = check_permission_with_prompt(
+            &checker,
+            &event_bus,
+            "session-1",
+            "wait_tasks",
+            "waiting",
+            "wait_tasks",
+            false,
+        )
+        .await
+        .expect("permission check should succeed");
+
+        assert_eq!(action, PermissionAction::Allow);
+    }
+
     #[test]
     fn test_tool_result_content_for_llm_truncates_large_payloads() {
         let content = format!("{}{}", "a".repeat(9_000), "b".repeat(9_000));
@@ -2905,6 +2957,7 @@ mod tests {
             session_id: Some("session-1".to_string()),
             request_id: Some("request-1".to_string()),
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         assert!(chat_request_payload_bytes(&request) >= 40);
@@ -2952,6 +3005,7 @@ mod tests {
             session_id: Some("session-1".to_string()),
             request_id: Some("request-1".to_string()),
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         assert!(

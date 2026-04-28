@@ -328,6 +328,12 @@ impl Storage {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS discovered_models (
+                provider_id TEXT PRIMARY KEY,
+                models_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS todos (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
@@ -1065,6 +1071,52 @@ impl Storage {
             .query_row(params![key], |row| row.get::<_, String>(0))
             .optional()?;
         Ok(val)
+    }
+
+    /// Stores or replaces cached discovered model metadata for a provider.
+    ///
+    /// The payload should be a serialized JSON array of model metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the upsert fails.
+    pub fn set_discovered_models(&self, provider_id: &str, models_json: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT OR REPLACE INTO discovered_models (provider_id, models_json, updated_at) VALUES (?1, ?2, ?3)",
+            params![provider_id, models_json, now],
+        )?;
+        Ok(())
+    }
+
+    /// Retrieves cached discovered model metadata for a provider, or `None` if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the query fails.
+    pub fn get_discovered_models(&self, provider_id: &str) -> Result<Option<String>> {
+        let conn = lock_conn!(self)?;
+        let mut stmt =
+            conn.prepare("SELECT models_json FROM discovered_models WHERE provider_id = ?1")?;
+        let val = stmt
+            .query_row(params![provider_id], |row| row.get::<_, String>(0))
+            .optional()?;
+        Ok(val)
+    }
+
+    /// Deletes cached discovered model metadata for a provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the delete fails.
+    pub fn delete_discovered_models(&self, provider_id: &str) -> Result<()> {
+        let conn = lock_conn!(self)?;
+        conn.execute(
+            "DELETE FROM discovered_models WHERE provider_id = ?1",
+            params![provider_id],
+        )?;
+        Ok(())
     }
 
     // ── Todo CRUD ───────────────────────────────────────────────────
@@ -2494,4 +2546,40 @@ pub struct MemoryRow {
     pub access_count: i64,
     /// ISO-8601 timestamp of last access.
     pub last_accessed: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Storage;
+
+    #[test]
+    fn test_discovered_models_round_trip() {
+        let storage = Storage::open_in_memory().expect("in-memory storage");
+        storage
+            .set_discovered_models("gemini", r#"[{"id":"gemini-2.5-pro"}]"#)
+            .expect("store models");
+
+        let cached = storage
+            .get_discovered_models("gemini")
+            .expect("load models");
+        assert_eq!(cached.as_deref(), Some(r#"[{"id":"gemini-2.5-pro"}]"#));
+    }
+
+    #[test]
+    fn test_delete_discovered_models_removes_entry() {
+        let storage = Storage::open_in_memory().expect("in-memory storage");
+        storage
+            .set_discovered_models("copilot", r#"[]"#)
+            .expect("store models");
+        storage
+            .delete_discovered_models("copilot")
+            .expect("delete models");
+
+        assert!(
+            storage
+                .get_discovered_models("copilot")
+                .expect("load models")
+                .is_none()
+        );
+    }
 }

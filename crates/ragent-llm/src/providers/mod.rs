@@ -12,6 +12,7 @@ pub mod huggingface;
 pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
+mod thinking;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,10 @@ pub struct ModelInfo {
     /// This is the billing multiplier per GitHub Copilot documentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_multiplier: Option<f64>,
+    /// Default or user-configured thinking configuration for this model.
+    /// When `None`, the model uses its built-in default (Auto for reasoning-capable, Off for others).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_config: Option<ragent_types::ThinkingConfig>,
 }
 
 /// Summary information about a provider and the models it offers.

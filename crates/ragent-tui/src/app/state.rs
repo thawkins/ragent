@@ -294,6 +294,10 @@ pub struct ModelPickerEntry {
     pub vision: bool,
     /// Whether the model supports tool use.
     pub tool_use: bool,
+    /// Supported thinking levels for this model.
+    pub thinking_levels: Vec<ragent_types::ThinkingLevel>,
+    /// Effective default thinking configuration for this model after config overlays.
+    pub thinking_config: Option<ragent_types::ThinkingConfig>,
     /// Cost tier label (e.g., "Free", "Low", "Medium", "High", "Premium").
     /// For Copilot, this shows the premium request tier based on multiplier.
     pub cost_tier: String,
@@ -346,6 +350,17 @@ pub enum ProviderSetupStep {
         /// Available models with full metadata.
         models: Vec<ModelPickerEntry>,
         /// Index of the highlighted model.
+        selected: usize,
+    },
+    /// Choosing which thinking level to use for the selected model.
+    SelectThinkingLevel {
+        /// The provider id (e.g. "anthropic").
+        provider_id: String,
+        /// Human-readable provider display name.
+        provider_name: String,
+        /// The selected model entry.
+        model: ModelPickerEntry,
+        /// Index of the highlighted thinking level.
         selected: usize,
     },
     /// Setup complete — briefly confirm success.
@@ -490,6 +505,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "model",
         description: "Switch the active model, or show metadata with /model show",
+    },
+    SlashCommandDef {
+        trigger: "thinking",
+        description: "Switch the current thinking level: /thinking auto|off|low|medium|high",
     },
     SlashCommandDef {
         trigger: "provider",
@@ -965,6 +984,8 @@ pub struct App {
     /// Set during model selection; used when `resolve_model()` cannot find the model
     /// (e.g. dynamically discovered ollama/ollama_cloud models).
     pub selected_model_ctx_window: Option<usize>,
+    /// Persisted thinking level for the currently selected model.
+    pub selected_thinking_level: Option<ragent_types::ThinkingLevel>,
     /// Session processor for sending messages to the LLM.
     pub session_processor: Arc<SessionProcessor>,
     /// Resolved agent configuration.

@@ -14,6 +14,7 @@ use crate::agent::AgentInfo;
 use crate::llm::ChatMessage;
 use crate::message::Message;
 use crate::tool::{TeamContext, ToolRegistry};
+use ragent_types::ThinkingConfig;
 
 /// Cache version counter for global invalidation tracking.
 static CACHE_VERSION: AtomicU64 = AtomicU64::new(1);
@@ -373,6 +374,8 @@ pub struct SessionState {
     last_updated: std::time::Instant,
     /// Session ID this state belongs to
     session_id: String,
+    /// Current session-level thinking configuration.
+    thinking: ThinkingConfig,
 }
 
 impl SessionState {
@@ -385,6 +388,7 @@ impl SessionState {
             estimated_token_count: 0,
             last_updated: std::time::Instant::now(),
             session_id: session_id.into(),
+            thinking: ThinkingConfig::default(),
         }
     }
 
@@ -392,6 +396,17 @@ impl SessionState {
     #[must_use]
     pub fn session_id(&self) -> &str {
         &self.session_id
+    }
+
+    /// Get the session's current thinking configuration.
+    #[must_use]
+    pub fn thinking(&self) -> &ThinkingConfig {
+        &self.thinking
+    }
+
+    /// Update the session's thinking configuration.
+    pub fn set_thinking(&mut self, thinking: ThinkingConfig) {
+        self.thinking = thinking;
     }
 
     /// Clear all cached state (e.g., after compaction or reset).
@@ -512,5 +527,12 @@ mod tests {
     fn test_session_state_should_compact() {
         let state = SessionState::new("test-session");
         assert!(!state.should_compact(100000));
+    }
+
+    #[test]
+    fn test_session_state_stores_thinking_config() {
+        let mut state = SessionState::new("test-session");
+        state.set_thinking(ThinkingConfig::off());
+        assert_eq!(state.thinking(), &ThinkingConfig::off());
     }
 }

@@ -15,6 +15,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+use super::thinking::should_warn_unsupported_thinking;
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent};
 use crate::{ModelInfo, Provider};
@@ -112,10 +113,12 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
                 streaming: true,
                 vision: false,
                 tool_use: true,
+                thinking_levels: Vec::new(),
             },
             context_window: 128_000,
             max_output: Some(4_096),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "meta-llama/Llama-3.1-70B-Instruct".to_string(),
@@ -130,10 +133,12 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
                 streaming: true,
                 vision: false,
                 tool_use: true,
+                thinking_levels: Vec::new(),
             },
             context_window: 128_000,
             max_output: Some(4_096),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "Qwen/Qwen2.5-Coder-32B-Instruct".to_string(),
@@ -148,10 +153,12 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
                 streaming: true,
                 vision: false,
                 tool_use: true,
+                thinking_levels: Vec::new(),
             },
             context_window: 32_000,
             max_output: Some(4_096),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "Qwen/Qwen2.5-72B-Instruct".to_string(),
@@ -166,10 +173,12 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
                 streaming: true,
                 vision: false,
                 tool_use: true,
+                thinking_levels: Vec::new(),
             },
             context_window: 128_000,
             max_output: Some(4_096),
             request_multiplier: None,
+            thinking_config: None,
         },
         ModelInfo {
             id: "deepseek-ai/DeepSeek-R1".to_string(),
@@ -184,10 +193,12 @@ pub fn huggingface_default_models() -> Vec<ModelInfo> {
                 streaming: true,
                 vision: false,
                 tool_use: false,
+                thinking_levels: Vec::new(),
             },
             context_window: 128_000,
             max_output: Some(8_192),
             request_multiplier: None,
+            thinking_config: None,
         },
     ]
 }
@@ -387,6 +398,13 @@ impl HuggingFaceClient {
                 })
                 .collect();
             body["tools"] = json!(tools);
+        }
+
+        if should_warn_unsupported_thinking(request) {
+            tracing::warn!(
+                model = %request.model,
+                "HuggingFace provider ignores thinking config because the API has no standard thinking parameter"
+            );
         }
 
         body
@@ -731,10 +749,12 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
                     streaming: true,
                     vision: has_vision,
                     tool_use: has_tool_use,
+                    thinking_levels: Vec::new(),
                 },
                 context_window: estimate_context_from_id(&m.model_id),
                 max_output: Some(4_096),
                 request_multiplier: None,
+                thinking_config: None,
             }
         })
         .collect();
@@ -886,6 +906,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);
@@ -935,6 +956,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);
@@ -972,6 +994,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);
@@ -1011,6 +1034,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);
@@ -1091,6 +1115,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);
@@ -1121,6 +1146,7 @@ mod tests {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let body = client.build_request_body(&request);

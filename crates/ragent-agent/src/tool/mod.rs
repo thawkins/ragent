@@ -99,8 +99,6 @@ pub mod question;
 pub mod read;
 pub mod rm;
 pub mod search;
-/// Claude-compatible multi-command file editor.
-pub mod str_replace_editor;
 /// Structured memory store, recall, and forget tools.
 pub mod structured_memory;
 pub mod task_complete;

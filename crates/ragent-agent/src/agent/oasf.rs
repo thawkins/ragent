@@ -146,6 +146,10 @@ pub struct RagentAgentPayload {
     #[serde(default)]
     pub memory: Option<String>,
 
+    /// Default thinking/reasoning configuration for this agent's requests.
+    #[serde(default)]
+    pub thinking: Option<ragent_types::ThinkingConfig>,
+
     /// Arbitrary key-value options forwarded verbatim to the LLM provider.
     pub options: Option<serde_json::Value>,
 }

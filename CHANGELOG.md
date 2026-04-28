@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.0-alpha.53] - 2026-04-27
+
+### Fixed
+- **Ollama Cloud thinking disabled** — Removed the `think` parameter from Ollama Cloud `build_request_body()`. The Ollama Cloud `/api/chat` endpoint does not support the `think` field, unlike the local Ollama `/v1/chat/completions` endpoint. Also removed binary thinking heuristics from `list_ollama_cloud_models` — all cloud models now report an empty `thinking_levels` list. The local Ollama provider is unaffected and continues to send the `think` boolean.
+
 ## [0.1.0-alpha.52] - 2026-04-26
 
 ### Added

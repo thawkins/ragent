@@ -113,6 +113,12 @@ pub struct ChatRequest {
     /// the stream stalled.  Set from `StreamConfig.timeout_secs`.
     #[serde(skip)]
     pub stream_timeout_secs: Option<u64>,
+    /// Thinking/reasoning configuration for this request.
+    /// Provider adapters use this to set provider-specific parameters
+    /// (e.g. Anthropic `thinking.*`, OpenAI `reasoning_effort`).
+    /// Falls back to legacy `options["thinking"]` if not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ragent_types::ThinkingConfig>,
 }
 
 /// A single message in a chat conversation.

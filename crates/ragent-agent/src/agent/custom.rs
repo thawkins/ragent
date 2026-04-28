@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use crate::agent::oasf::{OasfAgentRecord, RAGENT_MODULE_TYPE, RagentAgentPayload};
 use crate::agent::{AgentInfo, AgentMode, ModelRef};
 use crate::permission::{Permission, PermissionAction, PermissionRule};
+use ragent_types::ThinkingConfig;
 
 /// A successfully loaded and validated custom agent definition.
 #[derive(Debug, Clone)]
@@ -198,6 +199,8 @@ struct ProfileFrontmatter {
     hidden: Option<bool>,
     /// Persistent memory scope: `"user"`, `"project"`, or omit for none.
     memory: Option<String>,
+    /// Default thinking configuration for this agent's requests.
+    thinking: Option<ThinkingConfig>,
     /// Permission rules — same schema as OASF `ragent/agent/v1`.
     permissions: Option<Vec<crate::agent::oasf::RagentPermissionRule>>,
     /// Skill names to preload.
@@ -251,6 +254,7 @@ fn load_agent_profile(path: &Path, is_project_local: bool) -> Result<CustomAgent
         permissions: fm.permissions,
         hidden: fm.hidden,
         memory: fm.memory,
+        thinking: fm.thinking,
         options: fm.options,
     };
 
@@ -460,9 +464,49 @@ pub fn record_to_agent_info(
         max_steps: Some(payload.max_steps.unwrap_or(500)),
         skills: payload.skills,
         memory,
+        thinking: payload.thinking,
         options,
         model_pinned,
     };
 
     Ok(agent_info)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::oasf::{OasfModule, RAGENT_MODULE_TYPE};
+    use ragent_types::ThinkingLevel;
+    use serde_json::json;
+
+    #[test]
+    fn test_record_to_agent_info_parses_thinking_defaults() {
+        let record = OasfAgentRecord {
+            name: "reasoner".to_string(),
+            description: "Reasoning custom agent".to_string(),
+            version: "1.0.0".to_string(),
+            schema_version: "0.7.0".to_string(),
+            authors: Vec::new(),
+            created_at: None,
+            skills: Vec::new(),
+            domains: Vec::new(),
+            locators: Vec::new(),
+            modules: vec![OasfModule {
+                module_type: RAGENT_MODULE_TYPE.to_string(),
+                payload: json!({
+                    "system_prompt": "You reason carefully.",
+                    "thinking": {
+                        "enabled": true,
+                        "level": "high"
+                    }
+                }),
+            }],
+        };
+
+        let agent = record_to_agent_info(&record, Path::new("/tmp/reasoner.json")).expect("agent");
+        assert_eq!(
+            agent.thinking,
+            Some(ThinkingConfig::new(ThinkingLevel::High))
+        );
+    }
 }

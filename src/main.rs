@@ -506,6 +506,14 @@ async fn main() -> Result<()> {
                 tracing::info!("Starting interactive mode (plain, no TUI)");
                 use tokio::io::AsyncBufReadExt;
 
+                let mut resolved_agent = resolved_agent.clone();
+                let config_guard = config.read().await;
+                agent::apply_fallback_thinking(
+                    &mut resolved_agent,
+                    &config_guard,
+                    provider_registry.as_ref(),
+                );
+
                 tracing::info!("Starting ragent interactive mode (plain)");
                 let dir = std::fs::canonicalize(".")?;
                 let session = session_manager.create_session(dir)?;
@@ -545,6 +553,13 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Run { prompt }) => {
             tracing::info!("Starting headless run mode");
+            let mut resolved_agent = resolved_agent.clone();
+            let config_guard = config.read().await;
+            agent::apply_fallback_thinking(
+                &mut resolved_agent,
+                &config_guard,
+                provider_registry.as_ref(),
+            );
             let dir = std::fs::canonicalize(".")?;
             let session = session_manager.create_session(dir)?;
             match session_processor

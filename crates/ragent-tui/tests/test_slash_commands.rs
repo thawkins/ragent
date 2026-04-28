@@ -78,6 +78,51 @@ fn cwd_test_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+#[test]
+fn test_backfill_model_ctx_window_refreshes_stale_ollama_cloud_cache() {
+    let mut app = make_app();
+    app.selected_model = Some("ollama_cloud/deepseek-v4-pro".to_string());
+    app.selected_model_ctx_window = Some(32_768);
+    app.storage
+        .set_setting("selected_model_ctx_window", "32768")
+        .expect("persist stale ctx");
+
+    let discovered = vec![provider::ModelInfo {
+        id: "deepseek-v4-pro".to_string(),
+        provider_id: "ollama_cloud".to_string(),
+        name: "DeepSeek V4 Pro".to_string(),
+        cost: ragent_config::Cost {
+            input: 0.0,
+            output: 0.0,
+        },
+        capabilities: ragent_config::Capabilities {
+            reasoning: false,
+            streaming: true,
+            vision: false,
+            tool_use: true,
+            thinking_levels: Vec::new(),
+        },
+        context_window: 1_048_576,
+        max_output: None,
+        request_multiplier: None,
+        thinking_config: None,
+    }];
+    let discovered_json = serde_json::to_string(&discovered).expect("serialize discovered models");
+    app.storage
+        .set_discovered_models("ollama_cloud", &discovered_json)
+        .expect("persist discovered models");
+
+    app.backfill_model_ctx_window();
+
+    assert_eq!(app.selected_model_ctx_window, Some(1_048_576));
+    assert_eq!(
+        app.storage
+            .get_setting("selected_model_ctx_window")
+            .expect("read ctx setting"),
+        Some("1048576".to_string())
+    );
+}
+
 // ── /clear ──────────────────────────────────────────────────────────
 
 #[test]
@@ -573,6 +618,59 @@ fn test_slash_model_show_invalid_subcommand_shows_usage() {
     assert_eq!(app.status, "Usage: /model [show]");
 }
 
+#[test]
+fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
+    let mut app = make_app();
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "missing-provider".to_string(),
+        name: "Missing Provider".to_string(),
+        source: ProviderSource::Database,
+    });
+
+    app.execute_slash_command("/model");
+
+    assert!(
+        app.status.contains("No models available"),
+        "expected empty-model warning, got: {}",
+        app.status
+    );
+    assert!(
+        app.provider_setup.is_none(),
+        "should not open empty model picker"
+    );
+}
+
+#[test]
+fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discovery_is_unavailable() {
+    let mut app = make_app();
+    app.configured_provider = Some(ConfiguredProvider {
+        id: "ollama_cloud".to_string(),
+        name: "Ollama Cloud".to_string(),
+        source: ProviderSource::Database,
+    });
+    app.selected_model = Some("ollama_cloud/deepseek-v4-flash".to_string());
+    app.selected_model_ctx_window = Some(262_144);
+
+    app.execute_slash_command("/model");
+
+    match app.provider_setup.as_ref() {
+        Some(ProviderSetupStep::SelectModel {
+            provider_id,
+            provider_name,
+            models,
+            selected,
+        }) => {
+            assert_eq!(provider_id, "ollama_cloud");
+            assert_eq!(provider_name, "Ollama Cloud");
+            assert_eq!(*selected, 0);
+            assert_eq!(models.len(), 1);
+            assert_eq!(models[0].id, "deepseek-v4-flash");
+            assert_eq!(models[0].context_window, 262_144);
+        }
+        other => panic!("expected SelectModel fallback, got {other:?}"),
+    }
+}
+
 // ── /provider ───────────────────────────────────────────────────────
 
 #[test]
@@ -612,6 +710,8 @@ fn test_slash_provider_selection_updates_displayed_provider() {
             reasoning: false,
             vision: false,
             tool_use: true,
+            thinking_levels: vec![],
+            thinking_config: None,
             cost_tier: "Free".to_string(),
             cost_multiplier: "0x".to_string(),
         }],
@@ -666,6 +766,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                thinking_levels: vec![],
+                thinking_config: None,
                 cost_tier: "Free".to_string(),
                 cost_multiplier: "0x".to_string(),
             },
@@ -679,6 +781,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                thinking_levels: vec![],
+                thinking_config: None,
                 cost_tier: "Free".to_string(),
                 cost_multiplier: "0x".to_string(),
             },
@@ -692,6 +796,8 @@ fn test_model_selector_navigation_wraps_top_and_bottom() {
                 reasoning: false,
                 vision: true,
                 tool_use: true,
+                thinking_levels: vec![],
+                thinking_config: None,
                 cost_tier: "Free".to_string(),
                 cost_multiplier: "0x".to_string(),
             },

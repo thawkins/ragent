@@ -76,6 +76,12 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - **Linting**: No wildcard imports. Treat cognitive complexity ≤30 and missing docs warnings as review targets rather than guaranteed compiler-enforced limits.
 - **Best Practices**: Read the best practices at https://www.djamware.com/post/68b2c7c451ce620c6f5efc56/rust-project-structure-and-best-practices-for-clean-scalable-code and apply them to the project where relevant.
 
+## Thinking / Reasoning Configuration
+
+- New code should use the typed `ChatRequest.thinking: Option<ThinkingConfig>` path for provider reasoning controls.
+- Do not introduce new writes to legacy `options["thinking"]` or related ad-hoc fields except when maintaining backward-compatibility shims.
+- When documenting or configuring defaults, use provider/model `thinking` blocks in `ragent.json` and the `/thinking` command terminology (`auto`, `off`, `low`, `medium`, `high`).
+
 ## Team Workflow
 
 When asked to use a team or when a task benefits from parallel reviewers / workers:

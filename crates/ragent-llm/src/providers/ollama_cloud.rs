@@ -10,6 +10,9 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
+// Ollama Cloud does not support a `think` parameter, even though local
+// Ollama's OpenAI-compatible endpoint does. We do not import any thinking
+// helpers here.
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
@@ -125,16 +128,36 @@ struct OllamaShowResponse {
     model_info: HashMap<String, Value>,
     #[serde(default)]
     capabilities: Vec<String>,
+    #[serde(flatten)]
+    extra: HashMap<String, Value>,
 }
 
 impl OllamaShowResponse {
     /// Extracts the context length from model_info.
-    /// Looks for keys matching `<architecture>.context_length`.
+    /// Looks for common top-level fields first, then `<architecture>.*` model_info keys.
     fn context_length(&self) -> Option<usize> {
+        for key in [
+            "context_length",
+            "context_window",
+            "num_ctx",
+            "max_position_embeddings",
+            "max_sequence_length",
+        ] {
+            if let Some(value) = self.extra.get(key).and_then(parse_usize_value) {
+                return Some(value);
+            }
+        }
+
         for (key, value) in &self.model_info {
-            if key.ends_with(".context_length") {
-                if let Some(len) = value.as_u64() {
-                    return Some(len as usize);
+            if key.ends_with(".context_length")
+                || key.ends_with(".context_window")
+                || key.ends_with(".num_ctx")
+                || key.ends_with(".n_ctx")
+                || key.ends_with(".max_position_embeddings")
+                || key.ends_with(".max_sequence_length")
+            {
+                if let Some(len) = parse_usize_value(value) {
+                    return Some(len);
                 }
             }
         }
@@ -145,6 +168,19 @@ impl OllamaShowResponse {
     fn has_vision(&self) -> bool {
         self.capabilities.iter().any(|c| c == "vision")
     }
+}
+
+fn parse_usize_value(value: &Value) -> Option<usize> {
+    value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .or_else(|| {
+            value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .and_then(|value| value.parse::<usize>().ok())
+        })
 }
 
 fn estimate_context_window(parameter_size: &str) -> usize {
@@ -402,12 +438,10 @@ impl OllamaCloudClient {
             body["tools"] = json!(tool_defs);
         }
 
-        if let Some(thinking_val) = request.options.get("thinking")
-            && thinking_val.as_str() == Some("disabled")
-        {
-            body["think"] = json!(false);
-        }
-
+                  // Ollama Cloud does not support the `think` parameter.  It is not
+                    // appended here even when the caller's request carries a thinking
+                    // configuration, because the cloud service silently ignores or
+                    // rejects it.
         body
     }
 }
@@ -732,6 +766,9 @@ pub async fn list_ollama_cloud_models(
 
             // Check vision capability from /api/show
             let has_vision = show_info.as_ref().is_some_and(|info| info.has_vision());
+              // Ollama Cloud does not support thinking/reasoning parameters.
+            let reasoning = false;
+            let thinking_levels = Vec::new();
 
             ModelInfo {
                 id: model_id,
@@ -742,14 +779,16 @@ pub async fn list_ollama_cloud_models(
                     output: 0.0,
                 },
                 capabilities: Capabilities {
-                    reasoning: false,
+                    reasoning,
                     streaming: true,
                     vision: has_vision,
                     tool_use: true,
+                    thinking_levels,
                 },
                 context_window: ctx,
                 max_output: None,
                 request_multiplier: None,
+                thinking_config: None,
             }
         })
         .collect())
@@ -758,6 +797,7 @@ pub async fn list_ollama_cloud_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_provider_defaults() {
@@ -771,5 +811,29 @@ mod tests {
     fn test_with_custom_url() {
         let provider = OllamaCloudProvider::with_url("https://example.com/");
         assert_eq!(provider.base_url, "https://example.com");
+    }
+
+    #[test]
+    fn test_context_length_parses_top_level_string_fields() {
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "context_length": "1048576",
+            "capabilities": []
+        }))
+        .expect("show response should parse");
+
+        assert_eq!(response.context_length(), Some(1_048_576));
+    }
+
+    #[test]
+    fn test_context_length_parses_alternate_model_info_keys() {
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "model_info": {
+                "llama.context_window": 1048576
+            },
+            "capabilities": []
+        }))
+        .expect("show response should parse");
+
+        assert_eq!(response.context_length(), Some(1_048_576));
     }
 }

@@ -217,8 +217,7 @@ impl ExtractionEngine {
         if success
             && matches!(
                 tool_name,
-                "edit" | "write" | "create" | "multiedit" | "str_replace_editor"
-            )
+                                          "edit" | "write" | "create" | "multiedit"            )
         {
             if let Some(candidate) =
                 Self::extract_pattern_from_edit(tool_name, input, result_content, working_dir)
@@ -677,7 +676,7 @@ impl ExtractionEngine {
                     // Track edited files.
                     if matches!(
                         tc.tool_name.as_str(),
-                        "edit" | "write" | "create" | "multiedit" | "str_replace_editor"
+                        "edit" | "write" | "create" | "multiedit"
                     ) {
                         if let Some(path) = tc.input.get("path").and_then(|v| v.as_str()) {
                             let rel = Path::new(path)

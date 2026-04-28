@@ -30,6 +30,7 @@ use ragent_core::{
 use ragent_team::team::{
     self, Mailbox, MailboxMessage, MemberStatus, MessageType, TaskStatus, TeamMember, TeamStore,
 };
+use ragent_types::{ThinkingConfig, ThinkingLevel};
 
 use crate::input::{self, InputAction};
 use crate::tips;
@@ -93,6 +94,7 @@ impl Completer for RagentCompleter {
             session_id: None,
             request_id: None,
             stream_timeout_secs: None,
+            thinking: None,
         };
 
         let mut stream = client.chat(request).await.context("starting LLM stream")?;
@@ -378,6 +380,7 @@ impl App {
             .ok()
             .flatten()
             .and_then(|s| s.parse::<usize>().ok());
+        let selected_thinking_level = Self::load_persisted_thinking_level(storage.as_ref());
 
         let mut app = Self {
             messages: Vec::new(),
@@ -412,6 +415,7 @@ impl App {
             provider_registry,
             selected_model,
             selected_model_ctx_window,
+            selected_thinking_level,
             session_processor,
             agent_info,
             cycleable_agents,
@@ -897,6 +901,7 @@ impl App {
         if let Some(model_ref) = resolved_model {
             agent.model = Some(model_ref);
         }
+        self.apply_selected_model_and_thinking(&mut agent);
 
         let summary_prompt =
             "Summarise the conversation so far into a concise representation that \
@@ -1187,16 +1192,206 @@ impl App {
             .or(self.selected_model_ctx_window.filter(|w| *w > 0))
     }
 
-    /// Backfill `selected_model_ctx_window` by querying the provider's model list.
-    ///
-    /// Called once at startup when the persisted cache is empty. This ensures
-    /// models selected before the caching feature was added still get context
-    /// window information displayed in the status bar.
-    pub fn backfill_model_ctx_window(&mut self) {
-        // Skip if already cached or no model selected.
-        if self.selected_model_ctx_window.is_some() {
-            return;
+    fn parse_thinking_level_setting(value: &str) -> Option<ThinkingLevel> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(ThinkingLevel::Auto),
+            "off" => Some(ThinkingLevel::Off),
+            "low" => Some(ThinkingLevel::Low),
+            "medium" => Some(ThinkingLevel::Medium),
+            "high" => Some(ThinkingLevel::High),
+            _ => None,
         }
+    }
+
+    fn thinking_level_setting_value(level: ThinkingLevel) -> &'static str {
+        match level {
+            ThinkingLevel::Auto => "auto",
+            ThinkingLevel::Off => "off",
+            ThinkingLevel::Low => "low",
+            ThinkingLevel::Medium => "medium",
+            ThinkingLevel::High => "high",
+        }
+    }
+
+    fn thinking_level_display(level: ThinkingLevel) -> &'static str {
+        Self::thinking_level_setting_value(level)
+    }
+
+    fn thinking_level_is_explicit(storage: &Storage) -> bool {
+        storage
+            .get_setting("thinking_level_explicit")
+            .ok()
+            .flatten()
+            .is_some_and(|value| value == "1")
+    }
+
+    fn load_persisted_thinking_level(storage: &Storage) -> Option<ThinkingLevel> {
+        let level = storage
+            .get_setting("thinking_level")
+            .ok()
+            .flatten()
+            .and_then(|s| Self::parse_thinking_level_setting(&s))?;
+
+        if level == ThinkingLevel::Auto && !Self::thinking_level_is_explicit(storage) {
+            return None;
+        }
+
+        Some(level)
+    }
+
+    /// Short display label for a thinking level (shown in the status bar).
+    pub fn thinking_level_short(level: ThinkingLevel) -> &'static str {
+        match level {
+            ThinkingLevel::Auto => "Auto",
+            ThinkingLevel::Off => "Off",
+            ThinkingLevel::Low => "Low",
+            ThinkingLevel::Medium => "Med",
+            ThinkingLevel::High => "High",
+        }
+    }
+
+    pub(crate) fn format_thinking_levels(levels: &[ThinkingLevel]) -> String {
+        if levels.is_empty() {
+            "—".to_string()
+        } else {
+            levels
+                .iter()
+                .map(|level| Self::thinking_level_short(*level))
+                .collect::<Vec<_>>()
+                .join("/")
+        }
+    }
+
+    pub(crate) fn default_thinking_level_for_entry(entry: &ModelPickerEntry) -> ThinkingLevel {
+        if let Some(thinking) = &entry.thinking_config {
+            return if thinking.is_effective_enabled() {
+                thinking.level
+            } else {
+                ThinkingLevel::Off
+            };
+        }
+
+        if entry.thinking_levels.contains(&ThinkingLevel::Off) {
+            ThinkingLevel::Off
+        } else {
+            entry
+                .thinking_levels
+                .first()
+                .copied()
+                .unwrap_or(ThinkingLevel::Off)
+        }
+    }
+
+    fn thinking_config_for_level(level: ThinkingLevel) -> ThinkingConfig {
+        if level == ThinkingLevel::Off {
+            ThinkingConfig::off()
+        } else {
+            ThinkingConfig::new(level)
+        }
+    }
+
+    fn explicit_selected_thinking_config(&self) -> Option<ThinkingConfig> {
+        self.selected_thinking_level
+            .map(Self::thinking_config_for_level)
+    }
+
+    fn effective_thinking_config_for_entry(entry: &ModelPickerEntry) -> ThinkingConfig {
+        entry.thinking_config.clone().unwrap_or_else(|| {
+            Self::thinking_config_for_level(Self::default_thinking_level_for_entry(entry))
+        })
+    }
+
+    fn model_entry_for_ref(&self, model_ref: &ModelRef) -> Option<ModelPickerEntry> {
+        self.resolved_model_entries_for_provider(&model_ref.provider_id)
+            .into_iter()
+            .find(|entry| entry.id == model_ref.model_id)
+    }
+
+    fn effective_thinking_config_for_agent(&self, agent: &AgentInfo) -> Option<ThinkingConfig> {
+        self.explicit_selected_thinking_config()
+            .or_else(|| agent.thinking.clone())
+            .or_else(|| {
+                agent
+                    .model
+                    .as_ref()
+                    .and_then(|model_ref| self.model_entry_for_ref(model_ref))
+                    .map(|entry| Self::effective_thinking_config_for_entry(&entry))
+            })
+    }
+
+    fn effective_thinking_level_for_agent(&self, agent: &AgentInfo) -> Option<ThinkingLevel> {
+        self.effective_thinking_config_for_agent(agent)
+            .map(|config| config.level)
+    }
+
+    fn persist_selected_thinking_level(&mut self, level: ThinkingLevel) {
+        self.selected_thinking_level = Some(level);
+        let _ = self
+            .storage
+            .set_setting("thinking_level", Self::thinking_level_setting_value(level));
+        let _ = self.storage.set_setting("thinking_level_explicit", "1");
+    }
+
+    fn apply_selected_model_and_thinking(&self, agent: &mut AgentInfo) {
+        if (!agent.model_pinned || agent.model.is_none())
+            && let Some(ref model_str) = self.selected_model
+            && let Some((provider, model)) = model_str.split_once('/')
+        {
+            agent.model = Some(ModelRef {
+                provider_id: provider.to_string(),
+                model_id: model.to_string(),
+            });
+        }
+
+        if let Some(thinking) = self.effective_thinking_config_for_agent(agent) {
+            agent.thinking = Some(thinking);
+        }
+    }
+
+    fn active_model_entry(&self) -> Option<ModelPickerEntry> {
+        let model_ref = self.selected_model.as_deref()?;
+        let (provider_id, model_id) = model_ref.split_once('/')?;
+        self.resolved_model_entries_for_provider(provider_id)
+            .into_iter()
+            .find(|entry| entry.id == model_id)
+    }
+
+    fn active_thinking_levels(&self) -> Vec<ThinkingLevel> {
+        self.active_model_entry()
+            .map(|entry| entry.thinking_levels)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn finalize_model_selection(
+        &mut self,
+        provider_id: String,
+        provider_name: String,
+        entry: &ModelPickerEntry,
+        thinking_level: ThinkingLevel,
+    ) -> String {
+        let model_value = format!("{}/{}", provider_id, entry.id);
+        let _ = self.storage.set_setting("selected_model", &model_value);
+        let _ = self.storage.set_setting("preferred_provider", &provider_id);
+        let _ = self.storage.set_setting(
+            "selected_model_ctx_window",
+            &entry.context_window.to_string(),
+        );
+        self.selected_model = Some(model_value);
+        self.selected_model_ctx_window = Some(entry.context_window);
+        self.persist_selected_thinking_level(thinking_level);
+        self.configured_provider = Some(ConfiguredProvider {
+            id: provider_id,
+            name: provider_name,
+            source: ProviderSource::Database,
+        });
+        entry.name.clone()
+    }
+
+    /// Refresh `selected_model_ctx_window` from the provider's model list.
+    ///
+    /// Called once at startup so stale cached values from previous runs can be
+    /// corrected when the provider returns richer model metadata.
+    pub fn backfill_model_ctx_window(&mut self) {
         let model = match self.selected_model.as_deref() {
             Some(m) => m.to_string(),
             None => return,
@@ -1204,11 +1399,12 @@ impl App {
         let Some((provider_id, model_id)) = model.split_once('/') else {
             return;
         };
+        let previous_context_window = self.selected_model_ctx_window;
 
-        // Query the provider for its full model list.
-        let models = self.models_for_provider(provider_id);
+        // Use cached/default metadata so startup does not block on provider discovery.
+        let models = self.resolved_model_entries_for_provider(provider_id);
         if let Some(entry) = models.iter().find(|e| e.id == model_id) {
-            if entry.context_window > 0 {
+            if entry.context_window > 0 && previous_context_window != Some(entry.context_window) {
                 self.selected_model_ctx_window = Some(entry.context_window);
                 let _ = self.storage.set_setting(
                     "selected_model_ctx_window",
@@ -1216,8 +1412,9 @@ impl App {
                 );
                 tracing::info!(
                     model = %model,
+                    previous_context_window = ?previous_context_window,
                     context_window = entry.context_window,
-                    "Backfilled context window for selected model"
+                    "Refreshed context window for selected model"
                 );
             }
         }
@@ -1234,6 +1431,44 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
             })
+    }
+
+    fn provider_api_key(&self, provider_id: &str) -> Option<String> {
+        let from_storage = || {
+            self.storage
+                .get_provider_auth(provider_id)
+                .ok()
+                .flatten()
+                .filter(|key| !key.is_empty())
+        };
+
+        match provider_id {
+            "anthropic" => from_storage().or_else(|| {
+                std::env::var("ANTHROPIC_API_KEY")
+                    .ok()
+                    .filter(|key| !key.is_empty())
+            }),
+            "gemini" => from_storage()
+                .or_else(|| {
+                    std::env::var("GEMINI_API_KEY")
+                        .ok()
+                        .filter(|key| !key.is_empty())
+                })
+                .or_else(|| {
+                    std::env::var("GOOGLE_API_KEY")
+                        .ok()
+                        .filter(|key| !key.is_empty())
+                }),
+            "huggingface" => from_storage()
+                .or_else(|| std::env::var("HF_TOKEN").ok().filter(|key| !key.is_empty()))
+                .or_else(|| {
+                    std::env::var("HUGGING_FACE_HUB_TOKEN")
+                        .ok()
+                        .filter(|key| !key.is_empty())
+                }),
+            "ollama_cloud" => self.ollama_cloud_api_key(),
+            _ => from_storage(),
+        }
     }
 
     /// Calculate cost tier and multiplier for a model based on its per-token costs.
@@ -1320,40 +1555,7 @@ impl App {
     fn hf_default_model_entries(&self) -> Vec<ModelPickerEntry> {
         self.provider_registry
             .get("huggingface")
-            .map(|p| {
-                let models = p.default_models();
-                let baseline_cost = models
-                    .iter()
-                    .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                    .filter(|c| *c > 0.0)
-                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                    .unwrap_or(0.001);
-
-                models
-                    .into_iter()
-                    .map(|m| {
-                        let (cost_tier, cost_multiplier) = self.calculate_cost_tier(
-                            m.cost.input,
-                            m.cost.output,
-                            baseline_cost,
-                            m.request_multiplier,
-                        );
-                        ModelPickerEntry {
-                            id: m.id,
-                            name: m.name,
-                            context_window: m.context_window,
-                            max_output: m.max_output,
-                            cost_input: m.cost.input,
-                            cost_output: m.cost.output,
-                            reasoning: m.capabilities.reasoning,
-                            vision: m.capabilities.vision,
-                            tool_use: m.capabilities.tool_use,
-                            cost_tier,
-                            cost_multiplier,
-                        }
-                    })
-                    .collect()
-            })
+            .map(|p| self.picker_entries_from_models(p.default_models()))
             .unwrap_or_default()
     }
 
@@ -1478,20 +1680,7 @@ impl App {
         );
 
         let mut agent = self.agent_info.clone();
-        // Apply the globally-selected model when:
-        //   1. The agent has no model at all, OR
-        //   2. The agent's model was not explicitly pinned by a custom profile
-        //      (built-in agents carry an anthropic default that should be
-        //      overridden by the user's /provider selection).
-        if (!agent.model_pinned || agent.model.is_none())
-            && let Some(ref model_str) = self.selected_model
-            && let Some((provider, model)) = model_str.split_once('/')
-        {
-            agent.model = Some(ModelRef {
-                provider_id: provider.to_string(),
-                model_id: model.to_string(),
-            });
-        }
+        self.apply_selected_model_and_thinking(&mut agent);
 
         // Inject role-mode system prompt addition when a role mode is active.
         if let Some(ref mode) = self.role_mode {
@@ -1887,6 +2076,15 @@ impl App {
                 // Suggest agent-related subcommands
                 vec!["list".to_string(), "switch".to_string()]
             }
+            "thinking" => {
+                vec![
+                    "auto".to_string(),
+                    "off".to_string(),
+                    "low".to_string(),
+                    "medium".to_string(),
+                    "high".to_string(),
+                ]
+            }
             "codeindex" => {
                 vec!["on".to_string(), "off".to_string(), "sync".to_string()]
             }
@@ -1949,6 +2147,7 @@ impl App {
                     .to_string(),
             ),
             "model" => Some("[show]".to_string()),
+            "thinking" => Some("[auto|off|low|medium|high]".to_string()),
             "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
@@ -2781,6 +2980,54 @@ impl App {
     /// Helper function to convert a model with cost information into a ModelPickerEntry.
     /// Calculates cost tier and multiplier relative to the baseline cost in the list.
     /// For Copilot models with request_multiplier, uses the multiplier directly.
+    fn current_config(&self) -> ragent_core::config::Config {
+        ragent_core::config::Config::load().unwrap_or_default()
+    }
+
+    fn overlay_model_config(
+        &self,
+        config: &ragent_core::config::Config,
+        mut model: ragent_core::provider::ModelInfo,
+    ) -> ragent_core::provider::ModelInfo {
+        if let Some(provider_config) = config.provider.get(&model.provider_id) {
+            if model.thinking_config.is_none() {
+                model.thinking_config = provider_config.thinking.clone();
+            }
+
+            if let Some(model_config) = provider_config.models.get(&model.id) {
+                if let Some(name) = &model_config.name {
+                    model.name = name.clone();
+                }
+                if let Some(cost) = &model_config.cost {
+                    model.cost = ragent_config::Cost {
+                        input: cost.input,
+                        output: cost.output,
+                    };
+                }
+                if let Some(capabilities) = &model_config.capabilities {
+                    model.capabilities = ragent_config::Capabilities {
+                        reasoning: capabilities.reasoning,
+                        streaming: capabilities.streaming,
+                        vision: capabilities.vision,
+                        tool_use: capabilities.tool_use,
+                        thinking_levels: capabilities.thinking_levels.clone(),
+                    };
+                }
+                if let Some(thinking) = &model_config.thinking {
+                    model.thinking_config = Some(thinking.clone());
+                }
+            }
+        }
+
+        if model.thinking_config.is_none() {
+            model.thinking_config = Some(ragent_core::agent::default_thinking_config_for_levels(
+                &model.capabilities.thinking_levels,
+            ));
+        }
+
+        model
+    }
+
     fn model_to_picker_entry(
         &self,
         m: ragent_core::provider::ModelInfo,
@@ -2802,181 +3049,311 @@ impl App {
             reasoning: m.capabilities.reasoning,
             vision: m.capabilities.vision,
             tool_use: m.capabilities.tool_use,
+            thinking_levels: m.capabilities.thinking_levels,
+            thinking_config: m.thinking_config,
             cost_tier,
             cost_multiplier,
         }
     }
 
-    /// Get models available for a given provider.
-    pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
-        let mut models: Vec<ModelPickerEntry> = if provider_id == "ollama" {
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                let result = tokio::task::block_in_place(|| {
-                    handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
-                });
-                if let Ok(fetched) = result {
-                    if !fetched.is_empty() {
-                        let baseline_cost = fetched
-                            .iter()
-                            .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                            .filter(|c| *c > 0.0)
-                            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                            .unwrap_or(0.001);
-                        fetched
-                            .into_iter()
-                            .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                            .collect()
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
-        } else if provider_id == "ollama_cloud" {
-            if let Some(token) = self.ollama_cloud_api_key() {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    let result = tokio::task::block_in_place(|| {
-                        handle.block_on(
-                            ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
-                                &token, None,
-                            ),
-                        )
-                    });
-                    if let Ok(fetched) = result {
-                        if !fetched.is_empty() {
-                            let baseline_cost = fetched
-                                .iter()
-                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                .filter(|c| *c > 0.0)
-                                .min_by(|a, b| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .unwrap_or(0.001);
-                            fetched
-                                .into_iter()
-                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                .collect()
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
-                }
-            } else {
-                vec![]
-            }
-        } else if provider_id == "copilot" {
-            // Prefer DB-stored device flow token (works for token exchange),
-            // then fall back to other token sources for model discovery.
-            let token = self
+    fn picker_entries_from_models(
+        &self,
+        models: Vec<ragent_core::provider::ModelInfo>,
+    ) -> Vec<ModelPickerEntry> {
+        let config = self.current_config();
+        let models: Vec<_> = models
+            .into_iter()
+            .map(|model| self.overlay_model_config(&config, model))
+            .collect();
+        let baseline_cost = models
+            .iter()
+            .map(|m| (m.cost.input + m.cost.output) / 2.0)
+            .filter(|c| *c > 0.0)
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.001);
+
+        models
+            .into_iter()
+            .map(|m| self.model_to_picker_entry(m, baseline_cost))
+            .collect()
+    }
+
+    fn cache_discovered_models(
+        &self,
+        provider_id: &str,
+        models: &[ragent_core::provider::ModelInfo],
+    ) {
+        if let Ok(models_json) = serde_json::to_string(models) {
+            let _ = self
                 .storage
-                .get_provider_auth("copilot")
-                .ok()
-                .flatten()
-                .filter(|k| !k.is_empty())
-                .or_else(|| {
-                    let _storage = self.storage.clone();
-                    let db_lookup = move || -> Option<String> { None }; // already checked
-                    ragent_core::provider::copilot::resolve_copilot_github_token(Some(&db_lookup))
-                });
-            if let Some(token) = token {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    let result = tokio::task::block_in_place(|| {
-                        handle.block_on(ragent_core::provider::copilot::list_copilot_models(&token))
-                    });
-                    if let Ok(fetched) = result {
-                        if !fetched.is_empty() {
-                            let baseline_cost = fetched
-                                .iter()
-                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                .filter(|c| *c > 0.0)
-                                .min_by(|a, b| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .unwrap_or(0.001);
-                            fetched
-                                .into_iter()
-                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                .collect()
-                        } else {
-                            vec![]
-                        }
-                    } else {
-                        vec![]
-                    }
+                .set_discovered_models(provider_id, &models_json);
+        }
+    }
+
+    fn cached_model_entries(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        self.storage
+            .get_discovered_models(provider_id)
+            .ok()
+            .flatten()
+            .and_then(|models_json| {
+                serde_json::from_str::<Vec<ragent_core::provider::ModelInfo>>(&models_json).ok()
+            })
+            .map(|models| self.picker_entries_from_models(models))
+            .unwrap_or_default()
+    }
+
+    fn selected_model_fallback_entries(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        let Some(model_ref) = self.selected_model.as_deref() else {
+            return Vec::new();
+        };
+        let Some((selected_provider, model_id)) = model_ref.split_once('/') else {
+            return Vec::new();
+        };
+        if selected_provider != provider_id {
+            return Vec::new();
+        }
+
+        vec![ModelPickerEntry {
+            id: model_id.to_string(),
+            name: model_id.to_string(),
+            context_window: self.selected_model_ctx_window.unwrap_or(0),
+            max_output: None,
+            cost_input: 0.0,
+            cost_output: 0.0,
+            reasoning: false,
+            vision: false,
+            tool_use: true,
+            thinking_levels: Vec::new(),
+            thinking_config: None,
+            cost_tier: "Unknown".to_string(),
+            cost_multiplier: "?".to_string(),
+        }]
+    }
+
+    fn resolved_model_entries_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        let default_entries = || {
+            self.provider_registry
+                .get(provider_id)
+                .map(|provider| self.picker_entries_from_models(provider.default_models()))
+                .unwrap_or_default()
+        };
+
+        let mut models = match provider_id {
+            "ollama" | "ollama_cloud" => {
+                let cached = self.cached_model_entries(provider_id);
+                if !cached.is_empty() {
+                    cached
                 } else {
-                    vec![]
+                    self.selected_model_fallback_entries(provider_id)
                 }
-            } else {
-                vec![]
             }
-        } else if provider_id == "huggingface" {
-            let token = self
-                .storage
-                .get_provider_auth("huggingface")
-                .ok()
-                .flatten()
-                .filter(|k| !k.is_empty())
-                .or_else(|| std::env::var("HF_TOKEN").ok().filter(|k| !k.is_empty()))
-                .or_else(|| {
-                    std::env::var("HUGGING_FACE_HUB_TOKEN")
-                        .ok()
-                        .filter(|k| !k.is_empty())
-                });
-            if let Some(token) = token {
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    let result = tokio::task::block_in_place(|| {
-                        handle.block_on(ragent_core::provider::huggingface::discover_models(&token))
-                    });
-                    if let Ok(fetched) = result {
-                        if !fetched.is_empty() {
-                            let baseline_cost = fetched
-                                .iter()
-                                .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                                .filter(|c| *c > 0.0)
-                                .min_by(|a, b| {
-                                    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-                                })
-                                .unwrap_or(0.001);
-                            fetched
-                                .into_iter()
-                                .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                                .collect()
-                        } else {
-                            self.hf_default_model_entries()
-                        }
-                    } else {
-                        self.hf_default_model_entries()
-                    }
+            "huggingface" => {
+                let cached = self.cached_model_entries("huggingface");
+                if !cached.is_empty() {
+                    cached
                 } else {
                     self.hf_default_model_entries()
                 }
-            } else {
-                self.hf_default_model_entries()
             }
-        } else {
-            self.provider_registry
-                .get(provider_id)
-                .map(|p| {
-                    let models = p.default_models();
-                    let baseline_cost = models
-                        .iter()
-                        .map(|m| (m.cost.input + m.cost.output) / 2.0)
-                        .filter(|c| *c > 0.0)
-                        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                        .unwrap_or(0.001);
-                    models
-                        .into_iter()
-                        .map(|m| self.model_to_picker_entry(m, baseline_cost))
-                        .collect()
-                })
-                .unwrap_or_default()
+            _ => {
+                let cached = self.cached_model_entries(provider_id);
+                if !cached.is_empty() {
+                    cached
+                } else {
+                    default_entries()
+                }
+            }
+        };
+
+        models.sort_by(|a, b| a.name.cmp(&b.name));
+        models
+    }
+
+    /// Get models available for a given provider.
+    pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
+        let default_entries = || self.resolved_model_entries_for_provider(provider_id);
+
+        let mut models: Vec<ModelPickerEntry> = match provider_id {
+            "ollama" => {
+                let cached = self.cached_model_entries("ollama");
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let result = tokio::task::block_in_place(|| {
+                        handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
+                    });
+                    if let Ok(fetched) = result
+                        && !fetched.is_empty()
+                    {
+                        self.cache_discovered_models("ollama", &fetched);
+                        self.picker_entries_from_models(fetched)
+                    } else if !cached.is_empty() {
+                        cached
+                    } else {
+                        self.selected_model_fallback_entries("ollama")
+                    }
+                } else {
+                    cached
+                }
+            }
+            "ollama_cloud" => {
+                let cached = self.cached_model_entries("ollama_cloud");
+                if let Some(token) = self.ollama_cloud_api_key() {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(
+                                ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
+                                    &token, None,
+                                ),
+                            )
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("ollama_cloud", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else if !cached.is_empty() {
+                            cached
+                        } else {
+                            self.selected_model_fallback_entries("ollama_cloud")
+                        }
+                    } else {
+                        cached
+                    }
+                } else if !cached.is_empty() {
+                    cached
+                } else {
+                    self.selected_model_fallback_entries("ollama_cloud")
+                }
+            }
+            "anthropic" => {
+                let cached = self.cached_model_entries("anthropic");
+                if let Some(api_key) = self.provider_api_key("anthropic") {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(
+                                ragent_core::provider::anthropic::list_anthropic_models(
+                                    &api_key, None,
+                                ),
+                            )
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("anthropic", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else if !cached.is_empty() {
+                            cached
+                        } else {
+                            default_entries()
+                        }
+                    } else if !cached.is_empty() {
+                        cached
+                    } else {
+                        default_entries()
+                    }
+                } else if !cached.is_empty() {
+                    cached
+                } else {
+                    default_entries()
+                }
+            }
+            "gemini" => {
+                let cached = self.cached_model_entries("gemini");
+                if let Some(api_key) = self.provider_api_key("gemini") {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(ragent_core::provider::gemini::list_gemini_models(
+                                &api_key, None,
+                            ))
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("gemini", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else if !cached.is_empty() {
+                            cached
+                        } else {
+                            default_entries()
+                        }
+                    } else if !cached.is_empty() {
+                        cached
+                    } else {
+                        default_entries()
+                    }
+                } else if !cached.is_empty() {
+                    cached
+                } else {
+                    default_entries()
+                }
+            }
+            "copilot" => {
+                let cached = self.cached_model_entries("copilot");
+                let token = self
+                    .storage
+                    .get_provider_auth("copilot")
+                    .ok()
+                    .flatten()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        let _storage = self.storage.clone();
+                        let db_lookup = move || -> Option<String> { None };
+                        ragent_core::provider::copilot::resolve_copilot_github_token(Some(
+                            &db_lookup,
+                        ))
+                    });
+                if let Some(token) = token {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(ragent_core::provider::copilot::list_copilot_models(
+                                &token,
+                            ))
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("copilot", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else {
+                            cached
+                        }
+                    } else {
+                        cached
+                    }
+                } else {
+                    cached
+                }
+            }
+            "huggingface" => {
+                let cached = self.cached_model_entries("huggingface");
+                if let Some(token) = self.provider_api_key("huggingface") {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(ragent_core::provider::huggingface::discover_models(
+                                &token,
+                            ))
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("huggingface", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else if !cached.is_empty() {
+                            cached
+                        } else {
+                            self.hf_default_model_entries()
+                        }
+                    } else if !cached.is_empty() {
+                        cached
+                    } else {
+                        self.hf_default_model_entries()
+                    }
+                } else if !cached.is_empty() {
+                    cached
+                } else {
+                    self.hf_default_model_entries()
+                }
+            }
+            _ => default_entries(),
         };
         // Sort models alphabetically by name
         models.sort_by(|a, b| a.name.cmp(&b.name));
@@ -3002,7 +3379,13 @@ impl App {
             .split_once('/')
             .map(|(_, m)| m)
             .unwrap_or(model_str);
-        Some(format!("{} / {}", provider_name, model_id))
+        let thinking = self
+            .active_model_entry()
+            .filter(|entry| !entry.thinking_levels.is_empty())
+            .and(self.effective_thinking_level_for_agent(&self.agent_info))
+            .map(|level| format!(" [thinking: {}]", Self::thinking_level_display(level)))
+            .unwrap_or_default();
+        Some(format!("{} / {}{}", provider_name, model_id, thinking))
     }
 
     /// Returns the active `provider/model` identifier for the current session, if any.
@@ -3037,7 +3420,7 @@ impl App {
         );
 
         if let Some(entry) = self
-            .models_for_provider(provider_id)
+            .resolved_model_entries_for_provider(provider_id)
             .into_iter()
             .find(|entry| entry.id == model_id)
         {
@@ -3056,6 +3439,13 @@ impl App {
                 entry.cost_output,
                 entry.cost_tier,
                 entry.cost_multiplier,
+            ));
+            report.push_str(&format!(
+                "\n## Thinking\n\n- **Current level:** {}\n- **Supported levels:** {}\n",
+                self.effective_thinking_level_for_agent(&self.agent_info)
+                    .map(Self::thinking_level_display)
+                    .unwrap_or("unknown"),
+                Self::format_thinking_levels(&entry.thinking_levels),
             ));
 
             if entry.name != entry.id {
@@ -4053,15 +4443,7 @@ impl App {
                     self.agent_info.clone()
                 });
 
-                // Apply current model override
-                if let Some(ref model_str) = self.selected_model {
-                    if let Some((provider, model)) = model_str.split_once('/') {
-                        agent.model = Some(ModelRef {
-                            provider_id: provider.to_string(),
-                            model_id: model.to_string(),
-                        });
-                    }
-                }
+                self.apply_selected_model_and_thinking(&mut agent);
 
                 // Allow file writes so the agent can call memory_write
                 agent.permission = ragent_core::agent::default_permissions();
@@ -4417,14 +4799,22 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 "" => {
                     if let Some(ref prov) = self.configured_provider {
                         let models = self.models_for_provider(&prov.id.clone());
-                        let prov_name = prov.name.clone();
-                        let prov_id = prov.id.clone();
-                        self.provider_setup = Some(ProviderSetupStep::SelectModel {
-                            provider_id: prov_id,
-                            provider_name: prov_name,
-                            models,
-                            selected: 0,
-                        });
+                        if models.is_empty() {
+                            self.provider_setup = None;
+                            self.status = format!(
+                                "⚠ No models available for {} — check provider setup and model discovery",
+                                prov.name
+                            );
+                        } else {
+                            let prov_name = prov.name.clone();
+                            let prov_id = prov.id.clone();
+                            self.provider_setup = Some(ProviderSetupStep::SelectModel {
+                                provider_id: prov_id,
+                                provider_name: prov_name,
+                                models,
+                                selected: 0,
+                            });
+                        }
                     } else {
                         self.status = "⚠ No provider configured — use /provider first".to_string();
                     }
@@ -4443,6 +4833,49 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.status = "Usage: /model [show]".to_string();
                 }
             },
+            "thinking" => {
+                if self.selected_model.is_none() {
+                    self.status = "⚠ No model selected — use /model to choose".to_string();
+                    return;
+                }
+
+                let supported = self.active_thinking_levels();
+                let requested = args.trim();
+                if requested.is_empty() {
+                    let current = self
+                        .effective_thinking_level_for_agent(&self.agent_info)
+                        .map(Self::thinking_level_display)
+                        .unwrap_or("unknown");
+                    self.append_assistant_text(&format!(
+                        "From: /thinking\nCurrent: `{}`\nSupported: `{}`\n",
+                        current,
+                        Self::format_thinking_levels(&supported)
+                    ));
+                    self.status = "thinking".to_string();
+                    return;
+                }
+
+                let Some(level) = Self::parse_thinking_level_setting(requested) else {
+                    self.status = "Usage: /thinking [auto|off|low|medium|high]".to_string();
+                    return;
+                };
+
+                if supported.is_empty() && level != ThinkingLevel::Off {
+                    self.status =
+                        "⚠ Active model does not support configurable thinking".to_string();
+                    return;
+                }
+                if !supported.is_empty() && !supported.contains(&level) {
+                    self.status = format!(
+                        "⚠ Thinking level '{}' is not supported by the active model",
+                        Self::thinking_level_display(level)
+                    );
+                    return;
+                }
+
+                self.persist_selected_thinking_level(level);
+                self.status = format!("thinking: {}", Self::thinking_level_display(level));
+            }
             "provider" => {
                 self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
             }
@@ -4531,6 +4964,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                                 .ok()
                                 .flatten()
                                 .and_then(|s| s.parse::<usize>().ok());
+                            self.selected_thinking_level =
+                                Self::load_persisted_thinking_level(self.storage.as_ref());
                             self.code_index_enabled = cfg.code_index.enabled;
                             self.sync_tool_visibility_from_config(&cfg);
                             self.sync_internal_llm_from_config(&cfg);
@@ -4656,14 +5091,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.push_log_no_agent(LogLevel::Info, "Resuming halted agent".to_string());
 
                 let mut agent = self.agent_info.clone();
-                if let Some(ref model_str) = self.selected_model {
-                    if let Some((provider, model)) = model_str.split_once('/') {
-                        agent.model = Some(ModelRef {
-                            provider_id: provider.to_string(),
-                            model_id: model.to_string(),
-                        });
-                    }
-                }
+                self.apply_selected_model_and_thinking(&mut agent);
 
                 let processor = self.session_processor.clone();
                 let flag = Arc::new(AtomicBool::new(false));
@@ -9522,7 +9950,8 @@ Type `/swarm help` for more info.\n";
                 outbound_bytes,
             } => {
                 if self.is_current_session(session_id) {
-                    self.stream_out_bytes += outbound_bytes;
+                    self.stream_in_bytes = 0;
+                    self.stream_out_bytes = outbound_bytes;
                 }
             }
             Event::ToolCallStart {
@@ -11599,5 +12028,128 @@ fn summarise_error(raw: &str) -> String {
         format!("{}…", &cleaned[..end])
     } else {
         cleaned.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_thinking_levels_handles_empty_and_full_lists() {
+        assert_eq!(App::format_thinking_levels(&[]), "—");
+        assert_eq!(
+            App::format_thinking_levels(&[
+                ThinkingLevel::Auto,
+                ThinkingLevel::Off,
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+            ]),
+            "Auto/Off/Low/Med/High"
+        );
+    }
+
+    #[test]
+    fn test_default_thinking_level_defaults_to_off_when_unconfigured() {
+        let entry = ModelPickerEntry {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            context_window: 128_000,
+            max_output: Some(8_192),
+            cost_input: 0.0,
+            cost_output: 0.0,
+            reasoning: true,
+            vision: false,
+            tool_use: true,
+            thinking_levels: vec![ThinkingLevel::Auto, ThinkingLevel::Off, ThinkingLevel::High],
+            thinking_config: None,
+            cost_tier: "Free".to_string(),
+            cost_multiplier: "0x".to_string(),
+        };
+
+        assert_eq!(
+            App::default_thinking_level_for_entry(&entry),
+            ThinkingLevel::Off
+        );
+    }
+
+    #[test]
+    fn test_default_thinking_level_falls_back_to_off_for_nonthinking_models() {
+        let entry = ModelPickerEntry {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            context_window: 128_000,
+            max_output: Some(8_192),
+            cost_input: 0.0,
+            cost_output: 0.0,
+            reasoning: false,
+            vision: false,
+            tool_use: true,
+            thinking_levels: vec![],
+            thinking_config: None,
+            cost_tier: "Free".to_string(),
+            cost_multiplier: "0x".to_string(),
+        };
+
+        assert_eq!(
+            App::default_thinking_level_for_entry(&entry),
+            ThinkingLevel::Off
+        );
+    }
+
+    #[test]
+    fn test_default_thinking_level_uses_explicit_entry_config() {
+        let entry = ModelPickerEntry {
+            id: "model".to_string(),
+            name: "Model".to_string(),
+            context_window: 128_000,
+            max_output: Some(8_192),
+            cost_input: 0.0,
+            cost_output: 0.0,
+            reasoning: true,
+            vision: false,
+            tool_use: true,
+            thinking_levels: vec![
+                ThinkingLevel::Auto,
+                ThinkingLevel::Off,
+                ThinkingLevel::Low,
+                ThinkingLevel::High,
+            ],
+            thinking_config: Some(ThinkingConfig::new(ThinkingLevel::High)),
+            cost_tier: "Free".to_string(),
+            cost_multiplier: "0x".to_string(),
+        };
+
+        assert_eq!(
+            App::default_thinking_level_for_entry(&entry),
+            ThinkingLevel::High
+        );
+    }
+
+    #[test]
+    fn test_load_persisted_thinking_level_ignores_legacy_auto_default() {
+        let storage = Storage::open_in_memory().expect("in-memory storage");
+        storage
+            .set_setting("thinking_level", "auto")
+            .expect("persist thinking level");
+
+        assert_eq!(App::load_persisted_thinking_level(&storage), None);
+    }
+
+    #[test]
+    fn test_load_persisted_thinking_level_keeps_explicit_auto() {
+        let storage = Storage::open_in_memory().expect("in-memory storage");
+        storage
+            .set_setting("thinking_level", "auto")
+            .expect("persist thinking level");
+        storage
+            .set_setting("thinking_level_explicit", "1")
+            .expect("persist explicit marker");
+
+        assert_eq!(
+            App::load_persisted_thinking_level(&storage),
+            Some(ThinkingLevel::Auto)
+        );
     }
 }

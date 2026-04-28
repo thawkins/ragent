@@ -4,10 +4,9 @@
 //! normal editing mode and the permission dialog intercept.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ragent_types::ThinkingLevel;
 
-use crate::app::{
-    App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
-};
+use crate::app::{App, ContextAction, PROVIDER_LIST, ProviderSetupStep};
 
 fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
     if char_index == 0 {
@@ -1261,38 +1260,98 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
             KeyCode::Enter => {
-                let model_name = if let Some(entry) = models.get(selected) {
-                    let model_value = format!("{}/{}", provider_id, entry.id);
-                    let _ = app.storage.set_setting("selected_model", &model_value);
-                    // Persist the user's explicit provider choice so it survives restarts.
-                    let _ = app.storage.set_setting("preferred_provider", &provider_id);
-                    // Persist the context window so the status bar can show usage %.
-                    let _ = app.storage.set_setting(
-                        "selected_model_ctx_window",
-                        &entry.context_window.to_string(),
-                    );
-                    app.selected_model = Some(model_value);
-                    app.selected_model_ctx_window = Some(entry.context_window);
-                    // Ensure the UI reflects the provider the user just chose.
-                    app.configured_provider = Some(ConfiguredProvider {
-                        id: provider_id.clone(),
-                        name: provider_name.clone(),
-                        source: ProviderSource::Database,
-                    });
-                    Some(entry.name.clone())
+                if let Some(entry) = models.get(selected).cloned() {
+                    if entry.thinking_levels.is_empty() {
+                        let model_name = app.finalize_model_selection(
+                            provider_id,
+                            provider_name.clone(),
+                            &entry,
+                            ThinkingLevel::Off,
+                        );
+                        app.provider_setup = Some(ProviderSetupStep::Done {
+                            provider_name,
+                            model_name: Some(model_name),
+                        });
+                    } else {
+                        let default_level = App::default_thinking_level_for_entry(&entry);
+                        let selected_level = entry
+                            .thinking_levels
+                            .iter()
+                            .position(|level| *level == default_level)
+                            .unwrap_or(0);
+                        app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
+                            provider_id,
+                            provider_name,
+                            model: entry,
+                            selected: selected_level,
+                        });
+                    }
                 } else {
-                    None
-                };
-                app.provider_setup = Some(ProviderSetupStep::Done {
-                    provider_name,
-                    model_name,
-                });
+                    app.provider_setup = Some(ProviderSetupStep::Done {
+                        provider_name,
+                        model_name: None,
+                    });
+                }
             }
             _ => {
                 app.provider_setup = Some(ProviderSetupStep::SelectModel {
                     provider_id,
                     provider_name,
                     models,
+                    selected,
+                });
+            }
+        },
+        ProviderSetupStep::SelectThinkingLevel {
+            provider_id,
+            provider_name,
+            model,
+            selected,
+        } => match key.code {
+            KeyCode::Up => {
+                let new = if selected == 0 {
+                    model.thinking_levels.len().saturating_sub(1)
+                } else {
+                    selected - 1
+                };
+                app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
+                    provider_id,
+                    provider_name,
+                    model,
+                    selected: new,
+                });
+            }
+            KeyCode::Down => {
+                let new = if model.thinking_levels.is_empty() {
+                    0
+                } else {
+                    (selected + 1) % model.thinking_levels.len()
+                };
+                app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
+                    provider_id,
+                    provider_name,
+                    model,
+                    selected: new,
+                });
+            }
+            KeyCode::Enter => {
+                let level = model
+                    .thinking_levels
+                    .get(selected)
+                    .copied()
+                    .unwrap_or(ThinkingLevel::Off);
+                let model_name =
+                    app.finalize_model_selection(provider_id, provider_name.clone(), &model, level);
+                app.provider_setup = Some(ProviderSetupStep::Done {
+                    provider_name,
+                    model_name: Some(model_name),
+                });
+            }
+            _ => {
+                app.provider_setup = Some(ProviderSetupStep::SelectThinkingLevel {
+                    provider_id,
+                    provider_name,
+                    model,
                     selected,
                 });
             }
@@ -1375,8 +1434,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     app.configured_provider = None;
                     app.selected_model = None;
                     app.selected_model_ctx_window = None;
+                    app.selected_thinking_level = None;
                     let _ = app.storage.delete_setting("selected_model");
                     let _ = app.storage.delete_setting("selected_model_ctx_window");
+                    let _ = app.storage.delete_setting("thinking_level");
+                    let _ = app.storage.delete_setting("thinking_level_explicit");
                     app.provider_health
                         .store(0, std::sync::atomic::Ordering::Relaxed);
                 }

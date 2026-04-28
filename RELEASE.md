@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.52
+## Current Version: 0.1.0-alpha.53
+
+### Fixed
+- **Ollama Cloud thinking disabled** — Removed the `think` parameter from Ollama Cloud `build_request_body()`. The Ollama Cloud `/api/chat` endpoint does not support the `think` field, unlike the local Ollama `/v1/chat/completions` endpoint. Also removed binary thinking heuristics from `list_ollama_cloud_models` — all cloud models now report an empty `thinking_levels` list. The local Ollama provider is unaffected and continues to send the `think` boolean.
+
+## Previous: 0.1.0-alpha.52
 
 ### Added
 - **Local Git workspace tools (Milestone 1)** — 7 new `git_*` tools in `ragent-tools-vcs` that let the LLM inspect any local git repository:
