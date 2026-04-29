@@ -563,47 +563,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         };
     }
 
-    // Journal viewer: Esc closes the panel, Up/Down/j/k navigate, Enter toggles expand
-    if app.journal_viewer.is_some() {
-        return match key.code {
-            KeyCode::Esc => {
-                app.journal_viewer = None;
-                None
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if let Some(ref mut viewer) = app.journal_viewer {
-                    viewer.move_up();
-                }
-                None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(ref mut viewer) = app.journal_viewer {
-                    viewer.move_down();
-                }
-                None
-            }
-            KeyCode::Enter => {
-                if let Some(ref mut viewer) = app.journal_viewer {
-                    viewer.toggle_expand();
-                }
-                None
-            }
-            KeyCode::PageUp => {
-                if let Some(ref mut viewer) = app.journal_viewer {
-                    viewer.scroll_offset = viewer.scroll_offset.saturating_sub(5);
-                }
-                None
-            }
-            KeyCode::PageDown => {
-                if let Some(ref mut viewer) = app.journal_viewer {
-                    viewer.scroll_offset = viewer.scroll_offset.saturating_add(5);
-                }
-                None
-            }
-            _ => None,
-        };
-    }
-
     // Internal-LLM chat panel captures all input when open.
     if app.internal_llm_chat_panel.is_some() {
         match key.code {

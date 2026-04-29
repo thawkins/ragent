@@ -567,7 +567,6 @@ pub fn memory_routes() -> axum::Router<AppState> {
         .route("/{id}", delete(forget_memory))
         .route("/visualisation", get(get_visualisation))
         .route("/visualisation/graph", get(get_visualisation_graph))
-        .route("/visualisation/timeline", get(get_visualisation_timeline))
         .route("/visualisation/tags", get(get_visualisation_tags))
         .route("/visualisation/heatmap", get(get_visualisation_heatmap))
 }
@@ -599,19 +598,6 @@ pub async fn get_visualisation_graph(
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to generate graph: {e}"),
-        ),
-    }
-}
-
-/// GET /memory/visualisation/timeline — Journal timeline.
-pub async fn get_visualisation_timeline(
-    State(state): State<AppState>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    match ragent_core::memory::generate_timeline(&state.storage) {
-        Ok(timeline) => serialize_response(timeline, "timeline"),
-        Err(e) => error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate timeline: {e}"),
         ),
     }
 }

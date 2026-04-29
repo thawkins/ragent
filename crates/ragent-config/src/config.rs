@@ -91,9 +91,10 @@ pub struct Config {
 #[derive(Debug, Clone, Default)]
 struct ToolVisibilitySpecified {
     office: bool,
-    journal: bool,
     github: bool,
     gitlab: bool,
+    teams: bool,
+    agents: bool,
     codeindex: bool,
 }
 
@@ -106,15 +107,18 @@ pub struct ToolVisibilityConfig {
     /// Office document tools (office_read, office_write, office_info, libre_read, etc.).
     #[serde(default = "default_false")]
     pub office: bool,
-    /// Journal tools (journal_write, journal_search, journal_read).
-    #[serde(default = "default_false")]
-    pub journal: bool,
     /// GitHub tools (github_list_issues, github_get_issue, github_create_issue, etc.).
     #[serde(default = "default_false")]
     pub github: bool,
     /// GitLab tools (gitlab_list_issues, gitlab_get_issue, gitlab_create_mr, etc.).
     #[serde(default = "default_false")]
     pub gitlab: bool,
+    /// Team coordination tools (team_create, team_spawn, team_message, etc.).
+    #[serde(default = "default_false")]
+    pub teams: bool,
+    /// Autonomous agent task tools (new_task, list_tasks, cancel_task, etc.).
+    #[serde(default = "default_false")]
+    pub agents: bool,
     /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
     /// Default `true` — codeindex tools are visible when the subsystem is enabled.
     #[serde(default = "default_true")]
@@ -127,9 +131,10 @@ impl Default for ToolVisibilityConfig {
     fn default() -> Self {
         Self {
             office: false,
-            journal: false,
             github: false,
             gitlab: false,
+            teams: false,
+            agents: false,
             codeindex: true,
             specified: ToolVisibilitySpecified::default(),
         }
@@ -141,9 +146,10 @@ impl ToolVisibilityConfig {
     pub fn iter_switches(&self) -> impl Iterator<Item = (&'static str, bool)> {
         [
             ("office", self.office),
-            ("journal", self.journal),
             ("github", self.github),
             ("gitlab", self.gitlab),
+            ("teams", self.teams),
+            ("agents", self.agents),
             ("codeindex", self.codeindex),
         ]
         .into_iter()
@@ -158,24 +164,27 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
         #[derive(Deserialize, Default)]
         struct RawToolVisibilityConfig {
             office: Option<bool>,
-            journal: Option<bool>,
             github: Option<bool>,
             gitlab: Option<bool>,
+            teams: Option<bool>,
+            agents: Option<bool>,
             codeindex: Option<bool>,
         }
 
         let raw = RawToolVisibilityConfig::deserialize(deserializer)?;
         Ok(Self {
             office: raw.office.unwrap_or_else(default_false),
-            journal: raw.journal.unwrap_or_else(default_false),
             github: raw.github.unwrap_or_else(default_false),
             gitlab: raw.gitlab.unwrap_or_else(default_false),
+            teams: raw.teams.unwrap_or_else(default_false),
+            agents: raw.agents.unwrap_or_else(default_false),
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
-                journal: raw.journal.is_some(),
                 github: raw.github.is_some(),
                 gitlab: raw.gitlab.is_some(),
+                teams: raw.teams.is_some(),
+                agents: raw.agents.is_some(),
                 codeindex: raw.codeindex.is_some(),
             },
         })
@@ -199,7 +208,6 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "pdf_read",
             "pdf_write",
         ]),
-        "journal" => Some(&["journal_write", "journal_search", "journal_read"]),
         "github" => Some(&[
             "github_list_issues",
             "github_get_issue",
@@ -233,6 +241,35 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "gitlab_cancel_job",
             "gitlab_retry_job",
         ]),
+        "teams" => Some(&[
+            "team_approve_plan",
+            "team_assign_task",
+            "team_broadcast",
+            "team_cleanup",
+            "team_create",
+            "team_idle",
+            "team_memory_read",
+            "team_memory_write",
+            "team_message",
+            "team_read_messages",
+            "team_shutdown_ack",
+            "team_shutdown_teammate",
+            "team_spawn",
+            "team_status",
+            "team_submit_plan",
+            "team_task_claim",
+            "team_task_complete",
+            "team_task_create",
+            "team_task_list",
+            "team_wait",
+        ]),
+        "agents" => Some(&[
+            "cancel_task",
+            "list_tasks",
+            "new_task",
+            "task_complete",
+            "wait_tasks",
+        ]),
         "codeindex" => Some(&[
             "codeindex_search",
             "codeindex_status",
@@ -248,7 +285,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
 /// Configuration for LLM streaming behaviour (timeouts, retries)./// ```json
 /// {
 ///   "stream": {
-///     "timeout_secs": 600,
+///     "timeout_secs": 120,
 ///     "max_retries": 4,
 ///     "retry_backoff_secs": 2
 ///   }
@@ -256,7 +293,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-    /// Seconds of silence before a stream is considered stalled (default: 600).
+    /// Seconds of silence before a stream is considered stalled (default: 120).
     #[serde(default = "default_stream_timeout_secs")]
     pub timeout_secs: u64,
     /// Maximum number of retry attempts after a stall or connection failure (default: 4).
@@ -269,7 +306,7 @@ pub struct StreamConfig {
 }
 
 const fn default_stream_timeout_secs() -> u64 {
-    600
+    120
 }
 
 const fn default_stream_max_retries() -> u32 {
@@ -966,14 +1003,17 @@ impl Config {
         if overlay.tool_visibility.specified.office {
             base.tool_visibility.office = overlay.tool_visibility.office;
         }
-        if overlay.tool_visibility.specified.journal {
-            base.tool_visibility.journal = overlay.tool_visibility.journal;
-        }
         if overlay.tool_visibility.specified.github {
             base.tool_visibility.github = overlay.tool_visibility.github;
         }
         if overlay.tool_visibility.specified.gitlab {
             base.tool_visibility.gitlab = overlay.tool_visibility.gitlab;
+        }
+        if overlay.tool_visibility.specified.teams {
+            base.tool_visibility.teams = overlay.tool_visibility.teams;
+        }
+        if overlay.tool_visibility.specified.agents {
+            base.tool_visibility.agents = overlay.tool_visibility.agents;
         }
         if overlay.tool_visibility.specified.codeindex {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
@@ -1467,15 +1507,15 @@ impl Default for StructuredMemoryConfig {
 
 /// Semantic search (embedding) configuration.
 ///
-/// When enabled, memories and journal entries are embedded using a local
+/// When enabled, structured memories are embedded using a local
 /// sentence-transformer model for similarity-based retrieval. This extends
 /// the existing FTS5 keyword search with cosine-similarity ranking.
 ///
 /// # Feature flag
 ///
 /// The `embeddings` Cargo feature must be enabled for the local ONNX-based
-/// embedding provider. When the feature is disabled, `memory_search` and
-/// `journal_search` fall back to FTS5-only mode regardless of this config.
+/// embedding provider. When the feature is disabled, memory search falls back
+/// to FTS5-only mode regardless of this config.
 ///
 /// ```json
 /// {
@@ -1492,9 +1532,9 @@ impl Default for StructuredMemoryConfig {
 pub struct SemanticConfig {
     /// Whether semantic search via embeddings is enabled.
     ///
-    /// When `false` (default), `memory_search` and `journal_search` use
-    /// FTS5 keyword search only. When `true` and the `embeddings` feature
-    /// is compiled in, entries are embedded and searched by cosine similarity.
+    /// When `false` (default), memory search uses FTS5 keyword search only.
+    /// When `true` and the `embeddings` feature is compiled in, entries are
+    /// embedded and searched by cosine similarity.
     #[serde(default = "default_semantic_enabled")]
     pub enabled: bool,
     /// Name of the ONNX sentence-transformer model to use.
@@ -1706,8 +1746,8 @@ pub struct CompactionConfig {
     pub enabled: bool,
     /// Maximum content size in bytes for a memory block.
     ///
-    /// Blocks exceeding 90% of this limit are compacted (truncated with
-    /// original content logged to the journal). Default: 4096 (4 KiB).
+    /// Blocks exceeding 90% of this limit are compacted to stay within the
+    /// configured size limit. Default: 4096 (4 KiB).
     #[serde(default = "default_block_size_limit")]
     pub block_size_limit: usize,
     /// Total memory count that triggers compaction.
@@ -1770,9 +1810,8 @@ fn default_min_interval_hours() -> u64 {
 pub struct EvictionConfig {
     /// Whether to auto-evict stale memories without user confirmation.
     ///
-    /// When `false` (default), stale memories are identified and logged to
-    /// the journal but not deleted automatically. When `true`, they are
-    /// deleted without confirmation.
+    /// When `false` (default), stale memories are identified but not deleted
+    /// automatically. When `true`, they are deleted without confirmation.
     #[serde(default = "default_eviction_auto")]
     pub auto: bool,
     /// Number of days since last access before a memory is considered stale.

@@ -7,8 +7,7 @@
 //!   and merges or proposes merging of duplicates.
 //!
 //! - **Block compaction** ([`compact_blocks`]): Detects memory blocks that
-//!   exceed their size limit and truncates them, logging the original
-//!   content to the journal before compaction.
+//!   exceed their size limit and truncates them safely.
 //!
 //! - **Stale memory eviction** ([`evict_stale_memories`]): Finds memories
 //!   below the minimum confidence threshold that haven't been accessed
@@ -350,13 +349,12 @@ pub struct CompactionResult {
 ///
 /// For each block whose content exceeds 90% of `block_size_limit` bytes:
 ///
-/// 1. Log the original content to the journal (for recovery).
-/// 2. Truncate the content, preserving frontmatter and a summary.
-/// 3. Save the compacted block back.
+/// 1. Truncate the content, preserving frontmatter and a summary.
+/// 2. Save the compacted block back.
 ///
 /// # Arguments
 ///
-/// * `storage` - SQLite storage for journal logging.
+/// * `storage` - SQLite storage backend.
 /// * `working_dir` - Project directory for block storage.
 /// * `config` - Memory configuration (for block size limit).
 ///
@@ -364,7 +362,7 @@ pub struct CompactionResult {
 ///
 /// A [`CompactionResult`] summarising what was done.
 pub fn compact_blocks(
-    storage: &Storage,
+    _storage: &Storage,
     working_dir: &Path,
     config: &MemoryConfig,
 ) -> CompactionResult {
@@ -408,19 +406,6 @@ pub fn compact_blocks(
                     "Block exceeds 90% of size limit, compacting"
                 );
 
-                // Log original to journal before compacting.
-                let _ = storage.create_journal_entry(
-                    &uuid::Uuid::new_v4().to_string(),
-                    &format!("Block compaction: {}", label),
-                    &block.content,
-                    working_dir
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default()
-                        .as_str(),
-                    "system",
-                    &["compaction".to_string(), "memory-block".to_string()],
-                );
                 // Compact: keep frontmatter + truncated content + note.
                 let compacted = compact_block_content(&block.content, size_limit);
 
@@ -455,8 +440,7 @@ pub fn compact_blocks(
 /// If the content has YAML frontmatter (delimited by `---`), we preserve it
 /// and truncate the body. Otherwise, we truncate from the end.
 ///
-/// A note is appended indicating the compaction and that the full content
-/// was saved to the journal.
+/// A note is appended indicating the compaction.
 pub fn compact_block_content(content: &str, size_limit: usize) -> String {
     let target_size = (size_limit as f64 * 0.75) as usize; // Compact to 75% of limit
 
@@ -470,7 +454,7 @@ pub fn compact_block_content(content: &str, size_limit: usize) -> String {
             if body.len() > target_size {
                 let truncated_body = &body[..body.len().min(target_size)];
                 return format!(
-                    "{}\n{}\n\n---\n*This block was compacted. The full content was saved to the journal before compaction.*\n",
+                    "{}\n{}\n\n---\n*This block was compacted to stay within the configured size limit.*\n",
                     frontmatter.trim_end(),
                     truncated_body.trim_end()
                 );
@@ -482,7 +466,7 @@ pub fn compact_block_content(content: &str, size_limit: usize) -> String {
     if content.len() > target_size {
         let truncated = &content[..target_size];
         format!(
-            "{}\n\n---\n*This block was compacted. The full content was saved to the journal before compaction.*\n",
+            "{}\n\n---\n*This block was compacted to stay within the configured size limit.*\n",
             truncated.trim_end()
         )
     } else {
@@ -509,14 +493,13 @@ pub struct EvictionResult {
 /// For each memory with `confidence < min_confidence` AND
 /// `last_accessed > stale_days` days ago:
 ///
-/// 1. Log the memory content to the journal (for recovery).
-/// 2. Delete the memory (or queue for user confirmation if `auto_evict` is false).
+/// 1. Delete the memory (or queue for user confirmation if `auto_evict` is false).
 ///
 /// # Arguments
 ///
 /// * `storage` - SQLite storage backend.
 /// * `config` - Eviction configuration.
-/// * `working_dir` - Project directory (for journal context).
+/// * `working_dir` - Project directory.
 /// * `auto_evict` - If `true`, delete automatically. If `false`, just log proposals.
 ///
 /// # Returns
@@ -525,7 +508,7 @@ pub struct EvictionResult {
 pub fn evict_stale_memories(
     storage: &Storage,
     config: &EvictionConfig,
-    working_dir: &Path,
+    _working_dir: &Path,
     auto_evict: bool,
 ) -> EvictionResult {
     let stale_threshold = Utc::now() - Duration::days(config.stale_days as i64);
@@ -581,34 +564,6 @@ pub fn evict_stale_memories(
         }
 
         result.memories_considered += 1;
-
-        // Log to journal before eviction.
-        let project_name = working_dir
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
-        let tag_strs: Vec<&str> = tags.iter().map(|s| s.as_str()).collect();
-
-        let _ = storage.create_journal_entry(
-            &uuid::Uuid::new_v4().to_string(),
-            &format!(
-                "Memory evicted: {}",
-                &mem.content[..mem.content.len().min(80)]
-            ),
-            &format!(
-                "Evicted memory (confidence: {:.2}, category: {}):\n\n{}",
-                mem.confidence, mem.category, mem.content
-            ),
-            &project_name,
-            "system",
-            &tag_strs
-                .iter()
-                .map(|_s| format!("eviction"))
-                .chain(std::iter::once("memory-eviction".to_string()))
-                .collect::<Vec<_>>(),
-        );
 
         if auto_evict {
             // Delete the memory.

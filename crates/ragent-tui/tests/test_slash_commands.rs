@@ -1585,8 +1585,9 @@ fn test_slash_tools_lists_visibility_switches() {
         "should show visibility heading"
     );
     assert!(text.contains("office"), "should list office switch");
-    assert!(text.contains("journal"), "should list journal switch");
     assert!(text.contains("github"), "should list github switch");
+    assert!(text.contains("teams"), "should list teams switch");
+    assert!(text.contains("agents"), "should list agents switch");
     assert!(text.contains("codeindex"), "should list codeindex switch");
 }
 
@@ -1614,9 +1615,8 @@ fn test_slash_tools_help_shows_usage() {
     assert!(text.contains("`/tools show`"));
     assert!(text.contains("`/tools help`"));
     assert!(text.contains("`/tools <switch> on|off`"));
-    assert!(text.contains("`office`, `journal`, `github`, `gitlab`, `codeindex`"));
+    assert!(text.contains("`office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`"));
 }
-
 #[test]
 fn test_slash_tools_show_alias_lists_visibility_switches() {
     let mut app = make_app();
@@ -1629,6 +1629,8 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("Tool Family Visibility"));
     assert!(text.contains("office"));
+    assert!(text.contains("teams"));
+    assert!(text.contains("agents"));
     assert!(text.contains("codeindex"));
 }
 
@@ -1670,6 +1672,88 @@ fn test_slash_tools_office_on_shows_office_tools() {
     );
     let text = app.messages.last().unwrap().text_content();
     assert!(text.contains("`office` visibility is now **on**"));
+}
+
+#[test]
+fn test_slash_tools_teams_on_shows_team_tools() {
+    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _guard = CwdGuard(original_cwd);
+    let _temp = enter_temp_config_dir();
+
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+
+    let hidden = ragent_core::config::tool_family_names("teams")
+        .expect("teams family")
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+    app.session_processor.tool_registry.set_hidden(&hidden);
+
+    assert!(
+        !app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "team_create")
+    );
+
+    app.execute_slash_command("/tools teams on");
+
+    assert!(app.tool_visibility.teams);
+    assert_eq!(app.status, "tools: teams on");
+    assert!(
+        app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "team_create")
+    );
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("`teams` visibility is now **on**"));
+}
+
+#[test]
+fn test_slash_tools_agents_on_shows_agent_tools() {
+    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let original_cwd = std::env::current_dir().expect("cwd");
+    let _guard = CwdGuard(original_cwd);
+    let _temp = enter_temp_config_dir();
+
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+    app.tool_visibility = ragent_core::config::ToolVisibilityConfig::default();
+
+    let hidden = ragent_core::config::tool_family_names("agents")
+        .expect("agents family")
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+    app.session_processor.tool_registry.set_hidden(&hidden);
+
+    assert!(
+        !app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "new_task")
+    );
+
+    app.execute_slash_command("/tools agents on");
+
+    assert!(app.tool_visibility.agents);
+    assert_eq!(app.status, "tools: agents on");
+    assert!(
+        app.session_processor
+            .tool_registry
+            .definitions()
+            .iter()
+            .any(|d| d.name == "new_task")
+    );
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("`agents` visibility is now **on**"));
 }
 
 #[test]

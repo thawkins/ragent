@@ -441,14 +441,15 @@ fn build_line2_center(
     _config: &StatusBarConfig,
     mode: ResponsiveMode,
 ) -> Vec<Span<'static>> {
-              let mut spans = Vec::new();
-          
-              fn format_kilobytes(bytes: u64) -> String {
-                  format!("{:.1}KB", bytes as f64 / 1024.0)
-              }
-          
-              // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
-              let display_text = if let Some(quota) = app.quota_percent {        // Rate limit quota percentage (from provider headers)
+    let mut spans = Vec::new();
+
+    fn format_kilobytes(bytes: u64) -> String {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    }
+
+    // Use quota_percent from rate-limit headers if available, otherwise show cumulative token count
+    let display_text = if let Some(quota) = app.quota_percent {
+        // Rate limit quota percentage (from provider headers)
         let percent = quota as u32;
         let color = if percent >= 95 {
             colors::ERROR

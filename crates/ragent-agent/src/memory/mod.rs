@@ -29,7 +29,6 @@ pub mod defaults;
 pub mod embedding;
 pub mod extract;
 pub mod import_export;
-pub mod journal;
 pub mod knowledge_graph;
 pub mod migrate;
 pub mod storage;
@@ -56,7 +55,6 @@ pub use import_export::{
     ExportResult, ImportResult, MemoryBlocksExport, MemoryExport, export_all, import_claude_code,
     import_cline, import_ragent,
 };
-pub use journal::{JournalEntry, JournalEntrySummary};
 pub use knowledge_graph::{
     Entity, EntityType, ExtractedEntity, ExtractedRelationship, ExtractionResult, KnowledgeGraph,
     RelationType, Relationship, extract_entities, get_knowledge_graph, store_extraction,
@@ -65,6 +63,6 @@ pub use storage::{BlockStorage, FileBlockStorage, load_all_blocks};
 pub use store::{ForgetFilter, MEMORY_CATEGORIES, StructuredMemory};
 pub use visualisation::{
     AccessHeatmap, AccessHeatmapEntry, GraphEdge, GraphNode, MemoryGraph, TagCloud, TagCloudEntry,
-    Timeline, TimelineEntry, VisualisationData, generate_graph, generate_heatmap,
-    generate_tag_cloud, generate_timeline, generate_visualisation,
+    VisualisationData, generate_graph, generate_heatmap, generate_tag_cloud,
+    generate_visualisation,
 };

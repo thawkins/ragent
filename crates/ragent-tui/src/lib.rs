@@ -427,7 +427,7 @@ pub async fn run_tui(
         // Refresh cached code index stats periodically (every 5s, not every frame).
         app.refresh_code_index_stats();
 
-        // Refresh cached memory/journal stats for the status bar.
+        // Refresh cached memory stats for the status bar.
         app.refresh_memory_stats();
 
         if app.needs_redraw

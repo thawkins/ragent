@@ -1,4 +1,4 @@
-//! Integration tests for memory and journal REST endpoints.
+//! Integration tests for memory REST endpoints.
 //!
 //! Tests exercise the full request/response cycle through the Axum router
 //! using `tower::ServiceExt::oneshot` without opening a TCP socket.
@@ -20,7 +20,7 @@ use ragent_core::tool::ToolRegistry;
 use ragent_server::routes::{AppState, router};
 use tower::ServiceExt;
 
-/// Build a minimal [`AppState`] suitable for testing memory/journal endpoints.
+/// Build a minimal [`AppState`] suitable for testing memory endpoints.
 fn test_state(token: &str) -> AppState {
     let storage = Arc::new(Storage::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new(16));
@@ -204,154 +204,6 @@ async fn test_memory_forget_not_found() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-// ── Journal Endpoints ──────────────────────────────────────────────────
-
-#[tokio::test]
-async fn test_journal_entries_requires_auth() {
-    let app = router(test_state("secret"));
-    let req = Request::builder()
-        .uri("/journal/entries")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn test_journal_entries_list_empty() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .uri("/journal/entries")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_journal_search_requires_auth() {
-    let app = router(test_state("secret"));
-    let req = Request::builder()
-        .uri("/journal/search?q=test")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn test_journal_create_and_search() {
-    let state = test_state("tok");
-    let storage = state.storage.clone();
-
-    // Pre-seed a journal entry directly via storage
-    storage
-        .create_journal_entry(
-            "test-id-1",
-            "Discovered pattern",
-            "Always use Result for fallible operations in Rust.",
-            "",
-            "",
-            &["rust".to_string(), "pattern".to_string()],
-        )
-        .unwrap();
-
-    let app = router(state);
-
-    // Search for the entry
-    let req = Request::builder()
-        .uri("/journal/search?q=Result+fallible")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-}
-
-#[tokio::test]
-async fn test_journal_create_via_api() {
-    let state = test_state("tok");
-    let app = router(state);
-
-    let req = Request::builder()
-        .method("POST")
-        .uri("/journal/entries")
-        .header("Authorization", "Bearer tok")
-        .header("Content-Type", "application/json")
-        .body(Body::from(
-            r#"{"title":"API test entry","content":"Created via HTTP API","tags":["test"]}"#,
-        ))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED);
-}
-
-#[tokio::test]
-async fn test_journal_create_empty_title_rejected() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .method("POST")
-        .uri("/journal/entries")
-        .header("Authorization", "Bearer tok")
-        .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"title":"","content":"Some content"}"#))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn test_journal_get_entry_not_found() {
-    let app = router(test_state("tok"));
-    let req = Request::builder()
-        .uri("/journal/entries/nonexistent-id")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn test_journal_entries_with_tag_filter() {
-    let state = test_state("tok");
-    let storage = state.storage.clone();
-
-    // Pre-seed entries with different tags
-    storage
-        .create_journal_entry(
-            "id-1",
-            "Rust pattern",
-            "Use Result everywhere",
-            "",
-            "",
-            &["rust".to_string()],
-        )
-        .unwrap();
-    storage
-        .create_journal_entry(
-            "id-2",
-            "Python pattern",
-            "Use try/except for errors",
-            "",
-            "",
-            &["python".to_string()],
-        )
-        .unwrap();
-
-    let app = router(state);
-
-    // Filter by tag
-    let req = Request::builder()
-        .uri("/journal/entries?tag=rust")
-        .header("Authorization", "Bearer tok")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 // ── Memory Block CRUD ──────────────────────────────────────────────────

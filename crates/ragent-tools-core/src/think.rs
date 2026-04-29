@@ -86,3 +86,33 @@ mod tests {
         assert_eq!(metadata["thought"], thought);
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::EventBus;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_think_tool_returns_full_thought_in_metadata() {
+        let tool = ThinkTool;
+        let ctx = ToolContext {
+            session_id: "session-1".to_string(),
+            working_dir: PathBuf::from("/tmp"),
+            event_bus: Arc::new(EventBus::new(16)),
+        };
+        let thought = "This is the full reasoning content that should remain visible.";
+
+        let output = tool
+            .execute(json!({ "thought": thought }), &ctx)
+            .await
+            .expect("think tool should succeed");
+
+        assert!(output.content.is_empty());
+        let metadata = output
+            .metadata
+            .expect("think output should include metadata");
+        assert_eq!(metadata["thinking"], true);
+        assert_eq!(metadata["thought"], thought);
+    }
+}

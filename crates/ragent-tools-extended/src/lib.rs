@@ -10,7 +10,6 @@ pub mod codeindex_search;
 pub mod codeindex_status;
 pub mod codeindex_symbols;
 pub mod http_request;
-pub mod journal;
 pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
@@ -30,12 +29,11 @@ pub mod webfetch;
 pub mod websearch;
 
 pub mod memory {
-    //! Memory helpers reused by the extracted memory and journal tools.
+    //! Memory helpers reused by the extracted memory tools.
 
     pub mod block;
     pub mod cross_project;
     pub mod embedding;
-    pub mod journal;
     pub mod migrate;
     pub mod storage;
 }
@@ -74,18 +72,6 @@ pub mod storage {
         pub description: String,
         pub created_at: String,
         pub updated_at: String,
-    }
-
-    /// Row representation of a journal entry.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct JournalEntryRow {
-        pub id: String,
-        pub title: String,
-        pub content: String,
-        pub project: String,
-        pub session_id: String,
-        pub timestamp: String,
-        pub created_at: String,
     }
 
     /// Row representation of a structured memory.
@@ -132,24 +118,6 @@ pub mod storage {
         ) -> Result<bool>;
         fn delete_todo(&self, id: &str, session_id: &str) -> Result<bool>;
         fn clear_todos(&self, session_id: &str) -> Result<usize>;
-
-        fn create_journal_entry(
-            &self,
-            id: &str,
-            title: &str,
-            content: &str,
-            project: &str,
-            session_id: &str,
-            tags: &[String],
-        ) -> Result<()>;
-        fn get_journal_entry(&self, id: &str) -> Result<Option<JournalEntryRow>>;
-        fn search_journal_entries(
-            &self,
-            query: &str,
-            tags: Option<&[String]>,
-            limit: usize,
-        ) -> Result<Vec<JournalEntryRow>>;
-        fn get_journal_tags(&self, id: &str) -> Result<Vec<String>>;
 
         fn get_memory(&self, id: i64) -> Result<Option<MemoryRow>>;
         fn get_memory_tags(&self, id: i64) -> Result<Vec<String>>;
@@ -353,9 +321,6 @@ pub fn create_extended_registry() -> ToolRegistry {
     registry.register(Arc::new(memory_replace::MemoryReplaceTool));
     registry.register(Arc::new(memory_search::MemorySearchTool));
     registry.register(Arc::new(memory_migrate::MemoryMigrateTool));
-    registry.register(Arc::new(journal::JournalWriteTool));
-    registry.register(Arc::new(journal::JournalSearchTool));
-    registry.register(Arc::new(journal::JournalReadTool));
     registry.register(Arc::new(todo::TodoReadTool));
     registry.register(Arc::new(todo::TodoWriteTool));
     registry.register(Arc::new(codeindex_search::CodeIndexSearchTool));

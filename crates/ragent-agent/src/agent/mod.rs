@@ -1573,9 +1573,9 @@ pub fn build_system_prompt_with_storage(
                      3. Then read specific sections using valid line ranges\n\
                      4. Never read an entire file >100 lines in a single call\n",
               );
-        
-              // Guidance on using edit / multiedit tools
-              prompt.push_str(
+
+    // Guidance on using edit / multiedit tools
+    prompt.push_str(
                   "\n## Editing Files\n\n\
                    Use the `edit` tool for single surgical text replacements in one file.\n\
                    Use the `multiedit` tool when applying multiple edits across one or more files atomically.\n\

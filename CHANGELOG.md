@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.0-alpha.54] - 2026-04-28
+
+### Changed
+- **Remove some features and add more feature switches** — Removed the legacy journal subsystem (journal tools, journal viewer panel, journal API routes, journal memory backend) in favour of the newer structured-memory and embedding-based memory stores. Added stream-config default overrides (`timeout_secs`, `max_retries`, `retry_backoff_secs`) so agents can tune network resilience without editing code. Updated tool-visibility metadata across agent and config crates. Simplified TUI layout and status-bar rendering. Reduced binary size and API surface.
+
 ## [0.1.0-alpha.53] - 2026-04-27
 
 ### Fixed

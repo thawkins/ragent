@@ -114,6 +114,12 @@ struct SessionError<'a> {
 }
 
 #[derive(Serialize)]
+struct SessionNotice<'a> {
+    session_id: &'a str,
+    message: &'a str,
+}
+
+#[derive(Serialize)]
 struct ServerStatus<'a> {
     server_id: &'a str,
     status: &'a str,
@@ -281,6 +287,7 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::AgentSwitched { .. } => "agent_switched",
         Event::AgentSwitchRequested { .. } => "agent_switch_requested",
         Event::AgentRestoreRequested { .. } => "agent_restore_requested",
+        Event::AgentNotice { .. } => "agent_notice",
         Event::AgentError { .. } => "agent_error",
         Event::McpStatusChanged { .. } => "mcp_status_changed",
         Event::TokenUsage { .. } => "token_usage",
@@ -306,8 +313,6 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::TaskCompleted { .. } => "task_completed",
         Event::ShellCwdChanged { .. } => "shell_cwd_changed",
         Event::UserInput { .. } => "user_input",
-        Event::JournalEntryCreated { .. } => "journal_entry_created",
-        Event::JournalSearched { .. } => "journal_searched",
         Event::MemoryStored { .. } => "memory_stored",
         Event::MemoryRecalled { .. } => "memory_recalled",
         Event::MemoryForgotten { .. } => "memory_forgotten",
@@ -450,6 +455,14 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         } => to_data(&SessionSummary {
             session_id,
             summary,
+        }),
+
+        Event::AgentNotice {
+            session_id,
+            message,
+        } => to_data(&SessionNotice {
+            session_id,
+            message,
         }),
 
         Event::AgentError { session_id, error } => to_data(&SessionError { session_id, error }),
@@ -703,26 +716,6 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             request_id,
             response,
         }),
-
-        Event::JournalEntryCreated {
-            session_id,
-            id,
-            title,
-        } => to_data(&serde_json::json!({
-            "session_id": session_id,
-            "id": id,
-            "title": title,
-        })),
-
-        Event::JournalSearched {
-            session_id,
-            query,
-            result_count,
-        } => to_data(&serde_json::json!({
-            "session_id": session_id,
-            "query": query,
-            "result_count": result_count,
-        })),
 
         Event::MemoryStored {
             session_id,

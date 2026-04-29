@@ -66,8 +66,6 @@ pub mod glob;
 pub mod grep;
 /// Full HTTP client tool.
 pub mod http_request;
-/// Journal write, search, and read tools.
-pub mod journal;
 pub mod libreoffice_common;
 pub mod libreoffice_info;
 pub mod libreoffice_read;
@@ -559,63 +557,6 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
         self.inner.clear_todos(session_id)
     }
 
-    fn create_journal_entry(
-        &self,
-        id: &str,
-        title: &str,
-        content: &str,
-        project: &str,
-        session_id: &str,
-        tags: &[String],
-    ) -> anyhow::Result<()> {
-        self.inner
-            .create_journal_entry(id, title, content, project, session_id, tags)
-    }
-
-    fn get_journal_entry(
-        &self,
-        id: &str,
-    ) -> anyhow::Result<Option<ragent_tools_extended::storage::JournalEntryRow>> {
-        self.inner.get_journal_entry(id).map(|row| {
-            row.map(|row| ragent_tools_extended::storage::JournalEntryRow {
-                id: row.id,
-                title: row.title,
-                content: row.content,
-                project: row.project,
-                session_id: row.session_id,
-                timestamp: row.timestamp,
-                created_at: row.created_at,
-            })
-        })
-    }
-
-    fn search_journal_entries(
-        &self,
-        query: &str,
-        tags: Option<&[String]>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<ragent_tools_extended::storage::JournalEntryRow>> {
-        self.inner
-            .search_journal_entries(query, tags, limit)
-            .map(|rows| {
-                rows.into_iter()
-                    .map(|row| ragent_tools_extended::storage::JournalEntryRow {
-                        id: row.id,
-                        title: row.title,
-                        content: row.content,
-                        project: row.project,
-                        session_id: row.session_id,
-                        timestamp: row.timestamp,
-                        created_at: row.created_at,
-                    })
-                    .collect()
-            })
-    }
-
-    fn get_journal_tags(&self, id: &str) -> anyhow::Result<Vec<String>> {
-        self.inner.get_journal_tags(id)
-    }
-
     fn get_memory(
         &self,
         id: i64,
@@ -767,24 +708,6 @@ fn convert_extracted_extended_event(event: ragent_tools_extended::event::Event) 
         ragent_tools_extended::event::Event::ShellCwdChanged { session_id, cwd } => {
             Some(Event::ShellCwdChanged { session_id, cwd })
         }
-        ragent_tools_extended::event::Event::JournalEntryCreated {
-            session_id,
-            id,
-            title,
-        } => Some(Event::JournalEntryCreated {
-            session_id,
-            id,
-            title,
-        }),
-        ragent_tools_extended::event::Event::JournalSearched {
-            session_id,
-            query,
-            result_count,
-        } => Some(Event::JournalSearched {
-            session_id,
-            query,
-            result_count,
-        }),
         ragent_tools_extended::event::Event::MemorySearched {
             session_id,
             query,

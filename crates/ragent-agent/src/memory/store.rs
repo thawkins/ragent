@@ -154,6 +154,23 @@ impl StructuredMemory {
             ))
         }
     }
+
+    /// Validate tags for structured memories.
+    pub fn validate_tags(tags: &[String]) -> Result<(), String> {
+        for tag in tags {
+            if tag.is_empty() {
+                return Err("Tag cannot be empty".to_string());
+            }
+            for ch in tag.chars() {
+                if !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-') {
+                    return Err(format!(
+                        "Tag must contain only lowercase letters, digits, and hyphens, got '{tag}'"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Filter criteria for the `memory_forget` tool.
@@ -218,6 +235,16 @@ mod tests {
         assert!(StructuredMemory::validate_confidence(0.5).is_ok());
         assert!(StructuredMemory::validate_confidence(-0.1).is_err());
         assert!(StructuredMemory::validate_confidence(1.1).is_err());
+    }
+
+    #[test]
+    fn test_validate_tags() {
+        assert!(
+            StructuredMemory::validate_tags(&["valid-tag".to_string(), "v2".to_string()]).is_ok()
+        );
+        assert!(StructuredMemory::validate_tags(&["".to_string()]).is_err());
+        assert!(StructuredMemory::validate_tags(&["NotValid".to_string()]).is_err());
+        assert!(StructuredMemory::validate_tags(&["bad_tag".to_string()]).is_err());
     }
 
     #[test]

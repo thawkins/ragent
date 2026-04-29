@@ -105,7 +105,7 @@ This document provides a comprehensive reference of all keyboard shortcuts avail
 
 ---
 
-## Journal Viewer Shortcuts
+## Overlay Navigation Shortcuts
 
 | Shortcut | Action | Description |
 |----------|--------|-------------|
@@ -113,7 +113,7 @@ This document provides a comprehensive reference of all keyboard shortcuts avail
 | `↓` / `j` | Down | Move selection down |
 | `Enter` | Toggle | Expand/collapse selected entry |
 | `PageUp` / `PageDown` | Page scroll | Scroll by 5 entries |
-| `Esc` | Close | Close journal viewer |
+| `Esc` | Close | Close the active overlay or modal |
 
 ---
 

@@ -1080,6 +1080,7 @@ impl SessionProcessor {
             {
                 let _scope = profiler.scope("loop.llm.total");
                 'retry: for attempt in 0..=max_retries {
+                    let mut saw_completed_tool_call = false;
                     if attempt > 0 {
                         // Reset buffers for retry
                         text_buffer.clear();
@@ -1087,11 +1088,12 @@ impl SessionProcessor {
                         tool_calls.clear();
                         last_input_tokens = 0;
                         last_output_tokens = 0;
+                        saw_completed_tool_call = false;
 
                         let wait_secs = attempt as u64 * backoff_secs;
-                        self.event_bus.publish(Event::AgentError {
+                        self.event_bus.publish(Event::AgentNotice {
                             session_id: session_id.to_string(),
-                            error: format!(
+                            message: format!(
                                 "Retrying LLM request (attempt {}/{}), waiting {}s...",
                                 attempt + 1,
                                 max_retries + 1,
@@ -1135,9 +1137,9 @@ impl SessionProcessor {
                                     redact_secrets(&e.to_string())
                                 );
                                 if attempt < max_retries {
-                                    self.event_bus.publish(Event::AgentError {
+                                    self.event_bus.publish(Event::AgentNotice {
                                         session_id: session_id.to_string(),
-                                        error: format!("{} — will retry", e),
+                                        message: format!("{} — will retry", e),
                                     });
                                     continue 'retry;
                                 }
@@ -1220,6 +1222,7 @@ impl SessionProcessor {
                                 StreamEvent::ToolCallEnd { id } => {
                                     let _scope = profiler.scope("loop.llm.handle.tool_call_end");
                                     if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                                        saw_completed_tool_call = true;
                                         self.event_bus.publish(Event::ToolCallArgs {
                                             session_id: session_id.to_string(),
                                             call_id: tc.id.clone(),
@@ -1248,13 +1251,33 @@ impl SessionProcessor {
                                         attempt + 1,
                                         redact_secrets(&message)
                                     );
-                                    let is_retryable = is_retryable_stream_error(&message);
-                                    if is_retryable && attempt < max_retries {
-                                        self.event_bus.publish(Event::AgentError {
+                                    let has_meaningful_partial_output =
+                                        stream_has_meaningful_partial_output(
+                                            &text_buffer,
+                                            &reasoning_buffer,
+                                            saw_completed_tool_call,
+                                        );
+                                    if should_retry_stream_error(
+                                        &message,
+                                        attempt,
+                                        max_retries,
+                                        has_meaningful_partial_output,
+                                    ) {
+                                        self.event_bus.publish(Event::AgentNotice {
                                             session_id: session_id.to_string(),
-                                            error: format!("{} — will retry", message),
+                                            message: format!("{} — will retry", message),
                                         });
                                         had_retryable_error = true;
+                                    } else if is_retryable_stream_error(&message)
+                                        && has_meaningful_partial_output
+                                    {
+                                        self.event_bus.publish(Event::AgentNotice {
+                                            session_id: session_id.to_string(),
+                                            message: format!(
+                                                "{} — keeping partial output from this attempt",
+                                                message
+                                            ),
+                                        });
                                     } else {
                                         self.event_bus.publish(Event::AgentError {
                                             session_id: session_id.to_string(),
@@ -2660,6 +2683,23 @@ fn is_retryable_stream_error(message: &str) -> bool {
         || lower.contains("http2 error")
 }
 
+fn stream_has_meaningful_partial_output(
+    text_buffer: &str,
+    reasoning_buffer: &str,
+    saw_completed_tool_call: bool,
+) -> bool {
+    saw_completed_tool_call || !text_buffer.trim().is_empty() || !reasoning_buffer.trim().is_empty()
+}
+
+fn should_retry_stream_error(
+    message: &str,
+    attempt: u32,
+    max_retries: u32,
+    has_meaningful_partial_output: bool,
+) -> bool {
+    is_retryable_stream_error(message) && attempt < max_retries && !has_meaningful_partial_output
+}
+
 fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
     let content_parts: Vec<ContentPart> = parts
         .iter()
@@ -2961,6 +3001,37 @@ mod tests {
         };
 
         assert!(chat_request_payload_bytes(&request) >= 40);
+    }
+
+    #[test]
+    fn test_stream_has_meaningful_partial_output_detects_visible_text() {
+        assert!(stream_has_meaningful_partial_output(
+            "partial response",
+            "",
+            false
+        ));
+        assert!(stream_has_meaningful_partial_output(
+            "",
+            "partial reasoning",
+            false
+        ));
+        assert!(stream_has_meaningful_partial_output("", "", true));
+        assert!(!stream_has_meaningful_partial_output("   ", "\n", false));
+    }
+
+    #[test]
+    fn test_should_retry_stream_error_only_before_meaningful_output() {
+        let stall = "Ollama Cloud: stream stalled — no data received for 120s";
+
+        assert!(should_retry_stream_error(stall, 0, 4, false));
+        assert!(!should_retry_stream_error(stall, 0, 4, true));
+        assert!(!should_retry_stream_error(stall, 4, 4, false));
+        assert!(!should_retry_stream_error(
+            "provider rejected request",
+            0,
+            4,
+            false
+        ));
     }
 
     #[test]

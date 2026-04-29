@@ -6,9 +6,10 @@ use ragent_agent::config::{Config, ToolVisibilityConfig, tool_family_names};
 fn test_default_tool_visibility_config() {
     let config = ToolVisibilityConfig::default();
     assert!(!config.office);
-    assert!(!config.journal);
     assert!(!config.github);
     assert!(!config.gitlab);
+    assert!(!config.teams);
+    assert!(!config.agents);
     assert!(config.codeindex);
 }
 
@@ -23,15 +24,6 @@ fn test_tool_family_names_office() {
     assert!(names.contains(&"libre_info"));
     assert!(names.contains(&"pdf_read"));
     assert!(names.contains(&"pdf_write"));
-}
-
-#[test]
-fn test_tool_family_names_journal() {
-    let names = tool_family_names("journal").unwrap();
-    assert_eq!(names.len(), 3);
-    assert!(names.contains(&"journal_write"));
-    assert!(names.contains(&"journal_search"));
-    assert!(names.contains(&"journal_read"));
 }
 
 #[test]
@@ -59,6 +51,22 @@ fn test_tool_family_names_codeindex() {
 }
 
 #[test]
+fn test_tool_family_names_teams() {
+    let names = tool_family_names("teams").unwrap();
+    assert_eq!(names.len(), 20);
+    assert!(names.contains(&"team_create"));
+    assert!(names.contains(&"team_wait"));
+}
+
+#[test]
+fn test_tool_family_names_agents() {
+    let names = tool_family_names("agents").unwrap();
+    assert_eq!(names.len(), 5);
+    assert!(names.contains(&"new_task"));
+    assert!(names.contains(&"wait_tasks"));
+}
+
+#[test]
 fn test_tool_family_names_invalid() {
     assert!(tool_family_names("invalid").is_none());
 }
@@ -68,9 +76,10 @@ fn test_serde_defaults() {
     let json = "{}";
     let config: ToolVisibilityConfig = serde_json::from_str(json).unwrap();
     assert!(!config.office);
-    assert!(!config.journal);
     assert!(!config.github);
     assert!(!config.gitlab);
+    assert!(!config.teams);
+    assert!(!config.agents);
     assert!(config.codeindex);
 }
 
@@ -78,16 +87,18 @@ fn test_serde_defaults() {
 fn test_serde_custom_values() {
     let json = r#"{
         "office": true,
-        "journal": false,
         "github": true,
         "gitlab": true,
+        "teams": true,
+        "agents": true,
         "codeindex": false
     }"#;
     let config: ToolVisibilityConfig = serde_json::from_str(json).unwrap();
     assert!(config.office);
-    assert!(!config.journal);
     assert!(config.github);
     assert!(config.gitlab);
+    assert!(config.teams);
+    assert!(config.agents);
     assert!(!config.codeindex);
 }
 
@@ -98,6 +109,8 @@ fn test_effective_hidden_tools_uses_default_github_gitlab_switches() {
 
     assert!(hidden.contains(&"github_list_issues".to_string()));
     assert!(hidden.contains(&"gitlab_list_issues".to_string()));
+    assert!(hidden.contains(&"team_create".to_string()));
+    assert!(hidden.contains(&"new_task".to_string()));
 }
 
 #[test]
@@ -105,11 +118,13 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
     let mut base = Config::default();
     base.tool_visibility.github = true;
     base.tool_visibility.gitlab = true;
+    base.tool_visibility.teams = true;
+    base.tool_visibility.agents = true;
 
     let overlay: Config = serde_json::from_str(
         r#"{
             "tool_visibility": {
-                "journal": true
+                "office": true
             }
         }"#,
     )
@@ -117,7 +132,9 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
 
     let merged = Config::merge(base, overlay);
 
+    assert!(merged.tool_visibility.office);
     assert!(merged.tool_visibility.github);
     assert!(merged.tool_visibility.gitlab);
-    assert!(merged.tool_visibility.journal);
+    assert!(merged.tool_visibility.teams);
+    assert!(merged.tool_visibility.agents);
 }

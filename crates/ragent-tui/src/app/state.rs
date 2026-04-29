@@ -639,10 +639,6 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Switch theme: /theme default|high-contrast",
     },
     SlashCommandDef {
-        trigger: "journal",
-        description: "Journal viewer: /journal | /journal search <query> | /journal add <title>",
-    },
-    SlashCommandDef {
         trigger: "status",
         description: "Show status message history: /status [clear]",
     },
@@ -652,7 +648,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|journal|github|gitlab|codeindex] [on|off]",
+        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|codeindex] [on|off]",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.
@@ -1254,21 +1250,11 @@ pub struct App {
     /// Render area for memory browser content.
     pub memory_browser_area: Rect,
 
-    // ── Journal viewer (M7-T2) ───────────────────────────────────────────────
-    /// Active journal viewer overlay, if visible.
-    pub journal_viewer: Option<crate::panels::JournalViewerState>,
-    /// Cached click target for journal viewer close button.
-    pub journal_viewer_close_area: Rect,
-    /// Render area for journal viewer content.
-    pub journal_viewer_area: Rect,
-
     // ── Memory status (M7-T3) ─────────────────────────────────────────────────
     /// Cached count of memory blocks (global + project).
     pub memory_block_count: usize,
     /// Cached count of structured memories (SQLite).
     pub memory_entry_count: u64,
-    /// Cached count of journal entries.
-    pub journal_entry_count: u64,
     /// Timestamp of the last memory update event (for relative time display).
     pub memory_last_updated: Option<std::time::Instant>,
 

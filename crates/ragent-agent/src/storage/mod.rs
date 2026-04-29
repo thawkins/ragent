@@ -347,36 +347,6 @@ impl Storage {
                           CREATE INDEX IF NOT EXISTS idx_todos_session
                               ON todos(session_id, status);
             
-                          -- Journal system tables (Milestone 2)
-                          CREATE TABLE IF NOT EXISTS journal_entries (
-                              id TEXT PRIMARY KEY,
-                              title TEXT NOT NULL,
-                              content TEXT NOT NULL,
-                              project TEXT NOT NULL DEFAULT '',
-                              session_id TEXT NOT NULL DEFAULT '',
-                              timestamp TEXT NOT NULL,
-                              created_at TEXT NOT NULL
-                          );
-            
-                          CREATE TABLE IF NOT EXISTS journal_tags (
-                              entry_id TEXT NOT NULL,
-                              tag TEXT NOT NULL,
-                              PRIMARY KEY (entry_id, tag),
-                              FOREIGN KEY (entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE
-                          );
-            
-                          CREATE INDEX IF NOT EXISTS idx_journal_tags_tag
-                              ON journal_tags(tag);
-            
-                          CREATE INDEX IF NOT EXISTS idx_journal_entries_project
-                              ON journal_entries(project, timestamp DESC);
-            
-                          CREATE INDEX IF NOT EXISTS idx_journal_entries_session
-                              ON journal_entries(session_id, timestamp DESC);
-            
-                                                      CREATE VIRTUAL TABLE IF NOT EXISTS journal_fts
-                                                          USING fts5(title, content, content=journal_entries, content_rowid=rowid);
-                          
                                                       -- Structured memory store tables (Milestone 3)
                                                       CREATE TABLE IF NOT EXISTS memories (
                                                           id INTEGER PRIMARY KEY,
@@ -453,11 +423,7 @@ impl Storage {
                                                                                                               
                                                                                                                                                                     ",        )?;
         // Idempotent column additions (SQLite has no ALTER TABLE ADD COLUMN IF NOT EXISTS)
-        for (table, col) in &[
-            ("memories", "embedding"),
-            ("journal_entries", "embedding"),
-            ("sessions", "format_version"),
-        ] {
+        for (table, col) in &[("memories", "embedding"), ("sessions", "format_version")] {
             let has_col: bool = conn
                 .prepare(&format!(
                     "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name='{}'",
@@ -1271,306 +1237,6 @@ impl Storage {
         Ok(changed)
     }
 
-    // ── Journal CRUD ────────────────────────────────────────────────
-
-    /// Inserts a new journal entry and its tags, and updates the FTS index.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the insert fails (e.g., duplicate id).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use ragent_core::storage::Storage;
-    ///
-    /// let storage = Storage::open_in_memory().unwrap();
-    /// storage.create_journal_entry(
-    ///     "entry-1", "Bug fix", "Fixed off-by-one in parser",
-    ///     "my-project", "sess-1", &["bug".to_string()]
-    /// ).unwrap();
-    /// let entry = storage.get_journal_entry("entry-1").unwrap().unwrap();
-    /// assert_eq!(entry.title, "Bug fix");
-    /// ```
-    pub fn create_journal_entry(
-        &self,
-        id: &str,
-        title: &str,
-        content: &str,
-        project: &str,
-        session_id: &str,
-        tags: &[String],
-    ) -> Result<()> {
-        let conn = lock_conn!(self)?;
-        let now = Utc::now().to_rfc3339();
-        let timestamp = now.clone();
-
-        conn.execute(
-                    "INSERT INTO journal_entries (id, title, content, project, session_id, timestamp, created_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![id, title, content, project, session_id, timestamp, now],
-                )?;
-
-        for tag in tags {
-            conn.execute(
-                "INSERT OR IGNORE INTO journal_tags (entry_id, tag) VALUES (?1, ?2)",
-                params![id, tag],
-            )?;
-        }
-
-        // Update FTS index.
-        conn.execute(
-            "INSERT INTO journal_fts(rowid, title, content)
-                             SELECT rowid, title, content FROM journal_entries WHERE id = ?1",
-            params![id],
-        )?;
-        Ok(())
-    }
-
-    /// Retrieves a single journal entry by ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn get_journal_entry(&self, id: &str) -> Result<Option<JournalEntryRow>> {
-        let conn = lock_conn!(self)?;
-        let row = conn
-            .query_row(
-                "SELECT id, title, content, project, session_id, timestamp, created_at
-                         FROM journal_entries WHERE id = ?1",
-                params![id],
-                |row| {
-                    Ok(JournalEntryRow {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        content: row.get(2)?,
-                        project: row.get(3)?,
-                        session_id: row.get(4)?,
-                        timestamp: row.get(5)?,
-                        created_at: row.get(6)?,
-                    })
-                },
-            )
-            .optional()?;
-        Ok(row)
-    }
-
-    /// Retrieves tags for a journal entry.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn get_journal_tags(&self, entry_id: &str) -> Result<Vec<String>> {
-        let conn = lock_conn!(self)?;
-        let mut stmt =
-            conn.prepare("SELECT tag FROM journal_tags WHERE entry_id = ?1 ORDER BY tag")?;
-        let tags: Vec<String> = stmt
-            .query_map(params![entry_id], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(tags)
-    }
-
-    /// Searches journal entries using FTS5 full-text search, optionally
-    /// filtered by tags.
-    ///
-    /// Returns entries ordered by FTS rank (most relevant first).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn search_journal_entries(
-        &self,
-        query: &str,
-        tags: Option<&[String]>,
-        limit: usize,
-    ) -> Result<Vec<JournalEntryRow>> {
-        let conn = lock_conn!(self)?;
-
-        // Sanitise the FTS query: wrap each term in quotes to prevent injection.
-        let safe_query: String = query
-            .split_whitespace()
-            .filter(|s| !s.is_empty())
-            .map(|term| format!("\"{}\"", term.replace('"', "")))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        if safe_query.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let entries = if let Some(tags) = tags {
-            if tags.is_empty() {
-                self.list_journal_entries(limit)?
-            } else {
-                // Search with tag filter: join entries that have ALL specified tags.
-                let tag_placeholders: Vec<String> =
-                    (1..=tags.len()).map(|i| format!("?{i}")).collect();
-                let tag_filter = tag_placeholders.join(", ");
-                let sql = format!(
-                            "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
-                             FROM journal_entries e
-                             INNER JOIN journal_fts f ON f.rowid = e.rowid
-                             WHERE journal_fts MATCH ?{}
-                             AND e.id IN (
-                                 SELECT entry_id FROM journal_tags WHERE tag IN ({})
-                                 GROUP BY entry_id HAVING COUNT(DISTINCT tag) = {}
-                             )
-                             ORDER BY f.rank
-                             LIMIT ?{}",
-                            tags.len() + 1,
-                            tag_filter,
-                            tags.len(),
-                            tags.len() + 2,
-                        );
-
-                let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-                for tag in tags {
-                    params_vec.push(Box::new(tag.clone()));
-                }
-                params_vec.push(Box::new(safe_query));
-                params_vec.push(Box::new(limit as i64));
-
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-                    params_vec.iter().map(|p| p.as_ref()).collect();
-
-                let mut stmt = conn.prepare(&sql)?;
-                let rows: Vec<JournalEntryRow> = stmt
-                    .query_map(param_refs.as_slice(), |row| {
-                        Ok(JournalEntryRow {
-                            id: row.get(0)?,
-                            title: row.get(1)?,
-                            content: row.get(2)?,
-                            project: row.get(3)?,
-                            session_id: row.get(4)?,
-                            timestamp: row.get(5)?,
-                            created_at: row.get(6)?,
-                        })
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                rows
-            }
-        } else {
-            // Search without tag filter.
-            let sql =
-                        "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
-                         FROM journal_entries e
-                         INNER JOIN journal_fts f ON f.rowid = e.rowid
-                         WHERE journal_fts MATCH ?1
-                         ORDER BY f.rank
-                         LIMIT ?2";
-            let mut stmt = conn.prepare(sql)?;
-            let rows: Vec<JournalEntryRow> = stmt
-                .query_map(params![safe_query, limit as i64], |row| {
-                    Ok(JournalEntryRow {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        content: row.get(2)?,
-                        project: row.get(3)?,
-                        session_id: row.get(4)?,
-                        timestamp: row.get(5)?,
-                        created_at: row.get(6)?,
-                    })
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            rows
-        };
-
-        Ok(entries)
-    }
-
-    /// Lists recent journal entries, ordered by timestamp descending.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn list_journal_entries(&self, limit: usize) -> Result<Vec<JournalEntryRow>> {
-        let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
-            "SELECT id, title, content, project, session_id, timestamp, created_at
-                     FROM journal_entries ORDER BY timestamp DESC LIMIT ?1",
-        )?;
-        let rows = stmt
-            .query_map(params![limit as i64], |row| {
-                Ok(JournalEntryRow {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    content: row.get(2)?,
-                    project: row.get(3)?,
-                    session_id: row.get(4)?,
-                    timestamp: row.get(5)?,
-                    created_at: row.get(6)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Lists journal entries filtered by tag, ordered by timestamp descending.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn list_journal_entries_by_tag(
-        &self,
-        tag: &str,
-        limit: usize,
-    ) -> Result<Vec<JournalEntryRow>> {
-        let conn = lock_conn!(self)?;
-        let mut stmt = conn.prepare(
-            "SELECT e.id, e.title, e.content, e.project, e.session_id, e.timestamp, e.created_at
-                     FROM journal_entries e
-                     INNER JOIN journal_tags t ON t.entry_id = e.id
-                     WHERE t.tag = ?1
-                     ORDER BY e.timestamp DESC
-                     LIMIT ?2",
-        )?;
-        let rows = stmt
-            .query_map(params![tag, limit as i64], |row| {
-                Ok(JournalEntryRow {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    content: row.get(2)?,
-                    project: row.get(3)?,
-                    session_id: row.get(4)?,
-                    timestamp: row.get(5)?,
-                    created_at: row.get(6)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Deletes a journal entry by ID (cascades to tags and FTS).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the delete fails.
-    pub fn delete_journal_entry(&self, id: &str) -> Result<bool> {
-        let conn = lock_conn!(self)?;
-
-        // Remove from FTS first.
-        conn.execute(
-                    "DELETE FROM journal_fts WHERE rowid = (SELECT rowid FROM journal_entries WHERE id = ?1)",
-                    params![id],
-                )?;
-
-        // Tags are removed by ON DELETE CASCADE.
-        let affected = conn.execute("DELETE FROM journal_entries WHERE id = ?1", params![id])?;
-        Ok(affected > 0)
-    }
-
-    /// Counts the total number of journal entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn count_journal_entries(&self) -> Result<u64> {
-        let conn = lock_conn!(self)?;
-        let count: u64 =
-            conn.query_row("SELECT COUNT(*) FROM journal_entries", [], |row| row.get(0))?;
-        Ok(count)
-    }
-
     // ── Structured Memory CRUD ──────────────────────────────────────
 
     /// Inserts a new structured memory with category, tags, and confidence.
@@ -2078,23 +1744,6 @@ impl Storage {
         Ok(affected > 0)
     }
 
-    /// Stores an embedding vector for a journal entry.
-    ///
-    /// The embedding is serialised as a little-endian f32 blob and stored in
-    /// the `embedding` BLOB column of the `journal_entries` table.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the update fails (e.g., entry not found).
-    pub fn store_journal_embedding(&self, id: &str, embedding_blob: &[u8]) -> Result<bool> {
-        let conn = lock_conn!(self)?;
-        let affected = conn.execute(
-            "UPDATE journal_entries SET embedding = ?1 WHERE id = ?2",
-            params![embedding_blob, id],
-        )?;
-        Ok(affected > 0)
-    }
-
     /// Returns all memory embeddings that are not NULL.
     ///
     /// Each result contains the row ID and the raw embedding blob.
@@ -2108,24 +1757,6 @@ impl Storage {
         let mut stmt =
             conn.prepare("SELECT id, embedding FROM memories WHERE embedding IS NOT NULL")?;
         let rows: Vec<(i64, Vec<u8>)> = stmt
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Returns all journal entry embeddings that are not NULL.
-    ///
-    /// Each result contains the entry ID and the raw embedding blob.
-    /// Used for brute-force cosine similarity search.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn list_journal_embeddings(&self) -> Result<Vec<(String, Vec<u8>)>> {
-        let conn = lock_conn!(self)?;
-        let mut stmt =
-            conn.prepare("SELECT id, embedding FROM journal_entries WHERE embedding IS NOT NULL")?;
-        let rows: Vec<(String, Vec<u8>)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
@@ -2165,45 +1796,6 @@ impl Storage {
         }
 
         // Sort by similarity descending.
-        results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        results.truncate(limit);
-        Ok(results)
-    }
-
-    /// Search journal entries by cosine similarity against a query embedding.
-    ///
-    /// Loads all stored journal embeddings and computes brute-force cosine
-    /// similarity. Returns results ranked by similarity (highest first).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
-    pub fn search_journal_by_embedding(
-        &self,
-        query_embedding: &[f32],
-        dimensions: usize,
-        limit: usize,
-        min_similarity: f32,
-    ) -> Result<Vec<crate::memory::embedding::SimilarityResult>> {
-        let embeddings = self.list_journal_embeddings()?;
-        let mut results: Vec<crate::memory::embedding::SimilarityResult> = Vec::new();
-
-        for (_entry_id, blob) in &embeddings {
-            if let Ok(stored) = crate::memory::embedding::deserialise_embedding(blob, dimensions) {
-                let score = crate::memory::embedding::cosine_similarity(query_embedding, &stored);
-                if score >= min_similarity {
-                    results.push(crate::memory::embedding::SimilarityResult {
-                        row_id: 0, // Journal uses string IDs, store rowid separately
-                        score,
-                    });
-                }
-            }
-        }
-
         results.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -2493,25 +2085,6 @@ pub struct TodoRow {
     pub created_at: String,
     /// ISO-8601 last-updated timestamp.
     pub updated_at: String,
-}
-
-/// Row representation of a journal entry.
-#[derive(Debug, Clone)]
-pub struct JournalEntryRow {
-    /// Unique entry identifier (UUID v4).
-    pub id: String,
-    /// Short title describing the entry.
-    pub title: String,
-    /// Full content of the journal entry.
-    pub content: String,
-    /// Project this entry belongs to.
-    pub project: String,
-    /// Session that created this entry.
-    pub session_id: String,
-    /// ISO-8601 timestamp of the observation/event.
-    pub timestamp: String,
-    /// ISO-8601 creation timestamp.
-    pub created_at: String,
 }
 
 /// Row representation of a structured memory.

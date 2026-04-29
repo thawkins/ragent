@@ -11,9 +11,10 @@ The available switches are:
 | Switch | Default | Family |
 |--------|---------|--------|
 | `office` | `off` | Office/PDF tools |
-| `journal` | `off` | Journal tools |
 | `github` | `off` | GitHub issue and PR tools |
 | `gitlab` | `off` | GitLab issue, MR, pipeline, and job tools |
+| `teams` | `off` | Team coordination tools |
+| `agents` | `off` | Autonomous agent task tools |
 | `codeindex` | `on` | Code index tools |
 
 When a switch is `off`, tools in that family are excluded from:
@@ -40,6 +41,8 @@ Examples:
 ```text
 /tools github on
 /tools office on
+/tools teams off
+/tools agents off
 /tools codeindex off
 ```
 
@@ -54,9 +57,10 @@ You can also configure visibility directly in `ragent.json`:
 {
   "tool_visibility": {
     "office": true,
-    "journal": false,
     "github": false,
     "gitlab": false,
+    "teams": false,
+    "agents": false,
     "codeindex": true
   }
 }

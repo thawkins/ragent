@@ -7,7 +7,6 @@
 //! # Visualisation types
 //!
 //! - **Category graph**: nodes and edges showing memory categories and their relationships.
-//! - **Timeline**: journal entries ordered by timestamp.
 //! - **Tag cloud**: tags with their frequency counts.
 //! - **Access heatmap**: memories ranked by access count and recency.
 
@@ -61,26 +60,6 @@ pub struct MemoryGraph {
     pub edges: Vec<GraphEdge>,
 }
 
-/// A timeline entry for journal visualisation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimelineEntry {
-    /// ISO 8601 timestamp.
-    pub timestamp: String,
-    /// Entry title.
-    pub title: String,
-    /// Truncated content (max 200 chars).
-    pub content_preview: String,
-    /// Tags on the entry.
-    pub tags: Vec<String>,
-}
-
-/// The complete timeline for journal visualisation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Timeline {
-    /// Timeline entries, sorted by timestamp (most recent first).
-    pub entries: Vec<TimelineEntry>,
-}
-
 /// A tag with its frequency count for tag cloud visualisation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagCloudEntry {
@@ -88,9 +67,6 @@ pub struct TagCloudEntry {
     pub tag: String,
     /// Number of memories with this tag.
     pub count: usize,
-    /// Number of journal entries with this tag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub journal_count: Option<usize>,
 }
 
 /// The complete tag cloud for visualisation.
@@ -130,8 +106,6 @@ pub struct AccessHeatmap {
 pub struct VisualisationData {
     /// Category relationship graph.
     pub graph: MemoryGraph,
-    /// Journal timeline.
-    pub timeline: Timeline,
     /// Tag cloud.
     pub tag_cloud: TagCloud,
     /// Access pattern heatmap.
@@ -140,8 +114,7 @@ pub struct VisualisationData {
 
 // ── Generation functions ─────────────────────────────────────────────────────
 
-/// Generate the complete visualisation data for all memories, journal entries,
-/// and blocks.
+/// Generate the complete visualisation data for structured memories and blocks.
 ///
 /// # Arguments
 ///
@@ -158,13 +131,11 @@ pub fn generate_visualisation(
     _working_dir: &PathBuf,
 ) -> anyhow::Result<VisualisationData> {
     let graph = generate_graph(storage)?;
-    let timeline = generate_timeline(storage)?;
     let tag_cloud = generate_tag_cloud(storage)?;
     let heatmap = generate_heatmap(storage)?;
 
     Ok(VisualisationData {
         graph,
-        timeline,
         tag_cloud,
         heatmap,
     })
@@ -236,83 +207,23 @@ pub fn generate_graph(storage: &Storage) -> anyhow::Result<MemoryGraph> {
     Ok(MemoryGraph { nodes, edges })
 }
 
-/// Generate a journal timeline.
-///
-/// Returns journal entries sorted by timestamp (most recent first) with
-/// truncated content previews.
-pub fn generate_timeline(storage: &Storage) -> anyhow::Result<Timeline> {
-    let entries = storage.list_journal_entries(1_000)?;
-
-    let mut timeline_entries: Vec<TimelineEntry> = entries
-        .iter()
-        .map(|e| {
-            let tags = storage.get_journal_tags(&e.id).unwrap_or_default();
-            let preview = if e.content.len() > 200 {
-                format!("{}…", &e.content[..200])
-            } else {
-                e.content.clone()
-            };
-            TimelineEntry {
-                timestamp: e.timestamp.clone(),
-                title: e.title.clone(),
-                content_preview: preview,
-                tags,
-            }
-        })
-        .collect();
-
-    // Sort by timestamp descending.
-    timeline_entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-
-    Ok(Timeline {
-        entries: timeline_entries,
-    })
-}
-
-/// Generate a tag cloud from structured memories and journal entries.
-///
-/// Counts tag occurrences across both memories and journal entries.
+/// Generate a tag cloud from structured memories.
 pub fn generate_tag_cloud(storage: &Storage) -> anyhow::Result<TagCloud> {
     let memories = storage.list_memories("", 10_000)?;
 
-    // Count memory tags.
-    let mut tag_memory_counts: HashMap<String, usize> = HashMap::new();
+    let mut tag_counts: HashMap<String, usize> = HashMap::new();
     for mem in &memories {
         let tags = storage.get_memory_tags(mem.id).unwrap_or_default();
         for tag in &tags {
-            *tag_memory_counts.entry(tag.clone()).or_insert(0) += 1;
+            *tag_counts.entry(tag.clone()).or_insert(0) += 1;
         }
     }
 
-    // Count journal tags.
-    let journal_entries = storage.list_journal_entries(10_000)?;
-    let mut tag_journal_counts: HashMap<String, usize> = HashMap::new();
-    for entry in &journal_entries {
-        let tags = storage.get_journal_tags(&entry.id).unwrap_or_default();
-        for tag in &tags {
-            *tag_journal_counts.entry(tag.clone()).or_insert(0) += 1;
-        }
-    }
-
-    // Merge tags.
-    let mut all_tags: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for tag in tag_memory_counts.keys() {
-        all_tags.insert(tag.clone());
-    }
-    for tag in tag_journal_counts.keys() {
-        all_tags.insert(tag.clone());
-    }
-
-    let mut entries: Vec<TagCloudEntry> = all_tags
+    let mut entries: Vec<TagCloudEntry> = tag_counts
         .iter()
         .map(|tag| TagCloudEntry {
-            count: *tag_memory_counts.get(tag).unwrap_or(&0),
-            journal_count: if tag_journal_counts.contains_key(tag) {
-                Some(*tag_journal_counts.get(tag).unwrap_or(&0))
-            } else {
-                None
-            },
-            tag: tag.clone(),
+            tag: tag.0.clone(),
+            count: *tag.1,
         })
         .collect();
 
@@ -372,37 +283,20 @@ mod tests {
     }
 
     #[test]
-    fn test_timeline_entry_preview_truncation() {
-        // Verify the truncation logic produces a string with correct char count.
-        let long_content: String = "A".repeat(300);
-        // 200 ASCII chars + 1 ellipsis char "…" = 201 chars (203 bytes in UTF-8)
-        let truncated = if long_content.len() > 200 {
-            format!("{}…", &long_content[..200])
-        } else {
-            long_content.clone()
-        };
-        // Char count is 201, byte length is 203 (… is 3 bytes in UTF-8).
-        assert_eq!(truncated.chars().count(), 201);
-    }
-
-    #[test]
     fn test_tag_cloud_sorting() {
         // Test that sort_by count descending works.
         let mut tags = vec![
             TagCloudEntry {
                 tag: "rust".to_string(),
                 count: 10,
-                journal_count: Some(5),
             },
             TagCloudEntry {
                 tag: "python".to_string(),
                 count: 3,
-                journal_count: None,
             },
             TagCloudEntry {
                 tag: "debugging".to_string(),
                 count: 7,
-                journal_count: Some(2),
             },
         ];
         tags.sort_by(|a, b| b.count.cmp(&a.count));
@@ -418,9 +312,6 @@ mod tests {
                 nodes: Vec::new(),
                 edges: Vec::new(),
             },
-            timeline: Timeline {
-                entries: Vec::new(),
-            },
             tag_cloud: TagCloud { tags: Vec::new() },
             heatmap: AccessHeatmap {
                 entries: Vec::new(),
@@ -428,7 +319,6 @@ mod tests {
         };
         let json = serde_json::to_string_pretty(&data).unwrap();
         assert!(json.contains("\"graph\""));
-        assert!(json.contains("\"timeline\""));
         assert!(json.contains("\"tag_cloud\""));
         assert!(json.contains("\"heatmap\""));
     }

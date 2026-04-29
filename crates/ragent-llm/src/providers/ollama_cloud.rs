@@ -438,10 +438,10 @@ impl OllamaCloudClient {
             body["tools"] = json!(tool_defs);
         }
 
-                  // Ollama Cloud does not support the `think` parameter.  It is not
-                    // appended here even when the caller's request carries a thinking
-                    // configuration, because the cloud service silently ignores or
-                    // rejects it.
+        // Ollama Cloud does not support the `think` parameter.  It is not
+        // appended here even when the caller's request carries a thinking
+        // configuration, because the cloud service silently ignores or
+        // rejects it.
         body
     }
 }
@@ -766,7 +766,7 @@ pub async fn list_ollama_cloud_models(
 
             // Check vision capability from /api/show
             let has_vision = show_info.as_ref().is_some_and(|info| info.has_vision());
-              // Ollama Cloud does not support thinking/reasoning parameters.
+            // Ollama Cloud does not support thinking/reasoning parameters.
             let reasoning = false;
             let thinking_levels = Vec::new();
 

@@ -192,7 +192,7 @@ enum SessionCommands {
 /// Sub-commands for the `memory` namespace.
 #[derive(Subcommand)]
 enum MemoryCommands {
-    /// Export all memories, journal entries, and blocks to JSON on stdout
+    /// Export structured memories and blocks to JSON on stdout
     Export,
     /// Import memories from a JSON file or external format
     Import {
@@ -788,11 +788,8 @@ async fn main() -> Result<()> {
                     let json = serde_json::to_string_pretty(&export)?;
                     writeln!(std::io::stdout(), "{json}")?;
                     eprintln!(
-                        "Exported {} memories, {} journal entries, {} project blocks, {} global blocks",
-                        result.memory_count,
-                        result.journal_count,
-                        result.project_block_count,
-                        result.global_block_count,
+                        "Exported {} memories, {} project blocks, {} global blocks",
+                        result.memory_count, result.project_block_count, result.global_block_count,
                     );
                 }
                 MemoryCommands::Import {
@@ -839,18 +836,16 @@ async fn main() -> Result<()> {
                     if dry_run {
                         writeln!(
                             std::io::stdout(),
-                            "[DRY RUN] Would import {} memories, {} journal entries, {} project blocks, {} global blocks",
+                            "[DRY RUN] Would import {} memories, {} project blocks, {} global blocks",
                             result.memory_count,
-                            result.journal_count,
                             result.project_block_count,
                             result.global_block_count,
                         )?;
                     } else {
                         writeln!(
                             std::io::stdout(),
-                            "Imported {} memories, {} journal entries, {} project blocks, {} global blocks",
+                            "Imported {} memories, {} project blocks, {} global blocks",
                             result.memory_count,
-                            result.journal_count,
                             result.project_block_count,
                             result.global_block_count,
                         )?;
@@ -869,9 +864,7 @@ async fn main() -> Result<()> {
 
                     // List structured memory stats.
                     let memory_count = storage.list_memories("", 10_000)?.len();
-                    let journal_count = storage.count_journal_entries()?;
                     writeln!(stdout, "Structured memories: {memory_count}")?;
-                    writeln!(stdout, "Journal entries: {journal_count}")?;
 
                     // List project blocks.
                     let project_labels = block_storage

@@ -439,25 +439,6 @@ pub enum Event {
         response: String,
     },
 
-    // ── Journal events ─────────────────────────────────────────────────
-    /// A new journal entry was created.
-    JournalEntryCreated {
-        /// Session that created the entry.
-        session_id: String,
-        /// Unique identifier of the new entry.
-        id: String,
-        /// Title of the new entry.
-        title: String,
-    },
-    /// A journal search was performed.
-    JournalSearched {
-        /// Session that performed the search.
-        session_id: String,
-        /// The search query used.
-        query: String,
-        /// Number of results returned.
-        result_count: usize,
-    },
     /// A structured memory was stored.
     MemoryStored {
         /// Session that stored the memory.
@@ -572,8 +553,6 @@ impl Event {
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
             Self::UserInput { .. } => "UserInput",
-            Self::JournalEntryCreated { .. } => "JournalEntryCreated",
-            Self::JournalSearched { .. } => "JournalSearched",
             Self::MemoryStored { .. } => "MemoryStored",
             Self::MemoryRecalled { .. } => "MemoryRecalled",
             Self::MemoryForgotten { .. } => "MemoryForgotten",
@@ -631,9 +610,7 @@ impl Event {
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }
-            Self::JournalEntryCreated { session_id, .. }
-            | Self::JournalSearched { session_id, .. }
-            | Self::MemoryStored { session_id, .. }
+            Self::MemoryStored { session_id, .. }
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }
             | Self::MemorySearched { session_id, .. }

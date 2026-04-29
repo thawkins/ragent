@@ -526,12 +526,8 @@ impl App {
             memory_browser: None,
             memory_browser_close_area: Rect::default(),
             memory_browser_area: Rect::default(),
-            journal_viewer: None,
-            journal_viewer_close_area: Rect::default(),
-            journal_viewer_area: Rect::default(),
             memory_block_count: 0,
             memory_entry_count: 0,
-            journal_entry_count: 0,
             memory_last_updated: None,
             theme_mode: crate::theme::ThemeMode::Default,
             mouse_enabled: true,
@@ -2091,7 +2087,6 @@ impl App {
             "tools" => vec![
                 "show".to_string(),
                 "office".to_string(),
-                "journal".to_string(),
                 "github".to_string(),
                 "gitlab".to_string(),
                 "codeindex".to_string(),
@@ -2140,7 +2135,7 @@ impl App {
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|sync]".to_string()),
             "tools" => {
-                Some("[show|help|office|journal|github|gitlab|codeindex] [on|off]".to_string())
+                Some("[show|help|office|github|gitlab|teams|agents|codeindex] [on|off]".to_string())
             }
             "internal-llm" => Some(
                 "[show|help|on|off|chat|sessiontitle|promptcontext|memoryextraction] [on|off]"
@@ -2612,7 +2607,7 @@ impl App {
         }
     }
 
-    /// Refresh cached memory/journal counts for the status bar.    ///
+    /// Refresh cached memory counts for the status bar.
     /// Debounced to run at most once per 5 seconds to avoid unnecessary I/O.
     pub fn refresh_memory_stats(&mut self) {
         // Load memory block count
@@ -2621,7 +2616,6 @@ impl App {
         let blocks = ragent_core::memory::load_all_blocks(&block_storage, &working_dir);
         self.memory_block_count = blocks.len();
         self.memory_entry_count = self.storage.count_memories().unwrap_or(0);
-        self.journal_entry_count = self.storage.count_journal_entries().unwrap_or(0);
     }
 
     /// Register the primary session's short_sid → agent_name mapping.
@@ -3781,12 +3775,13 @@ impl App {
         ))
     }
 
-    fn tool_visibility_switches(&self) -> [(&'static str, bool); 5] {
+    fn tool_visibility_switches(&self) -> [(&'static str, bool); 6] {
         [
             ("office", self.tool_visibility.office),
-            ("journal", self.tool_visibility.journal),
             ("github", self.tool_visibility.github),
             ("gitlab", self.tool_visibility.gitlab),
+            ("teams", self.tool_visibility.teams),
+            ("agents", self.tool_visibility.agents),
             ("codeindex", self.tool_visibility.codeindex),
         ]
     }
@@ -3800,9 +3795,10 @@ impl App {
     fn set_tool_visibility_state(&mut self, switch: &str, enabled: bool) -> bool {
         match switch {
             "office" => self.tool_visibility.office = enabled,
-            "journal" => self.tool_visibility.journal = enabled,
             "github" => self.tool_visibility.github = enabled,
             "gitlab" => self.tool_visibility.gitlab = enabled,
+            "teams" => self.tool_visibility.teams = enabled,
+            "agents" => self.tool_visibility.agents = enabled,
             "codeindex" => self.tool_visibility.codeindex = enabled,
             _ => return false,
         }
@@ -5133,8 +5129,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                     ["help"] | ["usage"] => {
                         self.append_assistant_text(
-                            "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `journal`, `github`, `gitlab`, `codeindex`.",
-                        );
+                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                              );
                         self.status = "tools help".to_string();
                     }
                     [switch] => {
@@ -5146,8 +5142,8 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             self.status = "tools".to_string();
                         } else {
                             self.append_assistant_text(
-                                "From: /tools\n⚠ Invalid switch. Use one of: `office`, `journal`, `github`, `gitlab`, `codeindex`.",
-                            );
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                                      );
                             self.status = "tools error".to_string();
                         }
                     }
@@ -5166,12 +5162,11 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                         if !self.set_tool_visibility_state(switch, enabled) {
                             self.append_assistant_text(
-                                "From: /tools\n⚠ Invalid switch. Use one of: `office`, `journal`, `github`, `gitlab`, `codeindex`.",
-                            );
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                                      );
                             self.status = "tools error".to_string();
                             return;
                         }
-
                         let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
@@ -8043,90 +8038,6 @@ Type `/swarm help` for more info.\n";
                 }
             },
 
-            "journal" => {
-                let sub = args.split_whitespace().next().unwrap_or("");
-                let rest = args.trim_start().strip_prefix(sub).unwrap_or("").trim();
-                match sub {
-                    "" | "show" => {
-                        // Open the journal viewer panel
-                        self.journal_viewer =
-                            Some(crate::panels::JournalViewerState::load(&self.storage));
-                        self.status = "journal: viewer opened".to_string();
-                    }
-                    "search" => {
-                        if rest.is_empty() {
-                            self.append_assistant_text(
-                                "From: /journal\nUsage: `/journal search <query>`",
-                            );
-                            return;
-                        }
-                        // Open viewer and perform search
-                        let mut viewer = crate::panels::JournalViewerState::load(&self.storage);
-                        viewer.search_query = rest.to_string();
-                        viewer.search(&self.storage);
-                        self.journal_viewer = Some(viewer);
-                        self.status = format!("journal: searching for '{}'", rest);
-                    }
-                    "add" => {
-                        if rest.is_empty() {
-                            self.append_assistant_text(
-                                "From: /journal\nUsage: `/journal add <title>`",
-                            );
-                            return;
-                        }
-                        // Add a new journal entry
-                        // Generate a unique ID for the journal entry
-                        let id = format!("je-{}", ragent_core::id::SessionId::new());
-                        let project = std::env::current_dir()
-                            .ok()
-                            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-                            .unwrap_or_else(|| "ragent".to_string());
-                        let session_id = self.session_id.clone().unwrap_or_default();
-
-                        match self.storage.create_journal_entry(
-                            &id,
-                            rest,
-                            "",
-                            &project,
-                            &session_id,
-                            &[] as &[String],
-                        ) {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /journal add\n✅ Created journal entry: {} (id: {})",
-                                    rest, id
-                                ));
-                                // Refresh cached stats
-                                self.refresh_memory_stats();
-                            }
-                            Err(e) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /journal add\n❌ Failed to create entry: {}",
-                                    e
-                                ));
-                            }
-                        }
-                    }
-                    "help" => {
-                        self.append_assistant_text(
-                            "## /journal — Journal Viewer\n\n\
-                                           | Sub-command | Description |\n\
-                                           |-------------|-------------|\n\
-                                           | `/journal` | Open the journal viewer panel |\n\
-                                           | `/journal search <query>` | Search journal entries |\n\
-                                           | `/journal add <title>` | Add a new journal entry |\n\
-                                           | `/journal help` | Show this help |",
-                        );
-                        self.status = "journal: help".to_string();
-                    }
-                    _ => {
-                        self.append_assistant_text(
-                                          "From: /journal\nUsage: `/journal` | `/journal search <query>` | `/journal add <title>` | `/journal help`",
-                                      );
-                    }
-                }
-            }
-
             "mouse" => {
                 let sub = args.split_whitespace().next().unwrap_or("");
                 match sub {
@@ -8758,13 +8669,6 @@ Type `/swarm help` for more info.\n";
                     self.show_teams_window = false;
                     return;
                 }
-                // Journal viewer close button
-                if self.journal_viewer.is_some()
-                    && self.journal_viewer_close_area.contains(pos.into())
-                {
-                    self.journal_viewer = None;
-                    return;
-                }
                 // Memory browser close button
                 if self.memory_browser.is_some()
                     && self.memory_browser_close_area.contains(pos.into())
@@ -8772,17 +8676,7 @@ Type `/swarm help` for more info.\n";
                     self.memory_browser = None;
                     return;
                 }
-                // Click outside journal viewer closes it
-                if self.journal_viewer.is_some() {
-                    let journal_area = self
-                        .journal_viewer_area
-                        .union(self.journal_viewer_close_area);
-                    if !journal_area.contains(pos.into()) {
-                        self.journal_viewer = None;
-                        return;
-                    }
-                }
-                // Click outside memory browser closes it
+                // Click outside memory browser closes it.
                 if self.memory_browser.is_some() {
                     let memory_area = self
                         .memory_browser_area
@@ -10365,6 +10259,16 @@ Type `/swarm help` for more info.\n";
                         );
                     }
                     self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
+                }
+            }
+            Event::AgentNotice {
+                ref session_id,
+                ref message,
+            } => {
+                if self.is_current_session(session_id) {
+                    let summary = summarise_error(message);
+                    self.push_log_no_agent(LogLevel::Warn, format!("agent notice: {}", message));
+                    self.status = summary;
                 }
             }
             Event::AgentError {

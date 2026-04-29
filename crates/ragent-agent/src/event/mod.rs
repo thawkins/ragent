@@ -180,6 +180,13 @@ pub enum Event {
         /// Human-readable summary of what was accomplished.
         summary: String,
     },
+    /// A recoverable notice occurred in the agent loop.
+    AgentNotice {
+        /// Session in which the notice occurred.
+        session_id: String,
+        /// Human-readable notice description.
+        message: String,
+    },
     /// An unrecoverable error occurred in the agentic loop.
     AgentError {
         /// Session in which the error occurred.
@@ -439,25 +446,6 @@ pub enum Event {
         response: String,
     },
 
-    // ── Journal events ─────────────────────────────────────────────────
-    /// A new journal entry was created.
-    JournalEntryCreated {
-        /// Session that created the entry.
-        session_id: String,
-        /// Unique identifier of the new entry.
-        id: String,
-        /// Title of the new entry.
-        title: String,
-    },
-    /// A journal search was performed.
-    JournalSearched {
-        /// Session that performed the search.
-        session_id: String,
-        /// The search query used.
-        query: String,
-        /// Number of results returned.
-        result_count: usize,
-    },
     /// A structured memory was stored.
     MemoryStored {
         /// Session that stored the memory.
@@ -547,6 +535,7 @@ impl Event {
             Self::AgentSwitchRequested { .. } => "AgentSwitchRequested",
             Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
             Self::TaskCompleted { .. } => "TaskCompleted",
+            Self::AgentNotice { .. } => "AgentNotice",
             Self::AgentError { .. } => "AgentError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
@@ -572,8 +561,6 @@ impl Event {
             Self::TeammateP2PMessage { .. } => "TeammateP2PMessage",
             Self::ShellCwdChanged { .. } => "ShellCwdChanged",
             Self::UserInput { .. } => "UserInput",
-            Self::JournalEntryCreated { .. } => "JournalEntryCreated",
-            Self::JournalSearched { .. } => "JournalSearched",
             Self::MemoryStored { .. } => "MemoryStored",
             Self::MemoryRecalled { .. } => "MemoryRecalled",
             Self::MemoryForgotten { .. } => "MemoryForgotten",
@@ -605,6 +592,7 @@ impl Event {
             | Self::AgentSwitchRequested { session_id, .. }
             | Self::AgentRestoreRequested { session_id, .. }
             | Self::TaskCompleted { session_id, .. }
+            | Self::AgentNotice { session_id, .. }
             | Self::AgentError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
             | Self::RequestStarted { session_id, .. }
@@ -631,9 +619,7 @@ impl Event {
             Self::ShellCwdChanged { session_id, .. } | Self::UserInput { session_id, .. } => {
                 Some(session_id.as_str())
             }
-            Self::JournalEntryCreated { session_id, .. }
-            | Self::JournalSearched { session_id, .. }
-            | Self::MemoryStored { session_id, .. }
+            Self::MemoryStored { session_id, .. }
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }
             | Self::MemorySearched { session_id, .. }

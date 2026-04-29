@@ -46,7 +46,7 @@ graph LR
 | **Multi-provider LLM** | 7 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
-| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, journal, teams, sub-agents, LSP, office/PDF, web, and MCP |
+| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, LSP, office/PDF, web, and MCP |
 | **Code Intelligence** | Tree-sitter parsing (15+ languages), Tantivy FTS, symbol/reference search, and optional LSP integration |
 | **Persistent Memory** | Three-tier system — file blocks, structured SQLite store, and optional embedding-based semantic search — with automatic extraction, decay, compaction, and a knowledge graph |
 | **Teams & Swarms** | Multi-agent coordination with named teammates, shared task lists, mailbox messaging, and swarm decomposition for parallel work |
@@ -627,7 +627,6 @@ The following are aliases for commonly requested operations:
 | **GitHub** | 10 | Issues and PR management |
 | **GitLab** | 19 | Issues, merge requests, pipelines, and jobs |
 | **Memory** | 12 | memory_read/write/replace/store/recall/forget/search/migrate |
-| **Journal** | 3 | journal_write, journal_search, journal_read |
 | **Team** | 21 | Team lifecycle, tasks, messaging, coordination |
 | **Sub-agent** | 5 | new_task, cancel_task, list_tasks, wait_tasks, task_complete |
 | **LSP** | 6 | lsp_hover, definition, references, symbols, diagnostics |
@@ -1089,24 +1088,7 @@ A full-panel overlay for browsing memory blocks.
 
 ---
 
-#### 4.1.16 Journal Viewer Overlay
-
-A full-panel overlay for browsing journal entries.
-
-**Purpose**: Review recorded insights, decisions, and discoveries.
-
-**Features**:
-- Chronological list of journal entries
-- Tag filtering and search
-- Expand to view full entry content
-- Add new entries inline
-- FTS5 full-text search support
-
-**Access**: `/journal` command
-
----
-
-#### 4.1.17 Plan Approval Dialog (Modal)
+#### 4.1.16 Plan Approval Dialog (Modal)
 
 A centered dialog for approving or rejecting plans from the plan agent.
 
@@ -1185,7 +1167,6 @@ Various inline widgets rendered within the message panel.
 | `mcp_discover` | MCP Discovery | `/mcp discover` |
 | `output_view` | Output View | Auto (tool output) |
 | `memory_browser` | Memory Browser | `/memory` |
-| `journal_viewer` | Journal Viewer | `/journal` |
 | `plan_approval_pending` | Plan Approval | Auto (plan submission) |
 | `pending_forcecleanup` | Force-Cleanup Modal | `/team cleanup` (with active) |
 | `show_shortcuts` | Keybindings Help | `?` (empty input), `/help` |
@@ -1271,10 +1252,7 @@ Various inline widgets rendered within the message panel.
 | `/gitlab setup` | Configure GitLab connection (instance URL + PAT) |
 | `/gitlab logout` | Remove GitLab credentials |
 | `/gitlab status` | Show GitLab connection status |
-| **Journal & Todos** ||
-| `/journal` | View journal entries |
-| `/journal search <query>` | Search journal entries |
-| `/journal add <title>` | Add journal entry |
+| **Todos** ||
 | `/todos` | Show TODO items |
 | **LSP & Skills** ||
 | `/lsp discover` | Discover LSP servers |
@@ -1334,7 +1312,6 @@ graph TB
             FileMenu["@ File Menu"]
             HistoryPicker["History Picker"]
             MemoryBrowser["Memory Browser"]
-            JournalViewer["Journal Viewer"]
             PlanApproval["Plan Approval"]
             ForceCleanup["Force-Cleanup"]
             LSPDiscovery["LSP Discovery"]
@@ -1458,15 +1435,6 @@ ragent serve --port 8080  # Custom port
 | `POST` | `/memory/search` | Search memories |
 | `GET` | `/memory/search` | Search memories (query params) |
 
-#### Journal API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/journal` | List journal entries |
-| `POST` | `/journal` | Create journal entry |
-| `GET` | `/journal/{id}` | Get entry by ID |
-| `POST` | `/journal/search` | Search journal entries |
-
 #### Orchestrator API
 
 | Method | Endpoint | Description |
@@ -1504,21 +1472,7 @@ ragent serve --port 8080  # Custom port
 }
 ```
 
-**JournalEntryResponse:**
-
-```json
-{
-  "id": "j_xyz789",
-  "session_id": "sess_001",
-  "entry_type": "decision",
-  "title": "Chose PostgreSQL over MySQL",
-  "content": "After comparing performance benchmarks...",
-  "tags": ["database", "architecture"],
-  "created_at": "2025-01-15T10:30:00Z"
-}
-```
-
-**Search Request Body (`/memory/search`, `/journal/search`):**
+**Search Request Body (`/memory/search`):**
 
 ```json
 {

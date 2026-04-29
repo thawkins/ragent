@@ -27,7 +27,7 @@
 //!
 //! - **Default** (`embeddings` disabled): only [`NoOpEmbedding`] is available.
 //!   It returns empty vectors, signalling that semantic search is unavailable.
-//!   `memory_search` and `journal_search` fall back to FTS5-only mode.
+//!   `memory_search` falls back to FTS5-only mode.
 //!
 //! - **`embeddings` feature enabled**: [`LocalEmbeddingProvider`] becomes
 //!   available, using ONNX Runtime to run a `sentence-transformers` model
@@ -224,7 +224,7 @@ pub fn deserialise_embedding(blob: &[u8], dimensions: usize) -> Result<Vec<f32>>
 /// Pairs an item's row ID with its cosine similarity score to the query.
 #[derive(Debug, Clone)]
 pub struct SimilarityResult {
-    /// Row ID of the matching memory or journal entry.
+    /// Row ID of the matching memory.
     pub row_id: i64,
     /// Cosine similarity score in `[-1.0, 1.0]`. Higher = more similar.
     pub score: f32,

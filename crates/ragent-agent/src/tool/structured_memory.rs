@@ -93,9 +93,7 @@ impl Tool for MemoryStoreTool {
             })
             .unwrap_or_default();
 
-        // Validate tags (reuse journal tag validation logic).
-        crate::memory::journal::JournalEntry::validate_tags(&tags)
-            .map_err(|e| anyhow::anyhow!("Invalid tags: {e}"))?;
+        StructuredMemory::validate_tags(&tags).map_err(|e| anyhow::anyhow!("Invalid tags: {e}"))?;
 
         let project = ctx
             .working_dir

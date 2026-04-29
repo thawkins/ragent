@@ -7,6 +7,7 @@
 //! - Line 1: Session, agent, working directory, git branch, and status message
 //! - Line 2: Provider, token usage, active tasks, code index, and log indicator
 
+use crate::widgets::message_widget::make_relative_path;
 use ragent_types::ThinkingLevel;
 use ratatui::{
     Frame,
@@ -18,7 +19,6 @@ use ratatui::{
         Table, Wrap,
     },
 };
-use crate::widgets::message_widget::make_relative_path;
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
@@ -1530,14 +1530,6 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         crate::panels::render_internal_llm_chat(frame, app);
     }
 
-    // Journal viewer overlay
-    if app.journal_viewer.is_some() {
-        crate::panels::render_journal_viewer(frame, app);
-    } else {
-        app.journal_viewer_close_area = Rect::default();
-        app.journal_viewer_area = Rect::default();
-    }
-
     // Render output overlay last so it always appears above Teams/Agents popups.
     if app.output_view.is_some() {
         render_output_view_overlay(frame, app);
@@ -2276,22 +2268,14 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
     {
         let block_count = app.memory_block_count;
         let entry_count = app.memory_entry_count;
-        let journal_count = app.journal_entry_count;
-        if block_count > 0 || entry_count > 0 || journal_count > 0 {
+        if block_count > 0 || entry_count > 0 {
             let mem_label = if entry_count > 0 {
                 format!("│ MEM: {}blk, {}mem", block_count, entry_count)
             } else {
                 format!("│ MEM: {}blk", block_count)
             };
             row2_left.push(Span::styled(mem_label, Style::default().fg(Color::Magenta)));
-            if journal_count > 0 {
-                row2_left.push(Span::styled(
-                    format!(", {}j", journal_count),
-                    Style::default().fg(Color::Magenta),
-                ));
-            }
             row2_left.push(Span::raw(" "));
-
             // Relative time of last update
             if let Some(updated) = app.memory_last_updated {
                 let elapsed = updated.elapsed();
@@ -2412,7 +2396,7 @@ fn messages_to_lines<'a>(
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ];
-                    if summary.is_empty() {
+                    if canonical_tool_name(tool) == "think" || summary.is_empty() {
                         spans.push(Span::styled(display_name, name_style));
                     } else {
                         // Extract icon (emoji + space) from the beginning of summary
@@ -2476,93 +2460,93 @@ fn messages_to_lines<'a>(
                     }
                     lines.push(Line::from(spans));
 
-                                                                                      if state.status == ToolCallStatus::Completed && tool != "edit" && tool != "think" {
-                                                                                          if tool == "think" {
-                                                                                              // Render full thought text multi-line with 💭 prefix
-                                                                                              if let Some(thought) = state
-                                                                                                  .output
-                                                                                                  .as_ref()
-                                                                                                  .and_then(|out| out.get("thought"))
-                                                                                                  .and_then(|v| v.as_str())
-                                                                                                  .or_else(|| {
-                                                                                                      state
-                                                                                                          .output
-                                                                                                          .as_ref()
-                                                                                                          .and_then(|out| out.get("thinking"))
-                                                                                                          .and_then(|v| v.as_str())
-                                                                                                  })
-                                                                                                  .or_else(|| {
-                                                                                                      state
-                                                                                                          .output
-                                                                                                          .as_ref()
-                                                                                                          .and_then(|out| out.get("text"))
-                                                                                                          .and_then(|v| v.as_str())
-                                                                                                  })
-                                                                                              {
-                                                                                                  for line in thought.lines() {
-                                                                                                      lines.push(Line::from(Span::styled(
-                                                                                                          format!("  💭 {}", line),
-                                                                                                          theme::think(),
-                                                                                                      )));
-                                                                                                  }
-                                                                                              }
-                                                                                          } else if tool == "multiedit" {                                                  // Render per-file edit stats as a tabular list
-                                                  if let Some(file_stats) = state
-                                                      .output
-                                                      .as_ref()
-                                                      .and_then(|out| out.get("file_stats"))
-                                                      .and_then(|v| v.as_array())
-                                                  {
-                                                      let rel_paths: Vec<String> = file_stats
-                                                          .iter()
-                                                          .map(|fs| {
-                                                              fs.get("path")
-                                                                  .and_then(|p| p.as_str())
-                                                                  .map(|p| make_relative_path(p, cwd))
-                                                                  .unwrap_or_default()
-                                                          })
-                                                          .collect();
-                                                      let max_len = rel_paths.iter().map(|p| p.len()).max().unwrap_or(0);
-                                                      for (fs, rel_path) in file_stats.iter().zip(rel_paths.iter()) {
-                                                          let added =
-                                                              fs.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                          let removed =
-                                                              fs.get("removed").and_then(|v| v.as_u64()).unwrap_or(0);
-                                                          let padding =
-                                                              " ".repeat(max_len.saturating_sub(rel_path.len()));
-                                                          lines.push(Line::from(vec![
-                                                              Span::styled(
-                                                                  format!("  └ {}{} ", rel_path, padding),
-                                                                  Style::default().fg(Color::DarkGray),
-                                                              ),
-                                                              Span::styled(
-                                                                  format!("+{}", added),
-                                                                  Style::default().fg(Color::Green),
-                                                              ),
-                                                              Span::styled(" ", Style::default()),
-                                                              Span::styled(
-                                                                  format!("-{}", removed),
-                                                                  Style::default().fg(Color::Red),
-                                                              ),
-                                                          ]));
-                                                      }
-                                                  } else if let Some(result) =
-                                                      tool_result_summary(tool, &state.output, &state.input, cwd)
-                                                  {
-                                                      lines.push(Line::from(Span::styled(
-                                                          format!("  └ {}", result),
-                                                          Style::default().fg(Color::DarkGray),
-                                                      )));
-                                                  }
-                                              } else if let Some(result) =
-                                                  tool_result_summary(tool, &state.output, &state.input, cwd)
-                                              {
-                                                  lines.push(Line::from(Span::styled(
-                                                      format!("  └ {}", result),
-                                                      Style::default().fg(Color::DarkGray),
-                                                  )));
-                                              }
-                                          }
+                    if state.status == ToolCallStatus::Completed {
+                        if tool == "think" {
+                            if let Some(thought) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("thought"))
+                                .and_then(|v| v.as_str())
+                                .or_else(|| {
+                                    state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|out| out.get("thinking"))
+                                        .and_then(|v| v.as_str())
+                                })
+                                .or_else(|| {
+                                    state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|out| out.get("text"))
+                                        .and_then(|v| v.as_str())
+                                })
+                            {
+                                for line in thought.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  💭 {}", line),
+                                        theme::think(),
+                                    )));
+                                }
+                            }
+                        } else if tool == "multiedit" {
+                            if let Some(file_stats) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("file_stats"))
+                                .and_then(|v| v.as_array())
+                            {
+                                let rel_paths: Vec<String> = file_stats
+                                    .iter()
+                                    .map(|fs| {
+                                        fs.get("path")
+                                            .and_then(|p| p.as_str())
+                                            .map(|p| make_relative_path(p, cwd))
+                                            .unwrap_or_default()
+                                    })
+                                    .collect();
+                                let max_len = rel_paths.iter().map(|p| p.len()).max().unwrap_or(0);
+                                for (fs, rel_path) in file_stats.iter().zip(rel_paths.iter()) {
+                                    let added =
+                                        fs.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    let removed =
+                                        fs.get("removed").and_then(|v| v.as_u64()).unwrap_or(0);
+                                    let padding =
+                                        " ".repeat(max_len.saturating_sub(rel_path.len()));
+                                    lines.push(Line::from(vec![
+                                        Span::styled(
+                                            format!("  └ {}{} ", rel_path, padding),
+                                            Style::default().fg(Color::DarkGray),
+                                        ),
+                                        Span::styled(
+                                            format!("+{}", added),
+                                            Style::default().fg(Color::Green),
+                                        ),
+                                        Span::styled(" ", Style::default()),
+                                        Span::styled(
+                                            format!("-{}", removed),
+                                            Style::default().fg(Color::Red),
+                                        ),
+                                    ]));
+                                }
+                            } else if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::DarkGray),
+                                )));
+                            }
+                        } else if tool != "edit"
+                            && let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, cwd)
+                        {
+                            lines.push(Line::from(Span::styled(
+                                format!("  └ {}", result),
+                                Style::default().fg(Color::DarkGray),
+                            )));
+                        }
+                    }
                     if state.status == ToolCallStatus::Error {
                         if let Some(ref err) = state.error {
                             lines.push(Line::from(Span::styled(
@@ -3482,4 +3466,54 @@ fn render_plan_approval_dialog(frame: &mut Frame, app: &App) {
         .block(block)
         .wrap(ratatui::widgets::Wrap { trim: false });
     frame.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::messages_to_lines;
+    use ragent_core::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_messages_to_lines_renders_full_thinktool_output_multiline() {
+        let message = Message::new(
+            "s1",
+            Role::Assistant,
+            vec![MessagePart::ToolCall {
+                tool: "think".to_string(),
+                call_id: "call-1".to_string(),
+                state: ToolCallState {
+                    status: ToolCallStatus::Completed,
+                    input: json!({"thought": "First line.\nSecond line."}),
+                    output: Some(json!({"thought": "First line.\nSecond line."})),
+                    error: None,
+                    duration_ms: Some(42),
+                },
+            }],
+        );
+
+        let lines = messages_to_lines(&[message], &HashMap::new(), &HashMap::new(), "/project");
+        let rendered: Vec<String> = lines.iter().map(ToString::to_string).collect();
+
+        assert!(
+            rendered.iter().any(|line| line.contains("Think")),
+            "Expected tool header line in rendered output: {rendered:?}"
+        );
+        assert!(
+            rendered
+                .iter()
+                .filter(|line| line.contains("Think"))
+                .all(|line| !line.contains("First line.")),
+            "Expected think header to omit inline thought summary: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  💭 First line."),
+            "Expected first thought line in rendered output: {rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line == "  💭 Second line."),
+            "Expected second thought line in rendered output: {rendered:?}"
+        );
+    }
 }

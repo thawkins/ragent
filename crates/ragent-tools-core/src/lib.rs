@@ -310,7 +310,8 @@ pub fn create_core_registry() -> ToolRegistry {
     registry.register(Arc::new(edit::EditTool));
     registry.register(Arc::new(multiedit::MultiEditTool));
     registry.register(Arc::new(patch::PatchTool));
-          registry.register(Arc::new(copy_file::CopyFileTool));    registry.register(Arc::new(move_file::MoveFileTool));
+    registry.register(Arc::new(copy_file::CopyFileTool));
+    registry.register(Arc::new(move_file::MoveFileTool));
     registry.register(Arc::new(rm::RmTool));
     registry.register(Arc::new(mkdir::MakeDirTool));
     registry.register(Arc::new(append_file::AppendFileTool));

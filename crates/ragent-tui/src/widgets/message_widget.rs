@@ -349,7 +349,8 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|l| format!("⚡ py: {}", trunc120(l)))
                 .unwrap_or_else(|| "⚡ python".to_string())
         }
-                  "calculator" => {            let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
+        "calculator" => {
+            let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
             format!("⚡ {}", trunc120(&expr))
         }
 
@@ -711,19 +712,19 @@ pub(crate) fn read_line_range(metadata: &Option<serde_json::Value>) -> Option<St
     }
 }
 
-
-    /// Return inline diff stats `(+added, -removed)` for tools that support it.
-    ///
-    /// Currently only the `edit`, `multiedit`, and `patch` tools
-    /// provide the necessary `old_lines` / `new_lines` metadata.
-    pub(crate) fn tool_inline_diff(
-        tool: &str,
-        output: &Option<serde_json::Value>,
-    ) -> Option<(usize, usize)> {
-        let out = output.as_ref()?;
-        let tool = canonical_tool_name(tool);
-        match tool {
-            "edit" => {            let old_lines = out.get("old_lines").and_then(|v| v.as_u64());
+/// Return inline diff stats `(+added, -removed)` for tools that support it.
+///
+/// Currently only the `edit`, `multiedit`, and `patch` tools
+/// provide the necessary `old_lines` / `new_lines` metadata.
+pub(crate) fn tool_inline_diff(
+    tool: &str,
+    output: &Option<serde_json::Value>,
+) -> Option<(usize, usize)> {
+    let out = output.as_ref()?;
+    let tool = canonical_tool_name(tool);
+    match tool {
+        "edit" => {
+            let old_lines = out.get("old_lines").and_then(|v| v.as_u64());
             let new_lines = out.get("new_lines").and_then(|v| v.as_u64());
             match (old_lines, new_lines) {
                 (Some(old), Some(new)) => Some((new as usize, old as usize)),
@@ -1003,7 +1004,8 @@ pub fn tool_result_summary(
                 Some(format!("{}…", pluralize(line_count, "line", "lines")))
             }
         }
-                  "calculator" => {            let result = out.get("result").and_then(|v| v.as_str());
+        "calculator" => {
+            let result = out.get("result").and_then(|v| v.as_str());
             result.map(|r| format!("= {}", truncate_str(r, 100)))
         }
         // ═══════════════════════════════════════════════════════════════════
@@ -1583,7 +1585,7 @@ impl<'a> MessageWidget<'a> {
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ];
-                    if summary.is_empty() {
+                    if canonical_tool_name(tool) == "think" || summary.is_empty() {
                         spans.push(Span::styled(display_name, name_style));
                     } else {
                         spans.push(Span::styled(format!("{} ", display_name), name_style));
@@ -1688,36 +1690,37 @@ impl<'a> MessageWidget<'a> {
                                     )));
                                 }
                             }
-                                                  } else if tool == "think" {
-                                                      // Render full thought text multi-line with 💭 prefix
-                                                      if let Some(thought) = state
-                                                          .output
-                                                          .as_ref()
-                                                          .and_then(|out| out.get("thought"))
-                                                          .and_then(|v| v.as_str())
-                                                          .or_else(|| {
-                                                              state
-                                                                  .output
-                                                                  .as_ref()
-                                                                  .and_then(|out| out.get("thinking"))
-                                                                  .and_then(|v| v.as_str())
-                                                          })
-                                                          .or_else(|| {
-                                                              state
-                                                                  .output
-                                                                  .as_ref()
-                                                                  .and_then(|out| out.get("text"))
-                                                                  .and_then(|v| v.as_str())
-                                                          })
-                                                      {
-                                                          for line in thought.lines() {
-                                                              lines.push(Line::from(Span::styled(
-                                                                  format!("  💭 {}", line),
-                                                                  theme::think(),
-                                                              )));
-                                                          }
-                                                      }
-                                                  } else if tool == "multiedit" {                            // Render per-file edit stats as a tabular list
+                        } else if tool == "think" {
+                            // Render full thought text multi-line with 💭 prefix
+                            if let Some(thought) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("thought"))
+                                .and_then(|v| v.as_str())
+                                .or_else(|| {
+                                    state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|out| out.get("thinking"))
+                                        .and_then(|v| v.as_str())
+                                })
+                                .or_else(|| {
+                                    state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|out| out.get("text"))
+                                        .and_then(|v| v.as_str())
+                                })
+                            {
+                                for line in thought.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  💭 {}", line),
+                                        theme::think(),
+                                    )));
+                                }
+                            }
+                        } else if tool == "multiedit" {
+                            // Render per-file edit stats as a tabular list
                             if let Some(file_stats) = state
                                 .output
                                 .as_ref()
@@ -1766,19 +1769,21 @@ impl<'a> MessageWidget<'a> {
                                     Style::default().fg(Color::Gray),
                                 )));
                             }
-                                                                                                      } else if tool != "edit" && tool != "think" {
-                                                                                                          // Skip result summary for edit tool on success (already shows inline diff)
-                                                                                                          // Skip result summary for think tool (full thought rendered above
-                                                                                                          // with 💭 prefix, same as Reasoning parts)
-                                                                                                          if let Some(result) =
-                                                                                                              tool_result_summary(tool, &state.output, &state.input, self.cwd)
-                                                                                                          {
-                                                                                                              lines.push(Line::from(Span::styled(
-                                                                                                                  format!("  └ {}", result),
-                                                                                                                  Style::default().fg(Color::Gray),
-                                                                                                              )));
-                                                                                                          }
-                                                                                                      }                    }                    if state.status == ToolCallStatus::Error {
+                        } else if tool != "edit" && tool != "think" {
+                            // Skip result summary for edit tool on success (already shows inline diff)
+                            // Skip result summary for think tool (full thought rendered above
+                            // with 💭 prefix, same as Reasoning parts)
+                            if let Some(result) =
+                                tool_result_summary(tool, &state.output, &state.input, self.cwd)
+                            {
+                                lines.push(Line::from(Span::styled(
+                                    format!("  └ {}", result),
+                                    Style::default().fg(Color::Gray),
+                                )));
+                            }
+                        }
+                    }
+                    if state.status == ToolCallStatus::Error {
                         let err_msg = state
                             .error
                             .as_deref()

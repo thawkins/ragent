@@ -1,7 +1,8 @@
 //! Memory import/export system for portable data exchange.
 //!
-//! Supports exporting all memories and journal entries to a portable JSON format,
-//! and importing from JSON or external formats (Cline Memory Bank, Claude Code).
+//! Supports exporting structured memories and memory blocks to a portable JSON
+//! format, and importing from JSON or external formats (Cline Memory Bank,
+//! Claude Code).
 //!
 //! # Export format
 //!
@@ -11,7 +12,6 @@
 //!   "exported_at": "2025-07-15T10:30:00Z",
 //!   "source": "ragent",
 //!   "memories": [...],
-//!   "journal": [...],
 //!   "blocks": {...}
 //! }
 //! ```
@@ -32,7 +32,6 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 use crate::memory::block::{BlockScope, MemoryBlock};
-use crate::memory::journal::JournalEntry;
 use crate::memory::storage::BlockStorage;
 use crate::memory::store::StructuredMemory;
 use crate::storage::Storage;
@@ -41,8 +40,8 @@ use crate::storage::Storage;
 
 /// Top-level export container for all memory data.
 ///
-/// Contains structured memories, journal entries, and file-based blocks
-/// in a portable JSON format that can be imported by another ragent instance.
+/// Contains structured memories and file-based blocks in a portable JSON format
+/// that can be imported by another ragent instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryExport {
     /// Format version (semver-compatible).
@@ -54,9 +53,6 @@ pub struct MemoryExport {
     /// Structured memories from the SQLite store.
     #[serde(default)]
     pub memories: Vec<StructuredMemory>,
-    /// Journal entries from the SQLite store.
-    #[serde(default)]
-    pub journal: Vec<JournalEntry>,
     /// File-based memory blocks, keyed by scope then label.
     #[serde(default)]
     pub blocks: MemoryBlocksExport,
@@ -78,8 +74,6 @@ pub struct MemoryBlocksExport {
 pub struct ExportResult {
     /// Number of structured memories exported.
     pub memory_count: usize,
-    /// Number of journal entries exported.
-    pub journal_count: usize,
     /// Number of project blocks exported.
     pub project_block_count: usize,
     /// Number of global blocks exported.
@@ -91,8 +85,6 @@ pub struct ExportResult {
 pub struct ImportResult {
     /// Number of structured memories imported.
     pub memory_count: usize,
-    /// Number of journal entries imported.
-    pub journal_count: usize,
     /// Number of project blocks imported.
     pub project_block_count: usize,
     /// Number of global blocks imported.
@@ -104,7 +96,7 @@ pub struct ImportResult {
 
 // ── Export functions ─────���────────────────────────────────────────────────────
 
-/// Export all memories, journal entries, and blocks to a portable JSON format.
+/// Export all structured memories and blocks to a portable JSON format.
 ///
 /// # Arguments
 ///
@@ -125,7 +117,6 @@ pub fn export_all(
         exported_at: Utc::now().to_rfc3339(),
         source: "ragent".to_string(),
         memories: Vec::new(),
-        journal: Vec::new(),
         blocks: MemoryBlocksExport::default(),
     };
 
@@ -145,17 +136,6 @@ pub fn export_all(
         structured.access_count = mem.access_count;
         structured.last_accessed = mem.last_accessed.clone();
         export.memories.push(structured);
-    }
-
-    // Export journal entries.
-    let journal = storage.list_journal_entries(100_000)?;
-    for entry in &journal {
-        let tags = storage.get_journal_tags(&entry.id).unwrap_or_default();
-        let je = JournalEntry::new(&entry.title, &entry.content)
-            .with_tags(tags)
-            .with_project(&entry.project)
-            .with_session_id(&entry.session_id);
-        export.journal.push(je);
     }
 
     // Export project blocks.
@@ -186,7 +166,6 @@ pub fn export_all(
 
     let result = ExportResult {
         memory_count: export.memories.len(),
-        journal_count: export.journal.len(),
         project_block_count: export.blocks.project.len(),
         global_block_count: export.blocks.global.len(),
     };
@@ -196,7 +175,7 @@ pub fn export_all(
 
 // ── Import functions ──────────────────────────────────────────────────────────
 
-/// Import memories, journal entries, and blocks from a ragent export JSON.
+/// Import structured memories and blocks from a ragent export JSON.
 ///
 /// When `dry_run` is `true`, validates the import data without writing anything.
 ///
@@ -223,7 +202,6 @@ pub fn import_ragent(
 
     let mut result = ImportResult {
         memory_count: 0,
-        journal_count: 0,
         project_block_count: 0,
         global_block_count: 0,
         warnings: Vec::new(),
@@ -257,27 +235,6 @@ pub fn import_ragent(
             )?;
         }
         result.memory_count += 1;
-    }
-
-    // Import journal entries.
-    for entry in &export.journal {
-        if let Err(e) = JournalEntry::validate_tags(&entry.tags) {
-            result
-                .warnings
-                .push(format!("Skipping journal entry with invalid tags: {e}"));
-            continue;
-        }
-        if !dry_run {
-            storage.create_journal_entry(
-                &entry.id,
-                &entry.title,
-                &entry.content,
-                &entry.project,
-                &entry.session_id,
-                &entry.tags,
-            )?;
-        }
-        result.journal_count += 1;
     }
 
     // Import project blocks.
@@ -365,7 +322,6 @@ pub fn import_cline(
 ) -> Result<ImportResult> {
     let mut result = ImportResult {
         memory_count: 0,
-        journal_count: 0,
         project_block_count: 0,
         global_block_count: 0,
         warnings: Vec::new(),
@@ -473,7 +429,6 @@ pub fn import_claude_code(
 ) -> Result<ImportResult> {
     let mut result = ImportResult {
         memory_count: 0,
-        journal_count: 0,
         project_block_count: 0,
         global_block_count: 0,
         warnings: Vec::new(),
@@ -539,7 +494,6 @@ mod tests {
             memories: vec![
                 StructuredMemory::new("Test fact", "fact").with_tags(vec!["test".to_string()]),
             ],
-            journal: vec![JournalEntry::new("Test entry", "Test content")],
             blocks: MemoryBlocksExport {
                 project: std::collections::HashMap::from([(
                     "patterns".to_string(),
@@ -563,7 +517,6 @@ mod tests {
             exported_at: "2025-07-15T10:30:00Z".to_string(),
             source: "ragent".to_string(),
             memories: vec![StructuredMemory::new("Fact 1", "fact")],
-            journal: Vec::new(),
             blocks: MemoryBlocksExport::default(),
         };
 
