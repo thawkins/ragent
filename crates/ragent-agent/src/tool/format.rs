@@ -47,7 +47,7 @@ pub fn format_summary_content(summary: impl AsRef<str>, content: impl AsRef<str>
 /// Format a structured output with exit code, stdout, stderr, and timing info.
 ///
 /// This follows **Pattern C** from the content format standard,
-/// used by execution tools like bash and execute_python.
+/// used by execution tools like bash.
 ///
 /// # Arguments
 ///

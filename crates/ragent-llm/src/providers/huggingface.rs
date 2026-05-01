@@ -677,11 +677,14 @@ struct HfErrorResponse {
     estimated_time: Option<f64>,
 }
 
-/// Discovers available text-generation models from the HuggingFace Hub API.
+/// Discovers available chat-completions models from the authenticated
+/// HuggingFace router API.
 ///
-/// Queries the HuggingFace model hub for models tagged with `text-generation`
-/// that have warm inference endpoints. Returns up to [`MAX_DISCOVERED_MODELS`]
-/// models.
+/// Queries the OpenAI-compatible `GET /v1/models` endpoint exposed by
+/// `router.huggingface.co` and keeps only models with at least one live
+/// provider. This endpoint is queried with the caller's HuggingFace token so
+/// the results stay aligned with the models the authenticated account can route
+/// requests to.
 ///
 /// # Arguments
 ///
@@ -696,79 +699,163 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
     }
 
     let client = crate::provider::http_client::create_http_client();
-    let url = "https://huggingface.co/api/models\
-               ?pipeline_tag=text-generation\
-               &inference=warm\
-               &sort=likes\
-               &direction=-1\
-               &limit=50";
+    let url = format!("{HF_API_BASE}/v1/models");
 
     let response = client
-        .get(url)
+        .get(&url)
         .header("Authorization", format!("Bearer {api_key}"))
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .context("Failed to connect to HuggingFace Hub API")?;
+        .context("Failed to connect to HuggingFace router models API")?;
 
     if !response.status().is_success() {
         bail!(
-            "HuggingFace Hub API returned status {} when discovering models",
+            "HuggingFace router models API returned status {} when discovering models",
             response.status()
         );
     }
 
-    let models: Vec<HfModelEntry> = response
+    let response_body: HfRouterModelsResponse = response
         .json()
         .await
-        .context("Failed to parse HuggingFace model list")?;
+        .context("Failed to parse HuggingFace router model list")?;
 
-    let result: Vec<ModelInfo> = models
+    let result: Vec<ModelInfo> = response_body
+        .data
         .into_iter()
+        .filter_map(router_model_to_info)
         .take(MAX_DISCOVERED_MODELS)
-        .map(|m| {
-            let has_tool_use = m
-                .tags
-                .iter()
-                .any(|t| t == "tool-use" || t == "function-calling");
-            let has_vision = m
-                .tags
-                .iter()
-                .any(|t| t == "vision" || t == "image-text-to-text");
-
-            ModelInfo {
-                id: m.model_id.clone(),
-                provider_id: "huggingface".to_string(),
-                name: format_model_display_name(&m.model_id),
-                cost: Cost {
-                    input: 0.0,
-                    output: 0.0,
-                },
-                capabilities: Capabilities {
-                    reasoning: false,
-                    streaming: true,
-                    vision: has_vision,
-                    tool_use: has_tool_use,
-                    thinking_levels: Vec::new(),
-                },
-                context_window: estimate_context_from_id(&m.model_id),
-                max_output: Some(4_096),
-                request_multiplier: None,
-                thinking_config: None,
-            }
-        })
         .collect();
 
     Ok(result)
 }
 
-/// HuggingFace Hub API model entry (subset of fields).
+fn router_model_to_info(model: HfRouterModelEntry) -> Option<ModelInfo> {
+    let live_providers: Vec<HfRouterProviderEntry> = model
+        .providers
+        .into_iter()
+        .filter(|provider| provider.status == "live")
+        .collect();
+
+    if live_providers.is_empty() {
+        return None;
+    }
+
+    let has_text_io = model
+        .architecture
+        .as_ref()
+        .map(|arch| {
+            arch.output_modalities
+                .iter()
+                .any(|modality| modality == "text")
+                && arch
+                    .input_modalities
+                    .iter()
+                    .any(|modality| modality == "text")
+        })
+        .unwrap_or(true);
+    if !has_text_io {
+        return None;
+    }
+
+    let context_window = live_providers
+        .iter()
+        .filter_map(|provider| provider.context_length)
+        .max()
+        .unwrap_or_else(|| estimate_context_from_id(&model.model_id));
+    let max_output = live_providers
+        .iter()
+        .filter_map(|provider| provider.max_output)
+        .max()
+        .or(Some(4_096));
+    let input_cost = live_providers
+        .iter()
+        .filter_map(|provider| provider.pricing.as_ref().map(|pricing| pricing.input))
+        .reduce(f64::min)
+        .unwrap_or(0.0);
+    let output_cost = live_providers
+        .iter()
+        .filter_map(|provider| provider.pricing.as_ref().map(|pricing| pricing.output))
+        .reduce(f64::min)
+        .unwrap_or(0.0);
+    let vision = model
+        .architecture
+        .as_ref()
+        .map(|arch| {
+            arch.input_modalities
+                .iter()
+                .any(|modality| modality == "image")
+        })
+        .unwrap_or(false);
+    let tool_use = live_providers
+        .iter()
+        .any(|provider| provider.supports_tools);
+
+    Some(ModelInfo {
+        id: model.model_id.clone(),
+        provider_id: "huggingface".to_string(),
+        name: format_model_display_name(&model.model_id),
+        cost: Cost {
+            input: input_cost,
+            output: output_cost,
+        },
+        capabilities: Capabilities {
+            reasoning: false,
+            streaming: true,
+            vision,
+            tool_use,
+            thinking_levels: Vec::new(),
+        },
+        context_window,
+        max_output,
+        request_multiplier: None,
+        thinking_config: None,
+    })
+}
+
+/// Response body for the HuggingFace router `GET /v1/models` endpoint.
 #[derive(Debug, Deserialize)]
-struct HfModelEntry {
+struct HfRouterModelsResponse {
+    data: Vec<HfRouterModelEntry>,
+}
+
+/// Router model entry from the OpenAI-compatible `GET /v1/models` endpoint.
+#[derive(Debug, Deserialize)]
+struct HfRouterModelEntry {
     #[serde(rename = "id")]
     model_id: String,
     #[serde(default)]
-    tags: Vec<String>,
+    architecture: Option<HfRouterArchitecture>,
+    #[serde(default)]
+    providers: Vec<HfRouterProviderEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfRouterArchitecture {
+    #[serde(default)]
+    input_modalities: Vec<String>,
+    #[serde(default)]
+    output_modalities: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfRouterProviderEntry {
+    status: String,
+    #[serde(default)]
+    context_length: Option<usize>,
+    #[serde(default)]
+    max_output: Option<usize>,
+    #[serde(default)]
+    pricing: Option<HfRouterPricing>,
+    #[serde(default)]
+    supports_tools: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfRouterPricing {
+    input: f64,
+    output: f64,
 }
 
 /// Formats a HuggingFace model ID into a human-readable display name.
@@ -776,11 +863,27 @@ struct HfModelEntry {
 /// Strips the org prefix and converts hyphens/underscores to spaces.
 /// Examples: `"meta-llama/Llama-3.1-70B-Instruct"` → `"Llama 3.1 70B Instruct"`
 fn format_model_display_name(model_id: &str) -> String {
-    let name = model_id
+    let (repo_id, provider_suffix) =
+        model_id
+            .rsplit_once(':')
+            .map_or((model_id, None), |(repo_id, provider)| {
+                if repo_id.contains('/') {
+                    (repo_id, Some(provider))
+                } else {
+                    (model_id, None)
+                }
+            });
+    let name = repo_id
         .rsplit_once('/')
         .map(|(_, name)| name)
-        .unwrap_or(model_id);
-    name.replace('-', " ").replace('_', " ")
+        .unwrap_or(repo_id)
+        .replace('-', " ")
+        .replace('_', " ");
+
+    match provider_suffix {
+        Some(provider) => format!("{name} ({provider})"),
+        None => name,
+    }
 }
 
 /// Estimates context window size from the model ID.
@@ -788,7 +891,17 @@ fn format_model_display_name(model_id: &str) -> String {
 /// Looks for common size indicators in the model name (e.g., `4k`, `128k`).
 /// Falls back to parameter-size heuristics.
 fn estimate_context_from_id(model_id: &str) -> usize {
-    let lower = model_id.to_lowercase();
+    let lower = model_id
+        .rsplit_once(':')
+        .map_or(model_id, |(repo_id, provider)| {
+            if repo_id.contains('/') {
+                let _ = provider;
+                repo_id
+            } else {
+                model_id
+            }
+        })
+        .to_lowercase();
 
     // Explicit context markers
     if lower.contains("128k") || lower.contains("128000") {
@@ -861,6 +974,10 @@ mod tests {
             format_model_display_name("mistralai/Mixtral-8x7B-Instruct-v0.1"),
             "Mixtral 8x7B Instruct v0.1"
         );
+        assert_eq!(
+            format_model_display_name("deepseek-ai/DeepSeek-V4-Pro:together"),
+            "DeepSeek V4 Pro (together)"
+        );
         assert_eq!(format_model_display_name("plain-model"), "plain model");
     }
 
@@ -878,7 +995,89 @@ mod tests {
             estimate_context_from_id("mistralai/Mixtral-8x7B-Instruct-v0.1"),
             32_000
         );
+        assert_eq!(
+            estimate_context_from_id("Qwen/Qwen2.5-7B-Instruct-1M:featherless-ai"),
+            32_000
+        );
         assert_eq!(estimate_context_from_id("some-unknown/model-7b"), 32_000);
+    }
+
+    #[test]
+    fn test_router_model_to_info_uses_live_provider_metadata() {
+        let info = router_model_to_info(HfRouterModelEntry {
+            model_id: "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+            architecture: Some(HfRouterArchitecture {
+                input_modalities: vec!["text".to_string()],
+                output_modalities: vec!["text".to_string()],
+            }),
+            providers: vec![
+                HfRouterProviderEntry {
+                    status: "error".to_string(),
+                    context_length: Some(65_536),
+                    max_output: Some(2_048),
+                    pricing: Some(HfRouterPricing {
+                        input: 2.0,
+                        output: 8.0,
+                    }),
+                    supports_tools: false,
+                },
+                HfRouterProviderEntry {
+                    status: "live".to_string(),
+                    context_length: Some(131_072),
+                    max_output: Some(8_192),
+                    pricing: Some(HfRouterPricing {
+                        input: 0.9,
+                        output: 3.6,
+                    }),
+                    supports_tools: true,
+                },
+            ],
+        })
+        .expect("model should be included");
+
+        assert_eq!(info.id, "deepseek-ai/DeepSeek-V4-Pro");
+        assert_eq!(info.context_window, 131_072);
+        assert_eq!(info.max_output, Some(8_192));
+        assert!(info.capabilities.tool_use);
+        assert_eq!(info.cost.input, 0.9);
+        assert_eq!(info.cost.output, 3.6);
+    }
+
+    #[test]
+    fn test_router_model_to_info_skips_non_text_models() {
+        let info = router_model_to_info(HfRouterModelEntry {
+            model_id: "black-forest-labs/FLUX.1-dev".to_string(),
+            architecture: Some(HfRouterArchitecture {
+                input_modalities: vec!["text".to_string()],
+                output_modalities: vec!["image".to_string()],
+            }),
+            providers: vec![HfRouterProviderEntry {
+                status: "live".to_string(),
+                context_length: None,
+                max_output: None,
+                pricing: None,
+                supports_tools: false,
+            }],
+        });
+
+        assert!(info.is_none());
+    }
+
+    #[test]
+    fn test_router_model_to_info_skips_models_without_live_providers() {
+        let info = router_model_to_info(HfRouterModelEntry {
+            model_id: "some-org/offline-model".to_string(),
+            architecture: None,
+            providers: vec![HfRouterProviderEntry {
+                status: "error".to_string(),
+                context_length: Some(8_192),
+                max_output: None,
+                pricing: None,
+                supports_tools: false,
+            }],
+        });
+
+        assert!(info.is_none());
     }
 
     #[test]
@@ -939,7 +1138,7 @@ mod tests {
             model: "test-model".to_string(),
             messages: vec![],
             tools: vec![crate::llm::ToolDefinition {
-                name: "read_file".to_string(),
+                name: "read".to_string(),
                 description: "Read a file".to_string(),
                 parameters: json!({
                     "type": "object",
@@ -963,7 +1162,7 @@ mod tests {
         let tools = body["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["type"], "function");
-        assert_eq!(tools[0]["function"]["name"], "t_read_file");
+        assert_eq!(tools[0]["function"]["name"], "t_read");
     }
 
     #[test]

@@ -18,12 +18,12 @@ pub mod read;
 pub mod rm;
 pub mod truncate;
 pub mod write;
+pub mod xlsx;
 
 // Search tools
 pub mod glob;
 pub mod grep;
 pub mod list;
-pub mod search;
 
 // Shell tools
 pub mod bash;
@@ -321,7 +321,6 @@ pub fn create_core_registry() -> ToolRegistry {
     registry.register(Arc::new(glob::GlobTool));
     registry.register(Arc::new(list::ListTool));
     registry.register(Arc::new(grep::GrepTool));
-    registry.register(Arc::new(search::SearchTool));
 
     // Shell tools
     registry.register(Arc::new(bash::BashTool));

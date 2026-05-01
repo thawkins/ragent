@@ -582,11 +582,11 @@ The following are aliases for commonly requested operations:
 
 | Alias | Maps To |
 |-------|---------|
-| `view_file`, `read_file`, `get_file_contents`, `open_file` | `read` |
+| `read` | `read` |
 | `list_files`, `list_directory` | `list` |
 | `find_files` | `glob` |
-| `replace_in_file`, `update_file` | `edit` |
-| `search`, `search_in_repo`, `file_search` | `grep` |
+| `update_file` | `edit` |
+| `file_search` | `grep` |
 
 #### Execution Tools (10)
 
@@ -1202,7 +1202,14 @@ Various inline widgets rendered within the message panel.
 | `/init` | Analyze project and write to PROJECT_ANALYSIS.md |
 | **Tasks** ||
 | `/tasks` | List active background tasks |
-| `/cancel_task <id>` | Cancel a background task |
+| `/cancel <id>` | Cancel a background task |
+| `/bench list` | List supported benchmark suites and profiles |
+| `/bench init <suite-or-all-or-full>` | Initialize benchmark data under `benches/data/<suite>` in sample or full mode |
+| `/bench show` | Show benchmark defaults and the selected model |
+| `/bench run <target>` | Start a background benchmark run for a suite, profile, or `all` target and write workbook results |
+| `/bench status` | Show active or last benchmark run status |
+| `/bench open last` | Show the latest benchmark workbook path(s) and summary |
+| `/bench cancel` | Cancel the active benchmark run |
 | `/abort` | Abort current running agent |
 | **Tools** ||
 | `/tools` | List available tools with parameters |
@@ -1227,6 +1234,26 @@ Various inline widgets rendered within the message panel.
 | `/team broadcast <content>` | Broadcast to all teammates |
 | `/team spawn <agent>` | Spawn teammate agent |
 | `/team cleanup` | Cleanup team resources |
+
+### Benchmark Runner
+
+The TUI exposes a native benchmark workflow through `/bench` using the currently selected
+provider/model and the shared `ragent-bench` crate.
+
+- **Data roots:** `benches/data/<suite>/`
+- **Result workbooks:** `benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx`
+- **Virtual target:** `all` expands to every registered benchmark suite for both `/bench init` and `/bench run`
+- **Virtual target:** `full` is reserved for complete upstream dataset ingestion across every suite and stays gated until all suites implement full-data initialization
+- **Profiles:** `quick`, `standard`, and `agentic`
+- **Init modes:** default `/bench init` writes local sample fixtures; `/bench init <suite> --full` performs full upstream dataset ingestion when the suite supports it
+- **Background UX:** `/bench run ...` starts a background task, `/bench status` reports active or
+  completed state, `/bench open last` prints the latest workbook path(s), and `/bench cancel`
+  requests shutdown
+- **Resume:** `--resume` reuses an existing same-day workbook only when benchmark, model, and
+  config-hash sidecars match exactly
+
+The benchmark workbook schema is fixed across suites (`run`, `metrics`, `cases`, `artifacts`) so
+HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be compared directly.
 | **MCP** ||
 | `/mcp discover` | Discover MCP servers |
 | `/mcp list` | List connected MCP servers |

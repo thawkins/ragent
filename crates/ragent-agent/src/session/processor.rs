@@ -49,30 +49,33 @@ Rule: every response where you need information or need to act MUST start with a
 /// for any query that involves code symbols, types, or structure.
 fn build_codeindex_guidance_section_active() -> String {
     "\n## Code Intelligence — Codebase Index Tools\n\n\
-     A **codebase index** is active for this project. It provides fast, structured \
-     search across all indexed source files — symbols, references, dependencies, \
-     and documentation.\n\n\
-     **MANDATORY — You MUST use codeindex tools instead of grep/search for code symbol queries.**\n\
-     When the index is active, `grep` and `search` are the WRONG choice for finding \
-     functions, types, structs, enums, traits, or any named code entity. The index \
-     is faster, returns structured results with file/line/signature, and understands \
-     symbol kinds.\n\n\
-     **Decision flow — which tool to use:**\n\
-     - \"Where is function X defined?\" → `codeindex_search` (NOT grep)\n\
-     - \"Find all structs matching Y\" → `codeindex_symbols` with kind=struct (NOT grep)\n\
-     - \"Who calls function Z?\" → `codeindex_references` (NOT grep)\n\
-     - \"What does file A import?\" → `codeindex_dependencies` (NOT grep for imports)\n\
-     - \"List all functions in file B\" → `codeindex_symbols` with file_path (NOT grep)\n\
-     - \"Is the index working?\" → `codeindex_status`\n\
-     - \"Re-index after bulk edits\" → `codeindex_reindex`\n\n\
-     **When grep/search IS appropriate:**\n\
-     - Searching for arbitrary text strings, comments, or prose (not symbols)\n\
-     - Finding TODO/FIXME/HACK comments\n\
-     - Searching config files, markdown, or non-code text\n\
-     - Pattern matching across many files for non-structural content\n\n\
-     **Rule of thumb:** If you are looking for a named code entity (function, type, \
-     variable, import), use codeindex. If you are searching for a text pattern that \
-     is NOT a code symbol, use grep/search.\n\n"
+           A **codebase index** is active for this project. It provides fast, structured \
+           search across all indexed source files — symbols, references, dependencies, \
+           and documentation.\n\n\
+           **MANDATORY — You MUST use codeindex tools instead of grep for code symbol queries.**\n\
+           When the index is active, `grep` is the WRONG choice for finding \
+           functions, types, structs, enums, traits, or any named code entity. The index \
+           is faster, returns structured results with file/line/signature, and understands \
+           symbol kinds.\n\n\
+           **Decision flow — which tool to use:**\n\
+           - \"Where is function X defined?\" → `codeindex_search` (NOT grep)\n\
+           - \"Find all structs matching Y\" → `codeindex_symbols` with kind=struct (NOT grep)\n\
+           - \"Who calls function Z?\" → `codeindex_references` (NOT grep)\n\
+           - \"What does file A import?\" → `codeindex_dependencies` (NOT grep for imports)\n\
+           - \"List all functions in file B\" → `codeindex_symbols` with file_path (NOT grep)\n\
+           - \"Is the index working?\" → `codeindex_status`\n\
+           - \"Re-index after bulk edits\" → `codeindex_reindex`\n\n\
+           **When grep IS appropriate:**\n\
+           - Searching for arbitrary text strings, comments, or prose (not symbols)\n\
+           - Finding TODO/FIXME/HACK comments\n\
+           - Searching config files, markdown, or non-code text\n\
+           - Pattern matching across many files for non-structural content\n\n\
+           **Rule of thumb:** If you are looking for a named code entity (function, type, \
+           variable, import), use codeindex. If you are searching for a text pattern that \
+           is NOT a code symbol, use grep with the `pattern` parameter.\n\n\
+           **CRITICAL — grep parameter requirement:**\n\
+           The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
+           Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n"
         .to_string()
 }
 
@@ -82,13 +85,15 @@ fn build_codeindex_guidance_section_active() -> String {
 /// that grep/search should be used as fallback. Suggests enabling the index.
 fn build_codeindex_guidance_section_disabled() -> String {
     "\n## Code Intelligence — Codebase Index Tools\n\n\
-     The codebase index is **not active** for this project. Code index tools \
-     (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
-     `codeindex_dependencies`) will return \"not available\" if called.\n\n\
-     Use `grep` or `search` for code lookups in the meantime. You can suggest \
-     the user enable the index with `/codeindex on` for faster, structured \
-     symbol search.\n\n"
-        .to_string()
+           The codebase index is **not active** for this project. Code index tools \
+           (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, \
+           `codeindex_dependencies`) will return \"not available\" if called.\n\n\
+           Use `grep` with the `pattern` parameter for code lookups in the meantime. You can suggest \
+           the user enable the index with `/codeindex on` for faster, structured \
+           symbol search.\n\n\
+           **CRITICAL — grep parameter requirement:**\n\
+           The `grep` tool requires the `pattern` parameter. This is the ONLY required field. \
+           Do NOT omit it. Example: `grep(pattern: \"fn main\", path: \"src\")`\n\n"        .to_string()
 }
 
 /// Build a concise system-prompt section listing every registered tool by name and description.
@@ -314,7 +319,7 @@ pub(crate) async fn check_permission_with_prompt(
         || permission == "edit"
         || permission == "write"
     {
-        use crate::dir_lists::{get_allowlist, get_denylist};
+        use ragent_config::dir_lists::{get_allowlist, get_denylist};
 
         // Denylist takes precedence - immediately reject
         for pattern in get_denylist() {
@@ -435,7 +440,7 @@ pub struct SessionProcessor {
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
     /// LLM stream configuration (timeouts, retries, backoff).
-    pub stream_config: crate::config::StreamConfig,
+    pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
     pub extraction_engine: std::sync::OnceLock<Arc<crate::memory::ExtractionEngine>>,
     /// Auto-approve all permissions without prompting (set by --yes / --no-prompt CLI flag).
@@ -640,7 +645,7 @@ impl SessionProcessor {
                 .ok()
                 .flatten(),
             "generic_openai" => {
-                let cfg = crate::config::Config::load().ok();
+                let cfg = crate::Config::load().ok();
                 self.storage_op(|s| Ok(s.get_setting("generic_openai_api_base").ok().flatten()))
                     .await
                     .ok()
@@ -697,8 +702,9 @@ impl SessionProcessor {
         // Load config once for hooks and other config-dependent features
         let session_config = {
             let _scope = profiler.scope("config.load");
-            crate::config::Config::load().unwrap_or_default()
+            crate::Config::load().unwrap_or_default()
         };
+        let parsed_hook_configs = crate::hooks::parse_hook_configs(&session_config.hooks);
 
         // Fire on_session_start hook when this is the first message in the session
         let has_prior_messages = {
@@ -714,7 +720,7 @@ impl SessionProcessor {
         if !has_prior_messages {
             let _scope = profiler.scope("hooks.on_session_start");
             crate::hooks::fire_hooks(
-                &session_config.hooks,
+                &parsed_hook_configs,
                 crate::hooks::HookTrigger::OnSessionStart,
                 &working_dir,
                 &[],
@@ -1131,30 +1137,36 @@ impl SessionProcessor {
                         match client.chat(attempt_request).await {
                             Ok(s) => s,
                             Err(e) => {
+                                let error_message = e.to_string();
                                 debug!(
                                     "LLM call failed (attempt {}): {}",
                                     attempt + 1,
-                                    redact_secrets(&e.to_string())
+                                    redact_secrets(&error_message)
                                 );
-                                if attempt < max_retries {
+                                if attempt < max_retries
+                                    && !is_permanent_llm_api_error(&error_message)
+                                {
                                     self.event_bus.publish(Event::AgentNotice {
                                         session_id: session_id.to_string(),
-                                        message: format!("{} — will retry", e),
+                                        message: format!("{error_message} — will retry"),
                                     });
                                     continue 'retry;
                                 }
                                 self.event_bus.publish(Event::AgentError {
                                     session_id: session_id.to_string(),
-                                    error: e.to_string(),
+                                    error: error_message.clone(),
                                 });
-                                let error_msg = e.to_string();
                                 crate::hooks::fire_hooks(
-                                    &session_config.hooks,
+                                    &parsed_hook_configs,
                                     crate::hooks::HookTrigger::OnError,
                                     &working_dir,
-                                    &[("RAGENT_ERROR", &error_msg)],
+                                    &[("RAGENT_ERROR", &error_message)],
                                 );
-                                bail!("LLM call failed after {} attempts: {e}", max_retries + 1);
+                                bail!(
+                                    "LLM call failed after {} attempts: {}",
+                                    max_retries + 1,
+                                    error_message
+                                );
                             }
                         }
                     };
@@ -1571,7 +1583,7 @@ impl SessionProcessor {
                     let session_id_str = session_id.to_string();
                     let session_id_for_perm = session_id.to_string();
                     let hook_working_dir = working_dir.clone();
-                    let hook_configs = session_config.hooks.clone();
+                    let hook_configs = parsed_hook_configs.clone();
                     let extraction_engine = self.extraction_engine.clone();
                     let storage_clone = self.session_manager.storage().clone();
                     let profiler = profiler.clone();
@@ -1670,13 +1682,8 @@ impl SessionProcessor {
                                         extract_resource_from_input(&tool_input, &tc_clone.name);
 
                                     // For bash tool, split command on delimiters and check each sub-command
-                                    if tc_clone.name == "bash"
-                                        || tc_clone.name == "execute_bash"
-                                        || tc_clone.name == "run_shell_command"
-                                        || tc_clone.name == "run_terminal_cmd"
-                                    {
+                                    if tc_clone.name == "bash" {
                                         let sub_commands = split_bash_command(&resource);
-
                                         // Check if all commands are in the safe whitelist
                                         use crate::tool::bash::is_safe_command;
                                         let all_safe = sub_commands.iter().all(|cmd| {
@@ -2083,7 +2090,7 @@ impl SessionProcessor {
         {
             let _scope = profiler.scope("hooks.on_session_end");
             crate::hooks::fire_hooks(
-                &session_config.hooks,
+                &parsed_hook_configs,
                 crate::hooks::HookTrigger::OnSessionEnd,
                 &working_dir,
                 &[],
@@ -2180,7 +2187,7 @@ impl SessionProcessor {
         // Build a minimal system prompt using the agent's configured prompt.
         let (git_status, readme, agents_md, file_tree) =
             crate::agent::collect_prompt_context(&working_dir).await;
-        let run_init_config = crate::config::Config::load().unwrap_or_default();
+        let run_init_config = crate::Config::load().unwrap_or_default();
         let system_prompt = crate::agent::build_system_prompt_with_storage(
             agent,
             &working_dir,
@@ -2663,6 +2670,52 @@ fn chat_request_payload_bytes(request: &ChatRequest) -> u64 {
         .unwrap_or(0)
 }
 
+pub(crate) fn is_token_overflow_error_message(error_msg: &str) -> bool {
+    let msg = error_msg.to_lowercase();
+    msg.contains("prompt token count") && msg.contains("exceeds")
+        || msg.contains("context_length_exceeded")
+        || msg.contains("maximum context length")
+        || msg.contains("prompt is too long")
+        || msg.contains("input too large")
+}
+
+fn extract_error_status_code(error_msg: &str) -> Option<u16> {
+    for marker in ["HTTP ", "http ", "API error (", "api error (", "status "] {
+        if let Some(rest) = error_msg.split(marker).nth(1) {
+            let digits: String = rest
+                .chars()
+                .skip_while(|c| !c.is_ascii_digit())
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if digits.len() == 3
+                && let Ok(code) = digits.parse::<u16>()
+            {
+                return Some(code);
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn is_permanent_llm_api_error(error_msg: &str) -> bool {
+    if is_token_overflow_error_message(error_msg) {
+        return false;
+    }
+
+    let lower = error_msg.to_lowercase();
+    if lower.contains("invalid_request_error")
+        || lower.contains("model_not_supported")
+        || lower.contains("access denied for model")
+        || lower.contains("invalid or expired api token")
+    {
+        return true;
+    }
+
+    extract_error_status_code(error_msg)
+        .map(|code| (400..500).contains(&code) && code != 408 && code != 429)
+        .unwrap_or(false)
+}
+
 /// Determines whether a stream error message represents a transient failure
 /// that should be retried rather than treated as fatal.
 ///
@@ -2809,8 +2862,8 @@ pub fn detect_incomplete_file_task(user_text: &str, assistant_parts: &[MessagePa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::tool_family_names;
     use crate::permission::{PermissionAction, PermissionChecker};
+    use ragent_config::tool_family_names;
     use serde_json::json;
 
     #[tokio::test]
@@ -3031,6 +3084,30 @@ mod tests {
             0,
             4,
             false
+        ));
+    }
+
+    #[test]
+    fn test_is_permanent_llm_api_error_detects_model_not_supported() {
+        let error = "HuggingFace API error (400 Bad Request): {\"error\":{\"message\":\"The requested model `nvidia/Llama-3.1-Nemotron-70B-Instruct-HF` is not supported by any provider you have enabled.\",\"type\":\"invalid_request_error\",\"param\":\"model\",\"code\":\"model_not_supported\"}}";
+
+        assert!(is_permanent_llm_api_error(error));
+    }
+
+    #[test]
+    fn test_is_permanent_llm_api_error_ignores_retryable_statuses() {
+        assert!(!is_permanent_llm_api_error(
+            "OpenAI API error (429 Too Many Requests): rate limited"
+        ));
+        assert!(!is_permanent_llm_api_error(
+            "HTTP 408 Request Timeout: upstream timed out"
+        ));
+    }
+
+    #[test]
+    fn test_is_permanent_llm_api_error_ignores_token_overflow() {
+        assert!(!is_permanent_llm_api_error(
+            "OpenAI API error (400 Bad Request): context_length_exceeded"
         ));
     }
 

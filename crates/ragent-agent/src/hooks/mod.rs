@@ -28,6 +28,7 @@
 //! - `RAGENT_ERROR` — error message (only for `on_error` trigger)
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::path::Path;
 
 /// Trigger point for a lifecycle hook.
@@ -90,6 +91,23 @@ pub struct HookConfig {
     /// Optional timeout in seconds (default: 30).
     #[serde(default = "default_hook_timeout")]
     pub timeout_secs: u64,
+}
+
+/// Parses hook definitions loaded from config JSON into typed hook configs.
+#[must_use]
+pub fn parse_hook_configs(raw_hooks: &[Value]) -> Vec<HookConfig> {
+    raw_hooks
+        .iter()
+        .filter_map(
+            |value| match serde_json::from_value::<HookConfig>(value.clone()) {
+                Ok(hook) => Some(hook),
+                Err(error) => {
+                    tracing::warn!(error = %error, "Ignoring invalid hook config entry");
+                    None
+                }
+            },
+        )
+        .collect()
 }
 
 const fn default_hook_timeout() -> u64 {

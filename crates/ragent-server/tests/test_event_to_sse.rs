@@ -106,10 +106,10 @@ fn test_tool_call_start() {
     let (name, v) = parse_data(&Event::ToolCallStart {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "read_file".into(),
+        tool: "read".into(),
     });
     assert_eq!(name, "tool_call_start");
-    assert_eq!(v["tool"], "read_file");
+    assert_eq!(v["tool"], "read");
     assert_eq!(v["call_id"], "c1");
 }
 
@@ -118,7 +118,7 @@ fn test_tool_call_end_success() {
     let (name, v) = parse_data(&Event::ToolCallEnd {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "read_file".into(),
+        tool: "read".into(),
         error: None,
         duration_ms: 42,
     });
@@ -157,7 +157,7 @@ fn test_tool_result() {
     let (name, v) = parse_data(&Event::ToolResult {
         session_id: "s1".into(),
         call_id: "c1".into(),
-        tool: "read_file".into(),
+        tool: "read".into(),
         content: "file contents".into(),
         content_line_count: 5,
         metadata: Some(serde_json::json!({"lines_read": 5})),
@@ -189,12 +189,12 @@ fn test_tool_result_no_metadata() {
 fn test_tools_sent() {
     let (name, v) = parse_data(&Event::ToolsSent {
         session_id: "s1".into(),
-        tools: vec!["read_file".into(), "bash".into()],
+        tools: vec!["read".into(), "bash".into()],
     });
     assert_eq!(name, "tools_sent");
     let arr = v["tools"].as_array().unwrap();
     assert_eq!(arr.len(), 2);
-    assert_eq!(arr[0], "read_file");
+    assert_eq!(arr[0], "read");
 }
 
 // ── Permission events ────────────────────────────────────────────────────

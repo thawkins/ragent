@@ -95,7 +95,7 @@ impl MetadataBuilder {
 
     /// Add an exit code field to the metadata.
     ///
-    /// Use this for execution tools like bash or execute_python.
+    /// Use this for execution tools like bash.
     #[must_use]
     pub fn exit_code(mut self, code: i32) -> Self {
         self.inner

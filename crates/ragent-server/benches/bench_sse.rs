@@ -32,7 +32,7 @@ fn make_events() -> Vec<(&'static str, Event)> {
             Event::ToolCallEnd {
                 session_id: "sess-001".into(),
                 call_id: "call-42".into(),
-                tool: "read_file".into(),
+                tool: "read".into(),
                 error: None,
                 duration_ms: 123,
             },
@@ -50,7 +50,7 @@ fn make_events() -> Vec<(&'static str, Event)> {
             Event::ToolResult {
                 session_id: "sess-001".into(),
                 call_id: "call-42".into(),
-                tool: "read_file".into(),
+                tool: "read".into(),
                 content: "fn main() {\n    println!(\"Hello\");\n}\n".into(),
                 content_line_count: 3,
                 metadata: Some(serde_json::json!({"lines_read": 3})),

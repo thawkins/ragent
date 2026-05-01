@@ -412,6 +412,9 @@ pub async fn run_tui(
         // Check for completed /swarm LLM decomposition results.
         app.poll_pending_swarm();
 
+        // Check for completed /bench background runs.
+        app.poll_pending_bench();
+
         // Unblock swarm tasks whose dependencies are satisfied.
         app.poll_swarm_unblock();
 

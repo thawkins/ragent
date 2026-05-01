@@ -17,8 +17,10 @@ pub struct Config {
     #[serde(default)]
     pub username: Option<String>,
     /// Name of the agent to use when none is specified.
-    #[serde(default = "default_agent_name")]
+    #[serde(default = "default_agent_name", alias = "defaultAgent")]
     pub default_agent: String,
+    #[serde(skip)]
+    specified_default_agent: bool,
     /// LLM provider configurations keyed by provider id.
     #[serde(default)]
     pub provider: HashMap<String, ProviderConfig>,
@@ -95,6 +97,7 @@ struct ToolVisibilitySpecified {
     gitlab: bool,
     teams: bool,
     agents: bool,
+    plan: bool,
     codeindex: bool,
 }
 
@@ -119,6 +122,9 @@ pub struct ToolVisibilityConfig {
     /// Autonomous agent task tools (new_task, list_tasks, cancel_task, etc.).
     #[serde(default = "default_false")]
     pub agents: bool,
+    /// Plan-mode tools (plan_enter, plan_exit).
+    #[serde(default = "default_false")]
+    pub plan: bool,
     /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
     /// Default `true` — codeindex tools are visible when the subsystem is enabled.
     #[serde(default = "default_true")]
@@ -135,6 +141,7 @@ impl Default for ToolVisibilityConfig {
             gitlab: false,
             teams: false,
             agents: false,
+            plan: false,
             codeindex: true,
             specified: ToolVisibilitySpecified::default(),
         }
@@ -150,6 +157,7 @@ impl ToolVisibilityConfig {
             ("gitlab", self.gitlab),
             ("teams", self.teams),
             ("agents", self.agents),
+            ("plan", self.plan),
             ("codeindex", self.codeindex),
         ]
         .into_iter()
@@ -168,6 +176,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             gitlab: Option<bool>,
             teams: Option<bool>,
             agents: Option<bool>,
+            plan: Option<bool>,
             codeindex: Option<bool>,
         }
 
@@ -178,6 +187,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
             gitlab: raw.gitlab.unwrap_or_else(default_false),
             teams: raw.teams.unwrap_or_else(default_false),
             agents: raw.agents.unwrap_or_else(default_false),
+            plan: raw.plan.unwrap_or_else(default_false),
             codeindex: raw.codeindex.unwrap_or_else(default_true),
             specified: ToolVisibilitySpecified {
                 office: raw.office.is_some(),
@@ -185,6 +195,7 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
                 gitlab: raw.gitlab.is_some(),
                 teams: raw.teams.is_some(),
                 agents: raw.agents.is_some(),
+                plan: raw.plan.is_some(),
                 codeindex: raw.codeindex.is_some(),
             },
         })
@@ -270,6 +281,7 @@ pub fn tool_family_names(switch: &str) -> Option<&'static [&'static str]> {
             "task_complete",
             "wait_tasks",
         ]),
+        "plan" => Some(&["plan_enter", "plan_exit"]),
         "codeindex" => Some(&[
             "codeindex_search",
             "codeindex_status",
@@ -724,7 +736,7 @@ impl Config {
 
         // Inline config from environment variable
         if let Ok(content) = std::env::var("RAGENT_CONFIG_CONTENT") {
-            let overlay: Self = serde_json::from_str(&content).map_err(|e| {
+            let mut overlay: Self = serde_json::from_str(&content).map_err(|e| {
                 let line = e.line();
                 let column = e.column();
                 let problematic_line = content
@@ -748,6 +760,10 @@ impl Config {
                     e
                 )
             })?;
+            let overlay_value: serde_json::Value =
+                serde_json::from_str(&content).expect("valid JSON already parsed into Config");
+            overlay.specified_default_agent = overlay_value.get("defaultAgent").is_some()
+                || overlay_value.get("default_agent").is_some();
             config = Self::merge(config, overlay);
         }
 
@@ -759,7 +775,7 @@ impl Config {
             anyhow::anyhow!("Failed to read config file '{}': {}", path.display(), e)
         })?;
 
-        let config: Self = serde_json::from_str(&content).map_err(|e| {
+        let mut config: Self = serde_json::from_str(&content).map_err(|e| {
             // Extract line and column from serde_json error
             let line = e.line();
             let column = e.column();
@@ -787,6 +803,10 @@ impl Config {
                 e
             )
         })?;
+        let config_value: serde_json::Value =
+            serde_json::from_str(&content).expect("valid JSON already parsed into Config");
+        config.specified_default_agent = config_value.get("defaultAgent").is_some()
+            || config_value.get("default_agent").is_some();
 
         Ok(config)
     }
@@ -867,9 +887,10 @@ impl Config {
         if overlay.username.is_some() {
             base.username = overlay.username;
         }
-        if overlay.default_agent != default_agent_name()
-            && (overlay.default_agent != default_agent_name()
-                || base.default_agent == default_agent_name())
+        if overlay.specified_default_agent
+            || overlay.default_agent != default_agent_name()
+                && (overlay.default_agent != default_agent_name()
+                    || base.default_agent == default_agent_name())
         {
             base.default_agent = overlay.default_agent;
         }
@@ -1014,6 +1035,9 @@ impl Config {
         }
         if overlay.tool_visibility.specified.agents {
             base.tool_visibility.agents = overlay.tool_visibility.agents;
+        }
+        if overlay.tool_visibility.specified.plan {
+            base.tool_visibility.plan = overlay.tool_visibility.plan;
         }
         if overlay.tool_visibility.specified.codeindex {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;

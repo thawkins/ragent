@@ -4280,7 +4280,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "clap",
@@ -4298,7 +4298,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4365,8 +4365,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "ragent-bench"
+version = "0.1.0-alpha.55"
+dependencies = [
+ "anyhow",
+ "calamine",
+ "chrono",
+ "flate2",
+ "futures",
+ "ragent-agent",
+ "ragent-tools-core",
+ "ragent-types",
+ "reqwest 0.12.28",
+ "rust_xlsxwriter",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ragent-codeindex"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "blake3",
@@ -4410,6 +4433,7 @@ dependencies = [
  "ragent-types",
  "serde",
  "serde_json",
+ "serial_test",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -4458,7 +4482,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4509,7 +4533,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4550,6 +4574,7 @@ dependencies = [
  "ragent-types",
  "rayon",
  "regex",
+ "rust_xlsxwriter",
  "serde",
  "serde_json",
  "sha2",
@@ -4586,6 +4611,7 @@ dependencies = [
  "ragent-codeindex",
  "ragent-config",
  "ragent-storage",
+ "ragent-tools-core",
  "ragent-types",
  "reqwest 0.12.28",
  "rust_xlsxwriter",
@@ -4622,7 +4648,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "0.1.0-alpha.54"
+version = "0.1.0-alpha.55"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4639,6 +4665,7 @@ dependencies = [
  "lru 0.12.5",
  "pulldown-cmark",
  "ragent-agent",
+ "ragent-bench",
  "ragent-codeindex",
  "ragent-config",
  "ragent-prompt_opt",
@@ -4943,6 +4970,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",

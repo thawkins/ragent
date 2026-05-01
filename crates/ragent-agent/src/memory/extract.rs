@@ -49,10 +49,10 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::config::AutoExtractConfig;
 use crate::event::EventBus;
 use crate::internal_llm::{InternalLlmService, InternalLlmTaskKind, InternalTaskLimits};
 use crate::storage::Storage;
+use ragent_config::AutoExtractConfig;
 
 // ── MemoryCandidate ──────────────────────────────────────────────────────────
 

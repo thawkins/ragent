@@ -24,12 +24,12 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::config::{CompactionConfig, EvictionConfig, MemoryConfig};
 use crate::event::EventBus;
 use crate::memory::block::BlockScope;
 use crate::memory::embedding::{EmbeddingProvider, cosine_similarity, deserialise_embedding};
 use crate::memory::storage::{BlockStorage, FileBlockStorage};
 use crate::storage::Storage;
+use ragent_config::{CompactionConfig, EvictionConfig, MemoryConfig};
 
 // ── Memory Deduplication ──────────────────────────────────────────────────────
 

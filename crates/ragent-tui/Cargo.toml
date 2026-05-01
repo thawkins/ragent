@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 ragent-core = { package = "ragent-agent", path = "../ragent-agent" }
+ragent-bench = { path = "../ragent-bench" }
 ragent-team = { path = "../ragent-team" }
 ragent-config = { path = "../ragent-config" }
 ragent-types = { path = "../ragent-types" }

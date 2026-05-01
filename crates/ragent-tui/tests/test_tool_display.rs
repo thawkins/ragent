@@ -107,43 +107,12 @@ fn test_input_summary_websearch_tool() {
 
 #[test]
 fn test_canonical_tool_name_aliases() {
-    assert_eq!(canonical_tool_name("read_file"), "read");
-    assert_eq!(canonical_tool_name("view_file"), "read");
-    assert_eq!(canonical_tool_name("get_file_contents"), "read");
-    assert_eq!(canonical_tool_name("open_file"), "read");
-
-    assert_eq!(canonical_tool_name("list_files"), "list");
-    assert_eq!(canonical_tool_name("list_directory"), "list");
-
-    assert_eq!(canonical_tool_name("find_files"), "glob");
-
-    assert_eq!(canonical_tool_name("search_in_repo"), "search");
-    assert_eq!(canonical_tool_name("file_search"), "search");
-
-    assert_eq!(canonical_tool_name("replace_in_file"), "edit");
     assert_eq!(canonical_tool_name("update_file"), "write");
 
-    assert_eq!(canonical_tool_name("run_shell_command"), "bash");
-    assert_eq!(canonical_tool_name("execute_bash"), "bash");
     assert_eq!(canonical_tool_name("run_code"), "bash");
 
     // Unknown tools return themselves
     assert_eq!(canonical_tool_name("custom_tool"), "custom_tool");
-}
-
-#[test]
-fn test_alias_resolves_to_canonical_input_summary() {
-    // read_file should produce same summary as read
-    let alias_input = json!({"path": "test.txt"});
-    let canonical_input = json!({"path": "test.txt"});
-
-    let alias_summary = tool_input_summary("read_file", &alias_input, "/project");
-    let canonical_summary = tool_input_summary("read", &canonical_input, "/project");
-
-    assert_eq!(
-        alias_summary, canonical_summary,
-        "Alias should produce same summary as canonical"
-    );
 }
 
 // =============================================================================
@@ -394,7 +363,6 @@ fn test_truncate_str_unicode() {
 fn test_capitalize_tool_name() {
     assert_eq!(capitalize_tool_name("read"), "Read");
     assert_eq!(capitalize_tool_name("bash"), "Bash");
-    assert_eq!(capitalize_tool_name("execute_python"), "Execute_python");
     assert_eq!(capitalize_tool_name(""), "");
 }
 

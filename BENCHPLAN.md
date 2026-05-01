@@ -144,7 +144,7 @@ This plan uses a practical top 10 that are widely cited, strongly coding-focused
 /bench init swebench-lite
 /bench run quick
 /bench run humaneval
-/bench run swebench-lite --limit 25
+/bench run swebench-lite --cap 25
 /bench run livecodebench --release release_v6 --scenario codegeneration
 /bench run all --yes
 ```
@@ -154,6 +154,7 @@ This plan uses a practical top 10 that are widely cited, strongly coding-focused
 | Flag | Meaning |
 |---|---|
 | `--limit <N>` | Limit number of benchmark items for this run |
+| `--cap <N>` | Alias for `--limit <N>` |
 | `--samples <K>` | Number of generations per case when benchmark supports pass@k |
 | `--subset <name>` | Benchmark-specific subset (`lite`, `verified`, `hard`, etc.) |
 | `--release <version>` | Dataset release/version (LiveCodeBench, etc.) |

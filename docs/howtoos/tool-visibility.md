@@ -15,6 +15,7 @@ The available switches are:
 | `gitlab` | `off` | GitLab issue, MR, pipeline, and job tools |
 | `teams` | `off` | Team coordination tools |
 | `agents` | `off` | Autonomous agent task tools |
+| `plan` | `off` | Plan-mode tools |
 | `codeindex` | `on` | Code index tools |
 
 When a switch is `off`, tools in that family are excluded from:
@@ -43,6 +44,7 @@ Examples:
 /tools office on
 /tools teams off
 /tools agents off
+/tools plan off
 /tools codeindex off
 ```
 
@@ -61,6 +63,7 @@ You can also configure visibility directly in `ragent.json`:
     "gitlab": false,
     "teams": false,
     "agents": false,
+    "plan": false,
     "codeindex": true
   }
 }

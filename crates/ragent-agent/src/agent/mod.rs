@@ -684,6 +684,20 @@ fn rule(
     }
 }
 
+fn config_permission_rule_to_runtime(
+    rule: &ragent_config::permission::PermissionRule,
+) -> PermissionRule {
+    PermissionRule {
+        permission: Permission::from(rule.permission.to_string().as_str()),
+        pattern: rule.pattern.clone(),
+        action: match rule.action {
+            ragent_config::permission::PermissionAction::Allow => PermissionAction::Allow,
+            ragent_config::permission::PermissionAction::Deny => PermissionAction::Deny,
+            ragent_config::permission::PermissionAction::Ask => PermissionAction::Ask,
+        },
+    }
+}
+
 /// Returns the default permission ruleset applied when a custom agent does not
 /// specify its own `permissions` array.
 #[must_use]
@@ -749,7 +763,7 @@ pub fn default_thinking_config_for_levels(levels: &[ThinkingLevel]) -> ThinkingC
 /// Precedence: config per-model → config per-provider → model metadata → built-in default.
 #[must_use]
 pub fn fallback_thinking_for_model_ref(
-    config: &crate::config::Config,
+    config: &crate::Config,
     provider_registry: &crate::provider::ProviderRegistry,
     model_ref: &ModelRef,
 ) -> Option<ThinkingConfig> {
@@ -769,7 +783,7 @@ pub fn fallback_thinking_for_model_ref(
 /// Applies fallback thinking to an agent when it has a resolved model but no explicit default.
 pub fn apply_fallback_thinking(
     agent: &mut AgentInfo,
-    config: &crate::config::Config,
+    config: &crate::Config,
     provider_registry: &crate::provider::ProviderRegistry,
 ) {
     if agent.thinking.is_none()
@@ -795,7 +809,7 @@ pub fn apply_fallback_thinking(
 /// let agent = resolve_agent("general", &config).unwrap();
 /// assert_eq!(agent.name, "general");
 /// ```
-pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Result<AgentInfo> {
+pub fn resolve_agent(name: &str, config: &crate::Config) -> anyhow::Result<AgentInfo> {
     let builtins = create_builtin_agents();
     let mut agent = builtins
         .into_iter()
@@ -826,7 +840,11 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
             agent.max_steps = Some(max_steps);
         }
         if !agent_config.permission.is_empty() {
-            agent.permission = agent_config.permission.clone();
+            agent.permission = agent_config
+                .permission
+                .iter()
+                .map(config_permission_rule_to_runtime)
+                .collect();
         }
         agent.hidden = agent_config.hidden;
         if !agent_config.skills.is_empty() {
@@ -861,7 +879,7 @@ pub fn resolve_agent(name: &str, config: &crate::config::Config) -> anyhow::Resu
 /// ```
 pub fn resolve_agent_with_customs(
     name: &str,
-    config: &crate::config::Config,
+    config: &crate::Config,
     working_dir: &Path,
 ) -> anyhow::Result<AgentInfo> {
     let (custom_defs, _) = custom::load_custom_agents(working_dir);
@@ -1135,7 +1153,7 @@ pub fn build_system_prompt_with_storage(
     readme: Option<&str>,
     agents_md: Option<&str>,
     storage: Option<&crate::storage::Storage>,
-    memory_config: Option<&crate::config::MemoryConfig>,
+    memory_config: Option<&crate::MemoryConfig>,
 ) -> String {
     let mut prompt = String::new();
 
@@ -1398,7 +1416,7 @@ pub fn build_system_prompt_with_storage(
             .iter()
             .filter(|a| a.mode == AgentMode::Subagent && !a.hidden)
             .collect();
-        let max_background_agents = crate::config::Config::load()
+        let max_background_agents = crate::Config::load()
             .map(|c| c.experimental.max_background_agents)
             .unwrap_or(crate::task::DEFAULT_MAX_BACKGROUND_TASKS);
 

@@ -156,7 +156,7 @@ impl SessionManager {
             updated_at: now,
             archived_at: None,
             summary: None,
-            config_path: crate::config::Config::load()
+            config_path: crate::Config::load()
                 .ok()
                 .and_then(|_| std::env::var("RAGENT_CONFIG").ok())
                 .map(PathBuf::from),

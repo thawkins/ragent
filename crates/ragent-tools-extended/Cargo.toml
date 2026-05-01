@@ -11,6 +11,7 @@ repository = "https://github.com/thawkins/ragent"
 ragent-codeindex = { path = "../ragent-codeindex" }
 ragent-config = { path = "../ragent-config" }
 ragent-storage = { path = "../ragent-storage" }
+ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-types = { path = "../ragent-types" }
 
 tokio = { workspace = true }

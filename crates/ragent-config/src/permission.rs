@@ -211,6 +211,16 @@ pub struct PermissionChecker {
 }
 
 impl PermissionChecker {
+    fn permission_candidates(permission: &str) -> Vec<Permission> {
+        let normalized = Permission::from(permission);
+        let exact = Permission::Custom(permission.to_string());
+        if normalized == exact {
+            vec![normalized]
+        } else {
+            vec![exact, normalized]
+        }
+    }
+
     /// Creates a new checker with the given static ruleset.
     ///
     /// # Examples
@@ -257,14 +267,16 @@ impl PermissionChecker {
     /// ```
     #[must_use]
     pub fn check(&self, permission: &str, path: &str) -> PermissionAction {
-        let target = Permission::from(permission);
+        let targets = Self::permission_candidates(permission);
         let wildcard = Permission::Custom("*".to_string());
 
         // Check "always" grants first
-        if let Some(matchers) = self.always_grants.get(&target) {
-            for matcher in matchers {
-                if matcher.is_match(path) {
-                    return PermissionAction::Allow;
+        for target in &targets {
+            if let Some(matchers) = self.always_grants.get(target) {
+                for matcher in matchers {
+                    if matcher.is_match(path) {
+                        return PermissionAction::Allow;
+                    }
                 }
             }
         }
@@ -272,7 +284,7 @@ impl PermissionChecker {
         // Evaluate ruleset (last matching rule wins, like CSS specificity)
         let mut result = PermissionAction::Ask;
         for rule in &self.ruleset {
-            if (rule.permission == target || rule.permission == wildcard)
+            if (targets.contains(&rule.permission) || rule.permission == wildcard)
                 && let Some(pattern) = &rule.pattern
                 && let Ok(glob) = globset::Glob::new(pattern)
             {

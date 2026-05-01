@@ -23,7 +23,7 @@ use serde_json::Value;
 use tokio::process::Command;
 use tokio::sync::{RwLock, Semaphore};
 
-use crate::config::{McpServerConfig, McpTransport};
+use ragent_config::{McpServerConfig, McpTransport};
 
 pub use discovery::{DiscoveredMcpServer, McpDiscoverySource, discover as discover_servers};
 

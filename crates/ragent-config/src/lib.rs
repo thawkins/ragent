@@ -15,8 +15,9 @@ pub mod yolo;
 
 // Re-export commonly used types
 pub use config::{
-    AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, InternalLlmConfig,
-    InternalLlmDownloadPolicy, ModelConfig, ProviderConfig, ToolVisibilityConfig,
+    AgentConfig, AutoExtractConfig, Capabilities, CompactionConfig, Config, Cost,
+    CrossProjectConfig, EvictionConfig, InternalLlmConfig, InternalLlmDownloadPolicy,
+    McpServerConfig, McpTransport, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig,
     tool_family_names,
 };
 pub use permission::{PermissionAction, PermissionChecker, PermissionRule};

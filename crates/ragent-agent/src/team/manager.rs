@@ -26,9 +26,10 @@ use tokio::sync::{Mutex, Notify, RwLock};
 use tracing::{debug, warn};
 
 use crate::agent::{AgentInfo, AgentMode, resolve_agent_with_customs};
-use crate::config::Config;
 use crate::event::{Event, EventBus};
-use crate::session::processor::SessionProcessor;
+use crate::session::processor::{
+    SessionProcessor, is_permanent_llm_api_error, is_token_overflow_error_message,
+};
 use crate::team::TeamMember;
 use crate::team::config::{MemberStatus, PlanStatus};
 use crate::team::mailbox::{
@@ -36,45 +37,7 @@ use crate::team::mailbox::{
 };
 use crate::team::store::TeamStore;
 use crate::tool::TeamManagerInterface;
-
-/// Check if an error message indicates a context-window / token-count overflow.
-///
-/// These errors come from Anthropic, `OpenAI`, and GitHub Copilot when the prompt
-/// is too long for the model's context window.  They are *not* permanent failures —
-/// the session can be compacted and then retried successfully.
-fn is_token_overflow_error(error_msg: &str) -> bool {
-    let msg = error_msg.to_lowercase();
-    // Anthropic: "prompt token count of N exceeds the limit of M"
-    // OpenAI / Copilot: "context_length_exceeded", "maximum context length"
-    // Generic fallback phrases
-    msg.contains("prompt token count") && msg.contains("exceeds")
-        || msg.contains("context_length_exceeded")
-        || msg.contains("maximum context length")
-        || msg.contains("prompt is too long")
-        || msg.contains("input too large")
-}
-
-/// Check if an error message indicates a permanent (non-retryable) API error.
-///
-/// Matches HTTP 4xx errors (except 429 Too Many Requests, 408 Timeout, and
-/// token-overflow errors which can be resolved by compacting the session).
-fn is_permanent_api_error(error_msg: &str) -> bool {
-    // Token overflow is recoverable via compaction — never treat as permanent.
-    if is_token_overflow_error(error_msg) {
-        return false;
-    }
-    // Match "HTTP 4xx:" patterns, excluding 429 (rate limit) and 408 (timeout)
-    if let Some(rest) = error_msg.strip_prefix("HTTP ")
-        && let Some(code_str) = rest
-            .split(':')
-            .next()
-            .or_else(|| rest.split_whitespace().next())
-        && let Ok(code) = code_str.trim().parse::<u16>()
-    {
-        return (400..500).contains(&code) && code != 429 && code != 408;
-    }
-    false
-}
+use ragent_config::Config;
 
 /// Compact a teammate session's history by running the compaction agent.
 ///
@@ -789,7 +752,7 @@ impl TeamManager {
 
                         // Token overflow: compact the session history then retry
                         // without burning a retry attempt (first overflow only).
-                        if is_token_overflow_error(&last_error) && !compacted {
+                        if is_token_overflow_error_message(&last_error) && !compacted {
                             compacted = true;
                             tracing::warn!(
                                 team = %team_name_clone,
@@ -808,7 +771,7 @@ impl TeamManager {
                         }
 
                         // Don't retry permanent errors (4xx except 429 / 408 / token overflow).
-                        if is_permanent_api_error(&last_error) {
+                        if is_permanent_llm_api_error(&last_error) {
                             tracing::error!(
                                 team = %team_name_clone,
                                 agent_id = %agent_id_clone,

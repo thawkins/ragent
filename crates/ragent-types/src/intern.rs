@@ -166,15 +166,15 @@ mod tests {
 
     #[test]
     fn test_interned_string() {
-        let s1 = InternedString::new("read_file");
-        let s2 = InternedString::new("read_file");
+        let s1 = InternedString::new("read");
+        let s2 = InternedString::new("read");
 
         // Symbols should be equal
         assert_eq!(s1.symbol, s2.symbol);
         // Values should be equal
         assert_eq!(s1.as_str(), s2.as_str());
         // Display should work
-        assert_eq!(s1.to_string(), "read_file");
+        assert_eq!(s1.to_string(), "read");
     }
 
     #[test]

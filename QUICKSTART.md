@@ -849,11 +849,55 @@ Type `/` in the input to open an autocomplete menu:
 | `/system <prompt>` | Override system prompt |
 | `/opt help` | Show prompt optimization method table |
 | `/opt <method> <prompt>` | Optimize prompt with named method |
+| `/bench list` | List available benchmark suites and profiles |
+| `/bench init <suite-or-all-or-full>` | Create benchmark data roots in sample mode or full-download mode |
+| `/bench run <suite-or-profile-or-all>` | Start a background benchmark run and write workbook output |
+| `/bench status` | Show active or last benchmark run status |
+| `/bench open last` | Show the latest benchmark workbook path(s) and summary |
+| `/bench cancel` | Cancel the active benchmark run |
 | `/codeindex on` | Enable codebase indexing |
 | `/codeindex off` | Disable codebase indexing |
 | `/codeindex show` | Show index status and statistics |
 | `/codeindex reindex` | Trigger a full re-index |
 | `/codeindex help` | Show code index help |
+
+### Benchmark Workflow
+
+The benchmark runner uses the **currently selected model/provider** in the TUI and writes one
+normalized workbook per benchmark under:
+
+```text
+benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx
+```
+
+Typical workflow:
+
+```text
+/bench list
+/bench init humaneval
+/bench init humaneval --full
+/bench init all
+/bench init full
+/bench init humaneval --verify-only
+/bench run quick
+/bench run all --yes
+/bench status
+/bench open last
+/bench cancel
+```
+
+Notes:
+
+- `/bench init <suite-or-all-or-full>` creates or refreshes `benches/data/<suite>/`.
+- `/bench init all` initializes sample fixtures for every registered suite.
+- `/bench init <suite> --full` pulls full upstream benchmark data for suites that support it.
+- `/bench init full` is a gated virtual target that is reserved for complete full-data ingestion across every suite.
+- `/bench run <suite-or-profile-or-all>` runs in the background and records a workbook plus resume/debug sidecars.
+- Use `--limit N` or `--cap N` to cap a run to the first `N` cases.
+- `/bench status` shows active-run context while running and the last completion summary afterward.
+- `/bench open last` prints the latest workbook path(s) so you can open or inspect results directly.
+- `/bench cancel` requests shutdown of the active benchmark task.
+- Use `--resume` to reuse a same-day workbook only when the benchmark/model/config hash matches.
 
 ### Key Bindings
 

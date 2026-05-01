@@ -326,6 +326,7 @@ impl App {
         let git_branch = Self::detect_git_branch();
 
         let configured_provider = Self::detect_provider(&storage);
+        let _ = storage.delete_discovered_models("huggingface");
         let agent_name = agent_info.name.clone();
 
         let cwd_path = std::env::current_dir().unwrap_or_default();
@@ -497,7 +498,17 @@ impl App {
             focused_teammate: None,
             swarm_state: None,
             swarm_result: Arc::new(std::sync::Mutex::new(None)),
+            bench_result: Arc::new(std::sync::Mutex::new(None)),
             output_view: None,
+            active_bench_task_id: None,
+            active_bench_summary: None,
+            active_bench_started_at: None,
+            active_bench_cancel: None,
+            active_bench_progress: None,
+            bench_last_summary: None,
+            bench_last_workbooks: Vec::new(),
+            bench_last_finished_at: None,
+            bench_mock_outputs: None,
             opt_result: Arc::new(std::sync::Mutex::new(None)),
             internal_llm_config: app_config.internal_llm.clone(),
             internal_llm_service,
@@ -1152,6 +1163,341 @@ impl App {
                 self.push_log_no_agent(LogLevel::Warn, format!("Swarm error: {}", msg));
             }
         }
+    }
+
+    /// Poll for a completed `/bench run` background task.
+    pub fn poll_pending_bench(&mut self) {
+        if self.active_bench_task_id.is_some()
+            && let Some(progress) = self
+                .active_bench_progress
+                .as_ref()
+                .and_then(|handle| handle.snapshot())
+        {
+            self.status = format!(
+                "⏳ bench: {} {}/{}",
+                progress.suite_id, progress.completed_cases, progress.total_cases
+            );
+        }
+        let outcome = {
+            let mut guard = match self.bench_result.lock() {
+                Ok(g) => g,
+                Err(poisoned) => {
+                    tracing::error!("bench_result mutex poisoned, recovering");
+                    poisoned.into_inner()
+                }
+            };
+            guard.take()
+        };
+        let Some(outcome) = outcome else { return };
+
+        if let Some(task_id) = self.active_bench_task_id.take()
+            && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
+        {
+            self.active_tasks.remove(idx);
+        }
+        self.active_bench_summary = None;
+        self.active_bench_started_at = None;
+        self.active_bench_cancel = None;
+        if let Some(progress) = &self.active_bench_progress {
+            progress.clear();
+        }
+        self.active_bench_progress = None;
+
+        match outcome {
+            Ok(run) => {
+                self.bench_last_summary = Some(run.message.clone());
+                self.bench_last_workbooks = run.workbook_paths.clone();
+                self.bench_last_finished_at = Some(chrono::Utc::now());
+                self.append_assistant_text(&run.message);
+                self.status = "bench: done".to_string();
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "Finished /bench run — {} workbook(s)",
+                        run.workbook_paths.len()
+                    ),
+                );
+            }
+            Err(msg) => {
+                self.bench_last_summary = Some(format!("Benchmark run failed: {msg}"));
+                self.bench_last_finished_at = Some(chrono::Utc::now());
+                self.status = format!("⚠ bench failed: {msg}");
+                self.append_assistant_text(&format!("From: /bench run\n❌ {msg}"));
+                self.push_log_no_agent(LogLevel::Warn, format!("bench error: {msg}"));
+            }
+        }
+    }
+
+    fn render_bench_list(&self) -> String {
+        let mut output = String::from("From: /bench list\n## Benchmark Suites\n\n");
+        output.push_str(
+            "| suite | description | languages | revision |\n| --- | --- | --- | --- |\n",
+        );
+        for suite in ragent_bench::all_suites() {
+            let languages = suite.languages.join(", ");
+            output.push_str(&format!(
+                "| `{}` | {} | `{}` | `{}` |\n",
+                suite.id, suite.description, languages, suite.revision
+            ));
+        }
+        output.push_str("\n## Virtual Targets\n\n");
+        output.push_str("| target | expands to | notes |\n| --- | --- | --- |\n");
+        output.push_str(&format!(
+            "| `all` | `{}` registered suites | Initializes or runs every known benchmark suite. |\n",
+            ragent_bench::all_suites().len()
+        ));
+        output.push_str(
+            "| `full` | all suites, full upstream datasets | `/bench init full` is reserved for complete dataset ingestion and stays gated until every suite supports it. |\n",
+        );
+        output.push_str("\n## Profiles\n\n");
+        output.push_str("| profile | suites | notes |\n| --- | --- | --- |\n");
+        for profile in ragent_bench::all_profiles() {
+            let suites = if profile.suites.is_empty() {
+                "(none yet)".to_string()
+            } else {
+                profile.suites.join(", ")
+            };
+            let notes = if profile.expensive {
+                format!("{} Requires `--yes`.", profile.description)
+            } else {
+                profile.description.to_string()
+            };
+            output.push_str(&format!(
+                "| `{}` | `{}` | {} |\n",
+                profile.id, suites, notes
+            ));
+        }
+        output
+    }
+
+    fn render_bench_show(&self) -> String {
+        let selected_model = self
+            .selected_model
+            .clone()
+            .unwrap_or_else(|| "(not selected)".to_string());
+        let last = if self.bench_last_workbooks.is_empty() {
+            "(none)".to_string()
+        } else {
+            self.bench_last_workbooks
+                .iter()
+                .map(|path| format!("`{}`", path.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        format!(
+            "From: /bench show\n## Benchmark Defaults\n\n\
+             - **Selected model:** `{selected_model}`\n\
+             - **Virtual all target:** every registered benchmark suite\n\
+             - **Virtual full target:** full upstream dataset ingestion for every suite (gated until all suites support it)\n\
+             - **Quick profile:** `humaneval`, `mbpp`\n\
+             - **Standard profile:** `humaneval`, `mbpp`, `ds1000`, `repobench`, `crosscodeeval`\n\
+             - **Agentic profile:** `swebench-lite`, `livecodebench`\n\
+             - **Last workbook(s):** {last}\n"
+        )
+    }
+
+    fn render_bench_status(&self) -> String {
+        if let Some(task_id) = &self.active_bench_task_id {
+            let summary = self
+                .active_bench_summary
+                .as_deref()
+                .unwrap_or("benchmark task running");
+            let started = self
+                .active_bench_started_at
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(|| "(unknown)".to_string());
+            let cancellation = if self
+                .active_bench_cancel
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            {
+                "\n- **Cancellation:** requested"
+            } else {
+                ""
+            };
+            let progress = self
+                .active_bench_progress
+                .as_ref()
+                .and_then(ragent_bench::BenchProgressHandle::snapshot)
+                .map(|progress| {
+                    format!(
+                        "\n- **Progress:** suite `{}` ({}/{}) — case `{}/{}`",
+                        progress.suite_id,
+                        progress.suite_index,
+                        progress.total_suites,
+                        progress.completed_cases,
+                        progress.total_cases
+                    )
+                })
+                .unwrap_or_default();
+            return format!(
+                "From: /bench status\n## Active Benchmark Run\n\n- **Task ID:** `{}`\n- **Status:** `running`\n- **Summary:** {}\n- **Started:** `{}`{}{}\n",
+                task_id, summary, started, progress, cancellation
+            );
+        }
+        if let Some(summary) = &self.bench_last_summary {
+            let finished = self
+                .bench_last_finished_at
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(|| "(unknown)".to_string());
+            return format!(
+                "From: /bench status\n## Last Benchmark Run\n\n- **Finished:** `{finished}`\n- **Workbook count:** `{}`\n\n{}",
+                self.bench_last_workbooks.len(),
+                summary
+            );
+        }
+        "From: /bench status\nNo benchmark runs yet.".to_string()
+    }
+
+    fn render_bench_open_last(&self) -> String {
+        if self.bench_last_workbooks.is_empty() {
+            return "From: /bench open last\nNo benchmark workbooks available yet.".to_string();
+        }
+        let mut output = String::from("From: /bench open last\n## Latest Benchmark Results\n\n");
+        for path in &self.bench_last_workbooks {
+            output.push_str(&format!("- `{}`\n", path.display()));
+        }
+        if let Some(summary) = &self.bench_last_summary {
+            output.push_str("\n");
+            output.push_str(summary);
+        }
+        output
+    }
+
+    fn start_bench_run(
+        &mut self,
+        raw_command: &str,
+        target: ragent_bench::BenchTarget,
+        options: ragent_bench::BenchRunOptions,
+    ) {
+        if self.active_bench_task_id.is_some() {
+            self.status = "⚠ A benchmark run is already active.".to_string();
+            return;
+        }
+
+        let selected_model = match self.selected_model.as_deref() {
+            Some(model) => model,
+            None => {
+                self.status = "⚠ /bench run requires a configured model — use /model".to_string();
+                return;
+            }
+        };
+        let config = ragent_core::Config::load().unwrap_or_default();
+        let selection = match ragent_bench::resolve_model_context(
+            selected_model,
+            self.provider_registry.as_ref(),
+            self.storage.as_ref(),
+            &config,
+            self.effective_thinking_config_for_agent(&self.agent_info),
+        ) {
+            Ok(selection) => selection,
+            Err(e) => {
+                self.status = format!("⚠ Invalid model selection: {e}");
+                return;
+            }
+        };
+
+        let project_root = match std::env::current_dir() {
+            Ok(path) => path,
+            Err(e) => {
+                self.status = format!("⚠ Could not resolve current directory: {e}");
+                return;
+            }
+        };
+
+        if let Err(e) = ragent_bench::validate_run_prerequisites(&project_root, &target, &options) {
+            self.status = format!("⚠ {e}");
+            self.append_assistant_text(&format!("From: /bench run\n❌ {e}"));
+            return;
+        }
+
+        let task_id = format!("bench-{}", chrono::Utc::now().timestamp_millis());
+        let cancel = Arc::new(AtomicBool::new(false));
+        let progress = ragent_bench::BenchProgressHandle::default();
+        let target_label = match &target {
+            ragent_bench::BenchTarget::Suite(id) => id.as_str(),
+            ragent_bench::BenchTarget::Profile(id) => id.as_str(),
+            ragent_bench::BenchTarget::All => "all",
+        };
+        self.active_bench_task_id = Some(task_id.clone());
+        self.active_bench_summary = Some(format!(
+            "`{target_label}` on `{}/{}`",
+            selection.provider_id, selection.model_id
+        ));
+        self.active_bench_started_at = Some(chrono::Utc::now());
+        self.active_bench_cancel = Some(cancel.clone());
+        self.active_bench_progress = Some(progress.clone());
+        self.status = "⏳ bench: running…".to_string();
+        self.push_log_no_agent(LogLevel::Info, format!("benchmark task started: {task_id}"));
+        self.append_assistant_text(&format!(
+            "From: /bench run\n⏳ Started benchmark run for `{}` on `{}/{}.`\n\n- **Task ID:** `{}`\n- **Use:** `/bench status` for progress, `/bench cancel` to stop, `/bench open last` after completion.",
+            target_label,
+            selection.provider_id,
+            selection.model_id,
+            task_id
+        ));
+
+        let entry = ragent_core::task::TaskEntry {
+            id: task_id,
+            parent_session_id: self.session_id.clone().unwrap_or_default(),
+            child_session_id: "bench".to_string(),
+            agent_name: "bench".to_string(),
+            task_prompt: raw_command.to_string(),
+            background: true,
+            status: ragent_core::task::TaskStatus::Running,
+            result: Some("benchmark run in progress".to_string()),
+            error: None,
+            created_at: chrono::Utc::now(),
+            completed_at: None,
+            reported: false,
+            waiter_count: 0,
+        };
+        self.active_tasks.push(entry);
+
+        let bench_result = Arc::clone(&self.bench_result);
+        let raw_command = raw_command.to_string();
+        let provider_registry = Arc::clone(&self.provider_registry);
+        let storage = Arc::clone(&self.storage);
+        let mock_outputs = self.bench_mock_outputs.clone();
+        let progress_for_thread = progress.clone();
+        std::thread::spawn(move || {
+            let model_runner: Result<Box<dyn ragent_bench::BenchModelRunner>, String> =
+                if let Some(outputs) = mock_outputs {
+                    Ok(Box::new(ragent_bench::MockBenchModelRunner::new(
+                        selection.clone(),
+                        outputs,
+                    )))
+                } else {
+                    ragent_bench::LiveBenchModelRunner::new(
+                        selection.clone(),
+                        provider_registry,
+                        storage,
+                    )
+                    .map(|runner| Box::new(runner) as Box<dyn ragent_bench::BenchModelRunner>)
+                    .map_err(|e| e.to_string())
+                };
+            let outcome = model_runner.and_then(|runner| {
+                ragent_bench::run_target_with_progress(
+                    &project_root,
+                    runner.as_ref(),
+                    &raw_command,
+                    &target,
+                    &options,
+                    &cancel,
+                    Some(&progress_for_thread),
+                )
+                .map_err(|e| e.to_string())
+            });
+            match bench_result.lock() {
+                Ok(mut guard) => {
+                    *guard = Some(outcome);
+                }
+                Err(poisoned) => {
+                    let mut guard = poisoned.into_inner();
+                    *guard = Some(Err("benchmark result lock poisoned".to_string()));
+                }
+            }
+        });
     }
 
     /// Add a user message to the input history and save it.
@@ -2134,9 +2480,9 @@ impl App {
             "memory" => Some("<subcommand> [<arg>]".to_string()),
             "agent" => Some("[<name>]".to_string()),
             "codeindex" => Some("[on|off|sync]".to_string()),
-            "tools" => {
-                Some("[show|help|office|github|gitlab|teams|agents|codeindex] [on|off]".to_string())
-            }
+            "tools" => Some(
+                "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
+            ),
             "internal-llm" => Some(
                 "[show|help|on|off|chat|sessiontitle|promptcontext|memoryextraction] [on|off]"
                     .to_string(),
@@ -3145,6 +3491,8 @@ impl App {
                 let cached = self.cached_model_entries("huggingface");
                 if !cached.is_empty() {
                     cached
+                } else if self.provider_api_key("huggingface").is_some() {
+                    Vec::new()
                 } else {
                     self.hf_default_model_entries()
                 }
@@ -3334,12 +3682,12 @@ impl App {
                         } else if !cached.is_empty() {
                             cached
                         } else {
-                            self.hf_default_model_entries()
+                            Vec::new()
                         }
                     } else if !cached.is_empty() {
                         cached
                     } else {
-                        self.hf_default_model_entries()
+                        Vec::new()
                     }
                 } else if !cached.is_empty() {
                     cached
@@ -3775,13 +4123,14 @@ impl App {
         ))
     }
 
-    fn tool_visibility_switches(&self) -> [(&'static str, bool); 6] {
+    fn tool_visibility_switches(&self) -> [(&'static str, bool); 7] {
         [
             ("office", self.tool_visibility.office),
             ("github", self.tool_visibility.github),
             ("gitlab", self.tool_visibility.gitlab),
             ("teams", self.tool_visibility.teams),
             ("agents", self.tool_visibility.agents),
+            ("plan", self.tool_visibility.plan),
             ("codeindex", self.tool_visibility.codeindex),
         ]
     }
@@ -3799,6 +4148,7 @@ impl App {
             "gitlab" => self.tool_visibility.gitlab = enabled,
             "teams" => self.tool_visibility.teams = enabled,
             "agents" => self.tool_visibility.agents = enabled,
+            "plan" => self.tool_visibility.plan = enabled,
             "codeindex" => self.tool_visibility.codeindex = enabled,
             _ => return false,
         }
@@ -3815,7 +4165,30 @@ impl App {
                 if enabled { "on" } else { "off" }
             ));
         }
-        output.push_str("```\n");
+        output.push_str("```\n\n");
+
+        // List all currently visible tools from the registry.
+        let defs = self.session_processor.tool_registry.definitions();
+        if defs.is_empty() {
+            output.push_str("No tools are currently visible.\n");
+        } else {
+            output.push_str(&format!(
+                "Visible Tools ({} total):\n\n```text\n{:<24} description\n{:<24} -----------\n",
+                defs.len(),
+                "name",
+                "----"
+            ));
+            for def in defs {
+                let desc = if def.description.len() > 60 {
+                    format!("{}…", &def.description[..60])
+                } else {
+                    def.description.clone()
+                };
+                output.push_str(&format!("{:<24} {}\n", def.name, desc));
+            }
+            output.push_str("```\n");
+        }
+
         output
     }
 
@@ -4512,6 +4885,21 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     return;
                 }
 
+                if self
+                    .active_bench_task_id
+                    .as_deref()
+                    .is_some_and(|task_id| task_id.starts_with(args))
+                    && let Some(flag) = &self.active_bench_cancel
+                {
+                    flag.store(true, Ordering::Relaxed);
+                    self.status = "⏳ bench: cancellation requested".to_string();
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("Benchmark cancellation requested for {}", args),
+                    );
+                    return;
+                }
+
                 if let Some(task) = self.active_tasks.iter().find(|t| t.id.starts_with(args)) {
                     let task_id = task.id.clone();
                     let agent = task.agent_name.clone();
@@ -4536,6 +4924,103 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     self.push_log_no_agent(LogLevel::Warn, format!("Task not found: {}", args));
                 }
             }
+            "bench" => match ragent_bench::parse_bench_command(args) {
+                Ok(ragent_bench::BenchCommand::Help) => {
+                    self.append_assistant_text(
+                        "From: /bench\nUsage: `/bench list` | `/bench init <suite-or-all-or-full> [--full] [--force-download] [--verify-only]` | `/bench show` | `/bench run <suite-or-profile-or-all> [--limit N|--cap N] [--samples K] [--subset NAME] [--release VERSION] [--scenario NAME] [--language LANG] [--temperature F] [--top-p F] [--max-tokens N] [--deterministic] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--resume] [--no-exec] [--yes]` | `/bench status` | `/bench open last` | `/bench cancel`"
+                    );
+                    self.status = "bench help".to_string();
+                }
+                Ok(ragent_bench::BenchCommand::List) => {
+                    self.append_assistant_text(&self.render_bench_list());
+                    self.status = "bench list".to_string();
+                }
+                Ok(ragent_bench::BenchCommand::Show) => {
+                    self.append_assistant_text(&self.render_bench_show());
+                    self.status = "bench show".to_string();
+                }
+                Ok(ragent_bench::BenchCommand::Status) => {
+                    self.append_assistant_text(&self.render_bench_status());
+                    self.status = "bench status".to_string();
+                }
+                Ok(ragent_bench::BenchCommand::OpenLast) => {
+                    self.append_assistant_text(&self.render_bench_open_last());
+                    self.status = "bench open last".to_string();
+                }
+                Ok(ragent_bench::BenchCommand::Cancel) => {
+                    if let Some(flag) = &self.active_bench_cancel {
+                        flag.store(true, Ordering::Relaxed);
+                        self.status = "⏳ bench: cancellation requested".to_string();
+                        self.append_assistant_text(
+                            "From: /bench cancel\nCancellation requested for the active benchmark run.\n\nUse `/bench status` to watch it shut down.",
+                        );
+                    } else {
+                        self.status = "No active benchmark run".to_string();
+                        self.append_assistant_text("From: /bench cancel\nNo active benchmark run.");
+                    }
+                }
+                Ok(ragent_bench::BenchCommand::Init {
+                    target,
+                    mode,
+                    force_download,
+                    verify_only,
+                }) => {
+                    let project_root = match std::env::current_dir() {
+                        Ok(path) => path,
+                        Err(e) => {
+                            self.status = format!("⚠ Could not resolve current directory: {e}");
+                            return;
+                        }
+                    };
+                    match ragent_bench::init_target(
+                        &project_root,
+                        &target,
+                        mode,
+                        force_download,
+                        verify_only,
+                    ) {
+                        Ok(outcomes) => {
+                            let mode = if verify_only {
+                                "verified"
+                            } else if matches!(mode, ragent_bench::BenchInitMode::Full) {
+                                "initialized full dataset for"
+                            } else {
+                                "initialized"
+                            };
+                            let mut message =
+                                format!("From: /bench init\n✅ {mode} benchmark target.\n\n");
+                            for init in &outcomes {
+                                message.push_str(&format!(
+                                    "- **`{}`** {} at `{}` (`{}`, {} case(s))\n",
+                                    init.suite.id,
+                                    mode,
+                                    init.data_root.display(),
+                                    init.manifest.revision,
+                                    init.manifest.case_count
+                                ));
+                            }
+                            self.append_assistant_text(&message);
+                            let status_target = match &target {
+                                ragent_bench::BenchInitTarget::All => "all".to_string(),
+                                ragent_bench::BenchInitTarget::Full => "full".to_string(),
+                                ragent_bench::BenchInitTarget::Suite(id) => id.clone(),
+                            };
+                            self.status = format!("bench init: {status_target}");
+                        }
+                        Err(e) => {
+                            self.status = format!("⚠ bench init failed: {e}");
+                            self.append_assistant_text(&format!("From: /bench init\n❌ {e}"));
+                        }
+                    }
+                }
+                Ok(ragent_bench::BenchCommand::Run { target, options }) => {
+                    self.start_bench_run(raw, target, options);
+                }
+                Err(e) => {
+                    self.status = format!("⚠ {e}");
+                    self.append_assistant_text(&format!("From: /bench\n❌ {e}"));
+                }
+            },
             "compact" => {
                 let _ = self.start_compaction(false);
             }
@@ -5129,7 +5614,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                     }
                     ["help"] | ["usage"] => {
                         self.append_assistant_text(
-                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                                  "From: /tools\nUsage: `/tools` | `/tools show` | `/tools help` | `/tools <switch>` | `/tools <switch> on|off`\n\nValid switches: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
                                               );
                         self.status = "tools help".to_string();
                     }
@@ -5142,7 +5627,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             self.status = "tools".to_string();
                         } else {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
                                                       );
                             self.status = "tools error".to_string();
                         }
@@ -5162,7 +5647,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
 
                         if !self.set_tool_visibility_state(switch, enabled) {
                             self.append_assistant_text(
-                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `codeindex`.",
+                                                          "From: /tools\n⚠ Invalid switch. Use one of: `office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`.",
                                                       );
                             self.status = "tools error".to_string();
                             return;

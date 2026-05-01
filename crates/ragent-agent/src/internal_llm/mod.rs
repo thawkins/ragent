@@ -16,11 +16,11 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{Instrument, debug, info, info_span, warn};
 
-use crate::config::InternalLlmConfig;
 use crate::embedded::{
     EmbeddedInferenceError, EmbeddedRuntime, EmbeddedRuntimeStatus, InferenceControls,
     RuntimeAvailability,
 };
+use ragent_config::InternalLlmConfig;
 
 const CHARS_PER_TOKEN_BUDGET: usize = 4;
 
@@ -467,7 +467,7 @@ impl InternalLlmService {
             return Ok(None);
         }
 
-        let runtime = EmbeddedRuntime::from_config((&config).into())?.ok_or_else(|| {
+        let runtime = EmbeddedRuntime::from_config(config.clone())?.ok_or_else(|| {
             anyhow::anyhow!("internal LLM config was enabled but no runtime was created")
         })?;
         let executor = Arc::new(EmbeddedRuntimeExecutor::new(

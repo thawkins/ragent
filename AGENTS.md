@@ -1,6 +1,80 @@
 # Agent Guidelines for Rust apps
 - First when you startup say "Hi im Rust Agent and I have read Agents.md"
 
+## Available Tools
+
+You have access to the following tools. Use ONLY these exact tool names — do not invent or guess tool names. The canonical names below are the only ones you should use:
+
+### Core Tools (always available)
+- `bash` — Execute a shell command. Use `command` to provide the command, or `code` for a code snippet.
+- `read` — Read file contents with optional `start_line`/`end_line` range.
+- `edit` — Replace an exact occurrence of text in a file.
+- `multiedit` — Apply multiple edits across one or more files atomically.
+- `write` — Create or overwrite a file.
+- `create` — Create a new file with content.
+- `append_to_file` — Append text to the end of a file.
+- `grep` — Search file contents for a regex pattern using ripgrep.
+- `glob` — Find files matching a glob pattern.
+- `list` — List directory contents.
+- `question` — Ask the user a question and wait for their typed response.
+- `get_env` — Read environment variables.
+- `file_info` — Return metadata for a file or directory.
+- `diff_files` — Show a unified diff between two files or inline strings.
+- `copy_file` — Copy a file to a new location.
+- `move_file` — Move or rename a file or directory.
+- `rm` — Delete a single file.
+- `patch` — Apply a unified diff patch to one or more files.
+- `mkdir` — Create a directory.
+- `calculator` — Evaluate a mathematical expression.
+- `think` — Record a short reasoning note without changing project state.
+- `todo_read` — List TODO items for the current session.
+- `todo_write` — Add, update, remove, or clear TODO items.
+- `memory_read` — Read the contents of a memory file.
+- `memory_write` — Persist notes or learnings to memory files.
+- `memory_replace` — Replace a specific string in a named memory block.
+- `memory_search` — Search memories using semantic similarity or keyword matching.
+- `memory_store` — Store a structured memory with category, tags, and confidence score.
+- `memory_forget` — Delete structured memories by ID or filter criteria.
+- `memory_migrate` — Analyse a flat MEMORY.md file and propose splitting it into named blocks.
+- `plan_enter` — Delegate to the plan agent for read-only codebase analysis.
+- `codeindex_search` — Search the codebase index for symbols, functions, types, and documentation.
+- `codeindex_symbols` — Query symbols (functions, structs, enums, traits) from the codebase index.
+- `codeindex_references` �� Find all references to a symbol by name across the indexed codebase.
+- `codeindex_dependencies` — Query file-level dependencies from the code index.
+- `codeindex_status` — Show the current status and statistics of the codebase index.
+- `codeindex_reindex` — Trigger a full re-index of the codebase.
+
+### Code Intelligence Decision Flow
+When the codebase index is active, you MUST use `codeindex` tools instead of `grep` for code symbol queries. The index is faster, returns structured results, and understands symbol kinds.
+
+| Query type | Use |
+|---|---|
+| "Where is function X defined?" | `codeindex_search` (NOT grep) |
+| "Find all structs matching Y" | `codeindex_symbols` |
+| "Who calls function Z?" | `codeindex_references` |
+| "What does file A import?" | `codeindex_dependencies` |
+| "Is the index working?" | `codeindex_status` |
+| "Re-index after bulk edits" | `codeindex_reindex` |
+
+When searching for arbitrary text strings, comments, or non-symbol content, use `grep` with the `pattern` parameter. **Do NOT use `search` or `search_in_repo`** — these are not available tools. Always use `grep` for all text and pattern matching across files.
+
+**CRITICAL — grep parameter requirement:**
+The `grep` tool requires the `pattern` parameter. This is the ONLY required field. Do NOT omit it. Example:
+```
+grep(pattern: "fn main", path: "src")
+```
+
+**CRITICAL — grep is the ONLY text search tool:**
+There is no `search` or `search_in_repo` tool. Use `grep` for every text search need, whether it's a regex pattern or a plain text string. There are no aliases or shortcuts.
+
+### Shell Execution Rules
+- For simple commands or code snippets, use `bash` with the `command` or `code` parameter.
+- Timeout defaults to 120 seconds.
+- The `bash_reset` tool resets the persistent shell state.
+
+### Important
+Do NOT use `execute_bash`, `execute_code`, `execute_python`, `run_shell_command`, or `run_terminal_cmd` — these are deprecated aliases. Always use the canonical `bash` tool.
+
 ## Technology Stack
 - **Language**: Rust edition 2024 or greater
 

@@ -10,6 +10,7 @@ fn test_default_tool_visibility_config() {
     assert!(!config.gitlab);
     assert!(!config.teams);
     assert!(!config.agents);
+    assert!(!config.plan);
     assert!(config.codeindex);
 }
 
@@ -67,6 +68,14 @@ fn test_tool_family_names_agents() {
 }
 
 #[test]
+fn test_tool_family_names_plan() {
+    let names = tool_family_names("plan").unwrap();
+    assert_eq!(names.len(), 2);
+    assert!(names.contains(&"plan_enter"));
+    assert!(names.contains(&"plan_exit"));
+}
+
+#[test]
 fn test_tool_family_names_invalid() {
     assert!(tool_family_names("invalid").is_none());
 }
@@ -80,6 +89,7 @@ fn test_serde_defaults() {
     assert!(!config.gitlab);
     assert!(!config.teams);
     assert!(!config.agents);
+    assert!(!config.plan);
     assert!(config.codeindex);
 }
 
@@ -91,6 +101,7 @@ fn test_serde_custom_values() {
         "gitlab": true,
         "teams": true,
         "agents": true,
+        "plan": true,
         "codeindex": false
     }"#;
     let config: ToolVisibilityConfig = serde_json::from_str(json).unwrap();
@@ -99,6 +110,7 @@ fn test_serde_custom_values() {
     assert!(config.gitlab);
     assert!(config.teams);
     assert!(config.agents);
+    assert!(config.plan);
     assert!(!config.codeindex);
 }
 
@@ -111,6 +123,7 @@ fn test_effective_hidden_tools_uses_default_github_gitlab_switches() {
     assert!(hidden.contains(&"gitlab_list_issues".to_string()));
     assert!(hidden.contains(&"team_create".to_string()));
     assert!(hidden.contains(&"new_task".to_string()));
+    assert!(hidden.contains(&"plan_enter".to_string()));
 }
 
 #[test]
@@ -120,6 +133,7 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
     base.tool_visibility.gitlab = true;
     base.tool_visibility.teams = true;
     base.tool_visibility.agents = true;
+    base.tool_visibility.plan = true;
 
     let overlay: Config = serde_json::from_str(
         r#"{
@@ -137,4 +151,5 @@ fn test_runtime_merge_preserves_unspecified_tool_visibility_switches() {
     assert!(merged.tool_visibility.gitlab);
     assert!(merged.tool_visibility.teams);
     assert!(merged.tool_visibility.agents);
+    assert!(merged.tool_visibility.plan);
 }

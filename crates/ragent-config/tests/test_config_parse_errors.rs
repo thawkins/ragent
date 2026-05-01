@@ -1,10 +1,12 @@
 //! Tests for config file parsing error messages.
 
 use ragent_config::Config;
+use serial_test::serial;
 use std::fs;
 use tempfile::TempDir;
 
 #[test]
+#[serial]
 fn test_invalid_json_shows_line_and_column() {
     let temp_dir = TempDir::new().unwrap();
 
@@ -67,6 +69,7 @@ fn test_invalid_json_shows_line_and_column() {
 }
 
 #[test]
+#[serial]
 fn test_unknown_field_shows_clear_error() {
     let temp_dir = TempDir::new().unwrap();
     let ragent_dir = temp_dir.path().join(".ragent");
@@ -101,6 +104,7 @@ fn test_unknown_field_shows_clear_error() {
 }
 
 #[test]
+#[serial]
 fn test_type_mismatch_shows_clear_error() {
     let temp_dir = TempDir::new().unwrap();
     let ragent_dir = temp_dir.path().join(".ragent");
@@ -139,6 +143,7 @@ fn test_type_mismatch_shows_clear_error() {
 }
 
 #[test]
+#[serial]
 fn test_valid_json_loads_successfully() {
     let temp_dir = TempDir::new().unwrap();
     let ragent_dir = temp_dir.path().join(".ragent");

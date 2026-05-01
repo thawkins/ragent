@@ -5,9 +5,11 @@
 //! primitives that the moved modules still reference through `crate::*`.
 
 pub mod agent;
-pub mod bash_lists;
-pub mod config;
-pub mod dir_lists;
+/// Public compatibility re-export for callers that still import `ragent_agent::config::*`.
+pub mod config {
+    pub use ragent_config::config::StreamConfig;
+    pub use ragent_config::*;
+}
 pub mod error;
 pub mod event;
 pub mod file_ops;
@@ -34,11 +36,15 @@ pub mod tool;
 pub mod updater;
 pub mod yolo;
 
+pub use ragent_config::config::StreamConfig;
+pub use ragent_config::{
+    AgentConfig, Capabilities, Config, Cost, CrossProjectConfig, InternalLlmConfig,
+    InternalLlmDownloadPolicy, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig,
+    bash_lists, dir_lists, tool_family_names,
+};
 pub use ragent_llm::{embedded, llm, provider};
 pub use ragent_tools_vcs::{github, gitlab};
 
-// Re-export config types that downstream crates (e.g. ragent-tui) need
-pub use config::{ToolVisibilityConfig, tool_family_names};
 pub use internal_llm::{
     InternalLlmError, InternalLlmExecutionRequest, InternalLlmExecutor, InternalLlmMetricsSnapshot,
     InternalLlmQueueStatus, InternalLlmResult, InternalLlmService, InternalLlmStatusSnapshot,

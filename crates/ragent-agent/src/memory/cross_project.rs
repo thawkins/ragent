@@ -22,9 +22,9 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::config::CrossProjectConfig;
 use crate::memory::block::{BlockScope, MemoryBlock};
 use crate::memory::storage::BlockStorage;
+use ragent_config::CrossProjectConfig;
 
 /// Result of a cross-project block resolution.
 ///

@@ -271,7 +271,7 @@ pub fn resolve_forked_skill_agent(
     active_model: Option<&crate::agent::ModelRef>,
 ) -> anyhow::Result<crate::agent::AgentInfo> {
     let agent_name = invocation.fork_agent.as_deref().unwrap_or("general");
-    let config = crate::config::Config::default();
+    let config = crate::Config::default();
     let mut agent = crate::agent::resolve_agent(agent_name, &config)?;
     agent.mode = crate::agent::AgentMode::Subagent;
 

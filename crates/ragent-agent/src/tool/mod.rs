@@ -43,8 +43,6 @@ pub mod create;
 pub mod diff;
 /// File editing tool.
 pub mod edit;
-/// Python code execution tool.
-pub mod execute_python;
 /// File metadata / info tool.
 pub mod file_info;
 /// Per-file locking for concurrent edit operations.
@@ -96,7 +94,6 @@ pub mod plan;
 pub mod question;
 pub mod read;
 pub mod rm;
-pub mod search;
 /// Structured memory store, recall, and forget tools.
 pub mod structured_memory;
 pub mod task_complete;
@@ -1139,25 +1136,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_task_create::TeamTaskCreateTool));
     registry.register(Arc::new(team_task_list::TeamTaskListTool));
     registry.register(Arc::new(team_wait::TeamWaitTool));
-    // Phase 3 — code execution & Claude-compatible editor
-    registry.register(Arc::new(execute_python::ExecutePythonTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
-    registry.register(Arc::new(aliases::ViewFileTool));
-    registry.register(Arc::new(aliases::ReadFileTool));
-    registry.register(Arc::new(aliases::GetFileContentsTool));
-    registry.register(Arc::new(aliases::ListFilesTool));
-    registry.register(Arc::new(aliases::ListDirectoryTool));
-    registry.register(Arc::new(aliases::FindFilesTool));
-    registry.register(Arc::new(aliases::SearchInRepoTool));
-    registry.register(Arc::new(aliases::FileSearchTool));
-    registry.register(Arc::new(aliases::ReplaceInFileTool));
     registry.register(Arc::new(aliases::UpdateFileTool));
-    registry.register(Arc::new(aliases::RunShellCommandTool));
-    registry.register(Arc::new(aliases::RunTerminalCmdTool));
-    registry.register(Arc::new(aliases::ExecuteBashTool));
-    registry.register(Arc::new(aliases::ExecuteCodeTool));
-    registry.register(Arc::new(aliases::RunCodeTool));
     registry.register(Arc::new(aliases::AskUserTool));
-    registry.register(Arc::new(aliases::OpenFileTool));
     registry
 }

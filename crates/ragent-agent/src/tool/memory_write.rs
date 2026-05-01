@@ -248,7 +248,7 @@ impl Tool for MemoryReadTool {
                 if let Some(resolved) = crate::memory::cross_project::resolve_block(
                     label_str,
                     &ctx.working_dir,
-                    &crate::config::CrossProjectConfig::default(),
+                    &crate::CrossProjectConfig::default(),
                     &storage,
                 )? {
                     let dir = crate::memory::block::resolve_block_dir(

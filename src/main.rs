@@ -383,7 +383,12 @@ async fn main() -> Result<()> {
         tool_registry.set_hidden(&hidden_tools);
     }
     let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(
-        config.permission.clone(),
+        config
+            .permission
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
     )));
 
     // Resolve the active agent

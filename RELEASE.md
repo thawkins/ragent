@@ -1,44 +1,23 @@
 # Release
 
-## Current Version: 0.1.0-alpha.54
+## Current Version: 0.1.0-alpha.55
+
+### Added
+- **Benchmark runner subsystem** — New `ragent-bench` crate with suite registry (`quick`, `standard`, `agentic` profiles), workbook output (XLSX with `run`, `metrics`, `cases`, `artifacts` sheets), data initialization (sample fixtures and full upstream download), and a `LiveBenchModelRunner` that drives generation via the current provider/model. Includes HumanEval, MBPP, and a Phase-6 native suite adapter.
+- **`/bench` TUI slash commands** — Full benchmark workflow in the terminal: `/bench list`, `/bench init <suite-or-all>`, `/bench run <target>` (background task with progress), `/bench status`, `/bench open last`, and `/bench cancel`. Results written to `benches/<suite>/<YYYY-MM-DD>/<provider>/<model>.xlsx`.
+- **Benchmark documentation** — New `docs/userdocs/bench.md` and `docs/userdocs/bench.pdf` covering usage, architecture, and workbook schema.
+- **XLSX native writer** — `ragent-tools-core/src/xlsx.rs` for creating Office Open XML (OOXML) workbooks without external dependencies.
+
+### Changed
+- **HuggingFace model discovery rewritten** — Switched from the HuggingFace Hub API (`/api/models?pipeline_tag=text-generation`) to the authenticated router API (`/v1/models`), keeping only models with at least one live provider and filtering by text input/output modalities. Now captures per-provider context length, max output, and pricing.
+- **Tool alias cleanup** — Removed 13 deprecated aliases (`view_file`, `read_file`, `get_file_contents`, `open_file`, `list_files`, `list_directory`, `find_files`, `search_in_repo`, `file_search`, `replace_in_file`, `run_shell_command`, `run_terminal_cmd`, `execute_bash`, `execute_code`). Only `update_file` and `run_code` remain as aliases for `write` and `bash` respectively.
+- **Unified config types** — `ragent-agent` now re-exports `Config`, `StreamConfig`, `MemoryConfig`, `ToolVisibilityConfig`, `AgentConfig`, and other config types directly from `ragent-config`, removing the `ragent-agent/src/config/` module entirely. Permission rules are converted between config and runtime types via a new `config_permission_rule_to_runtime()` helper.
+- **Enhanced codeindex grep guidance** — System prompt now tells the LLM that `grep` requires the `pattern` parameter.
+- **AGENTS.md expanded** — Full tool reference section, code intelligence decision flow, shell execution rules, test organization, and other project guidelines added.
+- **Processor import cleanup** — `bash_lists` and `dir_lists` references migrated from `crate::` to `ragent_config::`.
+- **Cargo.lock updated** — New dependencies for benchmark crate (flate2, sha2, rust_xlsxwriter, uuid).
+
+## Previous: 0.1.0-alpha.54
 
 ### Changed
 - **Remove some features and add more feature switches** — Removed the legacy journal subsystem (journal tools, journal viewer panel, journal API routes, journal memory backend) in favour of the newer structured-memory and embedding-based memory stores. Added stream-config default overrides (`timeout_secs`, `max_retries`, `retry_backoff_secs`) so agents can tune network resilience without editing code. Updated tool-visibility metadata across agent and config crates. Simplified TUI layout and status-bar rendering. Reduced binary size and API surface.
-
-## Previous: 0.1.0-alpha.53
-
-## Current Version: 0.1.0-alpha.53
-
-### Fixed
-- **Ollama Cloud thinking disabled** — Removed the `think` parameter from Ollama Cloud `build_request_body()`. The Ollama Cloud `/api/chat` endpoint does not support the `think` field, unlike the local Ollama `/v1/chat/completions` endpoint. Also removed binary thinking heuristics from `list_ollama_cloud_models` — all cloud models now report an empty `thinking_levels` list. The local Ollama provider is unaffected and continues to send the `think` boolean.
-
-## Previous: 0.1.0-alpha.52
-
-### Added
-- **Local Git workspace tools (Milestone 1)** — 7 new `git_*` tools in `ragent-tools-vcs` that let the LLM inspect any local git repository:
-  `git_status`, `git_log`, `git_diff`, `git_branch`, `git_show`, `git_remote`, `git_tag`
-  - Permission categories: `git:read` (auto-allow) and `git:write` (prompt before execution)
-  - All tools execute the `git` CLI in the working directory with `GIT_TERMINAL_PROMPT=0`
-    to prevent interactive credential hangs
-  - Each tool returns both human-readable content and structured JSON metadata
-- **22 integration tests** for git tools covering status, log, diff, branch, show, remote, and tag operations
-- **Local Git workspace tools (Milestone 2)** — 6 new `git_*` tools in `ragent-tools-vcs` that let the LLM manipulate the local git repository:
-  `git_add`, `git_reset`, `git_checkout`, `git_commit`, `git_stash`, `git_cherry_pick`
-  - All tools use `git:write` permission category (prompted before execution)
-  - 13 new integration tests covering add, commit, reset, checkout, stash, and cherry-pick operations
-
-### Changed
-- **LSP documentation removal** — Removed the remaining LSP-specific spec, README, keybinding, audit, and competitive-analysis references; deleted the dedicated LSP exploration docs; and aligned user-facing documentation around CodeIndex and the current MCP/code-intelligence surfaces.
-
-### Removed
-- **LSP subsystem entirely removed** — All LSP client, tool, discovery, and configuration functionality has been removed. Code intelligence is now provided exclusively by the CodeIndex system (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`). This eliminates external language server dependencies, reduces binary size, and simplifies configuration.
-- **AIWiki feature removed** — Removed the AIWiki crate, slash commands, tools, runtime/config wiring, examples, and dedicated user documentation.
-- **Final AIWiki cleanup** — Removed the AIWiki removal plan document (AIREM.md) and purged the last remaining AIWiki reference from a comment in `crates/ragent-agent/src/config/mod.rs`.
-
-## Previous: 0.1.0-alpha.51
-
-### Added
-- **Profiler module** — Added a new profiler in `crates/ragent-agent/src/session/profiler.rs` for performance instrumentation of agent session processing, with corresponding tests in `crates/ragent-agent/tests/test_profiler.rs`.
-
-### Fixed
-- **Question tool multiple-choice support** — Fixed the `question` tool to correctly handle multiple-choice prompts and updated TUI rendering/tests accordingly (new `test_question_multiple_choice.rs`).

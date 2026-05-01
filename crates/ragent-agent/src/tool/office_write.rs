@@ -6,6 +6,7 @@
 //! Depends on: `docx-rust`, `rust_xlsxwriter`, `ooxmlsdk`.
 
 use anyhow::{Context, Result, bail};
+use ragent_tools_core::xlsx::write_xlsx;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -452,84 +453,6 @@ fn parse_inline_formatting(text: &str) -> Vec<(String, bool, bool, bool)> {
     }
 
     segments
-}
-
-/// Writes an Excel workbook from structured JSON content.
-///
-/// Expected content format:
-/// ```json
-/// { "sheets": [{ "name": "Sheet1", "rows": [["A1", "B1"], ["A2", "B2"]] }] }
-/// ```
-///
-/// # Arguments
-///
-/// * `path` - Output file path.
-/// * `content` - JSON content describing the workbook.
-///
-/// # Returns
-///
-/// `Ok(())` on success, or an error.
-fn write_xlsx(path: &Path, content: &Value) -> Result<()> {
-    use rust_xlsxwriter::Workbook;
-
-    let mut workbook = Workbook::new();
-
-    let sheets = content["sheets"]
-        .as_array()
-        .context("Missing 'sheets' array in xlsx content")?;
-
-    for sheet_def in sheets {
-        let sheet_name = sheet_def["name"].as_str().unwrap_or("Sheet1");
-
-        let worksheet = workbook.add_worksheet();
-        worksheet
-            .set_name(sheet_name)
-            .map_err(|e| anyhow::anyhow!("Failed to set sheet name: {e}"))?;
-
-        if let Some(rows) = sheet_def["rows"].as_array() {
-            for (row_idx, row) in rows.iter().enumerate() {
-                if let Some(cells) = row.as_array() {
-                    for (col_idx, cell) in cells.iter().enumerate() {
-                        let row_num = row_idx as u32;
-                        let col_num = col_idx as u16;
-
-                        match cell {
-                            Value::Number(n) => {
-                                if let Some(f) = n.as_f64() {
-                                    worksheet.write_number(row_num, col_num, f).map_err(|e| {
-                                        anyhow::anyhow!("Failed to write number: {e}")
-                                    })?;
-                                }
-                            }
-                            Value::Bool(b) => {
-                                worksheet
-                                    .write_boolean(row_num, col_num, *b)
-                                    .map_err(|e| anyhow::anyhow!("Failed to write boolean: {e}"))?;
-                            }
-                            Value::String(s) => {
-                                worksheet
-                                    .write_string(row_num, col_num, s)
-                                    .map_err(|e| anyhow::anyhow!("Failed to write string: {e}"))?;
-                            }
-                            Value::Null => {}
-                            _ => {
-                                let s = cell.to_string();
-                                worksheet
-                                    .write_string(row_num, col_num, &s)
-                                    .map_err(|e| anyhow::anyhow!("Failed to write value: {e}"))?;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    workbook
-        .save(path)
-        .map_err(|e| anyhow::anyhow!("Failed to save xlsx: {e}"))?;
-
-    Ok(())
 }
 
 /// Attempt to locate a `slides` array from arbitrarily shaped LLM output.

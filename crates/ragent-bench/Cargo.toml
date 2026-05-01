@@ -1,0 +1,33 @@
+[package]
+name = "ragent-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Benchmark suite runner for ragent — local AI coding benchmarks"
+
+[dependencies]
+# Workspace deps
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+rust_xlsxwriter.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+flate2 = "1"
+
+# Internal crates
+ragent-core = { package = "ragent-agent", path = "../ragent-agent" }
+ragent-tools-core = { path = "../ragent-tools-core" }
+ragent-types = { path = "../ragent-types" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.5"
+calamine = { workspace = true }

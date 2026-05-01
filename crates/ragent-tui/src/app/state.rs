@@ -459,6 +459,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Refresh the @ file-picker project index",
     },
     SlashCommandDef {
+        trigger: "bench",
+        description: "Benchmark runner: /bench list|init <suite-or-all-or-full>|show|run <target>|status|open last|cancel",
+    },
+    SlashCommandDef {
         trigger: "clear",
         description: "Clear message history for the current session",
     },
@@ -648,7 +652,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "tools",
-        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|codeindex] [on|off]",
+        description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off]",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.
@@ -1181,8 +1185,28 @@ pub struct App {
     pub swarm_state: Option<SwarmState>,
     /// Pending result from an async `/swarm` LLM decomposition call.
     pub swarm_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+    /// Pending result from a background `/bench run`.
+    pub bench_result: Arc<std::sync::Mutex<Option<Result<ragent_bench::BenchRunOutcome, String>>>>,
     /// Active output overlay state.
     pub output_view: Option<OutputViewState>,
+    /// Active benchmark task ID.
+    pub active_bench_task_id: Option<String>,
+    /// Human-readable summary for the active benchmark task.
+    pub active_bench_summary: Option<String>,
+    /// UTC timestamp when the active benchmark task started.
+    pub active_bench_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Cancellation flag for the active benchmark run.
+    pub active_bench_cancel: Option<Arc<AtomicBool>>,
+    /// Shared progress snapshot for the active benchmark run.
+    pub active_bench_progress: Option<ragent_bench::BenchProgressHandle>,
+    /// Last benchmark status summary.
+    pub bench_last_summary: Option<String>,
+    /// Last workbook paths produced by `/bench run`.
+    pub bench_last_workbooks: Vec<std::path::PathBuf>,
+    /// UTC timestamp for the most recent completed benchmark run.
+    pub bench_last_finished_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Mock benchmark outputs used by tests to avoid live provider calls.
+    pub bench_mock_outputs: Option<Vec<String>>,
     /// Pending result from an async `/opt` LLM call.
     pub opt_result: Arc<std::sync::Mutex<Option<Result<String, String>>>>,
     /// Persisted internal-LLM config currently active in the TUI.

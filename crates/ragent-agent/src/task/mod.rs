@@ -412,7 +412,7 @@ impl TaskManager {
         tokio::spawn(async move {
             let start = Instant::now();
 
-            let config = crate::config::Config::default();
+            let config = crate::Config::default();
             let mut agent_info =
                 match crate::agent::resolve_agent_with_customs(&agent, &config, &working_dir_buf) {
                     Ok(a) => a,
@@ -634,7 +634,7 @@ impl TaskManager {
         cancel_flag: Arc<AtomicBool>,
         working_dir: &std::path::Path,
     ) -> anyhow::Result<String> {
-        let config = crate::config::Config::default();
+        let config = crate::Config::default();
         let mut agent = crate::agent::resolve_agent_with_customs(agent_name, &config, working_dir)?;
         agent.mode = AgentMode::Subagent;
 

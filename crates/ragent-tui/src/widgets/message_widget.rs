@@ -87,20 +87,13 @@ pub fn capitalize_tool_name(name: &str) -> String {
 
 /// Map an alias tool name to its canonical equivalent for display purposes.
 ///
-/// When a model calls an alias tool (e.g. `read_file` instead of `read`),
+/// When a model calls an alias tool (e.g. `view_file` instead of `read`),
 /// both the input summary and result summary functions should produce the same
 /// rich display as the canonical tool.
 pub fn canonical_tool_name(tool: &str) -> &str {
     match tool {
-        "view_file" | "read_file" | "get_file_contents" | "open_file" => "read",
-        "list_files" | "list_directory" => "list",
-        "find_files" => "glob",
-        "search_in_repo" | "file_search" => "search",
-        "replace_in_file" => "edit",
         "update_file" => "write",
-        "run_shell_command" | "run_terminal_cmd" | "execute_bash" | "execute_code" | "run_code" => {
-            "bash"
-        }
+        "run_code" => "bash",
         other => other,
     }
 }
@@ -138,7 +131,7 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// - 📁 Directory Operations: list, make_directory/mkdir
 /// - ℹ️  File Info: file_info
 /// - 🔍 Search Operations: search, grep, glob
-/// - ⚡ Execution: bash, execute_python, calculator
+/// - ⚡ Execution: bash, calculator
 /// - 🌐 Network: webfetch, websearch, http_request
 /// - 🔧 Environment: get_env
 /// - ❓ User Interaction: question, ask_user
@@ -341,14 +334,7 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
                 .map(|s| format!("⚡ $ {}", trunc120(s)))
                 .unwrap_or_else(|| "⚡ bash".to_string())
         }
-        "execute_python" => {
-            // Show first non-empty line of the code snippet.
-            get_str(&["code", "script"])
-                .as_deref()
-                .and_then(|s| s.lines().find(|l| !l.trim().is_empty()))
-                .map(|l| format!("⚡ py: {}", trunc120(l)))
-                .unwrap_or_else(|| "⚡ python".to_string())
-        }
+
         "calculator" => {
             let expr = get_str(&["expression", "expr", "query"]).unwrap_or_default();
             format!("⚡ {}", trunc120(&expr))
@@ -985,25 +971,7 @@ pub fn tool_result_summary(
                 Some(format!("{}…", pluralize(line_count, "line", "lines")))
             }
         }
-        "execute_python" => {
-            let exit_code = out.get("exit_code").and_then(|v| v.as_i64());
-            let timed_out = out
-                .get("timed_out")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let duration_ms = out.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-            if timed_out {
-                Some(format!("timed out after {}ms", duration_ms))
-            } else if let Some(code) = exit_code {
-                Some(format!(
-                    "{}… (exit {})",
-                    pluralize(line_count, "line", "lines"),
-                    code
-                ))
-            } else {
-                Some(format!("{}…", pluralize(line_count, "line", "lines")))
-            }
-        }
+
         "calculator" => {
             let result = out.get("result").and_then(|v| v.as_str());
             result.map(|r| format!("= {}", truncate_str(r, 100)))

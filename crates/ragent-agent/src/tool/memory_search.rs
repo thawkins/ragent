@@ -260,9 +260,9 @@ impl MemorySearchTool {
     /// query string. When cross-project is enabled, searches both global
     /// and project scopes with project-override support.
     fn search_blocks(&self, query: &str, ctx: &ToolContext, output: &mut String) -> Result<usize> {
-        use crate::config::CrossProjectConfig;
         use crate::memory::cross_project::search_blocks_cross_project;
         use crate::memory::storage::FileBlockStorage;
+        use ragent_config::CrossProjectConfig;
 
         let storage = FileBlockStorage::new();
 

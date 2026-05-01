@@ -634,7 +634,7 @@ impl Tool for BashTool {
         if contains_banned_command(command) {
             if crate::yolo::is_enabled() {
                 tracing::warn!("YOLO mode: allowing banned command tool");
-            } else if crate::bash_lists::is_allowlisted(command) {
+            } else if ragent_config::bash_lists::is_allowlisted(command) {
                 tracing::info!("Banned command allowed by user allowlist");
             } else {
                 bail!(
@@ -683,7 +683,7 @@ impl Tool for BashTool {
 
         // Check user-defined denylist (from ragent.json `bash.denylist`)
         if !crate::yolo::is_enabled()
-            && let Some(pattern) = crate::bash_lists::matches_denylist(command)
+            && let Some(pattern) = ragent_config::bash_lists::matches_denylist(command)
         {
             bail!(
                 "Command rejected: matches user-defined deny pattern '{pattern}'. \

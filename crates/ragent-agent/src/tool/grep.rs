@@ -40,6 +40,7 @@ impl Tool for GrepTool {
 
     fn description(&self) -> &'static str {
         "Search file contents for a regex pattern using ripgrep. \
+         The `pattern` parameter is REQUIRED — do not omit it. \
          Respects .gitignore rules. Returns matching lines with file path \
          and line number. Supports regex, case-insensitive search, and \
          file-type glob filtering."

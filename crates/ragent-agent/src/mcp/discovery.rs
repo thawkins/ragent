@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::config::McpServerConfig;
+use ragent_config::{McpServerConfig, McpTransport};
 
 /// Origin of a discovered MCP server.
 #[derive(Debug, Clone)]
@@ -49,7 +49,7 @@ impl DiscoveredMcpServer {
     #[must_use]
     pub fn to_config(&self) -> McpServerConfig {
         McpServerConfig {
-            type_: crate::config::McpTransport::Stdio,
+            type_: McpTransport::Stdio,
             command: Some(self.executable.to_string_lossy().into_owned()),
             args: self.args.clone(),
             env: self.env.clone(),

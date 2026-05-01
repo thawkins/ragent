@@ -36,6 +36,16 @@ impl fmt::Display for PermissionAction {
     }
 }
 
+impl From<ragent_config::permission::PermissionAction> for PermissionAction {
+    fn from(value: ragent_config::permission::PermissionAction) -> Self {
+        match value {
+            ragent_config::permission::PermissionAction::Allow => Self::Allow,
+            ragent_config::permission::PermissionAction::Deny => Self::Deny,
+            ragent_config::permission::PermissionAction::Ask => Self::Ask,
+        }
+    }
+}
+
 /// Represents the type of permission required for a tool operation.
 ///
 /// Standard variants cover common operations (file reads, edits, shell
@@ -109,6 +119,12 @@ impl From<&str> for Permission {
     }
 }
 
+impl From<ragent_config::permission::Permission> for Permission {
+    fn from(value: ragent_config::permission::Permission) -> Self {
+        Self::from(value.to_string().as_str())
+    }
+}
+
 impl fmt::Display for Permission {
     /// Format the permission as a lowercase string.
     ///
@@ -166,6 +182,16 @@ pub struct PermissionRule {
     pub pattern: Option<String>,
     /// Action taken when this rule matches.
     pub action: PermissionAction,
+}
+
+impl From<ragent_config::permission::PermissionRule> for PermissionRule {
+    fn from(value: ragent_config::permission::PermissionRule) -> Self {
+        Self {
+            permission: value.permission.into(),
+            pattern: value.pattern,
+            action: value.action.into(),
+        }
+    }
 }
 
 /// An ordered list of [`PermissionRule`]s evaluated last-match-wins.
