@@ -3,6 +3,8 @@
 //! These adapters keep suite-specific prompt shaping and evaluation logic out of
 //! the generic runner while preserving the normalized workbook schema.
 
+use std::path::PathBuf;
+
 pub mod apps;
 pub mod bigcodebench;
 pub mod crosscodeeval;
@@ -114,3 +116,85 @@ pub(crate) use metrics::{
     accuracy_metric, average_metric, best_exact_or_similarity_sample, codebleu_score,
     exact_match_count, first_sample_exact_match, pass_at_k, resolution_rate, skipped_metric,
 };
+
+pub(crate) fn strip_code_fences(sample: &str) -> String {
+    let trimmed = sample.trim();
+    if let Some(start) = trimmed.find("```") {
+        let fenced = &trimmed[start + 3..];
+        if let Some(end) = fenced.find("```") {
+            return strip_leading_language_label(fenced[..end].trim_matches('\n'));
+        }
+    }
+    strip_leading_language_label(trimmed)
+}
+
+fn strip_leading_language_label(sample: &str) -> String {
+    let trimmed = sample.trim();
+    let mut lines = trimmed.lines();
+    let Some(first_line) = lines.next() else {
+        return String::new();
+    };
+    if is_language_label(first_line) {
+        return lines
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim_matches('\n')
+            .to_string();
+    }
+    trimmed.to_string()
+}
+
+fn is_language_label(line: &str) -> bool {
+    matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "c++"
+            | "cpp"
+            | "c#"
+            | "csharp"
+            | "dart"
+            | "go"
+            | "haskell"
+            | "java"
+            | "javascript"
+            | "js"
+            | "julia"
+            | "kotlin"
+            | "lua"
+            | "php"
+            | "py"
+            | "python"
+            | "r"
+            | "rs"
+            | "rust"
+            | "scala"
+            | "ts"
+            | "typescript"
+    )
+}
+
+pub(crate) fn bench_temp_root() -> std::io::Result<PathBuf> {
+    let root = std::env::current_dir()?.join("target").join("temp");
+    std::fs::create_dir_all(&root)?;
+    Ok(root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_code_fences;
+
+    #[test]
+    fn test_strip_code_fences_removes_bare_language_prefix() {
+        assert_eq!(
+            strip_code_fences("rust\npub fn answer() -> i32 {\n    42\n}"),
+            "pub fn answer() -> i32 {\n    42\n}"
+        );
+    }
+
+    #[test]
+    fn test_strip_code_fences_removes_fenced_language_prefix() {
+        assert_eq!(
+            strip_code_fences("```rust\npub fn answer() -> i32 {\n    42\n}\n```"),
+            "pub fn answer() -> i32 {\n    42\n}"
+        );
+    }
+}

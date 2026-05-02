@@ -867,7 +867,7 @@ The benchmark runner uses the **currently selected model/provider** in the TUI a
 normalized workbook per benchmark under:
 
 ```text
-benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx
+benches/<suite>/<language>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx
 ```
 
 Typical workflow:
@@ -876,10 +876,15 @@ Typical workflow:
 /bench list
 /bench init humaneval
 /bench init humaneval --full
+/bench init humaneval --full --language rust
+/bench init mbpp --full
+/bench init mbpp --full --language rust
+/bench init multipl-e --language rust
 /bench init all
 /bench init full
 /bench init humaneval --verify-only
 /bench run quick
+/bench run multipl-e --language rust --yes
 /bench run all --yes
 /bench status
 /bench open last
@@ -888,9 +893,11 @@ Typical workflow:
 
 Notes:
 
-- `/bench init <suite-or-all-or-full>` creates or refreshes `benches/data/<suite>/`.
+- `/bench init <suite-or-all-or-full>` creates or refreshes `benches/data/<suite>/<language>/`.
 - `/bench init all` initializes sample fixtures for every registered suite.
 - `/bench init <suite> --full` pulls full upstream benchmark data for suites that support it.
+- `/bench init humaneval --full` now pulls every HumanEvalPack language partition by default; use `--language <lang>` to target just one partition such as `rust`.
+- `/bench init mbpp --full` now pulls every BC-MBPP language partition by default; use `--language <lang>` to target just one partition such as `rust`.
 - `/bench init full` is a gated virtual target that is reserved for complete full-data ingestion across every suite.
 - `/bench run <suite-or-profile-or-all>` runs in the background and records a workbook plus resume/debug sidecars.
 - Use `--limit N` or `--cap N` to cap a run to the first `N` cases.

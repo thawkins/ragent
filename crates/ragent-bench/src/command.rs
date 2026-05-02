@@ -108,6 +108,8 @@ pub enum BenchCommand {
         target: BenchInitTarget,
         /// Initialization mode.
         mode: BenchInitMode,
+        /// Optional language selector.
+        language: Option<String>,
         /// Force a full rebuild of the local data root.
         force_download: bool,
         /// Verify without mutating the dataset root.
@@ -163,7 +165,7 @@ fn parse_open(parts: &[&str]) -> Result<BenchCommand> {
 fn parse_init(parts: &[&str]) -> Result<BenchCommand> {
     let Some(raw_target) = parts.first().copied() else {
         bail!(
-            "usage: /bench init <suite-or-all-or-full> [--full] [--force-download] [--verify-only]"
+            "usage: /bench init <suite-or-all-or-full> [--full] [--language LANG] [--force-download] [--verify-only]"
         );
     };
 
@@ -178,13 +180,27 @@ fn parse_init(parts: &[&str]) -> Result<BenchCommand> {
     } else {
         BenchInitMode::Sample
     };
+    let mut language = None;
     let mut force_download = false;
     let mut verify_only = false;
-    for part in &parts[1..] {
-        match *part {
-            "--full" => mode = BenchInitMode::Full,
-            "--force-download" => force_download = true,
-            "--verify-only" => verify_only = true,
+    let mut i = 1;
+    while i < parts.len() {
+        match parts[i] {
+            "--full" => {
+                mode = BenchInitMode::Full;
+                i += 1;
+            }
+            "--language" => {
+                language = Some(parse_string_flag(parts, &mut i, "--language")?);
+            }
+            "--force-download" => {
+                force_download = true;
+                i += 1;
+            }
+            "--verify-only" => {
+                verify_only = true;
+                i += 1;
+            }
             other => bail!("unknown /bench init flag: {other}"),
         }
     }
@@ -192,6 +208,7 @@ fn parse_init(parts: &[&str]) -> Result<BenchCommand> {
     Ok(BenchCommand::Init {
         target,
         mode,
+        language,
         force_download,
         verify_only,
     })

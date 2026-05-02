@@ -6,8 +6,9 @@ use ragent_bench::{
     ARTIFACTS_COLUMNS, ARTIFACTS_SHEET, BenchArtifactRecord, BenchCaseResult, BenchCommand,
     BenchInitMode, BenchInitTarget, BenchResultSummary, BenchRunConfig, BenchRunOptions,
     BenchTarget, CASES_COLUMNS, CASES_SHEET, METRICS_COLUMNS, METRICS_SHEET, MockBenchModelRunner,
-    RUN_COLUMNS, RUN_SHEET, all_suites, bench_data_root, expand_target, init_suite, init_target,
-    parse_bench_command, resolve_model_context, resolve_selected_model, run_target, verify_suite,
+    RUN_COLUMNS, RUN_SHEET, all_suites, bench_data_root, bench_data_root_for_language,
+    expand_target, init_suite, init_suite_with_language, init_target, parse_bench_command,
+    resolve_model_context, resolve_selected_model, run_target, verify_suite,
     workbook_debug_sidecar_path, workbook_output_path, workbook_resume_state_path,
     write_benchmark_workbook,
 };
@@ -15,6 +16,8 @@ use ragent_core::Config;
 use ragent_core::provider;
 use ragent_core::storage::Storage;
 use ragent_types::{ThinkingConfig, ThinkingLevel};
+use sha2::{Digest, Sha256};
+use std::fs;
 use std::sync::atomic::AtomicBool;
 
 #[test]
@@ -71,6 +74,7 @@ fn test_parse_bench_init_all_command() {
         BenchCommand::Init {
             target: BenchInitTarget::All,
             mode: BenchInitMode::Sample,
+            language: None,
             force_download: false,
             verify_only: true,
         }
@@ -85,6 +89,22 @@ fn test_parse_bench_init_full_command() {
         BenchCommand::Init {
             target: BenchInitTarget::Full,
             mode: BenchInitMode::Full,
+            language: None,
+            force_download: false,
+            verify_only: false,
+        }
+    );
+}
+
+#[test]
+fn test_parse_bench_init_language_command() {
+    let command = parse_bench_command("init multipl-e --language rust").expect("parse bench init");
+    assert_eq!(
+        command,
+        BenchCommand::Init {
+            target: BenchInitTarget::Suite("multipl-e".to_string()),
+            mode: BenchInitMode::Sample,
+            language: Some("rust".to_string()),
             force_download: false,
             verify_only: false,
         }
@@ -101,7 +121,7 @@ fn test_parse_bench_open_last_command() {
 fn test_bench_data_root_builder() {
     let root = tempfile::tempdir().expect("tempdir");
     let path = bench_data_root(root.path(), "humaneval");
-    assert!(path.ends_with("benches/data/humaneval"));
+    assert!(path.ends_with("benches/data/humaneval/python"));
 }
 
 #[test]
@@ -119,11 +139,16 @@ fn test_workbook_path_generation() {
     let path = workbook_output_path(
         root.path(),
         "humaneval",
+        "python",
         NaiveDate::from_ymd_opt(2026, 4, 28).expect("date"),
         "anthropic",
         "claude sonnet:4/20250514",
     );
-    assert!(path.ends_with("benches/humaneval/2026-04-28/anthropic/claude_sonnet_4_20250514.xlsx"));
+    assert!(
+        path.ends_with(
+            "benches/humaneval/python/2026-04-28/anthropic/claude_sonnet_4_20250514.xlsx"
+        )
+    );
 }
 
 #[test]
@@ -136,10 +161,11 @@ fn test_init_and_verify_suite_manifest() {
     let manifest = verify_suite(root.path(), "humaneval").expect("verify humaneval");
     assert_eq!(manifest.case_count, 1);
     assert_eq!(manifest.status, "ready");
-    assert_eq!(manifest.manifest_version, 2);
+    assert_eq!(manifest.language, "python");
+    assert_eq!(manifest.manifest_version, 4);
     assert_eq!(manifest.dataset_dir, "dataset");
     assert_eq!(manifest.case_file, "dataset/cases.jsonl");
-    assert_eq!(manifest.sources.len(), 1);
+    assert_eq!(manifest.sources.len(), 2);
     assert_eq!(manifest.files.len(), 1);
     assert_eq!(manifest.files[0].relative_path, "dataset/cases.jsonl");
     assert_eq!(manifest.files[0].sha256.len(), 64);
@@ -152,6 +178,7 @@ fn test_init_target_all_creates_all_suite_roots() {
         root.path(),
         &BenchInitTarget::All,
         BenchInitMode::Sample,
+        None,
         false,
         false,
     )
@@ -172,12 +199,43 @@ fn test_init_target_full_errors_until_all_suites_support_full_ingestion() {
         root.path(),
         &BenchInitTarget::Full,
         BenchInitMode::Full,
+        None,
         false,
         false,
     )
     .expect_err("full init should still be gated");
     assert!(error.to_string().contains("full"));
     assert!(error.to_string().contains("apps"));
+}
+
+#[test]
+fn test_mbpp_registry_lists_multilingual_full_dataset_languages() {
+    let mbpp = all_suites()
+        .iter()
+        .find(|suite| suite.id == "mbpp")
+        .expect("mbpp suite");
+
+    assert!(mbpp.languages.contains(&"python"));
+    assert!(mbpp.languages.contains(&"rust"));
+    assert!(mbpp.languages.contains(&"typescript"));
+    assert!(mbpp.language_source_note.contains("gabeorlanski/bc-mbpp"));
+}
+
+#[test]
+fn test_humaneval_registry_lists_humanevalpack_languages() {
+    let humaneval = all_suites()
+        .iter()
+        .find(|suite| suite.id == "humaneval")
+        .expect("humaneval suite");
+
+    assert!(humaneval.languages.contains(&"python"));
+    assert!(humaneval.languages.contains(&"rust"));
+    assert!(humaneval.languages.contains(&"javascript"));
+    assert!(
+        humaneval
+            .language_source_note
+            .contains("bigcode/humanevalpack")
+    );
 }
 
 #[test]
@@ -245,12 +303,26 @@ fn test_init_suite_reuses_existing_valid_data_root() {
 }
 
 #[test]
+fn test_init_suite_with_language_partitions_multipl_e_data() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let init = init_suite_with_language(root.path(), "multipl-e", Some("rust"), false, false)
+        .expect("init multipl-e rust");
+
+    assert_eq!(init.language, "rust");
+    assert!(init.data_root.ends_with("benches/data/multipl-e/rust"));
+    assert!(
+        bench_data_root_for_language(root.path(), "multipl-e", "rust")
+            .ends_with("benches/data/multipl-e/rust")
+    );
+}
+
+#[test]
 fn test_verify_suite_detects_checksum_mismatch() {
     let root = tempfile::tempdir().expect("tempdir");
     init_suite(root.path(), "humaneval", false, false).expect("init humaneval");
     let cases_path = root
         .path()
-        .join("benches/data/humaneval/dataset/cases.jsonl");
+        .join("benches/data/humaneval/python/dataset/cases.jsonl");
     std::fs::write(&cases_path, "tampered\n").expect("tamper cases");
 
     let error = verify_suite(root.path(), "humaneval").expect_err("checksum mismatch");
@@ -267,7 +339,7 @@ fn test_init_suite_rebuilds_invalid_existing_data() {
     init_suite(root.path(), "humaneval", false, false).expect("init humaneval");
     let cases_path = root
         .path()
-        .join("benches/data/humaneval/dataset/cases.jsonl");
+        .join("benches/data/humaneval/python/dataset/cases.jsonl");
     std::fs::write(&cases_path, "tampered\n").expect("tamper cases");
 
     let rebuilt = init_suite(root.path(), "humaneval", false, false).expect("rebuild invalid data");
@@ -326,6 +398,7 @@ fn test_run_target_all_writes_one_workbook_per_suite() {
         root.path(),
         &BenchInitTarget::All,
         BenchInitMode::Sample,
+        None,
         false,
         false,
     )
@@ -425,6 +498,86 @@ fn test_humaneval_executes_hidden_tests_for_body_only_completion() {
 }
 
 #[test]
+fn test_humaneval_executes_rust_native_tests() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let data_root = bench_data_root_for_language(root.path(), "humaneval", "rust");
+    fs::create_dir_all(data_root.join("dataset")).expect("create rust humaneval data root");
+
+    let cases_path = data_root.join("dataset/cases.jsonl");
+    let case = serde_json::json!({
+        "case_id": "Rust/0",
+        "prompt": "Write a Rust function `has_close_elements(numbers:Vec<f32>, threshold: f32) -> bool`.",
+        "starter_code": "fn has_close_elements(numbers: Vec<f32>, threshold: f32) -> bool {\n",
+        "reference": "    false\n}\n",
+        "language": "rust",
+        "test_code": "PLACEHOLDER_CODE_BODY\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn test_has_close_elements() {\n        assert!(has_close_elements(vec![1.0, 2.0, 2.1], 0.2));\n        assert!(!has_close_elements(vec![1.0, 2.0, 3.0], 0.1));\n    }\n}\n",
+        "entry_point": "has_close_elements",
+        "execution_commands": [["rustc", "--test", "__FILENAME__", "-o", "./__FILENAME__.exe"], ["./__FILENAME__.exe"]],
+        "execution_timeouts_secs": [10, 10],
+        "source_extension": "rs"
+    });
+    fs::write(&cases_path, format!("{case}\n")).expect("write rust humaneval case");
+    let cases_bytes = fs::read(&cases_path).expect("read rust humaneval case bytes");
+    let cases_sha = format!("{:x}", Sha256::digest(&cases_bytes));
+
+    let manifest_path = data_root.join("manifest.json");
+    let manifest = serde_json::json!({
+        "bench_name": "humaneval",
+        "display_name": "HumanEval",
+        "language": "rust",
+        "revision": "HumanEvalPack-1.0",
+        "sources": [
+            {"kind": "dataset", "url": "https://github.com/openai/human-eval"},
+            {"kind": "dataset", "url": "https://huggingface.co/datasets/bigcode/humanevalpack"}
+        ],
+        "initialized_at_utc": "2026-05-02T00:00:00Z",
+        "dataset_dir": "dataset",
+        "case_file": "dataset/cases.jsonl",
+        "case_count": 1,
+        "status": "ready",
+        "manifest_version": 4,
+        "files": [
+            {"relative_path": "dataset/cases.jsonl", "sha256": cases_sha, "bytes": cases_bytes.len()}
+        ]
+    });
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).expect("serialize manifest"),
+    )
+    .expect("write rust humaneval manifest");
+
+    let selection =
+        resolve_selected_model("anthropic/claude-sonnet-4-20250514").expect("resolve model");
+    let runner = MockBenchModelRunner::new(
+        selection,
+        vec![
+            "for i in 0..numbers.len() {\n        for j in (i + 1)..numbers.len() {\n            if (numbers[i] - numbers[j]).abs() < threshold {\n                return true;\n            }\n        }\n    }\n    false\n}"
+                .to_string(),
+        ],
+    );
+
+    let outcome = run_target(
+        root.path(),
+        &runner,
+        "/bench run humaneval --language rust",
+        &BenchTarget::Suite("humaneval".to_string()),
+        &BenchRunOptions {
+            language: Some("rust".to_string()),
+            ..BenchRunOptions::default()
+        },
+        &AtomicBool::new(false),
+    )
+    .expect("run humaneval rust");
+
+    assert!(
+        outcome
+            .summaries
+            .iter()
+            .any(|summary| summary.metric_name == "pass_at_1" && summary.metric_value == 1.0)
+    );
+}
+
+#[test]
 fn test_repobench_adapter_emits_exact_match_and_edit_similarity() {
     let root = tempfile::tempdir().expect("tempdir");
     init_suite(root.path(), "repobench", false, false).expect("init repobench");
@@ -486,6 +639,115 @@ fn test_run_target_no_exec_marks_mbpp_as_skipped() {
             .summaries
             .iter()
             .any(|summary| summary.metric_name == "accuracy" && summary.skipped_count == Some(1))
+    );
+}
+
+#[test]
+fn test_run_target_executes_mbpp_assertions() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_suite(root.path(), "mbpp", false, false).expect("init mbpp");
+    let selection =
+        resolve_selected_model("anthropic/claude-sonnet-4-20250514").expect("resolve model");
+    let runner = MockBenchModelRunner::new(
+        selection,
+        vec!["def is_palindrome(s):\n    return ''.join(reversed(s)) == s".to_string()],
+    );
+
+    let outcome = run_target(
+        root.path(),
+        &runner,
+        "/bench run mbpp",
+        &BenchTarget::Suite("mbpp".to_string()),
+        &BenchRunOptions::default(),
+        &AtomicBool::new(false),
+    )
+    .expect("run mbpp");
+
+    assert!(
+        outcome
+            .summaries
+            .iter()
+            .any(|summary| summary.metric_name == "accuracy" && summary.metric_value == 1.0)
+    );
+}
+
+#[test]
+fn test_run_target_executes_mbpp_rust_native_harness() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let data_root = bench_data_root_for_language(root.path(), "mbpp", "rust");
+    fs::create_dir_all(data_root.join("dataset")).expect("create rust data root");
+
+    let cases_path = data_root.join("dataset/cases.jsonl");
+    let case = serde_json::json!({
+        "case_id": "mbpp-rust-1",
+        "prompt": "pub fn is_palindrome(s: &str) -> bool {",
+        "reference": "",
+        "language": "rust",
+        "test_code": "PLACEHOLDER_CODE_BODY\n\nfn main() {\n    println!(\"TEST-0...{}\", if PLACEHOLDER_FN_NAME(\"level\") { \"PASSED\" } else { \"FAILED\" });\n    println!(\"TEST-1...{}\", if !PLACEHOLDER_FN_NAME(\"abc\") { \"PASSED\" } else { \"FAILED\" });\n}\n",
+        "entry_point": "is_palindrome",
+        "entry_class": "Solution",
+        "execution_commands": [["rustc", "__FILENAME__", "-o", "./__FILENAME__.exe"], ["./__FILENAME__.exe"]],
+        "execution_timeouts_secs": [10, 10],
+        "source_extension": "rs"
+    });
+    fs::write(&cases_path, format!("{case}\n")).expect("write rust mbpp case");
+    let cases_bytes = fs::read(&cases_path).expect("read rust mbpp case bytes");
+    let cases_sha = format!("{:x}", Sha256::digest(&cases_bytes));
+
+    let manifest_path = data_root.join("manifest.json");
+    let manifest = serde_json::json!({
+        "bench_name": "mbpp",
+        "display_name": "MBPP",
+        "language": "rust",
+        "revision": "BC-MBPP-1.0",
+        "sources": [
+            {"kind": "dataset", "url": "https://huggingface.co/datasets/google-research-datasets/mbpp"},
+            {"kind": "dataset", "url": "https://huggingface.co/datasets/gabeorlanski/bc-mbpp"}
+        ],
+        "initialized_at_utc": "2026-05-02T00:00:00Z",
+        "dataset_dir": "dataset",
+        "case_file": "dataset/cases.jsonl",
+        "case_count": 1,
+        "status": "ready",
+        "manifest_version": 4,
+        "files": [
+            {"relative_path": "dataset/cases.jsonl", "sha256": cases_sha, "bytes": cases_bytes.len()}
+        ]
+    });
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).expect("serialize manifest"),
+    )
+    .expect("write rust mbpp manifest");
+
+    let selection =
+        resolve_selected_model("anthropic/claude-sonnet-4-20250514").expect("resolve model");
+    let runner = MockBenchModelRunner::new(
+        selection,
+        vec![
+            "rust\npub fn is_palindrome(s: &str) -> bool {\n    s.chars().eq(s.chars().rev())\n}"
+                .to_string(),
+        ],
+    );
+
+    let outcome = run_target(
+        root.path(),
+        &runner,
+        "/bench run mbpp --language rust",
+        &BenchTarget::Suite("mbpp".to_string()),
+        &BenchRunOptions {
+            language: Some("rust".to_string()),
+            ..BenchRunOptions::default()
+        },
+        &AtomicBool::new(false),
+    )
+    .expect("run mbpp rust");
+
+    assert!(
+        outcome
+            .summaries
+            .iter()
+            .any(|summary| summary.metric_name == "accuracy" && summary.metric_value == 1.0)
     );
 }
 
@@ -565,14 +827,15 @@ fn test_apps_adapter_emits_accuracy_and_codebleu() {
 }
 
 #[test]
-fn test_multipl_e_skips_unsupported_language() {
+fn test_multipl_e_runs_selected_rust_language_partition() {
     let root = tempfile::tempdir().expect("tempdir");
-    init_suite(root.path(), "multipl-e", false, false).expect("init multipl-e");
+    init_suite_with_language(root.path(), "multipl-e", Some("rust"), false, false)
+        .expect("init multipl-e rust");
     let selection =
         resolve_selected_model("anthropic/claude-sonnet-4-20250514").expect("resolve model");
     let runner = MockBenchModelRunner::new(
         selection,
-        vec!["fn max_in_list(items: Vec<i32>) -> i32 { 0 }".to_string()],
+        vec!["fn max_in_list(items: &[i32]) -> i32 { *items.iter().max().unwrap() }".to_string()],
     );
 
     let outcome = run_target(
@@ -593,7 +856,7 @@ fn test_multipl_e_skips_unsupported_language() {
         outcome
             .summaries
             .iter()
-            .all(|summary| summary.skipped_count == Some(1))
+            .all(|summary| summary.language.as_deref() == Some("rust"))
     );
 }
 
@@ -941,7 +1204,7 @@ fn test_workbook_schema_headers_are_stable() {
         project_root: root.path().display().to_string(),
         data_root: root
             .path()
-            .join("benches/data/humaneval")
+            .join("benches/data/humaneval/python")
             .display()
             .to_string(),
         data_revision: "HumanEval-1.2".to_string(),

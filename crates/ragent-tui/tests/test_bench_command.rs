@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use ragent_bench::{BenchProgressHandle, BenchRunProgress};
+use ragent_bench::{BenchProgressHandle, BenchRunEvent, BenchRunOutcome, BenchRunProgress};
 use ragent_core::{
     agent,
     event::EventBus,
@@ -81,6 +81,14 @@ fn configured_app() -> App {
     app
 }
 
+fn all_message_text(app: &App) -> String {
+    app.messages
+        .iter()
+        .map(|message| message.text_content())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn test_bench_list_shows_suites_and_profiles() {
     let mut app = configured_app();
@@ -94,11 +102,16 @@ fn test_bench_list_shows_suites_and_profiles() {
         .text_content();
     assert!(text.contains("Benchmark Suites"));
     assert!(text.contains("language"));
-    assert!(text.contains("HumanEval"));
+    assert!(text.contains("local partition") || text.contains("local partitions"));
+    assert!(text.contains("humaneval"));
     assert!(text.contains("mbpp"));
+    assert!(text.contains("bigcode/humanevalpack"));
+    assert!(text.contains("gabeorlanski/bc-mbpp"));
+    assert!(text.contains("nuprl/MultiPL-E"));
     assert!(text.contains("bigcodebench"));
-    assert!(text.contains("`python`"));
-    assert!(text.contains("`diff`"));
+    assert!(text.contains("python"));
+    assert!(text.contains("diff"));
+    assert!(text.contains("rust"));
     assert!(text.contains("Virtual Targets"));
     assert!(text.contains("all"));
     assert!(text.contains("full"));
@@ -113,8 +126,11 @@ fn test_bench_init_humaneval_creates_data_root() {
 
     app.execute_slash_command("/bench init humaneval");
 
-    assert!(std::path::Path::new("benches/data/humaneval/manifest.json").exists());
-    assert!(std::path::Path::new("benches/data/humaneval/dataset/cases.jsonl").exists());
+    assert!(std::path::Path::new("benches/data/humaneval/python/manifest.json").exists());
+    assert!(std::path::Path::new("benches/data/humaneval/python/dataset/cases.jsonl").exists());
+    let text = all_message_text(&app);
+    assert!(text.contains("Loading benchmark data for `humaneval` [python]"));
+    assert!(text.contains("Loaded `humaneval` [python]"));
 }
 
 #[test]
@@ -132,7 +148,7 @@ fn test_bench_init_verify_only_reports_existing_state() {
         .expect("bench verify-only message")
         .text_content();
     assert!(text.contains("verified"));
-    assert!(std::path::Path::new("benches/data/humaneval/manifest.json").exists());
+    assert!(std::path::Path::new("benches/data/humaneval/python/manifest.json").exists());
 }
 
 #[test]
@@ -149,10 +165,11 @@ fn test_bench_init_all_creates_every_suite_root() {
         .expect("bench init all message")
         .text_content();
     assert!(text.contains("✅ initialized benchmark target."));
+    assert!(text.contains("[python]"));
     assert!(text.contains("humaneval"));
     assert!(text.contains("bigcodebench"));
-    assert!(std::path::Path::new("benches/data/humaneval/manifest.json").exists());
-    assert!(std::path::Path::new("benches/data/bigcodebench/manifest.json").exists());
+    assert!(std::path::Path::new("benches/data/humaneval/python/manifest.json").exists());
+    assert!(std::path::Path::new("benches/data/bigcodebench/python/manifest.json").exists());
 }
 
 #[test]
@@ -203,7 +220,10 @@ fn test_bench_run_humaneval_creates_workbook() {
         .last()
         .expect("bench run output")
         .text_content();
-    assert!(text.contains("sample(s) generated"));
+    assert!(text.contains("sample(s)"));
+    assert!(text.contains("generated"));
+    let all_text = all_message_text(&app);
+    assert!(all_text.contains("Running `humaneval` [python]"));
 }
 
 #[test]
@@ -287,6 +307,63 @@ fn test_bench_status_reports_case_progress() {
     assert!(text.contains("Progress"));
     assert!(text.contains("suite `humaneval` (1/2)"));
     assert!(text.contains("case `3/10`"));
+}
+
+#[test]
+fn test_bench_run_progress_events_show_case_id_and_status() {
+    let mut app = configured_app();
+    let progress = BenchProgressHandle::default();
+    progress.push_event(BenchRunEvent::SuiteStarted {
+        suite_id: "humaneval".to_string(),
+        language: "python".to_string(),
+        total_cases: 1,
+    });
+    progress.push_event(BenchRunEvent::CaseFinished {
+        suite_id: "humaneval".to_string(),
+        language: "python".to_string(),
+        case_id: "humaneval-sample-001".to_string(),
+        status: "passed".to_string(),
+    });
+
+    app.active_bench_task_id = Some("bench-progress".to_string());
+    app.active_bench_progress = Some(progress);
+    app.poll_pending_bench();
+
+    let text = all_message_text(&app);
+    assert!(text.contains("Running `humaneval` [python]"));
+    assert!(text.contains("humaneval-sample-001"));
+    assert!(text.contains("`passed`"));
+}
+
+#[test]
+fn test_bench_run_drains_final_progress_events_before_completion() {
+    let mut app = configured_app();
+    let progress = BenchProgressHandle::default();
+    progress.push_event(BenchRunEvent::CaseFinished {
+        suite_id: "mbpp".to_string(),
+        language: "rust".to_string(),
+        case_id: "mbpp-5".to_string(),
+        status: "passed".to_string(),
+    });
+
+    app.active_bench_task_id = Some("bench-progress".to_string());
+    app.active_bench_progress = Some(progress);
+    if let Ok(mut guard) = app.bench_result.lock() {
+        *guard = Some(Ok(BenchRunOutcome {
+            message: "From: /bench run\n## Benchmark Run\n\n- done".to_string(),
+            workbook_paths: Vec::new(),
+            summaries: Vec::new(),
+        }));
+    } else {
+        panic!("bench result lock");
+    }
+
+    app.poll_pending_bench();
+
+    let text = all_message_text(&app);
+    assert!(text.contains("mbpp-5"));
+    assert!(text.contains("`passed`"));
+    assert!(text.contains("## Benchmark Run"));
 }
 
 #[test]

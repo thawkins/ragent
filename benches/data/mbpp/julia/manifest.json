@@ -1,0 +1,34 @@
+{
+  "bench_name": "mbpp",
+  "display_name": "MBPP",
+  "language": "julia",
+  "revision": "BC-MBPP-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://huggingface.co/datasets/google-research-datasets/mbpp"
+    },
+    {
+      "kind": "dataset",
+      "url": "https://huggingface.co/datasets/gabeorlanski/bc-mbpp"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T13:09:52.778122625+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 855,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "595d3b87e813db6255f2a35b8fd4bb77cc7e89f65cf700b9c3119673d22f126c",
+      "bytes": 1211437
+    },
+    {
+      "relative_path": "dataset/raw/bc-mbpp.jsonl",
+      "sha256": "781057ec24bab279a3bb17131fe8b716f7479e6ee91a4c7efd49cbcdfbabe601",
+      "bytes": 1796853
+    }
+  ]
+}

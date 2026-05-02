@@ -15,7 +15,9 @@ pub use command::{
 };
 pub use data::{
     BenchCaseFixture, BenchDataFile, BenchDataManifest, BenchDataSource, BenchInitOutcome,
-    bench_data_root, init_suite, init_target, load_manifest, verify_suite,
+    BenchInitProgressEvent, bench_data_root, bench_data_root_for_language, init_suite,
+    init_suite_with_language, init_target, init_target_with_progress, load_manifest, verify_suite,
+    verify_suite_with_language,
 };
 pub use model::{
     BenchGeneratedSample, BenchGenerationResult, BenchModelRunner, LiveBenchModelRunner,
@@ -24,11 +26,11 @@ pub use model::{
 };
 pub use registry::{
     BenchProfileDef, BenchSuiteDef, all_profiles, all_suites, expand_target, find_profile,
-    find_suite, requires_confirmation,
+    find_suite, requires_confirmation, resolve_suite_and_language, resolve_suite_language,
 };
 pub use runner::{
-    BenchProgressHandle, BenchRunOutcome, BenchRunProgress, run_target, run_target_with_progress,
-    validate_run_prerequisites,
+    BenchProgressHandle, BenchRunEvent, BenchRunOutcome, BenchRunProgress, run_target,
+    run_target_with_progress, validate_run_prerequisites,
 };
 pub use suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, adapter_for_suite,

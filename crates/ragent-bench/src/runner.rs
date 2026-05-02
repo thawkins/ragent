@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::command::{BenchRunOptions, BenchTarget};
-use crate::data::{bench_data_root, load_cases, verify_suite};
+use crate::data::{bench_data_root_for_language, load_cases, verify_suite_with_language};
 use crate::model::BenchModelRunner;
-use crate::registry::{expand_target, find_profile, requires_confirmation};
+use crate::registry::{expand_target, find_profile, requires_confirmation, resolve_suite_language};
 use crate::suites::{BenchCaseEvaluation, BenchMetricEvaluation, adapter_for_suite};
 use crate::workbook::{
     BenchArtifactRecord, BenchCaseResult, BenchResultSummary, BenchRunConfig,
@@ -77,10 +77,36 @@ pub struct BenchRunProgress {
     pub total_cases: usize,
 }
 
+/// Incremental benchmark run event for UI progress reporting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BenchRunEvent {
+    /// One suite/language run started.
+    SuiteStarted {
+        /// Canonical benchmark suite ID.
+        suite_id: String,
+        /// Effective dataset language.
+        language: String,
+        /// Number of cases scheduled for this suite.
+        total_cases: usize,
+    },
+    /// One benchmark case finished evaluation.
+    CaseFinished {
+        /// Canonical benchmark suite ID.
+        suite_id: String,
+        /// Effective dataset language.
+        language: String,
+        /// Benchmark case identifier.
+        case_id: String,
+        /// Final case status such as `passed` or `failed`.
+        status: String,
+    },
+}
+
 /// Shared progress handle for active benchmark runs.
 #[derive(Debug, Clone, Default)]
 pub struct BenchProgressHandle {
     inner: Arc<Mutex<Option<BenchRunProgress>>>,
+    events: Arc<Mutex<Vec<BenchRunEvent>>>,
 }
 
 impl BenchProgressHandle {
@@ -113,6 +139,36 @@ impl BenchProgressHandle {
                 *guard = None;
             }
         }
+        match self.events.lock() {
+            Ok(mut guard) => guard.clear(),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.clear();
+            }
+        }
+    }
+
+    /// Publish one benchmark progress event.
+    pub fn push_event(&self, event: BenchRunEvent) {
+        match self.events.lock() {
+            Ok(mut guard) => guard.push(event),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.push(event);
+            }
+        }
+    }
+
+    /// Drain pending benchmark progress events.
+    #[must_use]
+    pub fn drain_events(&self) -> Vec<BenchRunEvent> {
+        match self.events.lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                std::mem::take(&mut *guard)
+            }
+        }
     }
 }
 
@@ -131,7 +187,7 @@ pub fn validate_run_prerequisites(
         bail!("This benchmark target requires `--yes`.");
     }
     for suite in expand_target(target)? {
-        verify_suite(project_root, suite.id)?;
+        verify_suite_with_language(project_root, suite.id, options.language.as_deref())?;
     }
     Ok(())
 }
@@ -204,8 +260,10 @@ pub fn run_target_with_progress(
             bail!("benchmark run cancelled");
         }
         let started_at = Utc::now();
-        let manifest = verify_suite(project_root, suite.id)?;
-        let data_root = bench_data_root(project_root, suite.id);
+        let effective_language = resolve_suite_language(suite, options.language.as_deref())?;
+        let manifest =
+            verify_suite_with_language(project_root, suite.id, Some(effective_language))?;
+        let data_root = bench_data_root_for_language(project_root, suite.id, effective_language);
         let cases = load_cases(&data_root)?;
         let adapter = adapter_for_suite(suite.id)?;
         let limited_cases: Vec<_> = match options.limit {
@@ -220,17 +278,24 @@ pub fn run_target_with_progress(
                 completed_cases: 0,
                 total_cases: limited_cases.len(),
             });
+            progress.push_event(BenchRunEvent::SuiteStarted {
+                suite_id: suite.id.to_string(),
+                language: effective_language.to_string(),
+                total_cases: limited_cases.len(),
+            });
         }
         let date = Utc::now().date_naive();
         let workbook_path = workbook_output_path(
             project_root,
             suite.id,
+            effective_language,
             date,
             &selection.provider_id,
             &selection.model_id,
         );
         let config_hash = build_run_config_hash(
             suite.id,
+            effective_language,
             &date.format("%Y-%m-%d").to_string(),
             &git_commit_sha,
             &manifest.revision,
@@ -253,8 +318,9 @@ pub fn run_target_with_progress(
                 .map(|summary| summary.sample_count)
                 .unwrap_or(0);
             message.push_str(&format!(
-                "- `{}` -> `{}` (resumed existing workbook; {} sample(s) recorded)\n",
+                "- `{}` [`{}`] -> `{}` (resumed existing workbook; {} sample(s) recorded)\n",
                 suite.id,
+                effective_language,
                 workbook_path.display(),
                 resumed_sample_count
             ));
@@ -263,7 +329,7 @@ pub fn run_target_with_progress(
             continue;
         }
         let run_config = BenchRunConfig {
-            run_id: build_run_id(suite.id, selection),
+            run_id: build_run_id(suite.id, effective_language, selection),
             bench_name: suite.id.to_string(),
             date_utc: date.format("%Y-%m-%d").to_string(),
             started_at_utc: started_at.to_rfc3339(),
@@ -283,7 +349,7 @@ pub fn run_target_with_progress(
             data_root: data_root.display().to_string(),
             data_revision: manifest.revision.clone(),
             evaluator_version: env!("CARGO_PKG_VERSION").to_string(),
-            notes: build_run_notes(options, selection, &config_hash),
+            notes: build_run_notes(options, selection, &config_hash, effective_language),
         };
 
         let case_outcomes: Vec<_> = limited_cases
@@ -303,6 +369,12 @@ pub fn run_target_with_progress(
                         total_suites,
                         completed_cases: idx + 1,
                         total_cases: limited_cases.len(),
+                    });
+                    progress.push_event(BenchRunEvent::CaseFinished {
+                        suite_id: suite.id.to_string(),
+                        language: case.language.clone(),
+                        case_id: case.case_id.clone(),
+                        status: evaluation.status.clone(),
                     });
                 }
 
@@ -342,6 +414,7 @@ pub fn run_target_with_progress(
         let summary_rows = build_summary_rows(
             &run_config.run_id,
             suite.id,
+            effective_language,
             options,
             &case_results,
             &suite_metrics,
@@ -419,8 +492,9 @@ pub fn run_target_with_progress(
             .unwrap_or_else(|| "no metrics".to_string());
 
         message.push_str(&format!(
-            "- `{}` -> `{}` ({} case(s), {} sample(s) generated; {})\n",
+            "- `{}` [`{}`] -> `{}` ({} case(s), {} sample(s) generated; {})\n",
             suite.id,
+            effective_language,
             workbook_path.display(),
             case_results.len(),
             case_results
@@ -442,10 +516,15 @@ pub fn run_target_with_progress(
     })
 }
 
-fn build_run_id(suite_id: &str, selection: &crate::model::ResolvedModelSelection) -> String {
+fn build_run_id(
+    suite_id: &str,
+    language: &str,
+    selection: &crate::model::ResolvedModelSelection,
+) -> String {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%SZ");
     let mut hasher = Sha256::new();
     hasher.update(suite_id.as_bytes());
+    hasher.update(language.as_bytes());
     hasher.update(selection.provider_id.as_bytes());
     hasher.update(selection.model_id.as_bytes());
     let digest = format!("{:x}", hasher.finalize());
@@ -462,6 +541,7 @@ fn build_run_notes(
     options: &BenchRunOptions,
     selection: &crate::model::ResolvedModelSelection,
     config_hash: &str,
+    effective_language: &str,
 ) -> String {
     let mut notes = Vec::new();
     notes.push(format!("config_hash={config_hash}"));
@@ -492,9 +572,7 @@ fn build_run_notes(
     if let Some(scenario) = &options.scenario {
         notes.push(format!("scenario={scenario}"));
     }
-    if let Some(language) = &options.language {
-        notes.push(format!("language={language}"));
-    }
+    notes.push(format!("language={effective_language}"));
     if let Some(temperature) = options.temperature {
         notes.push(format!("temperature={temperature}"));
     }
@@ -537,6 +615,7 @@ fn hash_string(value: &str) -> String {
 
 fn build_run_config_hash(
     suite_id: &str,
+    effective_language: &str,
     date_utc: &str,
     git_commit_sha: &str,
     manifest_revision: &str,
@@ -546,6 +625,7 @@ fn build_run_config_hash(
     let mut hasher = Sha256::new();
     for segment in [
         format!("suite={suite_id}"),
+        format!("language={effective_language}"),
         format!("date_utc={date_utc}"),
         format!("provider_id={}", selection.provider_id),
         format!("model_id={}", selection.model_id),
@@ -739,6 +819,7 @@ fn case_result_notes(evaluation: &BenchCaseEvaluation, finish_reasons: Vec<Strin
 fn build_summary_rows(
     run_id: &str,
     suite_id: &str,
+    effective_language: &str,
     options: &BenchRunOptions,
     case_results: &[BenchCaseResult],
     metrics: &[BenchMetricEvaluation],
@@ -753,10 +834,12 @@ fn build_summary_rows(
             metric_unit: metric.metric_unit.clone(),
             split_name: None,
             subset_name: options.subset.clone(),
-            language: options
-                .language
-                .clone()
-                .or_else(|| case_results.first().and_then(|case| case.language.clone())),
+            language: Some(
+                case_results
+                    .first()
+                    .and_then(|case| case.language.clone())
+                    .unwrap_or_else(|| effective_language.to_string()),
+            ),
             sample_count: case_results.len(),
             passed_count: metric.passed_count,
             failed_count: metric.failed_count,

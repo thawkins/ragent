@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "run_id": "bench-2026-05-02T13:29:50Z-ollama_cloud-deepseek-v4-flash-c9abd9c5",
+  "bench_name": "humaneval",
+  "date_utc": "2026-05-02",
+  "provider_id": "ollama_cloud",
+  "model_id": "deepseek-v4-flash",
+  "config_hash": "bcb1e1ffba6ffdc504e5f53ac330553bdce2a0ba4b9c78cd41d577bdb1585342",
+  "workbook_relative_path": "benches/humaneval/rust/2026-05-02/ollama_cloud/deepseek-v4-flash.xlsx",
+  "debug_relative_path": "benches/humaneval/rust/2026-05-02/ollama_cloud/deepseek-v4-flash.xlsx.bcb1e1ffba6f.debug.json",
+  "summaries": [
+    {
+      "metric_name": "pass_at_1",
+      "metric_value": 1.0,
+      "metric_unit": "ratio",
+      "split_name": null,
+      "subset_name": null,
+      "language": "rust",
+      "sample_count": 5,
+      "passed_count": 5,
+      "failed_count": 0,
+      "skipped_count": 0,
+      "notes": "HumanEval uses hidden-test execution when dataset test payload is available."
+    }
+  ]
+}

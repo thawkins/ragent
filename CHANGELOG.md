@@ -1,5 +1,29 @@
 # Changelog
 
+## Version: 0.1.0-alpha.56
+
+### Added
+- **Multilingual benchmark data support** — HumanEval expanded from Python-only to 6 languages: `cpp`, `go`, `java`, `javascript`, `python`, `rust` (via HumanEvalPack on HuggingFace). MBPP expanded from Python-only to 16 languages via BC-MBPP/BabelCode: `python`, `cpp`, `csharp`, `dart`, `go`, `haskell`, `java`, `javascript`, `julia`, `kotlin`, `lua`, `php`, `r`, `rust`, `scala`, `typescript`.
+- **`--language` flag for `/bench init` and `/bench run`** — Users can now initialize or run benchmarks targeting a single language partition (e.g., `/bench init humaneval --full --language rust`, `/bench run multipl-e --language rust --yes`).
+- **BenchCaseFixture field expansion** — Added `starter_code`, `entry_class`, `execution_commands`, `execution_timeouts_secs`, and `source_extension` fields to support multi-language benchmarks with different compilation/execution patterns.
+- **Per-language data manifests** — `BenchDataManifest` now includes a `language` field; manifest version bumped to 4 to reflect the new structure.
+
+### Changed
+- **Bench data initialization rearchitected** — `init_target()` now supports per-language dataset download from HuggingFace Datasets Server rows API (for HumanEvalPack) and BabelCode (for MBPP), with manifest validation and full upstream JSONL normalization.
+- **Bench suite metadata enriched** — `BenchSuiteDef` now carries `default_language` and `language_source_note` fields, improving documentation and runner guidance.
+- **BenchInitOutcome now language-aware** — Each initialization outcome tracks the effective dataset language alongside suite metadata.
+- **Bench runner language resolution** — New `resolve_suite_and_language()` and `resolve_suite_language()` helpers determine the active language for a given suite/command, defaulting to suite's `default_language` when `--language` is omitted.
+- **TUI `/bench run` language support** — The run dialog accepts `--language <lang>` to override the default language for a benchmark execution.
+- **Progress events for `/bench init`** — `BenchInitProgressEvent` enum provides per-suite/language start/finish events for better TUI feedback during initialization.
+- **Updated directory layout** — Benchmark output path changed from `benches/<suite>/<YYYY-MM-DD>/...` to `benches/<suite>/<language>/<YYYY-MM-DD>/...` to accommodate per-language results.
+
+### Removed
+- **Legacy Python-only HumanEval sample fixtures** — The old single-language `benches/data/humaneval/dataset/cases.jsonl`, `HumanEval.jsonl.gz`, and `manifest.json` superseded by per-language directories and version-4 manifests.
+
+### Documentation
+- **QUICKSTART.md updated** — Benchmark workflow section now reflects the `--language` flag, multilingual output paths, and new init/run examples for Rust-targeted partitions.
+- **Bench user docs updated** — `docs/userdocs/bench.md` revised with the new per-language directory structure and language flags.
+
 ## [0.1.0-alpha.55] - 2026-04-28
 
 ### Added

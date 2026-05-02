@@ -1,0 +1,34 @@
+{
+  "bench_name": "humaneval",
+  "display_name": "HumanEval",
+  "language": "java",
+  "revision": "HumanEvalPack-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/openai/human-eval"
+    },
+    {
+      "kind": "dataset",
+      "url": "https://huggingface.co/datasets/bigcode/humanevalpack"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T13:08:34.174871492+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 164,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "4290f1469779a7eff1cddd155154f6a5456fe4a26c2b7c48f6e320fb53540cb8",
+      "bytes": 416315
+    },
+    {
+      "relative_path": "dataset/raw/humanevalpack-java.json",
+      "sha256": "09c3a48b6d7096a2c4b4c9f22b5175ba3f361b7300148e287ab11da6733df20a",
+      "bytes": 442557
+    }
+  ]
+}

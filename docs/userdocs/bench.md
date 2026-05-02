@@ -12,7 +12,7 @@ without changing output format between runs.
 
 The `/bench` command family provides a local benchmark workflow with:
 
-- benchmark data initialization under `benches/data/<suite>/`
+- benchmark data initialization under `benches/data/<suite>/<language>/`
 - background benchmark execution from the TUI
 - one workbook per concrete benchmark suite
 - a fixed workbook schema across all suites
@@ -73,6 +73,7 @@ Use suite-level full mode like this:
 
 ```text
 /bench init humaneval --full
+/bench init humaneval --full --language rust
 /bench init mbpp --full
 ```
 
@@ -81,24 +82,25 @@ Use suite-level full mode like this:
 Before you can run a suite, its local benchmark data must exist under:
 
 ```text
-benches/data/<suite>/
+benches/data/<suite>/<language>/
 ```
 
-Each initialized suite data root includes a manifest and normalized dataset fixtures used by
-`ragent-bench`.
+Each suite has a default language. If you omit `--language`, both `/bench init` and `/bench run`
+use that default automatically. Each initialized language partition includes a manifest and
+normalized dataset fixtures used by `ragent-bench`.
 
 ### 2.6 Result workbooks
 
 Each concrete suite writes one workbook to:
 
 ```text
-benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx
+benches/<suite>/<language>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx
 ```
 
 Example:
 
 ```text
-benches/humaneval/2026-05-01/anthropic/claude-sonnet-4-20250514.xlsx
+benches/humaneval/python/2026-05-01/anthropic/claude-sonnet-4-20250514.xlsx
 ```
 
 If you run a profile or `all`, you get **multiple workbook files** - one per expanded suite.
@@ -135,7 +137,7 @@ Shows:
 ### 3.3 Initialize benchmark data
 
 ```text
-/bench init <suite-or-all-or-full> [--full] [--force-download] [--verify-only]
+/bench init <suite-or-all-or-full> [--full] [--language LANG] [--force-download] [--verify-only]
 ```
 
 Examples:
@@ -143,6 +145,7 @@ Examples:
 ```text
 /bench init humaneval
 /bench init humaneval --full
+/bench init multipl-e --language rust
 /bench init bigcodebench
 /bench init all
 /bench init full
@@ -152,7 +155,7 @@ Examples:
 
 Behavior:
 
-- creates or refreshes `benches/data/<suite>/`
+- creates or refreshes `benches/data/<suite>/<language>/`
 - verifies the suite manifest and tracked files
 - reports revision and case count
 - supports `all` and `full`, but not profiles
@@ -162,6 +165,7 @@ Flags:
 | Flag | Meaning |
 | --- | --- |
 | `--full` | Download and normalize the full upstream dataset for suites that support it |
+| `--language <lang>` | Initialize a specific language partition; in full mode, omit it to pull every supported upstream language partition for that suite |
 | `--force-download` | Rebuild the initialized data root even if a valid one already exists |
 | `--verify-only` | Verify the initialized data root without mutating it |
 
@@ -233,7 +237,7 @@ The benchmark runner accepts these options on `/bench run`:
 | `--subset <name>` | Benchmark-specific subset selector |
 | `--release <version>` | Benchmark-specific release/version selector |
 | `--scenario <name>` | Benchmark-specific scenario selector |
-| `--language <lang>` | Target language for multilingual suites |
+| `--language <lang>` | Select the language partition to run; omit it to use the suite default |
 | `--temperature <F>` | Override model temperature |
 | `--top-p <F>` | Override top-p |
 | `--max-tokens <N>` | Override completion max tokens |
@@ -279,8 +283,8 @@ pass/fail scoring.
 `--full` applies to `/bench init`, not `/bench run`.
 
 When supported by a suite, it downloads the upstream benchmark data and normalizes it into the
-local benchmark layout under `benches/data/<suite>/`. The current first-wave full-data suite
-implementations are `humaneval` and `mbpp`.
+local benchmark layout under `benches/data/<suite>/<language>/`. The current first-wave full-data
+suite implementations are `humaneval` and `mbpp`.
 
 ---
 
@@ -288,19 +292,19 @@ implementations are `humaneval` and `mbpp`.
 
 The current benchmark system supports these suites:
 
-| Suite | Purpose | Languages | Expensive | Typical metrics | Current caveats |
-| --- | --- | --- | --- | --- | --- |
-| `humaneval` | Function-level Python generation | `python` | No | `pass_at_1`, `pass_at_k` | Supports `--full` dataset ingestion from upstream HumanEval data |
-| `mbpp` | Basic Python problem solving | `python` | No | `accuracy` | Supports `--full` dataset ingestion from upstream MBPP data |
-| `apps` | Competitive-programming style generation | `python` | Yes | `accuracy`, `codebleu` | Heavy target; requires `--yes` |
-| `ds1000` | Data-science code generation | `python` | No | `accuracy` | Current adapter is a local MVP scorer |
-| `multipl-e` | Multi-language generation | `python` | Yes | `pass_at_1`, `pass_at_k` | Language mismatch is reported as skipped for the current sample fixture |
-| `repobench` | Repository-level completion | `python` | No | `exact_match`, `edit_similarity` | Native local metrics |
-| `crosscodeeval` | Cross-file completion | `python` | No | `completion_accuracy`, `edit_similarity` | Native local metrics |
-| `swebench-lite` | Patch generation for real bug-fix tasks | `diff` | Yes | `resolution_rate`, `instances_resolved` | Only `repair` is supported; current resolution is a native proxy |
-| `swebench-verified` | Verified SWE-bench subset | `diff` | Yes | `resolution_rate`, `instances_resolved` | Only `repair` is supported; current resolution is a native proxy |
-| `livecodebench` | Contamination-aware coding evaluation | `python` | Yes | `pass_at_1`, `scenario_score` | Phase 6 currently supports only `codegeneration` |
-| `bigcodebench` | Practical challenging code generation | `python` | Yes | `pass_at_1`, `pass_at_k`, `codebleu` | Heavy target; requires `--yes` |
+| Suite | Purpose | Default | Supported languages | Expensive | Typical metrics | Current caveats |
+| --- | --- | --- | --- | --- | --- | --- |
+| `humaneval` | Function-level generation with HumanEvalPack multilingual coverage | `python` | `cpp`, `go`, `java`, `javascript`, `python`, `rust` | No | `pass_at_1`, `pass_at_k` | Sample fixtures stay Python-only, but `--full` pulls HumanEvalPack from HF `bigcode/humanevalpack`; omitting `--language` initializes every supported language partition |
+| `mbpp` | Basic problem solving with BC-MBPP multilingual coverage | `python` | `python`, `cpp`, `csharp`, `dart`, `go`, `haskell`, `java`, `javascript`, `julia`, `kotlin`, `lua`, `php`, `r`, `rust`, `scala`, `typescript` | No | `accuracy` | Sample fixtures stay Python-only, but `--full` pulls BC-MBPP from HF `gabeorlanski/bc-mbpp`; omitting `--language` initializes every supported language partition |
+| `apps` | Competitive-programming style generation | `python` | `python` | Yes | `accuracy`, `codebleu` | Heavy target; requires `--yes` |
+| `ds1000` | Data-science code generation | `python` | `python` | No | `accuracy` | Current adapter is a local MVP scorer |
+| `multipl-e` | Multi-language generation | `python` | `python`, `rust` | Yes | `pass_at_1`, `pass_at_k` | Rust comes from MultiPL-E translations derived from HumanEval/MBPP; native multilingual full-data init now exists for `humaneval` via HumanEvalPack and `mbpp` via BC-MBPP |
+| `repobench` | Repository-level completion | `python` | `python` | No | `exact_match`, `edit_similarity` | Native local metrics |
+| `crosscodeeval` | Cross-file completion | `python` | `python` | No | `completion_accuracy`, `edit_similarity` | Upstream repo is multilingual; raw language data is distributed separately on request |
+| `swebench-lite` | Patch generation for real bug-fix tasks | `diff` | `diff` | Yes | `resolution_rate`, `instances_resolved` | Only `repair` is supported; current resolution is a native proxy |
+| `swebench-verified` | Verified SWE-bench subset | `diff` | `diff` | Yes | `resolution_rate`, `instances_resolved` | Only `repair` is supported; current resolution is a native proxy |
+| `livecodebench` | Contamination-aware coding evaluation | `python` | `python` | Yes | `pass_at_1`, `scenario_score` | Phase 6 currently supports only `codegeneration` |
+| `bigcodebench` | Practical challenging code generation | `python` | `python` | Yes | `pass_at_1`, `pass_at_k`, `codebleu` | Heavy target; requires `--yes` |
 
 ### 5.1 Important current limitations
 
@@ -308,7 +312,7 @@ Be aware of these current MVP constraints:
 
 1. `livecodebench` currently supports only the `codegeneration` scenario.
 2. `swebench-lite` and `swebench-verified` currently support only the `repair` scenario.
-3. `multipl-e` skips cases if the requested `--language` does not match the sample fixture.
+3. Each initialized dataset is partitioned under `benches/data/<suite>/<language>/`; rerun `/bench init` if the requested language partition is missing.
 4. `--no-exec` produces skipped metrics for suites that depend on execution.
 5. SWE-bench resolution currently uses native patch-shape and diff-similarity heuristics rather
    than full repository materialization plus isolated upstream-style test execution.
@@ -349,7 +353,9 @@ This fixed layout makes results directly comparable across suites.
 ```text
 /bench init humaneval
 /bench init humaneval --full
+/bench init humaneval --full --language rust
 /bench init mbpp --full
+/bench init mbpp --full --language rust
 /bench init mbpp
 /bench run quick
 /bench status
@@ -368,11 +374,14 @@ Use this once when preparing a project for broader benchmark work.
 
 ```text
 /bench init humaneval --full
+/bench init humaneval --full --language rust
 /bench init mbpp --full
+/bench init mbpp --full --language rust
 ```
 
 This stores normalized full benchmark data locally and tracks the raw upstream download in the
-suite manifest.
+suite manifest. `humaneval --full` now initializes every HumanEvalPack language partition, and
+`mbpp --full` does the same for BC-MBPP, unless you narrow either command with `--language`.
 
 ### 7.4 Run one expensive suite safely
 
@@ -435,7 +444,9 @@ currently supported suites:
 
 ```text
 /bench init humaneval --full
+/bench init humaneval --full --language rust
 /bench init mbpp --full
+/bench init mbpp --full --language rust
 ```
 
 ### "This benchmark target requires `--yes`"

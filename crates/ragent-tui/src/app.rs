@@ -1178,6 +1178,7 @@ impl App {
                 progress.suite_id, progress.completed_cases, progress.total_cases
             );
         }
+        self.drain_bench_progress_events();
         let outcome = {
             let mut guard = match self.bench_result.lock() {
                 Ok(g) => g,
@@ -1189,6 +1190,7 @@ impl App {
             guard.take()
         };
         let Some(outcome) = outcome else { return };
+        self.drain_bench_progress_events();
 
         if let Some(task_id) = self.active_bench_task_id.take()
             && let Some(idx) = self.active_tasks.iter().position(|task| task.id == task_id)
@@ -1208,6 +1210,7 @@ impl App {
                 self.bench_last_summary = Some(run.message.clone());
                 self.bench_last_workbooks = run.workbook_paths.clone();
                 self.bench_last_finished_at = Some(chrono::Utc::now());
+                self.force_new_message = true;
                 self.append_assistant_text(&run.message);
                 self.status = "bench: done".to_string();
                 self.push_log_no_agent(
@@ -1222,8 +1225,79 @@ impl App {
                 self.bench_last_summary = Some(format!("Benchmark run failed: {msg}"));
                 self.bench_last_finished_at = Some(chrono::Utc::now());
                 self.status = format!("⚠ bench failed: {msg}");
+                self.force_new_message = true;
                 self.append_assistant_text(&format!("From: /bench run\n❌ {msg}"));
                 self.push_log_no_agent(LogLevel::Warn, format!("bench error: {msg}"));
+            }
+        }
+    }
+
+    fn drain_bench_progress_events(&mut self) {
+        if let Some(handle) = &self.active_bench_progress {
+            let events = handle.drain_events();
+            for event in events {
+                self.force_new_message = true;
+                self.append_assistant_text(&self.render_bench_run_event(&event));
+            }
+        }
+    }
+
+    fn render_bench_run_event(&self, event: &ragent_bench::BenchRunEvent) -> String {
+        match event {
+            ragent_bench::BenchRunEvent::SuiteStarted {
+                suite_id,
+                language,
+                total_cases,
+            } => {
+                format!(
+                    "From: /bench run\n⏳ Running `{suite_id}` [{language}] — {total_cases} case(s)."
+                )
+            }
+            ragent_bench::BenchRunEvent::CaseFinished {
+                suite_id,
+                language,
+                case_id,
+                status,
+            } => {
+                let icon = if status == "passed" { "✅" } else { "❌" };
+                format!(
+                    "From: /bench run\n{icon} `{suite_id}` [{language}] case `{case_id}` -> `{status}`."
+                )
+            }
+        }
+    }
+
+    fn render_bench_init_event(&self, event: &ragent_bench::BenchInitProgressEvent) -> String {
+        match event {
+            ragent_bench::BenchInitProgressEvent::Starting {
+                suite_id,
+                language,
+                mode,
+                verify_only,
+            } => {
+                let action = if *verify_only {
+                    "Verifying"
+                } else if matches!(mode, ragent_bench::BenchInitMode::Full) {
+                    "Loading full benchmark data for"
+                } else {
+                    "Loading benchmark data for"
+                };
+                format!("From: /bench init\n⏳ {action} `{suite_id}` [{language}]…")
+            }
+            ragent_bench::BenchInitProgressEvent::Finished {
+                suite_id,
+                language,
+                verify_only,
+                case_count,
+                data_root,
+                ..
+            } => {
+                let action = if *verify_only { "Verified" } else { "Loaded" };
+                format!(
+                    "From: /bench init\n✅ {action} `{suite_id}` [{language}] at `{}` ({} case(s)).",
+                    data_root.display(),
+                    case_count
+                )
             }
         }
     }
@@ -1231,13 +1305,31 @@ impl App {
     fn render_bench_list(&self) -> String {
         let mut output = String::from("From: /bench list\n## Benchmark Suites\n\n");
         output.push_str(
-            "| suite | description | languages | revision |\n| --- | --- | --- | --- |\n",
+            "| suite | description | default | languages | language data | revision |\n| --- | --- | --- | --- | --- | --- |\n",
         );
         for suite in ragent_bench::all_suites() {
             let languages = suite.languages.join(", ");
+            let local_partition = if suite.languages.len() > 1 {
+                format!("local partitions: `benches/data/{}/<language>`", suite.id)
+            } else {
+                format!(
+                    "local partition: `benches/data/{}/{}`",
+                    suite.id, suite.default_language
+                )
+            };
+            let language_data = if suite.language_source_note.is_empty() {
+                local_partition
+            } else {
+                format!("{local_partition}; {}", suite.language_source_note)
+            };
             output.push_str(&format!(
-                "| `{}` | {} | `{}` | `{}` |\n",
-                suite.id, suite.description, languages, suite.revision
+                "| `{}` | {} | `{}` | `{}` | {} | `{}` |\n",
+                suite.id,
+                suite.description,
+                suite.default_language,
+                languages,
+                language_data,
+                suite.revision
             ));
         }
         output.push_str("\n## Virtual Targets\n\n");
@@ -4927,7 +5019,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             "bench" => match ragent_bench::parse_bench_command(args) {
                 Ok(ragent_bench::BenchCommand::Help) => {
                     self.append_assistant_text(
-                        "From: /bench\nUsage: `/bench list` | `/bench init <suite-or-all-or-full> [--full] [--force-download] [--verify-only]` | `/bench show` | `/bench run <suite-or-profile-or-all> [--limit N|--cap N] [--samples K] [--subset NAME] [--release VERSION] [--scenario NAME] [--language LANG] [--temperature F] [--top-p F] [--max-tokens N] [--deterministic] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--resume] [--no-exec] [--yes]` | `/bench status` | `/bench open last` | `/bench cancel`"
+                        "From: /bench\nUsage: `/bench list` | `/bench init <suite-or-all-or-full> [--full] [--language LANG] [--force-download] [--verify-only]` | `/bench show` | `/bench run <suite-or-profile-or-all> [--limit N|--cap N] [--samples K] [--subset NAME] [--release VERSION] [--scenario NAME] [--language LANG] [--temperature F] [--top-p F] [--max-tokens N] [--deterministic] [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--resume] [--no-exec] [--yes]` | `/bench status` | `/bench open last` | `/bench cancel`"
                     );
                     self.status = "bench help".to_string();
                 }
@@ -4962,6 +5054,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 Ok(ragent_bench::BenchCommand::Init {
                     target,
                     mode,
+                    language,
                     force_download,
                     verify_only,
                 }) => {
@@ -4972,12 +5065,17 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                             return;
                         }
                     };
-                    match ragent_bench::init_target(
+                    match ragent_bench::init_target_with_progress(
                         &project_root,
                         &target,
                         mode,
+                        language.as_deref(),
                         force_download,
                         verify_only,
+                        |event| {
+                            self.force_new_message = true;
+                            self.append_assistant_text(&self.render_bench_init_event(&event));
+                        },
                     ) {
                         Ok(outcomes) => {
                             let mode = if verify_only {
@@ -4991,14 +5089,16 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                                 format!("From: /bench init\n✅ {mode} benchmark target.\n\n");
                             for init in &outcomes {
                                 message.push_str(&format!(
-                                    "- **`{}`** {} at `{}` (`{}`, {} case(s))\n",
+                                    "- **`{}`** [{}] {} at `{}` (`{}`, {} case(s))\n",
                                     init.suite.id,
+                                    init.language,
                                     mode,
                                     init.data_root.display(),
                                     init.manifest.revision,
                                     init.manifest.case_count
                                 ));
                             }
+                            self.force_new_message = true;
                             self.append_assistant_text(&message);
                             let status_target = match &target {
                                 ragent_bench::BenchInitTarget::All => "all".to_string(),
@@ -5009,6 +5109,7 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         }
                         Err(e) => {
                             self.status = format!("⚠ bench init failed: {e}");
+                            self.force_new_message = true;
                             self.append_assistant_text(&format!("From: /bench init\n❌ {e}"));
                         }
                     }

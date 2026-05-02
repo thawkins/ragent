@@ -238,6 +238,7 @@ pub struct BenchArtifactRecord {
 pub fn workbook_output_path(
     project_root: &Path,
     bench_name: &str,
+    language: &str,
     date_utc: NaiveDate,
     provider_id: &str,
     model_id: &str,
@@ -245,6 +246,7 @@ pub fn workbook_output_path(
     project_root
         .join("benches")
         .join(bench_name)
+        .join(language)
         .join(date_utc.format("%Y-%m-%d").to_string())
         .join(provider_id)
         .join(format!("{}.xlsx", slugify_path_segment(model_id)))

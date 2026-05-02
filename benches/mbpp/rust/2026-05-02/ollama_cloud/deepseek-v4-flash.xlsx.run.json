@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "run_id": "bench-2026-05-02T13:31:24Z-ollama_cloud-deepseek-v4-flash-f53b2466",
+  "bench_name": "mbpp",
+  "date_utc": "2026-05-02",
+  "provider_id": "ollama_cloud",
+  "model_id": "deepseek-v4-flash",
+  "config_hash": "5431f1fb8973530995eaaea5e0d2b634ccbd8d91b0244afd04f2eb71288f64e5",
+  "workbook_relative_path": "benches/mbpp/rust/2026-05-02/ollama_cloud/deepseek-v4-flash.xlsx",
+  "debug_relative_path": "benches/mbpp/rust/2026-05-02/ollama_cloud/deepseek-v4-flash.xlsx.5431f1fb8973.debug.json",
+  "summaries": [
+    {
+      "metric_name": "accuracy",
+      "metric_value": 0.8,
+      "metric_unit": "ratio",
+      "split_name": null,
+      "subset_name": null,
+      "language": "rust",
+      "sample_count": 5,
+      "passed_count": 4,
+      "failed_count": 1,
+      "skipped_count": 0,
+      "notes": "MBPP uses bundled assertion execution for accuracy when tests are available."
+    }
+  ]
+}
