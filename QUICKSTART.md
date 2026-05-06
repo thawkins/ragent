@@ -5,7 +5,7 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-alpha.16)
+## Highlights (0.1.0-alpha.57)
 
 - Image attachment support (Alt+V): paste images from clipboard or file URIs; pending attachments are displayed before sending.
 - Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
