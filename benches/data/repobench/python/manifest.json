@@ -1,0 +1,25 @@
+{
+  "bench_name": "repobench",
+  "display_name": "RepoBench",
+  "language": "python",
+  "revision": "RepoBench-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/Leolty/repobench"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.810193921+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "aead4fbe96926d51b868e0e467923ba98e21cb8a9f7b2d8b4734bde903474de4",
+      "bytes": 150
+    }
+  ]
+}

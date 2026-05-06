@@ -1,0 +1,1 @@
+{"case_id":"swebench-verified-sample-001","prompt":"Apply a repository patch that resolves the reported issue.","reference":"diff --git a/service.py b/service.py","language":"diff"}

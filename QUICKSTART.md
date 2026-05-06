@@ -881,6 +881,7 @@ Typical workflow:
 /bench init mbpp --full --language rust
 /bench init multipl-e --language rust
 /bench init all
+/bench init all --full
 /bench init full
 /bench init humaneval --verify-only
 /bench run quick
@@ -895,6 +896,7 @@ Notes:
 
 - `/bench init <suite-or-all-or-full>` creates or refreshes `benches/data/<suite>/<language>/`.
 - `/bench init all` initializes sample fixtures for every registered suite.
+- `/bench init all --full` uses full upstream ingestion where available and falls back to sample fixtures for suites that do not yet support full-data initialization.
 - `/bench init <suite> --full` pulls full upstream benchmark data for suites that support it.
 - `/bench init humaneval --full` now pulls every HumanEvalPack language partition by default; use `--language <lang>` to target just one partition such as `rust`.
 - `/bench init mbpp --full` now pulls every BC-MBPP language partition by default; use `--language <lang>` to target just one partition such as `rust`.

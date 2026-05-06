@@ -1,0 +1,29 @@
+{
+  "bench_name": "swebench-lite",
+  "display_name": "SWE-bench Lite",
+  "language": "diff",
+  "revision": "SWE-bench-Lite-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://www.swebench.com/SWE-bench/"
+    },
+    {
+      "kind": "dataset",
+      "url": "https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.811921463+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "c7a0d7fb32f630170e4a71ce304d46dcad278787b6fa493f6d0614a118ec7b99",
+      "bytes": 170
+    }
+  ]
+}

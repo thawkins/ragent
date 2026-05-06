@@ -1,0 +1,1 @@
+{"case_id":"livecodebench-sample-001","prompt":"Implement the required function for this timed coding task.","reference":"def solve():\n    pass","language":"python"}

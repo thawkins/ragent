@@ -1,0 +1,25 @@
+{
+  "bench_name": "crosscodeeval",
+  "display_name": "CrossCodeEval",
+  "language": "python",
+  "revision": "CrossCodeEval-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/amazon-science/cceval"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.811085179+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "8883cf7c7be749a12f06bbc2637474d51f408ceac742b2377001538d14afbf59",
+      "bytes": 165
+    }
+  ]
+}

@@ -47,6 +47,8 @@ Profiles can be used with `/bench run`, but **not** with `/bench init`.
 `all` is a virtual target that expands to **every registered benchmark suite**.
 
 - `/bench init all` initializes data roots for every known suite
+- `/bench init all --full` uses full upstream ingestion where available and falls back to sample
+  fixtures for suites that do not yet support full-data initialization
 - `/bench run all --yes` runs every known suite
 
 Because `all` includes expensive suites, it always requires `--yes` for execution.
@@ -148,6 +150,7 @@ Examples:
 /bench init multipl-e --language rust
 /bench init bigcodebench
 /bench init all
+/bench init all --full
 /bench init full
 /bench init humaneval --verify-only
 /bench init swebench-lite --force-download
@@ -173,6 +176,8 @@ Initialization modes:
 
 - **Sample mode** is the default and writes local smoke-test fixtures.
 - **Full mode** is enabled with `--full` for supported suites.
+- **`/bench init all --full`** initializes every suite, using full upstream ingestion for suites
+  that support it today and sample fixtures for the rest.
 - **Virtual `full` target** means "run full mode for every suite" and stays gated until every suite
   supports full-data ingestion.
 

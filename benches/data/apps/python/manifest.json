@@ -1,0 +1,25 @@
+{
+  "bench_name": "apps",
+  "display_name": "APPS",
+  "language": "python",
+  "revision": "APPS-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/hendrycks/apps"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.806728250+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "76d780116663e9e4954d7b214ce1cb7fd6c249f13b0dba0c1a06a0db95bd9bb2",
+      "bytes": 161
+    }
+  ]
+}

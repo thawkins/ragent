@@ -1,0 +1,1 @@
+{"case_id":"bigcodebench-sample-001","prompt":"Write a complete solution for the described practical coding task.","reference":"def solution():\n    raise NotImplementedError","language":"python"}

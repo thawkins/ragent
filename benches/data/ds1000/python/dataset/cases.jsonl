@@ -1,0 +1,1 @@
+{"case_id":"ds1000-sample-001","prompt":"Filter a pandas DataFrame to rows where column x > 10.","reference":"df[df['x'] > 10]","language":"python"}

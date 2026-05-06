@@ -1,0 +1,25 @@
+{
+  "bench_name": "bigcodebench",
+  "display_name": "BigCodeBench",
+  "language": "python",
+  "revision": "BigCodeBench-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/bigcode-project/bigcodebench"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.814483181+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "201a4ad10d9cab07f0a7a0aa285be39144e4d03272617dc5503a2a314f0dbc15",
+      "bytes": 197
+    }
+  ]
+}

@@ -256,9 +256,9 @@ where
             Ok(vec![outcome])
         }
         BenchInitTarget::All => {
-            ensure_full_init_supported_for_target(target, mode)?;
             let mut outcomes = Vec::new();
             for suite in all_suites() {
+                let suite_mode = effective_init_mode_for_suite(suite.id, mode);
                 let languages = if mode == BenchInitMode::Full && language.is_none() {
                     suite.languages.to_vec()
                 } else {
@@ -268,13 +268,13 @@ where
                     on_progress(BenchInitProgressEvent::Starting {
                         suite_id: suite.id.to_string(),
                         language: suite_language.to_string(),
-                        mode,
+                        mode: suite_mode,
                         verify_only,
                     });
                     let outcome = init_suite_mode(
                         project_root,
                         suite.id,
-                        mode,
+                        suite_mode,
                         Some(suite_language),
                         force_download,
                         verify_only,
@@ -708,6 +708,17 @@ fn ensure_full_init_supported_for_target(
     bail!(
         "full dataset ingestion is not available for every suite yet; missing support for: {joined}"
     );
+}
+
+fn effective_init_mode_for_suite(suite_id: &str, requested_mode: BenchInitMode) -> BenchInitMode {
+    if requested_mode == BenchInitMode::Full && !supports_full_init(suite_id) {
+        return BenchInitMode::Sample;
+    }
+    requested_mode
+}
+
+fn supports_full_init(suite_id: &str) -> bool {
+    FULL_INIT_SUPPORTED_SUITES.contains(&suite_id)
 }
 
 fn prepare_suite_dataset(
@@ -1345,9 +1356,10 @@ fn humaneval_fixture_from_record(record: HumanEvalFullRecord) -> BenchCaseFixtur
 #[cfg(test)]
 mod tests {
     use super::{
-        BcMbppFullRecord, BenchCaseFixture, BenchDataManifest, BenchDataSource,
+        BcMbppFullRecord, BenchCaseFixture, BenchDataManifest, BenchDataSource, BenchInitMode,
         HumanEvalFullRecord, MANIFEST_VERSION, bc_mbpp_fixture_from_record, build_mbpp_test_code,
-        canonical_mbpp_language, humaneval_fixture_from_record, validate_case_fixtures,
+        canonical_mbpp_language, effective_init_mode_for_suite, humaneval_fixture_from_record,
+        validate_case_fixtures,
     };
 
     #[test]
@@ -1468,6 +1480,26 @@ mod tests {
             error
                 .to_string()
                 .contains("stale and missing bundled tests")
+        );
+    }
+
+    #[test]
+    fn test_effective_init_mode_for_all_full_falls_back_for_unsupported_suites() {
+        assert_eq!(
+            effective_init_mode_for_suite("humaneval", BenchInitMode::Full),
+            BenchInitMode::Full
+        );
+        assert_eq!(
+            effective_init_mode_for_suite("mbpp", BenchInitMode::Full),
+            BenchInitMode::Full
+        );
+        assert_eq!(
+            effective_init_mode_for_suite("apps", BenchInitMode::Full),
+            BenchInitMode::Sample
+        );
+        assert_eq!(
+            effective_init_mode_for_suite("swebench-lite", BenchInitMode::Full),
+            BenchInitMode::Sample
         );
     }
 }

@@ -1,0 +1,1 @@
+{"case_id":"crosscodeeval-sample-001","prompt":"Use cross-file context to finish the helper implementation.","reference":"return helper(value)","language":"python"}

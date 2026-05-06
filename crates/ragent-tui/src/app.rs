@@ -1335,7 +1335,7 @@ impl App {
         output.push_str("\n## Virtual Targets\n\n");
         output.push_str("| target | expands to | notes |\n| --- | --- | --- |\n");
         output.push_str(&format!(
-            "| `all` | `{}` registered suites | Initializes or runs every known benchmark suite. |\n",
+            "| `all` | `{}` registered suites | Initializes or runs every known benchmark suite; `/bench init all --full` uses full ingestion where available and sample fixtures elsewhere. |\n",
             ragent_bench::all_suites().len()
         ));
         output.push_str(
@@ -5078,21 +5078,25 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                         },
                     ) {
                         Ok(outcomes) => {
-                            let mode = if verify_only {
-                                "verified"
-                            } else if matches!(mode, ragent_bench::BenchInitMode::Full) {
-                                "initialized full dataset for"
+                            let heading = if verify_only {
+                                "verified benchmark target."
                             } else {
-                                "initialized"
+                                "initialized benchmark target."
                             };
-                            let mut message =
-                                format!("From: /bench init\n✅ {mode} benchmark target.\n\n");
+                            let mut message = format!("From: /bench init\n✅ {heading}\n\n");
                             for init in &outcomes {
+                                let init_action = if init.verified_only {
+                                    "verified"
+                                } else if matches!(init.mode, ragent_bench::BenchInitMode::Full) {
+                                    "initialized full dataset for"
+                                } else {
+                                    "initialized"
+                                };
                                 message.push_str(&format!(
                                     "- **`{}`** [{}] {} at `{}` (`{}`, {} case(s))\n",
                                     init.suite.id,
                                     init.language,
-                                    mode,
+                                    init_action,
                                     init.data_root.display(),
                                     init.manifest.revision,
                                     init.manifest.case_count
@@ -10704,47 +10708,40 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             }
-            Event::QuestionRequested {
-                ref session_id,
-                ref request_id,
-                ref question,
-                ref options,
-            } => {
-                if self.is_current_session(session_id) {
-                    if self.question_queue.iter().any(|r| r.id == *request_id) {
-                        tracing::warn!(
-                            request_id = %request_id,
-                            "Duplicate QuestionRequested ignored"
-                        );
-                    } else {
-                        tracing::info!(
-                            session_id = %session_id,
-                            request_id = %request_id,
-                            "TUI received QuestionRequested, showing dialog"
-                        );
-                        self.question_queue.push_back(QuestionRequest {
-                            id: request_id.clone(),
-                            session_id: session_id.clone(),
-                            question: question.clone(),
-                            options: options.clone(),
-                        });
-                        self.pending_question_input.clear();
-                        self.question_selected_index = 0;
-                        self.status = "awaiting question".to_string();
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            format!("question requested: {}", question),
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        expected_session = %self.session_id.as_deref().unwrap_or("none"),
-                        received_session = %session_id,
-                        "Ignoring QuestionRequested for different session"
-                    );
-                }
-            }
-            Event::PermissionReplied {
+                          Event::QuestionRequested {
+                              ref session_id,
+                              ref request_id,
+                              ref question,
+                              ref options,
+                          } => {
+                              // Allow questions from any session (including sub-agents) to be displayed
+                              // since they require user interaction to proceed.
+                              if self.question_queue.iter().any(|r| r.id == *request_id) {
+                                  tracing::warn!(
+                                      request_id = %request_id,
+                                      "Duplicate QuestionRequested ignored"
+                                  );
+                              } else {
+                                  tracing::info!(
+                                      session_id = %session_id,
+                                      request_id = %request_id,
+                                      "TUI received QuestionRequested, showing dialog"
+                                  );
+                                  self.question_queue.push_back(QuestionRequest {
+                                      id: request_id.clone(),
+                                      session_id: session_id.clone(),
+                                      question: question.clone(),
+                                      options: options.clone(),
+                                  });
+                                  self.pending_question_input.clear();
+                                  self.question_selected_index = 0;
+                                  self.status = "awaiting question".to_string();
+                                  self.push_log_no_agent(
+                                      LogLevel::Warn,
+                                      format!("question requested: {}", question),
+                                  );
+                              }
+                          }            Event::PermissionReplied {
                 ref session_id,
                 ref request_id,
                 allowed,

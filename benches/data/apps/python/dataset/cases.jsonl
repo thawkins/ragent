@@ -1,0 +1,1 @@
+{"case_id":"apps-sample-001","prompt":"Read two integers and print their sum.","reference":"a, b = map(int, input().split())\nprint(a + b)","language":"python"}

@@ -1,0 +1,1 @@
+{"case_id":"multipl-e-rust-sample-001","prompt":"Return the maximum element in a list.","reference":"fn max_in_list(items: &[i32]) -> i32 {\n    *items.iter().max().unwrap()\n}","language":"rust"}

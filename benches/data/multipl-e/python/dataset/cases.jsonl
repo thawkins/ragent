@@ -1,0 +1,1 @@
+{"case_id":"multipl-e-python-sample-001","prompt":"Return the maximum element in a list.","reference":"def max_in_list(items):\n    return max(items)","language":"python"}

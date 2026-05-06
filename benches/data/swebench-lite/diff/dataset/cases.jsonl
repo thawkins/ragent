@@ -1,0 +1,1 @@
+{"case_id":"swebench-lite-sample-001","prompt":"Patch the repository so the failing test now passes.","reference":"diff --git a/module.py b/module.py","language":"diff"}

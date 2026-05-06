@@ -1,0 +1,25 @@
+{
+  "bench_name": "ds1000",
+  "display_name": "DS-1000",
+  "language": "python",
+  "revision": "DS1000-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://ds1000-code-gen.github.io/"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.807674760+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "7cd64073cdfbea81ae773ef31ee7fabaca0e5752b381704ebca0ce5d20063104",
+      "bytes": 149
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "bench_name": "multipl-e",
+  "display_name": "MultiPL-E",
+  "language": "python",
+  "revision": "MultiPL-E-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/nuprl/MultiPL-E"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.808483077+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "e3d87b1aa17828068d6ef5170eff2d24a1713eb6c2e64ca9510de873f6dc0a77",
+      "bytes": 172
+    }
+  ]
+}

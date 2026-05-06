@@ -1,0 +1,25 @@
+{
+  "bench_name": "livecodebench",
+  "display_name": "LiveCodeBench",
+  "language": "python",
+  "revision": "LiveCodeBench-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://github.com/LiveCodeBench/LiveCodeBench"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.813625345+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "2e65d8dfb3937eb31a8d864aebb105428553d1286cc64bb443307b11bfd00b0e",
+      "bytes": 167
+    }
+  ]
+}

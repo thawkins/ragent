@@ -1,0 +1,29 @@
+{
+  "bench_name": "swebench-verified",
+  "display_name": "SWE-bench Verified",
+  "language": "diff",
+  "revision": "SWE-bench-Verified-1.0",
+  "sources": [
+    {
+      "kind": "dataset",
+      "url": "https://www.swebench.com/SWE-bench/"
+    },
+    {
+      "kind": "dataset",
+      "url": "https://github.com/SWE-bench/SWE-bench/blob/main/docs/guides/evaluation.md"
+    }
+  ],
+  "initialized_at_utc": "2026-05-02T14:04:35.812795849+00:00",
+  "dataset_dir": "dataset",
+  "case_file": "dataset/cases.jsonl",
+  "case_count": 1,
+  "status": "ready",
+  "manifest_version": 4,
+  "files": [
+    {
+      "relative_path": "dataset/cases.jsonl",
+      "sha256": "ad8dc7e41df5e58b5115cfe443594914341c9afd9dfe75301a1b8e4cf4274a9f",
+      "bytes": 182
+    }
+  ]
+}
