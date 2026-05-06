@@ -1,6 +1,6 @@
 # Release
 
-## Current Version: 0.1.0-alpha.56
+## Current Version: 0.1.0-alpha.57
 
 ### Added
 - **Benchmark runner subsystem** — New `ragent-bench` crate with suite registry (`quick`, `standard`, `agentic` profiles), workbook output (XLSX with `run`, `metrics`, `cases`, `artifacts` sheets), data initialization (sample fixtures and full upstream download), and a `LiveBenchModelRunner` that drives generation via the current provider/model. Includes HumanEval, MBPP, and a Phase-6 native suite adapter.
