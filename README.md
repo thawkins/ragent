@@ -2,12 +2,11 @@
 
 An AI coding agent for the terminal, built in Rust.
 
-ragent is a Rust coding agent inspired by [OpenCode](https://github.com/anomalyco/opencode) —
-the open-source AI coding agent. It provides multi-provider LLM orchestration, a
+ragent is a Rust coding agent inspired various coding agents like Roocode, ClaudCode, Copilot-cli and Opencode. It provides multi-provider LLM orchestration, a
 built-in tool system, a terminal UI, and a client/server architecture, all compiled
 into a single statically-linked binary with no runtime dependencies.
 
-It is reimplemented in Rust as a learninh exercise for the author.
+It is implemented in Rust as a learning exercise for the author.
 
 ## Features
 
