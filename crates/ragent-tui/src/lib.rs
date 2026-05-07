@@ -31,6 +31,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+#[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 
 /// RAII guard that ensures terminal state is restored on drop.
@@ -375,9 +376,16 @@ pub async fn run_tui(
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // Set up signal handlers for graceful shutdown (SIGINT, SIGTERM)
-    let mut sigint = signal(SignalKind::interrupt())?;
-    let mut sigterm = signal(SignalKind::terminate())?;
+    // Set up signal handlers for graceful shutdown (SIGINT, SIGTERM) - Unix only
+    #[cfg(unix)]
+    let (mut sigint, mut sigterm) = {
+        let sigint = signal(SignalKind::interrupt())?;
+        let sigterm = signal(SignalKind::terminate())?;
+        (sigint, sigterm)
+    };
+    #[cfg(windows)]
+    let (mut sigint, mut sigterm): (std::future::Pending<()>, std::future::Pending<()>) = 
+        (std::future::pending(), std::future::pending());
     let mut last_draw = std::time::Instant::now();
 
     while app.is_running {
