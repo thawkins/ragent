@@ -1027,18 +1027,24 @@ fn read_readme(working_dir: &Path) -> String {
     std::fs::read_to_string(&readme_path).unwrap_or_default()
 }
 
-/// Discover and load all AGENTS.md-style instruction files from the project tree.
+/// Discover and load all AGENTS.md-style instruction files from the project tree
+/// or the global directory.
 ///
 /// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
-/// `INSTRUCTIONS.md`, sorted by directory depth (root first). Returns a
-/// combined string listing the discovered file paths and their concatenated
-/// content.
+/// `INSTRUCTIONS.md` in the working directory. If any local files are found,
+/// they are used exclusively (sorted by directory depth, root first). If no
+/// local files exist, falls back to the global directory at
+/// `~/.local/share/ragent/`.
+///
+/// Returns a combined string listing the discovered file paths and their
+/// concatenated content.
 fn collect_agents_md_content(working_dir: &Path) -> String {
     const AGENT_FILE_NAMES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".ragent.md", "INSTRUCTIONS.md"];
 
     use ignore::WalkBuilder;
 
-    let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
+    // First, collect local project files
+    let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
 
     let walk = WalkBuilder::new(working_dir)
         .hidden(false)
@@ -1060,15 +1066,37 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
                 .strip_prefix(working_dir)
                 .map(|rel| rel.components().count())
                 .unwrap_or(usize::MAX);
-            found.push((depth, path));
+            local_files.push((depth, path));
         }
+    }
+
+    let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
+
+    // If no local files exist, fall back to global directory (~/.local/share/ragent/)
+    if local_files.is_empty() {
+        let global_dir = dirs::data_dir()
+            .map(|d| d.join("ragent"))
+            .filter(|d| d.is_dir());
+
+        if let Some(ref global_path) = global_dir {
+            for name in AGENT_FILE_NAMES {
+                let file_path = global_path.join(name);
+                if file_path.is_file() {
+                    // Use depth 0 for global files
+                    found.push((0, file_path));
+                }
+            }
+        }
+    } else {
+        // Use local files, sorted by depth (root first)
+        found = local_files;
     }
 
     if found.is_empty() {
         return String::new();
     }
 
-    // Sort: root files first (depth=1), then deeper subdirectories
+    // Sort: root files first (depth=1 for local, depth=0 for global), then deeper subdirectories
     found.sort_by_key(|(depth, path)| (*depth, path.clone()));
 
     let mut result = String::new();
@@ -1101,10 +1129,8 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
     }
 
     result
-}
-
-/// Build a system prompt for the given agent using cached context.
-#[must_use]
+}          
+            /// Build a system prompt for the given agent using cached context.#[must_use]
 pub fn build_system_prompt(
     agent: &AgentInfo,
     working_dir: &Path,

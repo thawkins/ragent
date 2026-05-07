@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.59
+## Current Version: 0.1.0-alpha.60
+
+### Added
+- **Global AGENTS.md search path** — The `collect_agents_md_content()` function now searches `~/.local/share/ragent/` for AGENTS.md-style instruction files (AGENTS.md, CLAUDE.md, .ragent.md, INSTRUCTIONS.md). If any local project files exist, they take precedence; otherwise global files are used as a fallback.
+
+### Changed
+- **AGENTS.md loading behavior** — Local project files now replace (rather than append to) global instruction files. This allows a single global configuration while still supporting project-specific overrides.
+
+## Previous: 0.1.0-alpha.59
 
 ### Added
 - **Benchmark runner subsystem** — New `ragent-bench` crate with suite registry (`quick`, `standard`, `agentic` profiles), workbook output (XLSX with `run`, `metrics`, `cases`, `artifacts` sheets), data initialization (sample fixtures and full upstream download), and a `LiveBenchModelRunner` that drives generation via the current provider/model. Includes HumanEval, MBPP, and a Phase-6 native suite adapter.

@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-alpha.60
+
+### Added
+- **Global AGENTS.md search path** — Extended `collect_agents_md_content()` to search `~/.local/share/ragent/` for instruction files. Falls back to global files only when no local project files exist.
+
+### Changed
+- **AGENTS.md precedence** — Local project instruction files now completely replace global files, rather than being appended to them. This enables cleaner project-specific overrides of global guidelines.
+
 ## Version: 0.1.0-alpha.59
 
 ### Changed
