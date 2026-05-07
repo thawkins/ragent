@@ -1027,6 +1027,50 @@ fn read_readme(working_dir: &Path) -> String {
     std::fs::read_to_string(&readme_path).unwrap_or_default()
 }
 
+/// Information about discovered instruction files.
+#[derive(Debug, Clone)]
+pub struct InstructionFileDiscovery {
+    /// The file names being searched for
+    pub searched_names: Vec<String>,
+    /// The working directory searched
+    pub working_dir: std::path::PathBuf,
+    /// The global directory searched (if applicable)
+    pub global_dir: Option<std::path::PathBuf>,
+    /// Files that were found
+    pub found_files: Vec<std::path::PathBuf>,
+}
+
+impl InstructionFileDiscovery {
+    /// Format a human-readable summary of the discovery
+    pub fn format_summary(&self) -> String {
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "Searching for instruction files: {}",
+            self.searched_names.join(", ")
+        ));
+        lines.push(format!("  Working directory: {}", self.working_dir.display()));
+        if let Some(ref global) = self.global_dir {
+            lines.push(format!("  Global directory: {}", global.display()));
+        }
+        if self.found_files.is_empty() {
+            lines.push("  No instruction files found".to_string());
+        } else {
+            lines.push(format!("  Found {} file(s):", self.found_files.len()));
+            for file in &self.found_files {
+                let rel = file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string();
+                lines.push(format!("    - {}", rel));
+            }
+        }
+        lines.push(String::new());
+        lines.push(String::new());
+        lines.join("\n")
+    }
+}
+
 /// Discover and load all AGENTS.md-style instruction files from the project tree
 /// or the global directory.
 ///
@@ -1037,11 +1081,18 @@ fn read_readme(working_dir: &Path) -> String {
 /// `~/.local/share/ragent/`.
 ///
 /// Returns a combined string listing the discovered file paths and their
-/// concatenated content.
-fn collect_agents_md_content(working_dir: &Path) -> String {
+/// concatenated content, along with discovery information for logging/display.
+pub fn collect_agents_md_content_with_discovery(
+    working_dir: &Path,
+) -> (String, InstructionFileDiscovery) {
     const AGENT_FILE_NAMES: &[&str] = &["AGENTS.md", "CLAUDE.md", ".ragent.md", "INSTRUCTIONS.md"];
 
     use ignore::WalkBuilder;
+
+    // Build discovery info
+    let global_dir = dirs::data_dir()
+        .map(|d| d.join("ragent"))
+        .filter(|d| d.is_dir());
 
     // First, collect local project files
     let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
@@ -1073,11 +1124,8 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
     let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
 
     // If no local files exist, fall back to global directory (~/.local/share/ragent/)
-    if local_files.is_empty() {
-        let global_dir = dirs::data_dir()
-            .map(|d| d.join("ragent"))
-            .filter(|d| d.is_dir());
-
+    let used_global = local_files.is_empty();
+    if used_global {
         if let Some(ref global_path) = global_dir {
             for name in AGENT_FILE_NAMES {
                 let file_path = global_path.join(name);
@@ -1092,8 +1140,15 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
         found = local_files;
     }
 
+    let discovery = InstructionFileDiscovery {
+        searched_names: AGENT_FILE_NAMES.iter().map(|s| s.to_string()).collect(),
+        working_dir: working_dir.to_path_buf(),
+        global_dir: if used_global { global_dir.clone() } else { None },
+        found_files: found.iter().map(|(_, p)| p.clone()).collect(),
+    };
+
     if found.is_empty() {
-        return String::new();
+        return (String::new(), discovery);
     }
 
     // Sort: root files first (depth=1 for local, depth=0 for global), then deeper subdirectories
@@ -1128,7 +1183,22 @@ fn collect_agents_md_content(working_dir: &Path) -> String {
         }
     }
 
-    result
+    (result, discovery)
+}
+
+/// Discover and load all AGENTS.md-style instruction files from the project tree
+/// or the global directory.
+///
+/// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
+/// `INSTRUCTIONS.md` in the working directory. If any local files are found,
+/// they are used exclusively (sorted by directory depth, root first). If no
+/// local files exist, falls back to the global directory at
+/// `~/.local/share/ragent/`.
+///
+/// Returns a combined string listing the discovered file paths and their
+/// concatenated content.
+fn collect_agents_md_content(working_dir: &Path) -> String {
+    collect_agents_md_content_with_discovery(working_dir).0
 }          
             /// Build a system prompt for the given agent using cached context.#[must_use]
 pub fn build_system_prompt(

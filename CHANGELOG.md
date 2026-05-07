@@ -1,5 +1,14 @@
 # Changelog
 
+## Version: 0.1.0-alpha.61
+
+### Added
+- **Instruction file discovery logging** — New `InstructionFileDiscovery` struct and `collect_agents_md_content_with_discovery()` function track which AGENTS.md-style files were found and where. Logs discovery summary via tracing and emits `AgentNotice` events for visibility.
+
+### Changed
+- **AgentNotice display** — TUI now displays `AgentNotice` events in the message window ("📋 **Agent Notice**" prefix) in addition to the status bar, making instruction file discovery visible to users.
+- **Improved formatting** — AGENTS.md acknowledgment messages now include a newline separator for better readability.
+
 ## Version: 0.1.0-alpha.60
 
 ### Added

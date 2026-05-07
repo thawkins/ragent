@@ -902,7 +902,7 @@ impl SessionProcessor {
         if !has_prior_exchange && has_tools && !is_subagent {
             let agents_md_path = working_dir.join("AGENTS.md");
             if agents_md_path.is_file() {
-                let init_text = "AGENTS.md project guidelines have been loaded. \
+                let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
                                  Please acknowledge them briefly.";
 
                 // Only send the init prompt — exclude the user's real message
@@ -2124,8 +2124,24 @@ impl SessionProcessor {
             |s| s.directory,
         );
 
-        let agents_md_path = working_dir.join("AGENTS.md");
-        if !agents_md_path.is_file() {
+        // Collect instruction files with discovery info for logging
+        let (agents_md, discovery) =
+            crate::agent::collect_agents_md_content_with_discovery(&working_dir);
+
+        // Log discovery info to tracing and emit AgentNotice event
+        let discovery_msg = discovery.format_summary();
+        tracing::info!(
+            session_id = %session_id,
+            "{}",
+            discovery_msg
+        );
+        self.event_bus.publish(Event::AgentNotice {
+            session_id: session_id.to_string(),
+            message: discovery_msg.clone(),
+        });
+
+        // Check if any instruction files were found
+        if discovery.found_files.is_empty() {
             return Ok(());
         }
 
@@ -2184,24 +2200,23 @@ impl SessionProcessor {
             }
         };
 
-        // Build a minimal system prompt using the agent's configured prompt.
-        let (git_status, readme, agents_md, file_tree) =
-            crate::agent::collect_prompt_context(&working_dir).await;
-        let run_init_config = crate::Config::load().unwrap_or_default();
-        let system_prompt = crate::agent::build_system_prompt_with_storage(
-            agent,
-            &working_dir,
-            &file_tree,
-            None,
-            Some(&git_status),
-            Some(&readme),
-            Some(&agents_md),
-            Some(self.session_manager.storage()),
-            Some(&run_init_config.memory),
-        );
-        let init_text = "AGENTS.md project guidelines have been loaded. \
-                         Please acknowledge them briefly.";
-        let init_messages = vec![ChatMessage {
+                  // Build a minimal system prompt using the agent's configured prompt.
+                // Note: agents_md was already collected above with discovery info
+                let (git_status, readme, _, file_tree) =
+                    crate::agent::collect_prompt_context(&working_dir).await;
+                let run_init_config = crate::Config::load().unwrap_or_default();
+                let system_prompt = crate::agent::build_system_prompt_with_storage(
+                    agent,
+                    &working_dir,
+                    &file_tree,
+                    None,
+                    Some(&git_status),
+                    Some(&readme),
+                    Some(&agents_md),
+                    Some(self.session_manager.storage()),
+                    Some(&run_init_config.memory),
+                                );        let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
+                                           Please acknowledge them briefly.";        let init_messages = vec![ChatMessage {
             role: "user".to_string(),
             content: ChatContent::Text(init_text.to_string()),
         }];
@@ -2261,9 +2276,8 @@ impl SessionProcessor {
                 session_id: session_id.to_string(),
                 text: ack_text.clone(),
             });
-            let init_user_text = "AGENTS.md project guidelines have been loaded. \
-                                  Please acknowledge them briefly.";
-            let user_msg = Message::new(
+                        let init_user_text = "AGENTS.md project guidelines have been loaded.\n\n\
+                                                Please acknowledge them briefly.";            let user_msg = Message::new(
                 session_id,
                 Role::User,
                 vec![MessagePart::Text {

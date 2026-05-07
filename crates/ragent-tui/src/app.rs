@@ -10844,17 +10844,18 @@ Type `/swarm help` for more info.\n";
                     self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
                 }
             }
-            Event::AgentNotice {
-                ref session_id,
-                ref message,
-            } => {
-                if self.is_current_session(session_id) {
-                    let summary = summarise_error(message);
-                    self.push_log_no_agent(LogLevel::Warn, format!("agent notice: {}", message));
-                    self.status = summary;
-                }
-            }
-            Event::AgentError {
+                          Event::AgentNotice {
+                              ref session_id,
+                              ref message,
+                          } => {
+                              if self.is_current_session(session_id) {
+                                  let summary = summarise_error(message);
+                                  self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
+                                  self.status = summary.clone();
+                                  // Also display in the message window for visibility
+                                  self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
+                              }
+                          }            Event::AgentError {
                 ref session_id,
                 ref error,
             } => {

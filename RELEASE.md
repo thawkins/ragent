@@ -1,6 +1,15 @@
 # Release
 
-## Current Version: 0.1.0-alpha.60
+## Current Version: 0.1.0-alpha.61
+
+### Added
+- **Instruction file discovery tracking** — The `collect_agents_md_content_with_discovery()` function now returns structured discovery information (`InstructionFileDiscovery`) showing which instruction files were searched for, where they were looked for (working directory and global directory), and which files were actually found. Discovery summaries are logged and emitted as `AgentNotice` events.
+
+### Changed
+- **AgentNotice visibility** — `AgentNotice` events are now displayed prominently in the TUI message window with a "📋 **Agent Notice**" header, in addition to being logged and shown in the status bar.
+- **Formatting improvements** — AGENTS.md acknowledgment prompt now includes better line breaks for readability.
+
+## Previous: 0.1.0-alpha.60
 
 ### Added
 - **Global AGENTS.md search path** — The `collect_agents_md_content()` function now searches `~/.local/share/ragent/` for AGENTS.md-style instruction files (AGENTS.md, CLAUDE.md, .ragent.md, INSTRUCTIONS.md). If any local project files exist, they take precedence; otherwise global files are used as a fallback.
