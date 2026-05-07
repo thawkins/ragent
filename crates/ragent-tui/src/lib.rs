@@ -376,16 +376,34 @@ pub async fn run_tui(
     app.force_new_message = true;
     terminal.draw(|frame| layout::render(frame, &mut app))?;
 
-    // Set up signal handlers for graceful shutdown (SIGINT, SIGTERM) - Unix only
-    #[cfg(unix)]
-    let (mut sigint, mut sigterm) = {
-        let sigint = signal(SignalKind::interrupt())?;
-        let sigterm = signal(SignalKind::terminate())?;
-        (sigint, sigterm)
-    };
-    #[cfg(windows)]
-    let (mut sigint, mut sigterm): (std::future::Pending<()>, std::future::Pending<()>) = 
-        (std::future::pending(), std::future::pending());
+    // Set up signal handlers for graceful shutdown via a channel
+    // This works cross-platform without needing #[cfg] inside tokio::select!
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    
+    // Spawn a task to listen for signals
+    tokio::spawn(async move {
+        #[cfg(unix)]
+        {
+            let mut sigint = signal(SignalKind::interrupt())?;
+            let mut sigterm = signal(SignalKind::terminate())?;
+            tokio::select! {
+                _ = sigint.recv() => {
+                    tracing::info!("SIGINT received, initiating graceful shutdown");
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, initiating graceful shutdown");
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("Ctrl+C received, initiating graceful shutdown");
+        }
+        let _ = shutdown_tx.send(());
+        anyhow::Result::<()>::Ok(())
+    });
+    
     let mut last_draw = std::time::Instant::now();
 
     while app.is_running {
@@ -449,14 +467,8 @@ pub async fn run_tui(
             last_draw = std::time::Instant::now();
         }
         tokio::select! {
-            // Handle SIGINT (Ctrl+C) - initiate graceful shutdown
-            _ = sigint.recv() => {
-                tracing::info!("SIGINT received, initiating graceful shutdown");
-                app.is_running = false;
-            }
-            // Handle SIGTERM - initiate graceful shutdown
-            _ = sigterm.recv() => {
-                tracing::info!("SIGTERM received, initiating graceful shutdown");
+            // Handle shutdown signal (Ctrl+C/SIGINT/SIGTERM)
+            _ = shutdown_rx.recv() => {
                 app.is_running = false;
             }
                           // Terminal key/mouse events (polled at 50ms intervals)
