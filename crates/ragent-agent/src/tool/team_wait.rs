@@ -146,7 +146,7 @@ impl Tool for TeamWaitTool {
                 content: format!(
                     "All teammates in team '{resolved_team_name}' are already idle.\n\n{summary}"
                 ),
-                metadata: Some(json!({ "team": resolved_team_name, "timed_out": false })),
+                metadata: Some(json!({ "team": resolved_team_name, "timed_out": false, "success": true })),
             });
         }
 
@@ -210,6 +210,7 @@ impl Tool for TeamWaitTool {
             metadata: Some(json!({
                 "team_name": resolved_team_name,
                 "timed_out": timed_out,
+                "success": !timed_out,
                 "idle_count": final_store.config.members.len() - waiting_for.len(),
                 "still_working_count": waiting_for.len(),
                 "still_working": waiting_for.iter().cloned().collect::<Vec<_>>(),

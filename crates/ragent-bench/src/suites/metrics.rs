@@ -52,16 +52,7 @@ pub(crate) fn best_exact_or_similarity_sample(
 /// Normalize code-like content for text-based comparisons.
 #[must_use]
 pub(crate) fn normalized_code(value: &str) -> String {
-    let mut result = String::new();
-    let mut first = true;
-    for word in value.split_whitespace() {
-        if !first {
-            result.push(' ');
-        }
-        result.push_str(word);
-        first = false;
-    }
-    result.trim().to_string()
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Compute normalized edit similarity in the range `[0, 1]`.
@@ -220,6 +211,19 @@ pub(crate) fn average_metric(
         skipped_count: Some(skipped_count),
         notes: notes.to_string(),
     }
+}
+
+/// Compute pass@1 (first-sample exact match rate) from evaluations.
+#[must_use]
+pub(crate) fn pass_at_1(evaluations: &[BenchCaseEvaluation]) -> f64 {
+    if evaluations.is_empty() {
+        return 0.0;
+    }
+    evaluations
+        .iter()
+        .filter(|e| e.first_sample_exact_match)
+        .count() as f64
+        / evaluations.len() as f64
 }
 
 /// Standard evaluation for exact-match-based benchmarks.

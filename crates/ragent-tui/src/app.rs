@@ -9315,25 +9315,26 @@ Type `/swarm help` for more info.\n";
                         return;
                     }
                 }
-                if self.teams_area.contains((event.column, event.row).into()) {
-                    let row = event.row.saturating_sub(self.teams_area.y);
-                    let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
-                    if absolute_row == 1 {
-                        // Lead row clicked — unfocus any teammate
-                        self.focused_teammate = None;
-                        self.status = "focus: lead (you)".to_string();
-                        return;
-                    }
-                    if absolute_row >= 2 {
-                        let idx = absolute_row - 2;
-                        if let Some(member) = self.team_members.get(idx).cloned() {
-                            // Focus this teammate (same as /team focus <name>)
-                            self.focus_teammate_by_id(&member.agent_id);
-                        }
-                        return;
-                    }
-                }
-                // Scrollbar drag takes priority (rightmost column of pane)
+                                  if self.teams_area.contains((event.column, event.row).into()) {
+                                      let row = event.row.saturating_sub(self.teams_area.y);
+                                      let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
+                                      // Account for border line at row 0
+                                      if absolute_row == 2 {
+                                          // Lead row clicked — unfocus any teammate
+                                          self.focused_teammate = None;
+                                          self.status = "focus: lead (you)".to_string();
+                                          return;
+                                      }
+                                      if absolute_row >= 3 {
+                                          // Teammate rows start at absolute_row 3 (after border, header, lead)
+                                          let idx = absolute_row - 3;
+                                          if let Some(member) = self.team_members.get(idx).cloned() {
+                                              // Focus this teammate (same as /team focus <name>)
+                                              self.focus_teammate_by_id(&member.agent_id);
+                                          }
+                                          return;
+                                      }
+                                  }                // Scrollbar drag takes priority (rightmost column of pane)
                 if self.message_area.height > 0
                     && event.column == self.message_area.right().saturating_sub(1)
                     && self.message_area.contains(pos.into())

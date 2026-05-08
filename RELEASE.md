@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.62
+## Current Version: 0.1.0-alpha.63
+
+### Changed
+- **Version bump** — Incremented to 0.1.0-alpha.63.
+
+## Previous: 0.1.0-alpha.62
 
 ### Added
 - **Instruction file discovery tracking** — The `collect_agents_md_content_with_discovery()` function now returns structured discovery information (`InstructionFileDiscovery`) showing which instruction files were searched for, where they were looked for (working directory and global directory), and which files were actually found. Discovery summaries are logged and emitted as `AgentNotice` events.

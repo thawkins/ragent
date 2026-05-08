@@ -125,6 +125,30 @@ fn compiled_denylist() -> &'static RwLock<GlobSet> {
     COMPILED_DENYLIST.get_or_init(|| RwLock::new(GlobSet::empty()))
 }
 
+/// Recompile patterns and update the compiled allowlist cache.
+fn recompile_allowlist() -> Result<()> {
+    let g = global()
+        .read()
+        .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+    let compiled = compile_patterns(&g.allowlist);
+    if let Ok(mut guard) = compiled_allowlist().write() {
+        *guard = compiled;
+    }
+    Ok(())
+}
+
+/// Recompile patterns and update the compiled denylist cache.
+fn recompile_denylist() -> Result<()> {
+    let g = global()
+        .read()
+        .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
+    let compiled = compile_patterns(&g.denylist);
+    if let Ok(mut guard) = compiled_denylist().write() {
+        *guard = compiled;
+    }
+    Ok(())
+}
+
 /// Compile a list of glob patterns into a GlobSet.
 fn compile_patterns(patterns: &[String]) -> GlobSet {
     let mut builder = GlobSetBuilder::new();
@@ -248,16 +272,7 @@ pub fn add_allowlist(pattern: &str, scope: Scope) -> Result<()> {
             g.allowlist.push(pattern.to_string());
         }
     }
-    // Recompile after modification
-    {
-        let g = global()
-            .read()
-            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        let compiled = compile_patterns(&g.allowlist);
-        if let Ok(mut guard) = compiled_allowlist().write() {
-            *guard = compiled;
-        }
-    }
+    recompile_allowlist()?;
     patch_config(scope, |root| {
         // Ensure dirs object exists
         if !root["dirs"].is_object() {
@@ -289,16 +304,7 @@ pub fn remove_allowlist(pattern: &str, scope: Scope) -> Result<bool> {
         g.allowlist.retain(|e| e != pattern);
         g.allowlist.len() < before
     };
-    // Recompile after modification
-    {
-        let g = global()
-            .read()
-            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        let compiled = compile_patterns(&g.allowlist);
-        if let Ok(mut guard) = compiled_allowlist().write() {
-            *guard = compiled;
-        }
-    }
+    recompile_allowlist()?;
     patch_config(scope, |root| {
         if let Some(arr) = root["dirs"]["allowlist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(pattern));
@@ -317,16 +323,7 @@ pub fn add_denylist(pattern: &str, scope: Scope) -> Result<()> {
             g.denylist.push(pattern.to_string());
         }
     }
-    // Recompile after modification
-    {
-        let g = global()
-            .read()
-            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        let compiled = compile_patterns(&g.denylist);
-        if let Ok(mut guard) = compiled_denylist().write() {
-            *guard = compiled;
-        }
-    }
+    recompile_denylist()?;
     patch_config(scope, |root| {
         if let Some(arr) = root["dirs"]["denylist"].as_array_mut() {
             let val = serde_json::Value::String(pattern.to_string());
@@ -347,16 +344,7 @@ pub fn remove_denylist(pattern: &str, scope: Scope) -> Result<bool> {
         g.denylist.retain(|e| e != pattern);
         g.denylist.len() < before
     };
-    // Recompile after modification
-    {
-        let g = global()
-            .read()
-            .map_err(|_| anyhow::anyhow!("lock poisoned"))?;
-        let compiled = compile_patterns(&g.denylist);
-        if let Ok(mut guard) = compiled_denylist().write() {
-            *guard = compiled;
-        }
-    }
+    recompile_denylist()?;
     patch_config(scope, |root| {
         if let Some(arr) = root["dirs"]["denylist"].as_array_mut() {
             arr.retain(|v| v.as_str() != Some(pattern));

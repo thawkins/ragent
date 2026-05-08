@@ -49,15 +49,7 @@ impl BenchSuiteAdapter for BigCodeBenchAdapter {
         }
 
         let (passed, failed) = count_passed_failed(evaluations);
-        let pass_at_1 = if evaluations.is_empty() {
-            0.0
-        } else {
-            evaluations
-                .iter()
-                .filter(|evaluation| evaluation.first_sample_exact_match)
-                .count() as f64
-                / evaluations.len() as f64
-        };
+        let pass_at_1 = crate::suites::pass_at_1(evaluations);
         let pass_at_k_values = evaluations
             .iter()
             .map(|evaluation| {
