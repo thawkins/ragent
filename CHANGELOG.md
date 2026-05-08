@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.62
+
+### Changed
+- **Version bump** — Incremented to 0.1.0-alpha.62.
+
 ## Version: 0.1.0-alpha.61
 
 ### Added

@@ -1,0 +1,231 @@
+# Code Quality Review Summary
+
+**Review Date:** 2025-01-17  
+**Files Reviewed:** Recently modified benchmark suite adapters and supporting modules  
+**Output Path:** optimize the data streaming from the Model Provider
+
+---
+
+## Findings Overview
+
+| Issue | Severity | Location | Description |
+|-------|----------|----------|-------------|
+| 1 | Medium | `metrics.rs:54-61` | `normalized_code` creates unnecessary `Vec` allocation |
+| 2 | Medium | `metrics.rs:105-127` | `codebleu_score` calls `normalized_code` redundantly |
+| 3 | Low | `metrics.rs:317-340` | `overlap_precision` creates HashMap repeatedly in fold |
+| 4 | High | `livecodebench.rs`, `multipl_e.rs` | Code duplication: inline logic instead of using `evaluate_exact_match_case` helper |
+| 5 | Low | `mod.rs:149-175` | `is_language_label` uses linear match instead of HashSet |
+
+---
+
+## Issue 1: Unnecessary Vec Allocation in `normalized_code`
+
+**File:** `crates/ragent-bench/src/suites/metrics.rs`  
+**Lines:** 54-61
+
+**Current Code:**
+```rust
+pub(crate) fn normalized_code(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()  // Unnecessary allocation
+        .join(" ")
+        .trim()
+        .to_string()
+}
+```
+
+**Problem:** The function collects split whitespace into a `Vec` just to join it. This allocates memory for the Vec and all string slices, then immediately discards it.
+
+**Suggested Fix:**
+```rust
+pub(crate) fn normalized_code(value: &str) -> String {
+    value
+        .split_whitespace()
+        .fold(String::new(), |mut acc, s| {
+            if !acc.is_empty() {
+                acc.push(' ');
+            }
+            acc.push_str(s);
+            acc
+        })
+        .trim()
+        .to_string()
+}
+```
+
+Or using `intersperse` from itertools if available in the crate.
+
+---
+
+## Issue 2: Redundant Normalization in `codebleu_score`
+
+**File:** `crates/ragent-bench/src/suites/metrics.rs`  
+**Lines:** 105-127
+
+**Current Code:**
+```rust
+pub(crate) fn codebleu_score(actual: &str, expected: &str) -> f64 {
+    if normalized_code(actual) == normalized_code(expected) {  // First normalization
+        return 1.0;
+    }
+    // ... later calls edit_similarity which normalizes again
+    let textual_similarity = edit_similarity(actual, expected);  // Second normalization
+    // ...
+}
+```
+
+**Problem:** `normalized_code` is called on both inputs twice - once for the early-exact-match check, and again inside `edit_similarity`. This doubles the string processing work.
+
+**Suggested Fix:** Normalize once and reuse:
+```rust
+pub(crate) fn codebleu_score(actual: &str, expected: &str) -> f64 {
+    let left = normalized_code(actual);
+    let right = normalized_code(expected);
+    
+    if left == right {
+        return 1.0;
+    }
+    
+    let actual_tokens = tokenize_code(&left);  // Use pre-normalized
+    let expected_tokens = tokenize_code(&right);
+    // ...
+    let textual_similarity = edit_similarity_normalized(&left, &right); // New helper
+```
+
+---
+
+## Issue 3: Inefficient HashMap Creation in `overlap_precision`
+
+**File:** `crates/ragent-bench/src/suites/metrics.rs`  
+**Lines:** 317-340
+
+**Current Code:**
+```rust
+fn overlap_precision(actual: &[String], expected: &[String]) -> f64 {
+    // ...
+    let expected_counts =
+        expected
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut counts, token| {
+                *counts.entry(token).or_insert(0usize) += 1;
+                counts  // Clones the HashMap on each iteration!
+            });
+```
+
+**Problem:** The `fold` pattern with `HashMap::new()` creates and moves the HashMap on every iteration. While the compiler may optimize this, it's semantically inefficient and confusing.
+
+**Suggested Fix:**
+```rust
+fn overlap_precision(actual: &[String], expected: &[String]) -> f64 {
+    // ...
+    let mut expected_counts = std::collections::HashMap::new();
+    for token in expected {
+        *expected_counts.entry(token).or_insert(0usize) += 1;
+    }
+    // ...
+}
+```
+
+---
+
+## Issue 4: Code Duplication - Inline Logic Instead of Helper
+
+**Files:** 
+- `crates/ragent-bench/src/suites/livecodebench.rs` (lines 36-78)
+- `crates/ragent-bench/src/suites/multipl_e.rs` (lines 38-82)
+
+**Problem:** Both `livecodebench.rs` and `multipl_e.rs` manually construct `BenchCaseEvaluation` with the same logic that's already encapsulated in `evaluate_exact_match_case`:
+
+```rust
+// From livecodebench.rs - duplicated logic
+let (selected_response, similarity) =
+    best_exact_or_similarity_sample(generation, &case.reference);
+let exact_matches = exact_match_count(generation, &case.reference);
+let first_exact = first_sample_exact_match(generation, &case.reference);
+// ... then manually builds BenchCaseEvaluation
+```
+
+This is identical to what `evaluate_exact_match_case` does internally (lines 238-266 in metrics.rs).
+
+**Suggested Fix:** Refactor these adapters to use the helper. The challenge is that these adapters have extra logic (scenario checking, language checking) that needs to run before the standard evaluation. Consider:
+
+1. **Option A:** Extract the common pre-check logic into a separate function
+2. **Option B:** Extend `evaluate_exact_match_case` with optional pre-check closure
+
+Example refactoring for `multipl_e.rs`:
+```rust
+fn evaluate_case(/* ... */) -> BenchCaseEvaluation {
+    // Handle language mismatch first
+    if let Some(language) = &options.language && language != &case.language {
+        return BenchCaseEvaluation {
+            status: "skipped".to_string(),
+            // ... rest of skip logic
+        };
+    }
+    
+    // Use the standard helper for everything else
+    evaluate_exact_match_case(case, generation, options, "MultiPL-E", |passed, similarity| {
+        format!("MultiPL-E native adapter uses normalized exact-match scoring...")
+    })
+}
+```
+
+---
+
+## Issue 5: Linear Search in `is_language_label`
+
+**File:** `crates/ragent-bench/src/suites/mod.rs`  
+**Lines:** 149-175
+
+**Current Code:**
+```rust
+fn is_language_label(line: &str) -> bool {
+    matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "c++" | "cpp" | "c#" | // ... 20+ more patterns
+    )
+}
+```
+
+**Problem:** This creates a new String via `to_ascii_lowercase()` then does a linear match through 20+ patterns. While not performance-critical (called once per code block), it could be more efficient.
+
+**Suggested Fix:** Use a static HashSet or match on bytes without allocation:
+```rust
+use std::sync::OnceLock;
+
+fn is_language_label(line: &str) -> bool {
+    static LANG_SET: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    let set = LANG_SET.get_or_init(|| {
+        ["c++", "cpp", "c#", /* ... */].into_iter().collect()
+    });
+    set.contains(line.trim().to_ascii_lowercase().as_str())
+}
+```
+
+Or simply lowercase once:
+```rust
+fn is_language_label(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    matches!(lower.as_str(), /* ... */)
+}
+```
+
+---
+
+## Summary of Recommended Actions
+
+### Immediate (High Impact)
+1. **Issue 4:** Refactor `livecodebench.rs` and `multipl_e.rs` to use `evaluate_exact_match_case` helper, extracting their pre-check logic into early returns.
+
+### Short-term (Medium Impact)
+2. **Issue 1:** Optimize `normalized_code` to avoid Vec allocation.
+3. **Issue 2:** Cache normalized strings in `codebleu_score` to avoid double computation.
+4. **Issue 3:** Rewrite `overlap_precision` to use explicit mutable HashMap instead of fold pattern.
+
+### Optional (Low Impact)
+5. **Issue 5:** Consider using HashSet for language labels if this function becomes hot.
+
+---
+
+*End of Review*

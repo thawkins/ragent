@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::agent::AgentInfo;
 use crate::event::{Event, EventBus, FinishReason};
-use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent};
+use crate::llm::{ChatContent, ChatMessage, ChatRequest, ContentPart, StreamEvent, ToolDefinition};
 use crate::message::{Message, MessagePart, Role, ToolCallState, ToolCallStatus};
 use crate::permission::PermissionChecker;
 use crate::provider::ProviderRegistry;
@@ -319,24 +319,19 @@ pub(crate) async fn check_permission_with_prompt(
         || permission == "edit"
         || permission == "write"
     {
-        use ragent_config::dir_lists::{get_allowlist, get_denylist};
+        use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
+
+        let denylist = get_compiled_denylist();
+        let allowlist = get_compiled_allowlist();
 
         // Denylist takes precedence - immediately reject
-        for pattern in get_denylist() {
-            if let Ok(glob) = globset::Glob::new(&pattern) {
-                if glob.compile_matcher().is_match(resource) {
-                    return Ok(PermissionAction::Deny);
-                }
-            }
+        if denylist.is_match(resource) {
+            return Ok(PermissionAction::Deny);
         }
 
         // Allowlist - immediately approve
-        for pattern in get_allowlist() {
-            if let Ok(glob) = globset::Glob::new(&pattern) {
-                if glob.compile_matcher().is_match(resource) {
-                    return Ok(PermissionAction::Allow);
-                }
-            }
+        if allowlist.is_match(resource) {
+            return Ok(PermissionAction::Allow);
         }
     }
 
@@ -886,8 +881,7 @@ impl SessionProcessor {
             )
         };
 
-        let mut chat_messages = history_to_chat_messages(&compacted_history); // 4b. AGENTS.md init exchange — on the first message of a session,
-        // prompt the model to acknowledge project guidelines so its output
+                  let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.
         // Note: history already contains the user message we just stored,
         // so we check for the absence of any assistant messages instead.
@@ -986,11 +980,11 @@ impl SessionProcessor {
         self.event_bus.set_step(session_id, 0);
         // Single-step agents (e.g. "chat") don't use tools — omit definitions
         // so providers aren't confused by unused tool schemas.
-        let tool_definitions = if max_steps <= 1 {
+        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = std::sync::Arc::new(if max_steps <= 1 {
             Vec::new()
         } else {
             self.tool_registry.definitions()
-        };
+        });
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
@@ -1112,23 +1106,21 @@ impl SessionProcessor {
                         }
                     }
 
-                    // Build request (fresh for each attempt)
-                    let attempt_request = ChatRequest {
-                        model: model_ref.model_id.clone(),
-                        messages: chat_messages.clone(),
-                        tools: tool_definitions.clone(),
-                        temperature: agent.temperature,
-                        top_p: agent.top_p,
-                        max_tokens: None,
-                        system: Some(system_prompt.clone()),
-                        options: agent.options.clone(),
-                        session_id: Some(session_id.to_string()),
-                        request_id: Some(Uuid::new_v4().to_string()),
-                        stream_timeout_secs: Some(self.stream_config.timeout_secs),
-                        thinking: agent.thinking.clone(),
-                    };
-
-                    self.event_bus.publish(Event::RequestStarted {
+                                                        // Build request (fresh for each attempt)
+                                                        let attempt_request = ChatRequest {
+                                                            model: model_ref.model_id.clone(),
+                                                            messages: chat_messages.clone(),
+                                                            tools: (*tool_definitions).clone(),
+                                                            temperature: agent.temperature,
+                                                            top_p: agent.top_p,
+                                                            max_tokens: None,
+                                                            system: Some(system_prompt.clone()),
+                                                            options: agent.options.clone(),
+                                                            session_id: Some(session_id.to_string()),
+                                                            request_id: Some(Uuid::new_v4().to_string()),
+                                                            stream_timeout_secs: Some(self.stream_config.timeout_secs),
+                                                            thinking: agent.thinking.clone(),
+                                                        };                    self.event_bus.publish(Event::RequestStarted {
                         session_id: session_id.to_string(),
                         outbound_bytes: chat_request_payload_bytes(&attempt_request),
                     });
@@ -2414,7 +2406,8 @@ fn resolve_team_context_for_session(
     None
 }
 
-fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
+/// Converts message history to chat messages, handling images asynchronously.
+async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
     let mut chat_messages = Vec::new();
 
     for msg in messages {
@@ -2427,11 +2420,11 @@ fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
             match &msg.parts[0] {
                 MessagePart::Text { text } => ChatContent::Text(text.clone()),
                 // Image parts must go through Parts() to get the image_url block.
-                MessagePart::Image { .. } => parts_to_chat_content(&msg.parts),
-                _ => parts_to_chat_content(&msg.parts),
+                MessagePart::Image { .. } => parts_to_chat_content(&msg.parts).await,
+                _ => parts_to_chat_content(&msg.parts).await,
             }
         } else {
-            parts_to_chat_content(&msg.parts)
+            parts_to_chat_content(&msg.parts).await
         };
 
         chat_messages.push(ChatMessage {
@@ -2575,50 +2568,53 @@ fn compact_history_with_atomic_tool_calls(
         }
     }
 
-    // Trim from the beginning, respecting atomic groups
-    let mut trimmed = messages.to_vec();
-    let mut current_tokens: usize = total_tokens;
-
-    while current_tokens > max_tokens && trimmed.len() > 2 {
-        // Always keep at least the last 2 messages (user query + context)
-        let to_remove = 0; // Try removing the oldest message
-
-        // Check if removing this would break atomicity
-        let would_break_atomicity = must_keep.contains(&to_remove)
-            || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
-
-        if would_break_atomicity {
-            // Skip this message and try the next
-            break;
-        }
-
-        let removed_tokens = estimate_tokens(&trimmed[to_remove]);
-        trimmed.remove(to_remove);
-
-        // Update indices in must_keep
-        let mut new_must_keep: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        for &idx in &must_keep {
-            if idx > to_remove {
-                new_must_keep.insert(idx - 1);
-            } else if idx != to_remove {
-                new_must_keep.insert(idx);
+          // Trim from the beginning, respecting atomic groups
+        // Use VecDeque for O(1) removal from front - fixes O(n²) complexity
+        let mut trimmed: std::collections::VecDeque<Message> = messages.iter().cloned().collect();
+        let mut current_tokens: usize = total_tokens;
+    
+        // Convert must_keep to account for VecDeque indexing
+        let mut must_keep: std::collections::HashSet<usize> = must_keep;
+    
+        while current_tokens > max_tokens && trimmed.len() > 2 {
+            // Always keep at least the last 2 messages (user query + context)
+            let to_remove = 0; // Try removing the oldest message
+    
+            // Check if removing this would break atomicity
+            let would_break_atomicity = must_keep.contains(&to_remove)
+                || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
+    
+            if would_break_atomicity {
+                // Skip this message and try the next
+                break;
+            }
+    
+            if let Some(msg) = trimmed.pop_front() {
+                let removed_tokens = estimate_tokens(&msg);
+                current_tokens = current_tokens.saturating_sub(removed_tokens);
+    
+                // Update indices in must_keep
+                let mut new_must_keep: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                for &idx in &must_keep {
+                    if idx > to_remove {
+                        new_must_keep.insert(idx - 1);
+                    } else if idx != to_remove {
+                        new_must_keep.insert(idx);
+                    }
+                }
+                must_keep = new_must_keep;
             }
         }
-        must_keep = new_must_keep;
-
-        current_tokens = current_tokens.saturating_sub(removed_tokens);
-    }
-
-    tracing::debug!(
-        original_count = messages.len(),
-        trimmed_count = trimmed.len(),
-        original_tokens = total_tokens,
-        final_tokens = current_tokens,
-        "Compacted message history"
-    );
-
-    trimmed
-}
+    
+        tracing::debug!(
+            original_count = messages.len(),
+            trimmed_count = trimmed.len(),
+            original_tokens = total_tokens,
+            final_tokens = current_tokens,
+            "Compacted message history"
+        );
+    
+        trimmed.into_iter().collect()}
 
 fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {
     if text.chars().count() <= max_chars {
@@ -2767,38 +2763,53 @@ fn should_retry_stream_error(
     is_retryable_stream_error(message) && attempt < max_retries && !has_meaningful_partial_output
 }
 
-fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
-    let content_parts: Vec<ContentPart> = parts
-        .iter()
-        .filter_map(|part| match part {
-            MessagePart::Text { text } => Some(ContentPart::Text { text: text.clone() }),
+/// Converts message parts to chat content, handling images asynchronously.
+/// This is async because image files may need to be read from disk.
+async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
+    let mut content_parts = Vec::new();
+
+    for part in parts {
+        match part {
+            MessagePart::Text { text } => {
+                content_parts.push(ContentPart::Text { text: text.clone() });
+            }
             MessagePart::ToolCall {
                 tool,
                 call_id,
                 state,
-            } => Some(ContentPart::ToolUse {
-                id: call_id.clone(),
-                name: tool.clone(),
-                input: state.input.clone(),
-            }),
-            MessagePart::Reasoning { .. } => None,
-            MessagePart::Image { mime_type, path } => {
-                // Read the file and encode as a base64 data URI.
-                match std::fs::read(path) {
-                    Ok(bytes) => {
+            } => {
+                content_parts.push(ContentPart::ToolUse {
+                    id: call_id.clone(),
+                    name: tool.clone(),
+                    input: state.input.clone(),
+                });
+            }
+            MessagePart::Reasoning { .. } => {
+                // Skip reasoning parts in chat content
+            }
+              MessagePart::Image(img) => {
+                // Read the file and encode as a base64 data URI using spawn_blocking
+                // to avoid blocking the async runtime for large image files.
+                let mime_type = img.mime_type.clone();
+                let path_display = img.path.display().to_string();
+                let path = img.path.clone();
+                match tokio::task::spawn_blocking(move || std::fs::read(&path)).await {
+                    Ok(Ok(bytes)) => {
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                        Some(ContentPart::ImageUrl {
+                        content_parts.push(ContentPart::ImageUrl {
                             url: format!("data:{mime_type};base64,{b64}"),
-                        })
+                        });
+                    }
+                    Ok(Err(e)) => {
+                        warn!(path = %path_display, error = %e, "failed to read image attachment");
                     }
                     Err(e) => {
-                        warn!(path = %path.display(), error = %e, "failed to read image attachment");
-                        None
+                        warn!(path = %path_display, error = %e, "spawn_blocking task failed");
                     }
                 }
-            }
-        })
-        .collect();
+            }        }
+    }
+
     ChatContent::Parts(content_parts)
 }
 
@@ -3014,39 +3025,38 @@ mod tests {
         assert!(truncated.len() < content.len());
     }
 
-    #[test]
-    fn test_history_to_chat_messages_uses_tool_output_content_field() {
-        let message = Message::new(
-            "session-1",
-            Role::Assistant,
-            vec![MessagePart::ToolCall {
-                tool: "read".to_string(),
-                call_id: "call-1".to_string(),
-                state: ToolCallState {
-                    status: ToolCallStatus::Completed,
-                    input: json!({"path": "src/lib.rs"}),
-                    output: Some(json!({
-                        "content": "fn main() {}\n",
-                        "line_count": 1
-                    })),
-                    error: None,
-                    duration_ms: Some(3),
-                },
-            }],
-        );
-
-        let chat = history_to_chat_messages(&[message]);
-        assert_eq!(chat.len(), 2);
-
-        let ChatContent::Parts(parts) = &chat[1].content else {
-            panic!("expected tool result parts");
-        };
-        let ContentPart::ToolResult { content, .. } = &parts[0] else {
-            panic!("expected tool result content");
-        };
-        assert_eq!(content, "fn main() {}\n");
-    }
-
+          #[tokio::test]
+          async fn test_history_to_chat_messages_uses_tool_output_content_field() {
+              let message = Message::new(
+                  "session-1",
+                  Role::Assistant,
+                  vec![MessagePart::ToolCall {
+                      tool: "read".to_string(),
+                      call_id: "call-1".to_string(),
+                      state: ToolCallState {
+                          status: ToolCallStatus::Completed,
+                          input: json!({"path": "src/lib.rs"}),
+                          output: Some(json!({
+                              "content": "fn main() {}\n",
+                              "line_count": 1
+                          })),
+                          error: None,
+                          duration_ms: Some(3),
+                      },
+                  }],
+              );
+    
+              let chat = history_to_chat_messages(&[message]).await;
+              assert_eq!(chat.len(), 2);
+    
+              let ChatContent::Parts(parts) = &chat[1].content else {
+                  panic!("expected tool result parts");
+              };
+              let ContentPart::ToolResult { content, .. } = &parts[0] else {
+                  panic!("expected tool result content");
+              };
+              assert_eq!(content, "fn main() {}\n");
+          }
     #[test]
     fn test_chat_request_payload_bytes_counts_serialized_request() {
         let request = ChatRequest {

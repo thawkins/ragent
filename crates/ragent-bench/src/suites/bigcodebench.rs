@@ -5,8 +5,7 @@ use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, average_metric,
-    best_exact_or_similarity_sample, codebleu_score, exact_match_count, first_sample_exact_match,
-    pass_at_k, skipped_metric,
+    count_passed_failed, evaluate_exact_match_case, pass_at_k, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: BigCodeBenchAdapter = BigCodeBenchAdapter;
@@ -31,35 +30,9 @@ impl BenchSuiteAdapter for BigCodeBenchAdapter {
         generation: &BenchGenerationResult,
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
-        let (selected_response, similarity) =
-            best_exact_or_similarity_sample(generation, &case.reference);
-        let exact_matches = exact_match_count(generation, &case.reference);
-        let first_exact = first_sample_exact_match(generation, &case.reference);
-        let codebleu = codebleu_score(&selected_response, &case.reference);
-        if options.no_exec {
-            return BenchCaseEvaluation {
-                status: "skipped".to_string(),
-                score: None,
-                selected_response,
-                exact_match_count: exact_matches,
-                first_sample_exact_match: first_exact,
-                notes: "BigCodeBench generation completed; sandboxed execution skipped because --no-exec was set.".to_string(),
-                error_code: None,
-                error_message: None,
-            };
-        }
-
-        let passed = exact_matches > 0;
-        BenchCaseEvaluation {
-            status: if passed { "passed" } else { "failed" }.to_string(),
-            score: Some(if passed { 1.0 } else { codebleu.max(similarity) }),
-            selected_response,
-            exact_match_count: exact_matches,
-            first_sample_exact_match: first_exact,
-            notes: "BigCodeBench native adapter records pass@k and CodeBLEU-style similarity for practical tasks.".to_string(),
-            error_code: None,
-            error_message: None,
-        }
+        evaluate_exact_match_case(case, generation, options, "BigCodeBench", |_, _| {
+            "BigCodeBench native adapter records pass@k and CodeBLEU-style similarity for practical tasks.".to_string()
+        })
     }
 
     fn summarize(
@@ -68,33 +41,14 @@ impl BenchSuiteAdapter for BigCodeBenchAdapter {
         options: &BenchRunOptions,
     ) -> Vec<BenchMetricEvaluation> {
         if options.no_exec {
-            return vec![
-                skipped_metric(
-                    "pass_at_1",
-                    evaluations.len(),
-                    "BigCodeBench evaluation skipped because --no-exec was set.",
-                ),
-                skipped_metric(
-                    "pass_at_k",
-                    evaluations.len(),
-                    "BigCodeBench evaluation skipped because --no-exec was set.",
-                ),
-                skipped_metric(
-                    "codebleu",
-                    evaluations.len(),
-                    "BigCodeBench evaluation skipped because --no-exec was set.",
-                ),
-            ];
+            return skipped_metrics_for_suite(
+                &["pass_at_1", "pass_at_k", "codebleu"],
+                evaluations.len(),
+                "BigCodeBench",
+            );
         }
 
-        let passed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
-            .count();
+        let (passed, failed) = count_passed_failed(evaluations);
         let pass_at_1 = if evaluations.is_empty() {
             0.0
         } else {

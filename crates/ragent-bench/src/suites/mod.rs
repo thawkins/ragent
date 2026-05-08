@@ -114,7 +114,9 @@ pub fn adapter_for_suite(suite_id: &str) -> Result<&'static dyn BenchSuiteAdapte
 
 pub(crate) use metrics::{
     accuracy_metric, average_metric, best_exact_or_similarity_sample, codebleu_score,
-    exact_match_count, first_sample_exact_match, pass_at_k, resolution_rate, skipped_metric,
+    count_passed_failed, edit_similarity, evaluate_exact_match_case, exact_match_count,
+    first_sample_exact_match, pass_at_k, resolution_rate, skipped_metric,
+    skipped_metrics_for_suite,
 };
 
 pub(crate) fn strip_code_fences(sample: &str) -> String {
@@ -145,31 +147,19 @@ fn strip_leading_language_label(sample: &str) -> String {
 }
 
 fn is_language_label(line: &str) -> bool {
-    matches!(
-        line.trim().to_ascii_lowercase().as_str(),
-        "c++"
-            | "cpp"
-            | "c#"
-            | "csharp"
-            | "dart"
-            | "go"
-            | "haskell"
-            | "java"
-            | "javascript"
-            | "js"
-            | "julia"
-            | "kotlin"
-            | "lua"
-            | "php"
-            | "py"
-            | "python"
-            | "r"
-            | "rs"
-            | "rust"
-            | "scala"
-            | "ts"
-            | "typescript"
-    )
+    // Using a static HashSet for O(1) lookups
+    use std::sync::OnceLock;
+    static LANG_SET: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    let set = LANG_SET.get_or_init(|| {
+        [
+            "c++", "cpp", "c#", "csharp", "dart", "go", "haskell", "java", "javascript", "js",
+            "julia", "kotlin", "lua", "php", "py", "python", "r", "rs", "rust", "scala", "ts",
+            "typescript",
+        ]
+        .into_iter()
+        .collect()
+    });
+    set.contains(line.trim().to_ascii_lowercase().as_str())
 }
 
 pub(crate) fn bench_temp_root() -> std::io::Result<PathBuf> {

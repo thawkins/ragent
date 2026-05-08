@@ -5,8 +5,8 @@ use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, average_metric,
-    best_exact_or_similarity_sample, exact_match_count, first_sample_exact_match, pass_at_k,
-    skipped_metric,
+    best_exact_or_similarity_sample, count_passed_failed, evaluate_exact_match_case,
+    exact_match_count, first_sample_exact_match, pass_at_k, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: LiveCodeBenchAdapter = LiveCodeBenchAdapter;
@@ -33,12 +33,13 @@ impl BenchSuiteAdapter for LiveCodeBenchAdapter {
         generation: &BenchGenerationResult,
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
-        let (selected_response, similarity) =
-            best_exact_or_similarity_sample(generation, &case.reference);
-        let exact_matches = exact_match_count(generation, &case.reference);
-        let first_exact = first_sample_exact_match(generation, &case.reference);
+        // Pre-check: scenario validation
         let scenario = options.scenario.as_deref().unwrap_or("codegeneration");
         if scenario != "codegeneration" {
+            let (selected_response, _) =
+                best_exact_or_similarity_sample(generation, &case.reference);
+            let exact_matches = exact_match_count(generation, &case.reference);
+            let first_exact = first_sample_exact_match(generation, &case.reference);
             return BenchCaseEvaluation {
                 status: "skipped".to_string(),
                 score: None,
@@ -52,30 +53,11 @@ impl BenchSuiteAdapter for LiveCodeBenchAdapter {
                 error_message: Some(format!("unsupported scenario `{scenario}`")),
             };
         }
-        if options.no_exec {
-            return BenchCaseEvaluation {
-                status: "skipped".to_string(),
-                score: None,
-                selected_response,
-                exact_match_count: exact_matches,
-                first_sample_exact_match: first_exact,
-                notes: "LiveCodeBench generation completed; scenario execution skipped because --no-exec was set.".to_string(),
-                error_code: None,
-                error_message: None,
-            };
-        }
 
-        let passed = exact_matches > 0;
-        BenchCaseEvaluation {
-            status: if passed { "passed" } else { "failed" }.to_string(),
-            score: Some(if passed { 1.0 } else { similarity }),
-            selected_response,
-            exact_match_count: exact_matches,
-            first_sample_exact_match: first_exact,
-            notes: "LiveCodeBench native adapter supports the codegeneration scenario and records pass@k-style metrics.".to_string(),
-            error_code: None,
-            error_message: None,
-        }
+        // Delegate to standard helper for remaining logic
+        evaluate_exact_match_case(case, generation, options, "LiveCodeBench", |_passed, _similarity| {
+            "LiveCodeBench native adapter supports the codegeneration scenario and records pass@k-style metrics.".to_string()
+        })
     }
 
     fn summarize(
@@ -88,28 +70,14 @@ impl BenchSuiteAdapter for LiveCodeBenchAdapter {
             .filter(|evaluation| evaluation.status == "skipped")
             .count();
         if options.no_exec || skipped == evaluations.len() {
-            return vec![
-                skipped_metric(
-                    "pass_at_1",
-                    evaluations.len(),
-                    "LiveCodeBench evaluation skipped because execution was unavailable.",
-                ),
-                skipped_metric(
-                    "scenario_score",
-                    evaluations.len(),
-                    "LiveCodeBench evaluation skipped because execution was unavailable.",
-                ),
-            ];
+            return skipped_metrics_for_suite(
+                &["pass_at_1", "scenario_score"],
+                evaluations.len(),
+                "LiveCodeBench",
+            );
         }
 
-        let passed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
-            .count();
+        let (passed, failed) = count_passed_failed(evaluations);
         let pass_at_1 = if evaluations.is_empty() {
             0.0
         } else {

@@ -2171,11 +2171,12 @@ impl App {
                         } else {
                             "image/jpeg"
                         };
-                        ragent_core::message::MessagePart::Image {
-                            mime_type: mime.to_string(),
-                            path: p,
-                        }
-                    })
+                                                  ragent_core::message::MessagePart::Image(Box::new(
+                                                      ragent_core::message::ImageData {
+                                                          mime_type: mime.to_string(),
+                                                          path: p,
+                                                      }
+                                                  ))                    })
                     .collect();
                 parts.push(ragent_core::message::MessagePart::Text { text: final_text });
                 let user_msg = ragent_core::message::Message::new(

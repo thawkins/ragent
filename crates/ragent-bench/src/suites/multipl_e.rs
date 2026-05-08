@@ -4,8 +4,9 @@ use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
-    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, best_exact_or_similarity_sample,
-    exact_match_count, first_sample_exact_match, pass_at_k, skipped_metric,
+    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter,
+    best_exact_or_similarity_sample, count_passed_failed, evaluate_exact_match_case,
+    exact_match_count, first_sample_exact_match, pass_at_k, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: MultiPlEAdapter = MultiPlEAdapter;
@@ -34,13 +35,14 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
         generation: &BenchGenerationResult,
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
-        let (selected_response, similarity) =
-            best_exact_or_similarity_sample(generation, &case.reference);
-        let exact_matches = exact_match_count(generation, &case.reference);
-        let first_exact = first_sample_exact_match(generation, &case.reference);
+        // Pre-check: language validation
         if let Some(language) = &options.language
             && language != &case.language
         {
+            let (selected_response, _) =
+                best_exact_or_similarity_sample(generation, &case.reference);
+            let exact_matches = exact_match_count(generation, &case.reference);
+            let first_exact = first_sample_exact_match(generation, &case.reference);
             return BenchCaseEvaluation {
                 status: "skipped".to_string(),
                 score: None,
@@ -55,30 +57,11 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
                 error_message: Some(format!("unsupported language `{language}`")),
             };
         }
-        if options.no_exec {
-            return BenchCaseEvaluation {
-                status: "skipped".to_string(),
-                score: None,
-                selected_response,
-                exact_match_count: exact_matches,
-                first_sample_exact_match: first_exact,
-                notes: "MultiPL-E generation completed; language-aware execution skipped because --no-exec was set.".to_string(),
-                error_code: None,
-                error_message: None,
-            };
-        }
 
-        let passed = exact_matches > 0;
-        BenchCaseEvaluation {
-            status: if passed { "passed" } else { "failed" }.to_string(),
-            score: Some(if passed { 1.0 } else { similarity }),
-            selected_response,
-            exact_match_count: exact_matches,
-            first_sample_exact_match: first_exact,
-            notes: "MultiPL-E native adapter uses normalized exact-match scoring as a functional-correctness proxy.".to_string(),
-            error_code: None,
-            error_message: None,
-        }
+        // Delegate to standard helper for remaining logic
+        evaluate_exact_match_case(case, generation, options, "MultiPL-E", |_passed, _similarity| {
+            "MultiPL-E native adapter uses normalized exact-match scoring as a functional-correctness proxy.".to_string()
+        })
     }
 
     fn summarize(
@@ -91,19 +74,18 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
             .filter(|evaluation| evaluation.status == "skipped")
             .count();
         if options.no_exec || skipped == evaluations.len() {
-            return vec![
-                skipped_metric(
+            let sample_count = options.samples.max(1);
+            return skipped_metrics_for_suite(
+                &[
                     "pass_at_1",
-                    evaluations.len(),
-                    "MultiPL-E evaluation skipped because execution was unavailable.",
-                ),
-                skipped_metric(
-                    &format!("pass_at_{}", options.samples.max(1)),
-                    evaluations.len(),
-                    "MultiPL-E evaluation skipped because execution was unavailable.",
-                ),
-            ];
+                    &format!("pass_at_{sample_count}"),
+                ],
+                evaluations.len(),
+                "MultiPL-E",
+            );
         }
+
+        let (_passed, failed) = count_passed_failed(evaluations);
 
         let pass_at_1 = if evaluations.is_empty() {
             0.0
@@ -132,10 +114,6 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
         let passed = evaluations
             .iter()
             .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
             .count();
         vec![
             BenchMetricEvaluation {

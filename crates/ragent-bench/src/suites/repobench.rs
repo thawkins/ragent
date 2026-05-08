@@ -5,7 +5,7 @@ use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
     BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, accuracy_metric, average_metric,
-    best_exact_or_similarity_sample, exact_match_count, first_sample_exact_match, skipped_metric,
+    count_passed_failed, evaluate_exact_match_case, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: RepoBenchAdapter = RepoBenchAdapter;
@@ -30,33 +30,17 @@ impl BenchSuiteAdapter for RepoBenchAdapter {
         generation: &BenchGenerationResult,
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
-        let (selected_response, similarity) =
-            best_exact_or_similarity_sample(generation, &case.reference);
-        let exact_matches = exact_match_count(generation, &case.reference);
-        let first_exact = first_sample_exact_match(generation, &case.reference);
-        if options.no_exec {
-            return BenchCaseEvaluation {
-                status: "skipped".to_string(),
-                score: None,
-                selected_response,
-                exact_match_count: exact_matches,
-                first_sample_exact_match: first_exact,
-                notes: "RepoBench prompt generated; local completion scoring skipped because --no-exec was set.".to_string(),
-                error_code: None,
-                error_message: None,
-            };
-        }
-
-        let passed = exact_matches > 0;
+        // Note: RepoBench uses edit similarity directly as score, not as fallback
+        let result = evaluate_exact_match_case(case, generation, options, "RepoBench", |_, similarity| {
+            format!("RepoBench MVP adapter records exact-match and edit-similarity scoring; CodeBLEU follows in a later phase. (similarity={similarity:.3})")
+        });
+        // Override: RepoBench uses similarity as score even when passed
         BenchCaseEvaluation {
-            status: if passed { "passed" } else { "failed" }.to_string(),
-            score: Some(similarity),
-            selected_response,
-            exact_match_count: exact_matches,
-            first_sample_exact_match: first_exact,
-            notes: "RepoBench MVP adapter records exact-match and edit-similarity scoring; CodeBLEU follows in a later phase.".to_string(),
-            error_code: None,
-            error_message: None,
+            score: Some(crate::suites::edit_similarity(
+                &result.selected_response,
+                &case.reference,
+            )),
+            ..result
         }
     }
 
@@ -66,28 +50,14 @@ impl BenchSuiteAdapter for RepoBenchAdapter {
         options: &BenchRunOptions,
     ) -> Vec<BenchMetricEvaluation> {
         if options.no_exec {
-            return vec![
-                skipped_metric(
-                    "exact_match",
-                    evaluations.len(),
-                    "RepoBench evaluation skipped because --no-exec was set.",
-                ),
-                skipped_metric(
-                    "edit_similarity",
-                    evaluations.len(),
-                    "RepoBench evaluation skipped because --no-exec was set.",
-                ),
-            ];
+            return skipped_metrics_for_suite(
+                &["exact_match", "edit_similarity"],
+                evaluations.len(),
+                "RepoBench",
+            );
         }
 
-        let passed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "passed")
-            .count();
-        let failed = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.status == "failed")
-            .count();
+        let (passed, failed) = count_passed_failed(evaluations);
         let similarities = evaluations
             .iter()
             .filter_map(|evaluation| evaluation.score)

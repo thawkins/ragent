@@ -1770,8 +1770,8 @@ impl<'a> MessageWidget<'a> {
                         )));
                     }
                 }
-                MessagePart::Image { path, .. } => {
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                MessagePart::Image(img) => {
+                    let name = img.path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),
                         Style::default().fg(Color::Yellow),

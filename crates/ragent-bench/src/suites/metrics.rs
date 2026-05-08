@@ -1,15 +1,18 @@
 //! Shared native benchmark metric helpers.
 
-use crate::model::BenchGenerationResult;
-use crate::suites::BenchMetricEvaluation;
+use crate::command::BenchRunOptions;
+use crate::data::BenchCaseFixture;
+use crate::model::{BenchGenerationResult};
+use crate::suites::{BenchCaseEvaluation, BenchMetricEvaluation};
 
 /// Count exact-match samples against a normalized reference string.
 #[must_use]
 pub(crate) fn exact_match_count(generation: &BenchGenerationResult, reference: &str) -> usize {
+    let normalized_reference = normalized_code(reference);
     generation
         .samples
         .iter()
-        .filter(|sample| normalized_code(&sample.text) == normalized_code(reference))
+        .filter(|sample| normalized_code(&sample.text) == normalized_reference)
         .count()
 }
 
@@ -19,10 +22,11 @@ pub(crate) fn first_sample_exact_match(
     generation: &BenchGenerationResult,
     reference: &str,
 ) -> bool {
+    let normalized_reference = normalized_code(reference);
     generation
         .samples
         .first()
-        .is_some_and(|sample| normalized_code(&sample.text) == normalized_code(reference))
+        .is_some_and(|sample| normalized_code(&sample.text) == normalized_reference)
 }
 
 /// Pick the best sample by exact match first, then edit similarity.
@@ -31,30 +35,41 @@ pub(crate) fn best_exact_or_similarity_sample(
     generation: &BenchGenerationResult,
     reference: &str,
 ) -> (String, f64) {
+    let normalized_reference = normalized_code(reference);
     generation
         .samples
         .iter()
         .map(|sample| {
             let similarity = edit_similarity(&sample.text, reference);
-            let exact = normalized_code(&sample.text) == normalized_code(reference);
+            let exact = normalized_code(&sample.text) == normalized_reference;
             (sample.text.clone(), if exact { 1.0 } else { similarity })
         })
         .max_by(|left, right| left.1.total_cmp(&right.1))
+        .map(|(text, score)| (text, score))
         .unwrap_or_else(|| (String::new(), 0.0))
 }
 
 /// Normalize code-like content for text-based comparisons.
 #[must_use]
 pub(crate) fn normalized_code(value: &str) -> String {
-    value
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .to_string()
+    let mut result = String::new();
+    let mut first = true;
+    for word in value.split_whitespace() {
+        if !first {
+            result.push(' ');
+        }
+        result.push_str(word);
+        first = false;
+    }
+    result.trim().to_string()
 }
 
 /// Compute normalized edit similarity in the range `[0, 1]`.
+///
+/// Uses Levenshtein distance with optimizations:
+/// - Pre-normalizes input to reduce variance
+/// - Uses single Vec allocation for right-side character collection
+/// - Computes left-side length without collecting
 #[must_use]
 pub(crate) fn edit_similarity(actual: &str, expected: &str) -> f64 {
     let left = normalized_code(actual);
@@ -62,20 +77,21 @@ pub(crate) fn edit_similarity(actual: &str, expected: &str) -> f64 {
     if left.is_empty() && right.is_empty() {
         return 1.0;
     }
-    let left_chars = left.chars().collect::<Vec<_>>();
-    let right_chars = right.chars().collect::<Vec<_>>();
-    let left_len = left_chars.len();
-    let right_len = right_chars.len();
+    let left_len = left.chars().count();
+    let right_len = right.chars().count();
     if left_len == 0 || right_len == 0 {
         return 0.0;
     }
 
-    let mut prev = (0..=right_len).collect::<Vec<_>>();
+    // Collect right-side chars once for indexed access
+    let right_chars: Vec<char> = right.chars().collect();
+    let mut prev: Vec<usize> = (0..=right_len).collect();
     let mut curr = vec![0usize; right_len + 1];
-    for (i, left_char) in left_chars.iter().enumerate() {
+
+    for (i, left_char) in left.chars().enumerate() {
         curr[0] = i + 1;
         for (j, right_char) in right_chars.iter().enumerate() {
-            let substitution_cost = usize::from(left_char != right_char);
+            let substitution_cost = usize::from(left_char != *right_char);
             curr[j + 1] = (prev[j + 1] + 1)
                 .min(curr[j] + 1)
                 .min(prev[j] + substitution_cost);
@@ -206,6 +222,79 @@ pub(crate) fn average_metric(
     }
 }
 
+/// Standard evaluation for exact-match-based benchmarks.
+///
+/// This helper reduces boilerplate by handling the common pattern of:
+/// 1. Computing selected response via exact match or edit similarity
+/// 2. Counting exact matches and first sample match
+/// 3. Handling no_exec mode with a skipped result
+/// 4. Building the final BenchCaseEvaluation
+///
+/// For suites that need custom logic, use the individual metric functions instead.
+#[must_use]
+pub(crate) fn evaluate_exact_match_case(
+    case: &BenchCaseFixture,
+    generation: &BenchGenerationResult,
+    options: &BenchRunOptions,
+    suite_name: &str,
+    notes_provider: impl FnOnce(bool, f64) -> String,
+) -> BenchCaseEvaluation {
+    let (selected_response, similarity) =
+        best_exact_or_similarity_sample(generation, &case.reference);
+    let exact_matches = exact_match_count(generation, &case.reference);
+    let first_exact = first_sample_exact_match(generation, &case.reference);
+
+    if options.no_exec {
+        return BenchCaseEvaluation {
+            status: "skipped".to_string(),
+            score: None,
+            selected_response,
+            exact_match_count: exact_matches,
+            first_sample_exact_match: first_exact,
+            notes: format!("{suite_name} prompt generated; evaluation skipped because --no-exec was set."),
+            error_code: None,
+            error_message: None,
+        };
+    }
+
+    let passed = exact_matches > 0;
+    BenchCaseEvaluation {
+        status: if passed { "passed" } else { "failed" }.to_string(),
+        score: Some(if passed { 1.0 } else { similarity }),
+        selected_response,
+        exact_match_count: exact_matches,
+        first_sample_exact_match: first_exact,
+        notes: notes_provider(passed, similarity),
+        error_code: None,
+        error_message: None,
+    }
+}
+
+/// Generate skipped metrics for multiple metric names when no_exec is set.
+#[must_use]
+pub(crate) fn skipped_metrics_for_suite(
+    metric_names: &[&str],
+    evaluations_len: usize,
+    suite_name: &str,
+) -> Vec<BenchMetricEvaluation> {
+    metric_names
+        .iter()
+        .map(|name| skipped_metric(
+            name,
+            evaluations_len,
+            &format!("{suite_name} evaluation skipped because --no-exec was set."),
+        ))
+        .collect()
+}
+
+/// Count passed and failed evaluations.
+#[must_use]
+pub(crate) fn count_passed_failed(evaluations: &[BenchCaseEvaluation]) -> (usize, usize) {
+    let passed = evaluations.iter().filter(|e| e.status == "passed").count();
+    let failed = evaluations.iter().filter(|e| e.status == "failed").count();
+    (passed, failed)
+}
+
 fn tokenize_code(value: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -233,25 +322,20 @@ fn overlap_precision(actual: &[String], expected: &[String]) -> f64 {
     if actual.is_empty() || expected.is_empty() {
         return 0.0;
     }
-    let expected_counts =
-        expected
-            .iter()
-            .fold(std::collections::HashMap::new(), |mut counts, token| {
-                *counts.entry(token).or_insert(0usize) += 1;
-                counts
-            });
-    let matched = actual
-        .iter()
-        .fold((0usize, expected_counts), |(matched, mut counts), token| {
-            if let Some(count) = counts.get_mut(token)
-                && *count > 0
-            {
+    let mut expected_counts = std::collections::HashMap::new();
+    for token in expected {
+        *expected_counts.entry(token).or_insert(0usize) += 1;
+    }
+    let mut matched = 0usize;
+    for token in actual {
+        if let Some(count) = expected_counts.get_mut(token) {
+            if *count > 0 {
                 *count -= 1;
-                return (matched + 1, counts);
+                matched += 1;
             }
-            (matched, counts)
-        });
-    matched.0 as f64 / actual.len() as f64
+        }
+    }
+    matched as f64 / actual.len() as f64
 }
 
 fn syntax_keyword_overlap(actual: &[String], expected: &[String]) -> f64 {

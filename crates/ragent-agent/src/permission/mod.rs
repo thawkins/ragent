@@ -231,8 +231,14 @@ pub enum PermissionDecision {
 ///
 /// Rules are evaluated last-match-wins. Permanent grants recorded via
 /// [`record_always`](Self::record_always) take precedence over ruleset entries.
+///
+/// Rules are indexed by permission type for O(1) lookup, improving performance
+/// when checking permissions with many rules.
 pub struct PermissionChecker {
-    ruleset: PermissionRuleset,
+    /// Indexed rules by permission type for efficient lookup.
+    rules_by_permission: HashMap<Permission, Vec<(globset::GlobMatcher, PermissionAction)>>,
+    /// Wildcard rules that apply to all permissions.
+    wildcard_rules: Vec<(globset::GlobMatcher, PermissionAction)>,
     always_grants: HashMap<Permission, Vec<globset::GlobMatcher>>,
 }
 
@@ -253,8 +259,28 @@ impl PermissionChecker {
     /// ```
     #[must_use]
     pub fn new(ruleset: PermissionRuleset) -> Self {
+        let mut rules_by_permission: HashMap<Permission, Vec<(globset::GlobMatcher, PermissionAction)>> = HashMap::new();
+        let mut wildcard_rules: Vec<(globset::GlobMatcher, PermissionAction)> = Vec::new();
+
+        // Pre-compile and index rules by permission type
+        for rule in ruleset {
+            let Some(pattern) = &rule.pattern else { continue };
+            let Ok(glob) = globset::Glob::new(pattern) else { continue };
+            let matcher = glob.compile_matcher();
+
+            if matches!(rule.permission, Permission::Custom(ref s) if s == "*") {
+                wildcard_rules.push((matcher, rule.action));
+            } else {
+                rules_by_permission
+                    .entry(rule.permission.clone())
+                    .or_default()
+                    .push((matcher, rule.action));
+            }
+        }
+
         Self {
-            ruleset,
+            rules_by_permission,
+            wildcard_rules,
             always_grants: HashMap::new(),
         }
     }
@@ -282,7 +308,6 @@ impl PermissionChecker {
     #[must_use]
     pub fn check(&self, permission: &str, path: &str) -> PermissionAction {
         let target = Permission::from(permission);
-        let wildcard = Permission::Custom("*".to_string());
 
         // Check "always" grants first
         if let Some(matchers) = self.always_grants.get(&target) {
@@ -293,19 +318,26 @@ impl PermissionChecker {
             }
         }
 
-        // Evaluate ruleset (last matching rule wins, like CSS specificity)
+        // Evaluate ruleset using indexed lookup (O(1) permission lookup)
+        // Last matching rule wins, like CSS specificity
         let mut result = PermissionAction::Ask;
-        for rule in &self.ruleset {
-            if (rule.permission == target || rule.permission == wildcard)
-                && let Some(pattern) = &rule.pattern
-                && let Ok(glob) = globset::Glob::new(pattern)
-            {
-                let matcher = glob.compile_matcher();
+
+        // Check permission-specific rules
+        if let Some(rules) = self.rules_by_permission.get(&target) {
+            for (matcher, action) in rules {
                 if matcher.is_match(path) {
-                    result = rule.action.clone();
+                    result = action.clone();
                 }
             }
         }
+
+        // Check wildcard rules (applies to all permissions)
+        for (matcher, action) in &self.wildcard_rules {
+            if matcher.is_match(path) {
+                result = action.clone();
+            }
+        }
+
         result
     }
 

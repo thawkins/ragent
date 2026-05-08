@@ -5,10 +5,10 @@
 //! session: creation, message streaming, tool calls, permission gates,
 //! agent switches, errors, and token usage.
 
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
 use tokio::sync::broadcast;
 
 /// Reason an LLM stopped generating a response.
@@ -508,10 +508,10 @@ pub struct EventBus {
     /// Per-session step counters.
     ///
     /// Keyed by session ID. The value is the current loop step for that agent
-    /// run. Using a shared `RwLock<HashMap>` means each clone of the bus sees
-    /// the same counters — important because the processor and TUI hold
+    /// run. Using a shared `DashMap<String, AtomicU64>` provides lock-free
+    /// concurrent access — important because the processor and TUI hold
     /// different clones of the same bus.
-    steps: Arc<RwLock<HashMap<String, u64>>>,
+    steps: Arc<DashMap<String, AtomicU64>>,
 }
 
 impl Event {
@@ -643,7 +643,7 @@ impl EventBus {
         let (sender, _) = broadcast::channel(capacity);
         Self {
             sender,
-            steps: Arc::new(RwLock::new(HashMap::new())),
+            steps: Arc::new(DashMap::new()),
         }
     }
 
@@ -652,11 +652,13 @@ impl EventBus {
     /// Called by the session processor at the start of each loop iteration.
     /// Pass `0` to clear (reset) the counter for that session.
     pub fn set_step(&self, session_id: &str, step: u64) {
-        let mut map = self.steps.write().expect("step map poisoned");
         if step == 0 {
-            map.remove(session_id);
+            self.steps.remove(session_id);
         } else {
-            map.insert(session_id.to_string(), step);
+            self.steps
+                .entry(session_id.to_string())
+                .or_insert_with(|| AtomicU64::new(0))
+                .store(step, Ordering::Relaxed);
         }
     }
 
@@ -666,10 +668,8 @@ impl EventBus {
     #[must_use]
     pub fn current_step(&self, session_id: &str) -> u64 {
         self.steps
-            .read()
-            .expect("step map poisoned")
             .get(session_id)
-            .copied()
+            .map(|entry| entry.load(Ordering::Relaxed))
             .unwrap_or(0)
     }
 
