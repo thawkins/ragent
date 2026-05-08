@@ -24,8 +24,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use crossterm::{
     event::{
-        self as ct_event, DisableMouseCapture, EnableMouseCapture, Event as CtEvent,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self as ct_event, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste,
+        EnableMouseCapture, Event as CtEvent, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -64,7 +65,12 @@ impl TerminalGuard {
 
         enable_raw_mode()?;
         let mut stdout = std::io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableMouseCapture
+        )?;
 
         Ok(Self { keyboard_enhanced })
     }
@@ -76,6 +82,9 @@ impl TerminalGuard {
     pub fn restore_terminal(&self) {
         // Disable mouse capture first to stop generating escape sequences
         let _ = execute!(std::io::stdout(), DisableMouseCapture);
+
+        // Disable bracketed paste mode
+        let _ = execute!(std::io::stdout(), DisableBracketedPaste);
 
         if self.keyboard_enhanced {
             let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
@@ -474,19 +483,25 @@ pub async fn run_tui(
                           // Terminal key/mouse events (polled at 50ms intervals)
                           _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
                               let mut got_input = false;
-                              while ct_event::poll(std::time::Duration::ZERO)? {
-                                  match ct_event::read()? {
-                                      CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                                      CtEvent::Mouse(mouse) => {
-                                          // Only process mouse events when mouse mode is enabled
-                                          if app.mouse_enabled {
-                                              app.handle_mouse_event(mouse); got_input = true;
-                                          }
-                                      }
-                                      _ => {}
-                                  }
-                              }
-                              if got_input {
+                                                              while ct_event::poll(std::time::Duration::ZERO)? {
+                                                                  match ct_event::read()? {
+                                                                      CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
+                                                                      CtEvent::Mouse(mouse) => {
+                                                                          // Only process mouse events when mouse mode is enabled
+                                                                          if app.mouse_enabled {
+                                                                              app.handle_mouse_event(mouse); got_input = true;
+                                                                          }
+                                                                      }
+                                                                      CtEvent::Paste(text) => {
+                                                                          // Insert pasted text as a single operation
+                                                                          // Strip carriage returns but preserve newlines
+                                                                          let clean: String = text.chars().filter(|&c| c != '\r').collect();
+                                                                          app.insert_text_at_cursor(&clean);
+                                                                          got_input = true;
+                                                                      }
+                                                                      _ => {}
+                                                                  }
+                                                              }                              if got_input {
                                   app.needs_redraw = true;
                               }
                           }            // Wake up when a new event arrives from the lossless mpsc bridge

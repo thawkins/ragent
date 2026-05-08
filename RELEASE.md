@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.63
+## Current Version: 0.1.0-alpha.64
+
+### Changed
+- **Version bump** — Incremented to 0.1.0-alpha.64.
+
+## Previous: 0.1.0-alpha.63
 
 ### Changed
 - **Version bump** — Incremented to 0.1.0-alpha.63.
