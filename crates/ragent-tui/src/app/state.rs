@@ -636,7 +636,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "codeindex",
-        description: "Manage codebase index: /codeindex on|off|show|reindex|help",
+        description: "Manage codebase index: /codeindex on|off|show|lang|reindex|help",
     },
     SlashCommandDef {
         trigger: "theme",

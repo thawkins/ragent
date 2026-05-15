@@ -8927,8 +8927,23 @@ Type `/swarm help` for more info.\n";
                             self.status = "codeindex: not active".to_string();
                         }
                     }
-                    "rebuild" => {
-                        if let Some(idx) = self.code_index.clone() {
+                                          "lang" | "languages" => {
+                                              let languages = ragent_codeindex::scanner::SUPPORTED_LANGUAGES;
+                                              let mut output = String::from("## Supported Languages\n\n");
+                                              output.push_str(
+                                                  "The code index supports the following languages:\n\n",
+                                              );
+                                              for (i, lang) in languages.iter().enumerate() {
+                                                  if i % 5 == 0 && i > 0 {
+                                                      output.push('\n');
+                                                  }
+                                                  output.push_str(&format!("`{lang}`  "));
+                                              }
+                                              output.push_str(&format!("\n\n**Total: {} languages**", languages.len()));
+                                              self.append_assistant_text(&output);
+                                              self.status = format!("codeindex: {} languages supported", languages.len());
+                                          }
+                                          "rebuild" => {                        if let Some(idx) = self.code_index.clone() {
                             self.append_assistant_text(
                                 "\u{1f504} **Rebuilding FTS index** from SQLite data...",
                             );
@@ -8956,33 +8971,32 @@ Type `/swarm help` for more info.\n";
                             );
                         }
                     }
-                    "help" => {
-                        self.append_assistant_text(
-                            "## /codeindex \u{2014} Codebase Index Management\n\n\
-                             | Sub-command | Description |\n\
-                             |-------------|-------------|\n\
-                             | `/codeindex on` | Enable codebase indexing |\n\
-                             | `/codeindex off` | Disable codebase indexing |\n\
-                             | `/codeindex show` | Show index status and statistics |\n\
-                             | `/codeindex reindex` | Trigger a full re-index |\n\
-                             | `/codeindex rebuild` | Rebuild FTS index from SQLite |\n\
-                             | `/codeindex help` | Show this help |\n\n\
-                             When enabled, the agent has access to these tools:\n\
-                             - `codeindex_search` \u{2014} Full-text search for symbols and docs\n\
-                             - `codeindex_symbols` \u{2014} Structured symbol query\n\
-                             - `codeindex_references` \u{2014} Find all references to a symbol\n\
-                             - `codeindex_dependencies` \u{2014} File dependency graph\n\
-                             - `codeindex_status` \u{2014} Index statistics\n\
-                             - `codeindex_reindex` \u{2014} Trigger full re-index",
-                        );
-                        self.status = "codeindex: help".to_string();
+                                          "help" => {
+                                              self.append_assistant_text(
+                                                  "## /codeindex \u{2014} Codebase Index Management\n\n\
+                                                   | Sub-command | Description |\n\
+                                                   |-------------|-------------|\n\
+                                                   | `/codeindex on` | Enable codebase indexing |\n\
+                                                   | `/codeindex off` | Disable codebase indexing |\n\
+                                                   | `/codeindex show` | Show index status and statistics |\n\
+                                                   | `/codeindex lang` | List supported languages |\n\
+                                                   | `/codeindex reindex` | Trigger a full re-index |\n\
+                                                   | `/codeindex rebuild` | Rebuild FTS index from SQLite |\n\
+                                                   | `/codeindex help` | Show this help |\n\n\
+                                                   When enabled, the agent has access to these tools:\n\
+                                                   - `codeindex_search` \u{2014} Full-text search for symbols and docs\n\
+                                                   - `codeindex_symbols` \u{2014} Structured symbol query\n\
+                                                   - `codeindex_references` \u{2014} Find all references to a symbol\n\
+                                                   - `codeindex_dependencies` \u{2014} File dependency graph\n\
+                                                   - `codeindex_status` \u{2014} Index statistics\n\
+                                                   - `codeindex_reindex` \u{2014} Trigger full re-index",
+                                              );                        self.status = "codeindex: help".to_string();
                     }
-                    _ => {
-                        self.append_assistant_text(
-                            "Usage: `/codeindex on|off|show|reindex|rebuild|help`",
-                        );
-                    }
-                }
+                                          _ => {
+                                              self.append_assistant_text(
+                                                  "Usage: `/codeindex on|off|show|lang|reindex|rebuild|help`",
+                                              );
+                                          }                }
             }
 
             _ => {

@@ -241,6 +241,17 @@ pub fn detect_language(path: &Path) -> Option<String> {
     Some(lang.to_string())
 }
 
+/// List of supported languages for the code index.
+/// These are the language identifiers returned by `detect_language`.
+pub const SUPPORTED_LANGUAGES: &[&str] = &[
+    "rust", "python", "typescript", "tsx", "javascript", "jsx", "go", "c", "c_header",
+    "cpp", "cpp_header", "java", "kotlin", "ruby", "swift", "csharp", "lua", "shell",
+    "zsh", "fish", "toml", "yaml", "json", "xml", "html", "css", "scss", "sql",
+    "markdown", "protobuf", "zig", "nim", "elixir", "erlang", "haskell", "ocaml", "r",
+    "dart", "php", "perl", "verilog", "vhdl", "terraform", "openscad", "cmake", "gradle",
+    "gradle_kts", "maven", "nix", "hcl",
+];
+
 /// Check if content looks like a binary file (contains NUL bytes in the first chunk).
 fn is_binary(content: &[u8]) -> bool {
     let check_len = content.len().min(BINARY_CHECK_BYTES);
