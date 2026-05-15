@@ -2773,7 +2773,7 @@ const KEYBINDINGS: &[(&str, &str)] = &[
     ("Ctrl+PageUp/PageDown", "Output overlay: jump start/end"),
     // ── Agent ────────────────────────────────────────────────────────────
     ("Tab", "Cycle to next agent"),
-    ("Esc", "Cancel running agent (while processing)"),
+    ("Esc / Ctrl+X", "Cancel running agent (while processing)"),
     // ── Teams ────────────────────────────────────────────────────────────
     ("Alt+↓", "Focus next teammate"),
     ("Alt+↑", "Focus previous teammate (or clear focus)"),

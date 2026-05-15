@@ -75,7 +75,7 @@ pub enum InputAction {
     SwitchAgent,
     /// Execute a `/`-prefixed command.
     SlashCommand(String),
-    /// Cancel the currently running agent (ESC while processing).
+    /// Cancel the currently running agent (Esc or Ctrl+X while processing).
     CancelAgent,
     /// Confirm a pending forcecleanup modal (Enter -> confirm).
     ConfirmForceCleanup,
@@ -667,10 +667,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             Some(InputAction::SendMessage(text))
         }
-        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Some(InputAction::CutToClipboard)
-        }
-        KeyCode::Char('v')
+                  KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                      if app.is_processing {
+                          Some(InputAction::CancelAgent)
+                      } else {
+                          Some(InputAction::CutToClipboard)
+                      }
+                  }        KeyCode::Char('v')
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT) =>
         {

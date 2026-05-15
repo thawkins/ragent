@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-alpha.68
+
+### Added
+- **`/codeindex` language filtering** — The `/codeindex` slash command now supports an optional `lang` parameter to filter code index results by programming language (e.g., `/codeindex lang rust`).
+
+### Changed
+- **Benchmark data cleanup** — Removed unused benchmark dataset files from `benches/data/` across multiple languages and suites, significantly reducing repository size.
+
 ## Version: 0.1.0-alpha.67
 
 ### Changed

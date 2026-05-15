@@ -10204,7 +10204,7 @@ Type `/swarm help` for more info.\n";
                         self.status = "halting agent…".to_string();
                         self.push_log_no_agent(
                             LogLevel::Warn,
-                            "User pressed ESC — halting agent".to_string(),
+                            "User pressed Esc or Ctrl+X — halting agent".to_string(),
                         );
                     }
                 }
