@@ -28,3 +28,6 @@ target/temp/
 
 # Code index data
 .ragent/
+!.ragent/skills/
+!.ragent/blueprints/
+
