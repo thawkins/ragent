@@ -106,7 +106,7 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
     let storage = Arc::new(Storage::open_in_memory().expect("in-memory storage"));
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(vec![])));
+    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
     let processor = SessionProcessor {
         session_manager: session_manager.clone(),
         provider_registry: Arc::new(provider_registry),

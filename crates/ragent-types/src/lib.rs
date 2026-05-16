@@ -12,7 +12,6 @@
 pub mod error;
 pub mod event;
 pub mod id;
-pub mod intern;
 pub mod llm;
 pub mod message;
 pub mod permission;

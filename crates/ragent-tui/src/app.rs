@@ -2171,12 +2171,13 @@ impl App {
                         } else {
                             "image/jpeg"
                         };
-                                                  ragent_core::message::MessagePart::Image(Box::new(
-                                                      ragent_core::message::ImageData {
-                                                          mime_type: mime.to_string(),
-                                                          path: p,
-                                                      }
-                                                  ))                    })
+                        ragent_core::message::MessagePart::Image(Box::new(
+                            ragent_core::message::ImageData {
+                                mime_type: mime.to_string(),
+                                path: p,
+                            },
+                        ))
+                    })
                     .collect();
                 parts.push(ragent_core::message::MessagePart::Text { text: final_text });
                 let user_msg = ragent_core::message::Message::new(
@@ -8927,23 +8928,22 @@ Type `/swarm help` for more info.\n";
                             self.status = "codeindex: not active".to_string();
                         }
                     }
-                                          "lang" | "languages" => {
-                                              let languages = ragent_codeindex::scanner::SUPPORTED_LANGUAGES;
-                                              let mut output = String::from("## Supported Languages\n\n");
-                                              output.push_str(
-                                                  "The code index supports the following languages:\n\n",
-                                              );
-                                              for (i, lang) in languages.iter().enumerate() {
-                                                  if i % 5 == 0 && i > 0 {
-                                                      output.push('\n');
-                                                  }
-                                                  output.push_str(&format!("`{lang}`  "));
-                                              }
-                                              output.push_str(&format!("\n\n**Total: {} languages**", languages.len()));
-                                              self.append_assistant_text(&output);
-                                              self.status = format!("codeindex: {} languages supported", languages.len());
-                                          }
-                                          "rebuild" => {                        if let Some(idx) = self.code_index.clone() {
+                    "lang" | "languages" => {
+                        let languages = ragent_codeindex::scanner::SUPPORTED_LANGUAGES;
+                        let mut output = String::from("## Supported Languages\n\n");
+                        output.push_str("The code index supports the following languages:\n\n");
+                        for (i, lang) in languages.iter().enumerate() {
+                            if i % 5 == 0 && i > 0 {
+                                output.push('\n');
+                            }
+                            output.push_str(&format!("`{lang}`  "));
+                        }
+                        output.push_str(&format!("\n\n**Total: {} languages**", languages.len()));
+                        self.append_assistant_text(&output);
+                        self.status = format!("codeindex: {} languages supported", languages.len());
+                    }
+                    "rebuild" => {
+                        if let Some(idx) = self.code_index.clone() {
                             self.append_assistant_text(
                                 "\u{1f504} **Rebuilding FTS index** from SQLite data...",
                             );
@@ -8971,8 +8971,8 @@ Type `/swarm help` for more info.\n";
                             );
                         }
                     }
-                                          "help" => {
-                                              self.append_assistant_text(
+                    "help" => {
+                        self.append_assistant_text(
                                                   "## /codeindex \u{2014} Codebase Index Management\n\n\
                                                    | Sub-command | Description |\n\
                                                    |-------------|-------------|\n\
@@ -8990,13 +8990,15 @@ Type `/swarm help` for more info.\n";
                                                    - `codeindex_dependencies` \u{2014} File dependency graph\n\
                                                    - `codeindex_status` \u{2014} Index statistics\n\
                                                    - `codeindex_reindex` \u{2014} Trigger full re-index",
-                                              );                        self.status = "codeindex: help".to_string();
-                    }
-                                          _ => {
-                                              self.append_assistant_text(
-                                                  "Usage: `/codeindex on|off|show|lang|reindex|rebuild|help`",
                                               );
-                                          }                }
+                        self.status = "codeindex: help".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                            "Usage: `/codeindex on|off|show|lang|reindex|rebuild|help`",
+                        );
+                    }
+                }
             }
 
             _ => {
@@ -9329,26 +9331,26 @@ Type `/swarm help` for more info.\n";
                         return;
                     }
                 }
-                                  if self.teams_area.contains((event.column, event.row).into()) {
-                                      let row = event.row.saturating_sub(self.teams_area.y);
-                                      let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
-                                      // Account for border line at row 0
-                                      if absolute_row == 2 {
-                                          // Lead row clicked — unfocus any teammate
-                                          self.focused_teammate = None;
-                                          self.status = "focus: lead (you)".to_string();
-                                          return;
-                                      }
-                                      if absolute_row >= 3 {
-                                          // Teammate rows start at absolute_row 3 (after border, header, lead)
-                                          let idx = absolute_row - 3;
-                                          if let Some(member) = self.team_members.get(idx).cloned() {
-                                              // Focus this teammate (same as /team focus <name>)
-                                              self.focus_teammate_by_id(&member.agent_id);
-                                          }
-                                          return;
-                                      }
-                                  }                // Scrollbar drag takes priority (rightmost column of pane)
+                if self.teams_area.contains((event.column, event.row).into()) {
+                    let row = event.row.saturating_sub(self.teams_area.y);
+                    let absolute_row = row.saturating_add(self.teams_scroll_offset) as usize;
+                    // Account for border line at row 0
+                    if absolute_row == 2 {
+                        // Lead row clicked — unfocus any teammate
+                        self.focused_teammate = None;
+                        self.status = "focus: lead (you)".to_string();
+                        return;
+                    }
+                    if absolute_row >= 3 {
+                        // Teammate rows start at absolute_row 3 (after border, header, lead)
+                        let idx = absolute_row - 3;
+                        if let Some(member) = self.team_members.get(idx).cloned() {
+                            // Focus this teammate (same as /team focus <name>)
+                            self.focus_teammate_by_id(&member.agent_id);
+                        }
+                        return;
+                    }
+                } // Scrollbar drag takes priority (rightmost column of pane)
                 if self.message_area.height > 0
                     && event.column == self.message_area.right().saturating_sub(1)
                     && self.message_area.contains(pos.into())
@@ -10724,40 +10726,41 @@ Type `/swarm help` for more info.\n";
                     );
                 }
             }
-                          Event::QuestionRequested {
-                              ref session_id,
-                              ref request_id,
-                              ref question,
-                              ref options,
-                          } => {
-                              // Allow questions from any session (including sub-agents) to be displayed
-                              // since they require user interaction to proceed.
-                              if self.question_queue.iter().any(|r| r.id == *request_id) {
-                                  tracing::warn!(
-                                      request_id = %request_id,
-                                      "Duplicate QuestionRequested ignored"
-                                  );
-                              } else {
-                                  tracing::info!(
-                                      session_id = %session_id,
-                                      request_id = %request_id,
-                                      "TUI received QuestionRequested, showing dialog"
-                                  );
-                                  self.question_queue.push_back(QuestionRequest {
-                                      id: request_id.clone(),
-                                      session_id: session_id.clone(),
-                                      question: question.clone(),
-                                      options: options.clone(),
-                                  });
-                                  self.pending_question_input.clear();
-                                  self.question_selected_index = 0;
-                                  self.status = "awaiting question".to_string();
-                                  self.push_log_no_agent(
-                                      LogLevel::Warn,
-                                      format!("question requested: {}", question),
-                                  );
-                              }
-                          }            Event::PermissionReplied {
+            Event::QuestionRequested {
+                ref session_id,
+                ref request_id,
+                ref question,
+                ref options,
+            } => {
+                // Allow questions from any session (including sub-agents) to be displayed
+                // since they require user interaction to proceed.
+                if self.question_queue.iter().any(|r| r.id == *request_id) {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        "Duplicate QuestionRequested ignored"
+                    );
+                } else {
+                    tracing::info!(
+                        session_id = %session_id,
+                        request_id = %request_id,
+                        "TUI received QuestionRequested, showing dialog"
+                    );
+                    self.question_queue.push_back(QuestionRequest {
+                        id: request_id.clone(),
+                        session_id: session_id.clone(),
+                        question: question.clone(),
+                        options: options.clone(),
+                    });
+                    self.pending_question_input.clear();
+                    self.question_selected_index = 0;
+                    self.status = "awaiting question".to_string();
+                    self.push_log_no_agent(
+                        LogLevel::Warn,
+                        format!("question requested: {}", question),
+                    );
+                }
+            }
+            Event::PermissionReplied {
                 ref session_id,
                 ref request_id,
                 allowed,
@@ -10860,18 +10863,19 @@ Type `/swarm help` for more info.\n";
                     self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
                 }
             }
-                          Event::AgentNotice {
-                              ref session_id,
-                              ref message,
-                          } => {
-                              if self.is_current_session(session_id) {
-                                  let summary = summarise_error(message);
-                                  self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
-                                  self.status = summary.clone();
-                                  // Also display in the message window for visibility
-                                  self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
-                              }
-                          }            Event::AgentError {
+            Event::AgentNotice {
+                ref session_id,
+                ref message,
+            } => {
+                if self.is_current_session(session_id) {
+                    let summary = summarise_error(message);
+                    self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
+                    self.status = summary.clone();
+                    // Also display in the message window for visibility
+                    self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
+                }
+            }
+            Event::AgentError {
                 ref session_id,
                 ref error,
             } => {

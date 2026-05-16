@@ -388,7 +388,7 @@ pub async fn run_tui(
     // Set up signal handlers for graceful shutdown via a channel
     // This works cross-platform without needing #[cfg] inside tokio::select!
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
-    
+
     // Spawn a task to listen for signals
     tokio::spawn(async move {
         #[cfg(unix)]
@@ -412,7 +412,7 @@ pub async fn run_tui(
         let _ = shutdown_tx.send(());
         anyhow::Result::<()>::Ok(())
     });
-    
+
     let mut last_draw = std::time::Instant::now();
 
     while app.is_running {

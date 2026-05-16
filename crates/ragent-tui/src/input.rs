@@ -667,13 +667,14 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
             }
             Some(InputAction::SendMessage(text))
         }
-                  KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                      if app.is_processing {
-                          Some(InputAction::CancelAgent)
-                      } else {
-                          Some(InputAction::CutToClipboard)
-                      }
-                  }        KeyCode::Char('v')
+        KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.is_processing {
+                Some(InputAction::CancelAgent)
+            } else {
+                Some(InputAction::CutToClipboard)
+            }
+        }
+        KeyCode::Char('v')
             if key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT) =>
         {

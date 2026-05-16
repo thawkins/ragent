@@ -74,7 +74,7 @@ fn sanitize_for_id(name: &str) -> String {
 }
 
 /// Maximum number of concurrent background tasks (default).
-pub const DEFAULT_MAX_BACKGROUND_TASKS: usize = 4;
+pub const DEFAULT_MAX_BACKGROUND_TASKS: usize = 8;
 
 /// Status of a sub-agent task.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

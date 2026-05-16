@@ -1064,17 +1064,26 @@ pub fn tool_result_summary(
             let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
             let title = out.get("title").and_then(|v| v.as_str());
-            match title {
-                Some(t) => Some(format!(
+            let old_status = out.get("old_status").and_then(|v| v.as_str());
+            let new_status = out.get("new_status").and_then(|v| v.as_str());
+            match (title, old_status, new_status) {
+                (Some(t), Some(old), Some(new)) => Some(format!(
+                    "{} \"{}\" ({} → {}) → {} remaining",
+                    action,
+                    truncate_str(t, 80),
+                    old,
+                    new,
+                    count
+                )),
+                (Some(t), _, _) => Some(format!(
                     "{} \"{}\" → {} remaining",
                     action,
                     truncate_str(t, 100),
                     count
                 )),
-                None => Some(format!("{} → {} remaining", action, count)),
+                _ => Some(format!("{} → {} remaining", action, count)),
             }
-        }
-        // ══════════════════════════════════��════════════════════════════════
+        } // ══════════════════════════════════��════════════════════════════════
         // 🤖 SUB-AGENT
         // ═══════════════════════════════════════════════════════════════════
         "new_task" => {
@@ -1771,7 +1780,11 @@ impl<'a> MessageWidget<'a> {
                     }
                 }
                 MessagePart::Image(img) => {
-                    let name = img.path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                    let name = img
+                        .path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),
                         Style::default().fg(Color::Yellow),

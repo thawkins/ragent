@@ -1,6 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.68
+## Current Version: 0.1.0-alpha.70
+
+### Changed
+- **Update concurrency** — Improved concurrency handling across the codebase.
+- **Fix todos** — Resolved outstanding todo issues.
+
+## Previous: 0.1.0-alpha.68
 
 ### Added
 - **`/codeindex` language filtering** — The `/codeindex` slash command now supports an optional `lang` parameter (e.g., `/codeindex lang rust`) to filter code index results by programming language.

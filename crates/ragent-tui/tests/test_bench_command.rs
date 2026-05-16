@@ -20,7 +20,7 @@ fn make_app() -> App {
     let event_bus = Arc::new(EventBus::default());
     let provider_registry = Arc::new(provider::create_default_registry());
     let tool_registry = Arc::new(tool::create_default_registry());
-    let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(vec![])));
+    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     let session_processor = Arc::new(SessionProcessor {
         session_manager,

@@ -151,7 +151,7 @@ impl Tool for TodoWriteTool {
             )
         })?;
 
-        let (summary, action_label, affected_id) = match action {
+        let (summary, action_label, affected_id, old_status, new_status) = match action {
             "add" => {
                 let title = input["title"]
                     .as_str()
@@ -180,6 +180,8 @@ impl Tool for TodoWriteTool {
                     format!("Added todo '{id}' with status '{status}'"),
                     "add",
                     Some(id.to_string()),
+                    None::<String>,
+                    None::<String>,
                 )
             }
             "update" => {
@@ -206,6 +208,14 @@ impl Tool for TodoWriteTool {
                     );
                 }
 
+                // Look up the old status before updating so we can display the change.
+                let old_status = storage
+                    .get_todos(&ctx.session_id, None)
+                    .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?
+                    .into_iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.status);
+
                 let updated = storage
                     .update_todo(id, &ctx.session_id, title, status, description)
                     .map_err(|e| anyhow::anyhow!("Failed to update todo: {e}"))?;
@@ -214,10 +224,25 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
+                let summary = if let (Some(old), Some(new)) = (&old_status, status) {
+                    format!("Updated todo '{id}' ({old} -> {new})")
+                } else {
+                    format!("Updated todo '{id}'")
+                };
+
+                // Only include status metadata when a status change actually occurred
+                let (old_status_str, new_status_str) = if status.is_some() {
+                    (old_status.clone(), status.map(String::from))
+                } else {
+                    (None, None)
+                };
+
                 (
-                    format!("Updated todo '{id}'"),
+                    summary,
                     "update",
                     Some(id.to_string()),
+                    old_status_str,
+                    new_status_str,
                 )
             }
             "complete" | "completed" | "done" => {
@@ -225,6 +250,14 @@ impl Tool for TodoWriteTool {
                 let id = input["id"]
                     .as_str()
                     .ok_or_else(|| anyhow::anyhow!("Missing required 'id' for complete action. Specify which TODO item to mark as done."))?;
+
+                // Look up the old status before completing so we can display the change.
+                let old_status = storage
+                    .get_todos(&ctx.session_id, None)
+                    .map_err(|e| anyhow::anyhow!("Failed to read todos: {e}"))?
+                    .into_iter()
+                    .find(|t| t.id == id)
+                    .map(|t| t.status);
 
                 let updated = storage
                     .update_todo(id, &ctx.session_id, None, Some("done"), None)
@@ -234,10 +267,18 @@ impl Tool for TodoWriteTool {
                     bail!("Todo '{id}' not found in this session");
                 }
 
+                let summary = if let Some(ref old) = old_status {
+                    format!("Marked todo '{id}' as done ({old} -> done)")
+                } else {
+                    format!("Marked todo '{id}' as done")
+                };
+
                 (
-                    format!("Marked todo '{id}' as done"),
+                    summary,
                     "complete",
                     Some(id.to_string()),
+                    old_status,
+                    Some("done".to_string()),
                 )
             }
             "remove" => {
@@ -270,7 +311,7 @@ impl Tool for TodoWriteTool {
                 } else {
                     format!("Removed todo '{id}' — \"{existing_title}\"")
                 };
-                (summary, "remove", None)
+                (summary, "remove", None, None::<String>, None::<String>)
             }
             "clear" => {
                 let count = storage
@@ -285,6 +326,8 @@ impl Tool for TodoWriteTool {
                     ),
                     "clear",
                     None,
+                    None::<String>,
+                    None::<String>,
                 )
             }
             _ => bail!(
@@ -328,7 +371,18 @@ impl Tool for TodoWriteTool {
                 .unwrap()
                 .insert("title".to_string(), json!(title));
         }
-
+        if let Some(old) = old_status {
+            metadata
+                .as_object_mut()
+                .unwrap()
+                .insert("old_status".to_string(), json!(old));
+        }
+        if let Some(new) = new_status {
+            metadata
+                .as_object_mut()
+                .unwrap()
+                .insert("new_status".to_string(), json!(new));
+        }
         Ok(ToolOutput {
             content: output,
             metadata: Some(metadata),

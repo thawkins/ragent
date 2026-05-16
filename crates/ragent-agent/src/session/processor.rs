@@ -260,7 +260,7 @@ fn extract_command_name(command: &str) -> String {
 ///
 /// Returns an error if the event bus closes during the wait.
 pub(crate) async fn check_permission_with_prompt(
-    checker: &Arc<tokio::sync::RwLock<PermissionChecker>>,
+    checker: &Arc<parking_lot::RwLock<PermissionChecker>>,
     event_bus: &Arc<EventBus>,
     session_id: &str,
     permission: &str,
@@ -337,7 +337,7 @@ pub(crate) async fn check_permission_with_prompt(
 
     // 1. Check PermissionChecker first
     let action = {
-        let c = checker.read().await;
+        let c = checker.read();
         c.check(permission, resource)
     };
 
@@ -379,10 +379,9 @@ pub(crate) async fn check_permission_with_prompt(
                         ..
                     })) if rid == request_id => {
                         // If user chose 'Always', record the grant
-                        if allowed && decision == crate::permission::PermissionDecision::Always {
-                            let mut c = checker.write().await;
-                            c.record_always(permission, resource);
-                            debug!(
+                                                  if allowed && decision == crate::permission::PermissionDecision::Always {
+                                                      let mut c = checker.write();
+                                                      c.record_always(permission, resource);                            debug!(
                                 "Recorded always-grant for permission={permission}, resource={resource}"
                             );
                         }
@@ -419,7 +418,7 @@ pub struct SessionProcessor {
     /// Registry of available tools the agent may invoke.
     pub tool_registry: Arc<ToolRegistry>,
     /// Checks whether a tool invocation is permitted.
-    pub permission_checker: Arc<tokio::sync::RwLock<PermissionChecker>>,
+    pub permission_checker: Arc<parking_lot::RwLock<PermissionChecker>>,
     /// Bus for broadcasting session and processing events.
     pub event_bus: Arc<EventBus>,
     /// Optional task manager for sub-agent spawning (F13/F14).
@@ -2893,7 +2892,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_team_tool_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(
@@ -2913,7 +2912,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_task_suffix_tool_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(
@@ -2933,7 +2932,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_question_tool_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(
@@ -2953,7 +2952,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_todo_read_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(
@@ -2973,7 +2972,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_todo_write_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(
@@ -2993,7 +2992,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hardwired_wait_tasks_is_auto_approved() {
-        let checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(Vec::new())));
+        let checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(Vec::new())));
         let event_bus = Arc::new(EventBus::new(16));
 
         let action = check_permission_with_prompt(

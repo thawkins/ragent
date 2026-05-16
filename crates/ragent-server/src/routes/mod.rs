@@ -216,12 +216,14 @@ impl From<SessionRow> for SessionResponse {
 }
 
 async fn list_sessions(State(state): State<AppState>) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.list_sessions() {
-        Ok(sessions) => {
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || storage.list_sessions()).await {
+        Ok(Ok(sessions)) => {
             let resp: Vec<SessionResponse> = sessions.into_iter().map(Into::into).collect();
             serialize_response(resp, "list_sessions")
         }
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
     }
 }
 
@@ -259,8 +261,11 @@ async fn create_session(
     }
     let directory = canonical.display().to_string();
     let id = uuid::Uuid::new_v4().to_string();
-    match state.storage.create_session(&id, &directory) {
-        Ok(()) => {
+    let storage = Arc::clone(&state.storage);
+    let id_for_spawn = id.clone();
+    let dir_for_spawn = directory.clone();
+    match tokio::task::spawn_blocking(move || storage.create_session(&id_for_spawn, &dir_for_spawn)).await {
+        Ok(Ok(())) => {
             state.event_bus.publish(Event::SessionCreated {
                 session_id: id.clone(),
             });
@@ -270,9 +275,14 @@ async fn create_session(
             )
                 .into_response()
         }
-        Err(e) => (
+        Ok(Err(e)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("{e}") })),
         )
             .into_response(),
     }
@@ -282,13 +292,15 @@ async fn get_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.get_session(&id) {
-        Ok(Some(session)) => {
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || storage.get_session(&id)).await {
+        Ok(Ok(Some(session))) => {
             let resp: SessionResponse = session.into();
             serialize_response(resp, "get_session")
         }
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "session not found"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "session not found"),
+        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
     }
 }
 
@@ -296,9 +308,11 @@ async fn archive_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.archive_session(&id) {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || storage.archive_session(&id)).await {
+        Ok(Ok(())) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))),
+        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
     }
 }
 
@@ -306,9 +320,11 @@ async fn get_messages(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.get_messages(&id) {
-        Ok(messages) => serialize_response(messages, "get_messages"),
-        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    let storage = Arc::clone(&state.storage);
+    match tokio::task::spawn_blocking(move || storage.get_messages(&id)).await {
+        Ok(Ok(messages)) => serialize_response(messages, "get_messages"),
+        Ok(Err(e)) => error_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("{e}")),
     }
 }
 
@@ -399,29 +415,43 @@ async fn abort_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    match state.storage.get_session(&id) {
-        Ok(Some(_)) => {
-            if let Err(e) = state.storage.archive_session(&id) {
-                tracing::error!(
-                    session_id = %id,
-                    error = %e,
-                    "Failed to archive session during abort"
-                );
-                return error_response(
+    let storage = Arc::clone(&state.storage);
+    let id_for_check = id.clone();
+    match tokio::task::spawn_blocking(move || storage.get_session(&id_for_check)).await {
+        Ok(Ok(Some(_))) => {
+            let storage2 = Arc::clone(&state.storage);
+            let id2 = id.clone();
+            match tokio::task::spawn_blocking(move || storage2.archive_session(&id2)).await {
+                Ok(Ok(())) => {
+                    state.event_bus.publish(Event::SessionAborted {
+                        session_id: id.clone(),
+                        reason: "user_requested".to_string(),
+                    });
+                    tracing::info!(session_id = %id, "Session aborted");
+                    (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
+                }
+                Ok(Err(e)) => {
+                    tracing::error!(
+                        session_id = %id,
+                        error = %e,
+                        "Failed to archive session during abort"
+                    );
+                    error_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to archive session: {e}"),
+                    )
+                }
+                Err(e) => error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to archive session: {e}"),
-                );
+                ),
             }
-
-            state.event_bus.publish(Event::SessionAborted {
-                session_id: id.clone(),
-                reason: "user_requested".to_string(),
-            });
-
-            tracing::info!(session_id = %id, "Session aborted");
-            (StatusCode::OK, Json(serde_json::json!({ "ok": true })))
         }
-        Ok(None) => error_response(StatusCode::NOT_FOUND, "Session not found"),
+        Ok(Ok(None)) => error_response(StatusCode::NOT_FOUND, "Session not found"),
+        Ok(Err(e)) => error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to look up session: {e}"),
+        ),
         Err(e) => error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to look up session: {e}"),
@@ -597,15 +627,23 @@ async fn spawn_task(
     Json(body): Json<SpawnTaskRequest>,
 ) -> Result<(StatusCode, Json<TaskResponse>), (StatusCode, Json<serde_json::Value>)> {
     // Verify session exists and get its directory
-    let session = match state.storage.get_session(&session_id) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
+    let storage = Arc::clone(&state.storage);
+    let sid = session_id.clone();
+    let session = match tokio::task::spawn_blocking(move || storage.get_session(&sid)).await {
+        Ok(Ok(Some(s))) => s,
+        Ok(Ok(None)) => {
             return Err(error_response(StatusCode::NOT_FOUND, "session not found"));
+        }
+        Ok(Err(e)) => {
+            return Err(error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                e.to_string(),
+            ));
         }
         Err(e) => {
             return Err(error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                e.to_string(),
+                format!("{e}"),
             ));
         }
     };
@@ -907,12 +945,18 @@ async fn verify_session_exists(
     state: &AppState,
     session_id: &str,
 ) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    match state.storage.get_session(session_id) {
-        Ok(Some(_)) => Ok(()),
-        Ok(None) => Err(error_response(StatusCode::NOT_FOUND, "session not found")),
-        Err(e) => Err(error_response(
+    let storage = Arc::clone(&state.storage);
+    let sid = session_id.to_string();
+    match tokio::task::spawn_blocking(move || storage.get_session(&sid)).await {
+        Ok(Ok(Some(_))) => Ok(()),
+        Ok(Ok(None)) => Err(error_response(StatusCode::NOT_FOUND, "session not found")),
+        Ok(Err(e)) => Err(error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             e.to_string(),
+        )),
+        Err(e) => Err(error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("{e}"),
         )),
     }
 }

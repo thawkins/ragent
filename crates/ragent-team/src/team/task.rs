@@ -4,7 +4,7 @@
 //! are serialised using an exclusive `flock` on the file via the `fs2` crate.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -151,26 +151,32 @@ impl TaskStore {
         Ok(Self { path })
     }
 
-    /// Read the current task list without acquiring a lock.
+    /// Read the current task list (acquires a shared lock).
     pub fn read(&self) -> Result<TaskList> {
         if !self.path.exists() {
             return Ok(TaskList::default());
         }
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&self.path)
+            .with_context(|| format!("open task store {}", self.path.display()))?;
+        file.lock_shared()
+            .with_context(|| format!("acquire shared lock on task store {}", self.path.display()))?;
         let raw = fs::read_to_string(&self.path)
             .with_context(|| format!("read {}", self.path.display()))?;
+        file.unlock()?;
         if raw.trim().is_empty() {
             return Ok(TaskList::default());
         }
         serde_json::from_str(&raw).with_context(|| format!("parse {}", self.path.display()))
     }
 
-    /// Write the task list (caller must hold the lock).
-    fn write_locked(file: &mut File, list: &TaskList) -> Result<()> {
+    /// Write the task list atomically (caller must hold the lock).
+    fn write_atomic(path: &Path, list: &TaskList) -> Result<()> {
         let json = serde_json::to_string_pretty(list)?;
-        file.set_len(0)?;
-        file.seek(SeekFrom::Start(0))?;
-        file.write_all(json.as_bytes())?;
-        file.flush()?;
+        let temp_path = path.with_extension("tmp");
+        fs::write(&temp_path, json)?;
+        fs::rename(&temp_path, path)?;
         Ok(())
     }
 
@@ -228,8 +234,8 @@ impl TaskStore {
             list.tasks[i].assigned_to = Some(agent_id.to_owned());
             list.tasks[i].claimed_at = Some(Utc::now());
             let claimed = list.tasks[i].clone();
-            Self::write_locked(&mut file, &list)?;
             file.unlock()?;
+            Self::write_atomic(&self.path, &list)?;
             Ok((Some(claimed), false))
         } else {
             file.unlock()?;
@@ -331,8 +337,8 @@ impl TaskStore {
         task.claimed_at = Some(Utc::now());
         let claimed = task.clone();
 
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(claimed)
     }
 
@@ -387,8 +393,8 @@ impl TaskStore {
         task.completed_at = Some(Utc::now());
         let completed = task.clone();
 
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(completed)
     }
 
@@ -419,8 +425,8 @@ impl TaskStore {
         }
 
         list.tasks.push(task);
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(())
     }
 
@@ -475,8 +481,8 @@ impl TaskStore {
         task.claimed_at = Some(Utc::now());
         let assigned = task.clone();
 
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(assigned)
     }
 
@@ -517,8 +523,8 @@ impl TaskStore {
         f(task);
         let updated = task.clone();
 
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(updated)
     }
 
@@ -552,8 +558,8 @@ impl TaskStore {
             .ok_or_else(|| anyhow!("task '{task_id}' not found"))?;
         let removed = list.tasks.remove(pos);
 
-        Self::write_locked(&mut file, &list)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &list)?;
         Ok(removed)
     }
 }

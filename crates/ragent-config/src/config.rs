@@ -683,7 +683,7 @@ impl Default for ExperimentalFlags {
 }
 
 const fn default_max_background_agents() -> usize {
-    4
+    8
 }
 
 const fn default_background_agent_timeout() -> u64 {

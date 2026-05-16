@@ -643,7 +643,7 @@ impl EventBus {
     /// Called by the session processor at the start of each loop iteration.
     /// Pass `0` to clear (reset) the counter for that session.
     pub fn set_step(&self, session_id: &str, step: u64) {
-        let mut map = self.steps.write().expect("step map poisoned");
+        let mut map = self.steps.write().unwrap_or_else(|e| e.into_inner());
         if step == 0 {
             map.remove(session_id);
         } else {
@@ -656,12 +656,8 @@ impl EventBus {
     /// Returns `0` if no step has been set for this session.
     #[must_use]
     pub fn current_step(&self, session_id: &str) -> u64 {
-        self.steps
-            .read()
-            .expect("step map poisoned")
-            .get(session_id)
-            .copied()
-            .unwrap_or(0)
+        let map = self.steps.read().unwrap_or_else(|e| e.into_inner());
+        map.get(session_id).copied().unwrap_or(0)
     }
 
     /// Returns a new receiver that will observe all future events.
@@ -685,9 +681,10 @@ impl EventBus {
     /// Silently drops the event if there are no active subscribers.
     /// Publishes an event to all active subscribers.
     ///
-    /// The underlying broadcast channel has a fixed-size buffer (256 by default).
+    /// The underlying broadcast channel has a fixed-size buffer (1024 by default).
     /// When the buffer is full, the oldest events are dropped and slow subscribers
-    /// will receive a `Lagged` error on their next `recv()`.
+    /// will receive a `Lagged` error on their next `recv()`.  A warning is emitted
+    /// when events are dropped due to a full buffer.
     ///
     /// # Examples
     ///
@@ -702,29 +699,38 @@ impl EventBus {
     /// });
     /// ```
     pub fn publish(&self, event: Event) {
-        if self.sender.send(event.clone()).is_err() {
-            // Build a "[agent_id:step]" tag when we have a session with an
-            // active step counter; fall back to just the event type name.
-            let tag = event.session_id().and_then(|sid| {
-                let step = self.current_step(sid);
-                if step > 0 {
-                    // Use the last 8 chars of the session id as a short label.
-                    let short_id = &sid[sid.len().saturating_sub(8)..];
-                    Some(format!("[{short_id}:{step}]"))
-                } else {
-                    None
+        match self.sender.send(event.clone()) {
+            Ok(n) => {
+                // n = number of receivers that got the event
+                if n == 0 {
+                    let tag = event.session_id().and_then(|sid| {
+                        let step = self.current_step(sid);
+                        if step > 0 {
+                            let short_id = &sid[sid.len().saturating_sub(8)..];
+                            Some(format!("[{short_id}:{step}]"))
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(tag) = tag {
+                        tracing::warn!(
+                            "Event dropped (no active subscribers) {}: {}",
+                            tag,
+                            event.type_name()
+                        );
+                    } else {
+                        tracing::warn!(
+                            "Event dropped (no active subscribers): {}",
+                            event.type_name()
+                        );
+                    }
                 }
-            });
-            if let Some(tag) = tag {
+            }
+            Err(broadcast::error::SendError(ev)) => {
+                // Buffer overflow — some receivers are lagging
                 tracing::warn!(
-                    "Event dropped (no active subscribers) {}: {}",
-                    tag,
-                    event.type_name()
-                );
-            } else {
-                tracing::warn!(
-                    "Event dropped (no active subscribers): {}",
-                    event.type_name()
+                    "Event dropped (broadcast channel full): {}",
+                    ev.type_name()
                 );
             }
         }
@@ -732,9 +738,9 @@ impl EventBus {
 }
 
 impl Default for EventBus {
-    /// Creates an `EventBus` with a default capacity of 256 events.
+    /// Creates an `EventBus` with a default capacity of 1024 events.
     fn default() -> Self {
-        Self::new(256)
+        Self::new(1024)
     }
 }
 

@@ -4280,12 +4280,13 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragent"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "clap",
  "dirs 6.0.0",
  "futures",
+ "parking_lot",
  "ragent-agent",
  "ragent-server",
  "ragent-tui",
@@ -4298,7 +4299,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-agent"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4326,6 +4327,7 @@ dependencies = [
  "num_cpus",
  "ooxmlsdk",
  "ort",
+ "parking_lot",
  "pdf-extract",
  "pin-project-lite",
  "printpdf",
@@ -4366,7 +4368,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-bench"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "calamine",
@@ -4389,7 +4391,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-codeindex"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "blake3",
@@ -4482,7 +4484,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-server"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4492,6 +4494,7 @@ dependencies = [
  "chrono",
  "criterion",
  "futures",
+ "parking_lot",
  "ragent-agent",
  "ragent-config",
  "ragent-prompt_opt",
@@ -4533,7 +4536,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-team"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4648,7 +4651,7 @@ dependencies = [
 
 [[package]]
 name = "ragent-tui"
-version = "0.1.0-alpha.68"
+version = "0.1.0-alpha.70"
 dependencies = [
  "anyhow",
  "arboard",
@@ -4663,6 +4666,7 @@ dependencies = [
  "html2text",
  "image",
  "lru 0.12.5",
+ "parking_lot",
  "pulldown-cmark",
  "ragent-agent",
  "ragent-bench",

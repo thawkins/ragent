@@ -2565,7 +2565,11 @@ fn messages_to_lines<'a>(
                     }
                 }
                 MessagePart::Image(img) => {
-                    let name = img.path.file_name().and_then(|n| n.to_str()).unwrap_or("image");
+                    let name = img
+                        .path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("image");
                     lines.push(Line::from(Span::styled(
                         format!("  📎 [image: {}]", name),
                         Style::default().fg(Color::Yellow),

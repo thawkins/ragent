@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 0.1.0-alpha.70
+
+### Changed
+- **Update concurrency** — Improved concurrency handling across the codebase.
+- **Fix todos** — Resolved outstanding todo issues.
+
 ## Version: 0.1.0-alpha.68
 
 ### Added

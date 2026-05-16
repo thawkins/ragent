@@ -382,7 +382,7 @@ async fn main() -> Result<()> {
         tracing::debug!(hidden_tools = ?hidden_tools, "Hiding tools from registry");
         tool_registry.set_hidden(&hidden_tools);
     }
-    let permission_checker = Arc::new(tokio::sync::RwLock::new(PermissionChecker::new(
+    let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(
         config
             .permission
             .clone()

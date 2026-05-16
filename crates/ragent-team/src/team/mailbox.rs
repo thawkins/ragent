@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -153,25 +153,31 @@ impl Mailbox {
         })
     }
 
-    /// Read all messages from the mailbox without modifying it.
+    /// Read all messages from the mailbox (acquires a shared lock).
     pub fn read_all(&self) -> Result<Vec<MailboxMessage>> {
         if !self.path.exists() {
             return Ok(Vec::new());
         }
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&self.path)
+            .with_context(|| format!("open mailbox {}", self.path.display()))?;
+        file.lock_shared()
+            .with_context(|| format!("acquire shared lock on mailbox {}", self.path.display()))?;
         let raw = fs::read_to_string(&self.path)
             .with_context(|| format!("read mailbox {}", self.path.display()))?;
+        file.unlock()?;
         if raw.trim().is_empty() {
             return Ok(Vec::new());
         }
         serde_json::from_str(&raw).with_context(|| format!("parse mailbox {}", self.path.display()))
     }
 
-    fn write_locked(file: &mut File, messages: &[MailboxMessage]) -> Result<()> {
+    fn write_atomic(path: &Path, messages: &[MailboxMessage]) -> Result<()> {
         let json = serde_json::to_string_pretty(messages)?;
-        file.set_len(0)?;
-        file.seek(SeekFrom::Start(0))?;
-        file.write_all(json.as_bytes())?;
-        file.flush()?;
+        let temp_path = path.with_extension("tmp");
+        fs::write(&temp_path, json)?;
+        fs::rename(&temp_path, path)?;
         Ok(())
     }
 
@@ -199,8 +205,8 @@ impl Mailbox {
         };
 
         messages.push(message);
-        Self::write_locked(&mut file, &messages)?;
         file.unlock()?;
+        Self::write_atomic(&self.path, &messages)?;
 
         // Wake the recipient's poll loop if one is registered.
         signal_notifier(&self.team_dir, &self.agent_id);
@@ -237,10 +243,11 @@ impl Mailbox {
             for m in &mut messages {
                 m.read = true;
             }
-            Self::write_locked(&mut file, &messages)?;
+            file.unlock()?;
+            Self::write_atomic(&self.path, &messages)?;
+        } else {
+            file.unlock()?;
         }
-
-        file.unlock()?;
         Ok(unread)
     }
 
@@ -272,9 +279,11 @@ impl Mailbox {
         if let Some(m) = found {
             if !m.read {
                 m.read = true;
-                Self::write_locked(&mut file, &messages)?;
+                file.unlock()?;
+                Self::write_atomic(&self.path, &messages)?;
+            } else {
+                file.unlock()?;
             }
-            file.unlock()?;
             Ok(true)
         } else {
             file.unlock()?;
