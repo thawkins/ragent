@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.79
+
+### Fixed
+- **Azure endpoint logging** — TUI log panel now displays the full endpoint URL for Azure AI Foundry requests.
+
 ## Version: 0.1.0-alpha.78
 
 ### Fixed
