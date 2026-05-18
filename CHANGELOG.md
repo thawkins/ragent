@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.74
+
+### Fixed
+- **SPEC.md mermaid diagrams** — Fixed 2 diagrams (Figure 1 and Figure 7) where closing fences/`end` keywords were on the same line as node definitions, which broke rendering. All 14 diagrams now pass syntax validation and render correctly.
+
 ## Version: 0.1.0-alpha.73
 
 ### Fixed

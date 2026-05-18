@@ -34,7 +34,9 @@ graph LR
     SP --> LLM[LLM Provider]
     SP --> AP[Agent Profile]
     SP --> TR[Tool Registry]
-          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, web, ...]```
+          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, web, ...]
+
+```
 
 **Figure 1:** Core Execution Loop — High-level session/agent/tool flow
 
@@ -1317,7 +1319,8 @@ graph TB
             ForceCleanup["Force-Cleanup"]
                           MCPDiscovery["MCP Discovery"]
                           OutputView["Output View"]
-                          Keybindings["Keybindings Help"]        end
+                          Keybindings["Keybindings Help"]
+                          end
     end
 
     subgraph EventHandling["Event Handling"]
