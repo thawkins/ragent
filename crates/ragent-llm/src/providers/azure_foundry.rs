@@ -104,9 +104,9 @@ impl Provider for AzureFoundryProvider {
             .or(env_endpoint.as_deref())
             .unwrap_or(DEFAULT_AZURE_FOUNDRY_HOST);
 
-                  let client = AzureFoundryClient::new(api_key, resolved_base);
-                tracing::info!(provider = "azure_foundry", endpoint = %resolved_base, "Connecting to Azure AI Foundry");
-                Ok(Box::new(client))    }
+        let client = AzureFoundryClient::new(api_key, resolved_base);
+        Ok(Box::new(client))
+    }
 }
 
 /// HTTP client for Azure AI Foundry.
@@ -211,6 +211,13 @@ impl LlmClient for AzureFoundryClient {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.inner.build_request_body(&request);
 
+        tracing::info!(
+            provider = "azure_foundry",
+            endpoint = %url,
+            model = %request.model,
+            "Sending chat request to Azure AI Foundry"
+        );
+
         let response = crate::provider::http_client::create_streaming_http_client()
             .post(&url)
             .header("api-key", &self.api_key)
@@ -257,4 +264,5 @@ struct AzureFoundryModelsResponse {
 #[derive(Debug, Deserialize)]
 struct AzureFoundryModelEntry {
     id: String,
+    object: String,
 }
