@@ -211,14 +211,11 @@ impl LlmClient for AzureFoundryClient {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let body = self.inner.build_request_body(&request);
 
-        tracing::info!(
-            provider = "azure_foundry",
-            endpoint = %url,
-            model = %request.model,
-            "Sending chat request to Azure AI Foundry"
-        );
-
-        let response = crate::provider::http_client::create_streaming_http_client()
+                            tracing::info!(
+                                endpoint = %url,
+                                model = %request.model,
+                                "[azure_foundry/{}] Sending chat request", request.model
+                            );        let response = crate::provider::http_client::create_streaming_http_client()
             .post(&url)
             .header("api-key", &self.api_key)
             .header("content-type", "application/json")

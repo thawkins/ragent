@@ -664,13 +664,12 @@ impl SessionProcessor {
             _ => None,
         };
 
-        tracing::info!(
-            provider = %model_ref.provider_id,
-            model = %model_ref.model_id,
-            api_base = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
-            "creating LLM client"
-        );
-
+                  tracing::info!(
+                      provider = %model_ref.provider_id,
+                      model = %model_ref.model_id,
+                      endpoint = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
+                      "creating LLM client"
+                  );
         let client = {
             let _scope = profiler.scope("llm.create_client");
             match provider

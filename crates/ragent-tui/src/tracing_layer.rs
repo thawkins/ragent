@@ -49,22 +49,30 @@ impl TuiTracingLayer {
     }
 }
 
-/// Visitor that extracts the `message` field from a tracing event.
+/// Visitor that extracts the `message` field and endpoint-related metadata
+/// from a tracing event.
 #[derive(Default)]
 struct MessageVisitor {
     message: String,
+    endpoint: Option<String>,
 }
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        if field.name() == "message" {
-            self.message = value.to_string();
+        match field.name() {
+            "message" => self.message = value.to_string(),
+            "endpoint" | "url" | "api_base" | "base_url" => self.endpoint = Some(value.to_string()),
+            _ => {}
         }
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            self.message = format!("{:?}", value);
+        match field.name() {
+            "message" => self.message = format!("{:?}", value),
+            "endpoint" | "url" | "api_base" | "base_url" => {
+                self.endpoint = Some(format!("{:?}", value));
+            }
+            _ => {}
         }
     }
 }
@@ -84,11 +92,17 @@ where
 
         // Include the target (module path) for context when it adds value.
         let target = event.metadata().target();
-        let message = if target.starts_with("ragent") || visitor.message.is_empty() {
+        let mut message = if target.starts_with("ragent") || visitor.message.is_empty() {
             visitor.message
         } else {
             format!("[{}] {}", target, visitor.message)
         };
+
+        // Append endpoint info if present — this is how we show the full
+        // Azure AI Foundry URL in the TUI log panel.
+        if let Some(endpoint) = visitor.endpoint {
+            message.push_str(&format!(" → {}", endpoint));
+        }
 
         // Non-blocking send — drop the record if the channel is full rather
         // than stalling the async runtime.

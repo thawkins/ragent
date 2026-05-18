@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.77
+## Current Version: 0.1.0-alpha.78
+
+### Fixed
+- **Azure endpoint logging** — TUI log panel now displays the full endpoint URL for Azure AI Foundry requests, not just the `[provider/model]` prefix.
+
+## Previous: 0.1.0-alpha.77
 
 ### Added
 - **Azure endpoint logging** — Azure AI Foundry provider now logs the resolved endpoint via `tracing::info!` when connecting.
