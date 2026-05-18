@@ -5486,58 +5486,9 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "model" => match args.trim() {
                 "" => {
-                    let configured = Self::get_configured_providers(&self.storage);
-                    match configured.len() {
-                        0 => {
-                            self.status =
-                                "⚠ No providers configured — use /setup to add one".to_string();
-                        }
-                        1 => {
-                            // Single configured provider — select it directly.
-                            let prov = &configured[0];
-                            let prov_id = prov.id.clone();
-                            let prov_name = prov.name.clone();
-                            // FR-003/FR-004: try persisted model restore, fallback to picker.
-                            if self
-                                .try_restore_provider_model(&prov_id, &prov_name)
-                                .is_some()
-                            {
-                                // Model was restored — show the Done confirmation.
-                                self.provider_setup = Some(ProviderSetupStep::Done {
-                                    provider_name: prov_name,
-                                    model_name: self
-                                        .selected_model
-                                        .as_ref()
-                                        .and_then(|m| m.split('/').nth(1))
-                                        .map(String::from),
-                                });
-                            } else {
-                                let models = self.models_for_provider(&prov_id);
-                                if models.is_empty() {
-                                    self.provider_setup = None;
-                                    self.status = format!(
-                                "⚠ No models available for {} — check provider setup and model discovery",
-                                prov_name
-                            );
-                                } else {
-                                    self.provider_setup =
-                                        Some(ProviderSetupStep::SelectModel {
-                                            provider_id: prov_id,
-                                            provider_name: prov_name,
-                                            models,
-                                            selected: 0,
-                                        });
-                                }
-                            }
-                        }
-                        _ => {
-                            self.provider_setup =
-                                Some(ProviderSetupStep::SelectConfiguredProvider {
-                                    providers: configured,
-                                    selected: 0,
-                                });
-                        }
-                    }
+                    // Show all providers (not just configured ones) so users can
+                    // see every option and either switch models or set up a new provider.
+                    self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
                 }
                 "show" => {
                     if !self.ensure_session() {

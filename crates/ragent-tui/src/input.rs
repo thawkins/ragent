@@ -829,7 +829,28 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 let (pid, pname) = PROVIDER_LIST[selected];
-                if pid == "ollama" {
+                // If already configured, skip setup and go straight to model picker
+                let already_configured = App::get_configured_providers(&app.storage)
+                    .iter()
+                    .any(|p| p.id == pid);
+                if already_configured {
+                    app.refresh_provider();
+                    let models = app.models_for_provider(pid);
+                    if models.is_empty() {
+                        app.provider_setup = None;
+                        app.status = format!(
+                            "⚠ No models available for {} — check provider setup and model discovery",
+                            pname
+                        );
+                    } else {
+                        app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                            provider_id: pid.to_string(),
+                            provider_name: pname.to_string(),
+                            models,
+                            selected: 0,
+                        });
+                    }
+                } else if pid == "ollama" {
                     // Ollama doesn't require a key — store empty and mark configured
                     let _ = app.storage.set_provider_auth(pid, "");
                     let _ = app

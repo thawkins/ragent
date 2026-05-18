@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.73
+
+### Fixed
+- **/model selection** — Fixed `/model` selection handling.
+
 ## Version: 0.1.0-alpha.72
 
 ### Added

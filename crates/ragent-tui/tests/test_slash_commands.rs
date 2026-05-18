@@ -595,16 +595,14 @@ fn test_slash_compact_no_messages_shows_warning() {
 // ── /model ──────────────────────────────────────────────────────────
 
 #[test]
-fn test_slash_model_no_provider_shows_warning() {
+fn test_slash_model_opens_provider_picker() {
     let mut app = make_app();
     // No provider configured by default (no env vars in test)
-    if app.configured_provider.is_none() {
-        app.execute_slash_command("/model");
-        assert!(
-            app.status.contains("No provider"),
-            "should warn about missing provider"
-        );
-    }
+    app.execute_slash_command("/model");
+    assert!(
+        matches!(app.provider_setup, Some(ProviderSetupStep::SelectProvider { .. })),
+        "/model should open the provider picker"
+    );
 }
 
 #[test]
@@ -671,14 +669,15 @@ fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
 
     app.execute_slash_command("/model");
 
+    // With the updated /model flow, we always show the full provider picker
+    // (all providers, not just configured ones) so users can set up any provider.
     assert!(
-        app.status.contains("No models available"),
-        "expected empty-model warning, got: {}",
-        app.status
-    );
-    assert!(
-        app.provider_setup.is_none(),
-        "should not open empty model picker"
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::SelectProvider { .. })
+        ),
+        "expected provider picker to open, got: {:?}",
+        app.provider_setup
     );
 }
 

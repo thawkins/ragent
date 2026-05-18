@@ -202,7 +202,14 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 Line::from(""),
             ];
 
-            for (i, (_pid, pname)) in PROVIDER_LIST.iter().enumerate() {
+            // Determine which providers have saved credentials so we can show a ✓ tick.
+            let configured_ids: std::collections::HashSet<String> =
+                App::get_configured_providers(&app.storage)
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+
+            for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
                 let (indicator, style) = if i == *selected {
                     (
                         "▸ ",
@@ -213,9 +220,15 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 } else {
                     ("  ", Style::default().fg(Color::White))
                 };
+                let tick = if configured_ids.contains(*pid) {
+                    " ✓"
+                } else {
+                    ""
+                };
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
+                    Span::styled(tick, Style::default().fg(Color::Green)),
                 ]));
             }
 

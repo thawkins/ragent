@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.72
+## Current Version: 0.1.0-alpha.73
+
+### Fixed
+- **/model selection** — Fixed `/model` selection handling.
+
+## Previous: 0.1.0-alpha.72
 
 ### Added
 - **gen-spec-pdf.sh script** — New `scripts/gen-spec-pdf.sh` for converting Markdown specifications (with Mermaid diagrams) to PDF using Pandoc and Chromium.

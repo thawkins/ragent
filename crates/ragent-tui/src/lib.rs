@@ -250,12 +250,12 @@ pub async fn run_tui(
                 app.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
 
-                // Render the ASCII art banner into the message window now that
-                // the session is valid (append_assistant_text requires session_id).
-                let banner = crate::logo::LOGO.join("\n");
-                app.append_assistant_text(&banner);
-                app.force_new_message = true;
-
+                                    // Render the ASCII art banner into the message window now that
+                                    // the session is valid (append_assistant_text requires session_id).
+                                    let banner = crate::logo::LOGO.join("\n");
+                                    app.append_assistant_text(&banner);
+                                    app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
+                                    app.force_new_message = true;
                 app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
