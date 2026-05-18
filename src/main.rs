@@ -216,6 +216,14 @@ fn data_dir() -> PathBuf {
         .join("ragent")
 }
 
+/// Print the ragent ASCII art startup banner to stdout.
+fn print_banner() {
+    for line in ragent_tui::logo::LOGO {
+        println!("{}", line);
+    }
+    println!("  v{}  —  Rust AI coding agent\n", env!("CARGO_PKG_VERSION"));
+}
+
 /// Parse CLI args, set up infrastructure, and dispatch to the selected command.
 ///
 /// # Errors
@@ -551,6 +559,9 @@ async fn main() -> Result<()> {
                     }
                 }
             } else {
+                // Print startup banner before entering TUI alternate screen
+                print_banner();
+
                 ragent_tui::run_tui(
                     event_bus,
                     storage,
@@ -639,6 +650,7 @@ async fn main() -> Result<()> {
                     anyhow::bail!("Session not found: {id}");
                 }
                 tracing::info!(session_id = %id, "Resuming session");
+                print_banner();
                 ragent_tui::run_tui(
                     event_bus,
                     storage,

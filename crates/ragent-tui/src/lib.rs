@@ -10,6 +10,7 @@ pub mod layout;
 pub mod layout_active_agents;
 pub mod layout_statusbar;
 pub mod layout_teams;
+pub mod logo;
 pub mod panels;
 pub mod theme;
 pub mod tips;
@@ -248,6 +249,12 @@ pub async fn run_tui(
                 let session_id = session.id.clone();
                 app.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
+
+                // Render the ASCII art banner into the message window now that
+                // the session is valid (append_assistant_text requires session_id).
+                let banner = crate::logo::LOGO.join("\n");
+                app.append_assistant_text(&banner);
+                app.force_new_message = true;
 
                 app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 app.status = "session created".to_string();

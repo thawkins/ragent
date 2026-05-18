@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-alpha.72
+
+### Added
+- **gen-spec-pdf.sh script** — New `scripts/gen-spec-pdf.sh` for converting Markdown specifications (with Mermaid diagrams) to PDF using Pandoc and Chromium.
+
+### Changed
+- **SPEC.md updates** — Removed LSP references and added a dedicated Spec Management section documenting the spec tool suite.
+
 ## Version: 0.1.0-alpha.71
 
 ### Added
