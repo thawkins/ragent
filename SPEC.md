@@ -1841,7 +1841,64 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
 
 ## 7. Memory System
 
-*(Documentation pending — see codebase for current implementation.)*
+The memory system provides persistent, structured storage of facts, patterns, preferences, and insights across sessions. It operates across three tiers with automatic extraction, decay, compaction, and optional semantic search.
+
+### 7.1 Three-Tier Architecture
+
+| Tier | Storage | Access | Purpose |
+|------|---------|--------|---------|
+| **File Blocks** | `~/.ragent/memory/` and `.ragent/memory/` | `memory_read` / `memory_write` | Human-readable markdown notes organised by topic |
+| **Structured Store** | SQLite (`memory` table) | `memory_store` / `memory_recall` / `memory_forget` | Typed, tagged, confidence-scored facts with full-text search |
+| **Semantic Search** | ONNX embeddings (optional) | `memory_search` | Embedding-based similarity search via `all-MiniLM-L6-v2` |
+
+### 7.2 Memory Tools
+
+| Tool | Purpose |
+|------|---------|
+| `memory_read` | Read a named memory block (e.g. `memory_read(label="patterns")`) |
+| `memory_write` | Write or append to a memory block with optional YAML frontmatter |
+| `memory_replace` | Replace a specific string within a named memory block |
+| `memory_store` | Store a structured memory with category, tags, and confidence score |
+| `memory_recall` | Full-text search across structured memories with filtering |
+| `memory_forget` | Delete memories by ID, age, confidence, category, or tags |
+| `memory_search` | Semantic similarity search (embeddings-based) |
+| `memory_migrate` | Analyse a flat `MEMORY.md` and propose splitting into named blocks |
+
+### 7.3 Memory Browser
+
+The TUI provides a full-panel memory browser accessible via `/memory`:
+
+- Lists global and project memory blocks
+- Shows size indicators with warnings for blocks near the 64 KB limit
+- Expand/collapse to view full content
+- Keyboard navigation (`j`/`k`, `Enter`, `Esc`)
+- Search and filter capabilities
+
+### 7.4 Structured Memory Categories
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| `fact` | Objective information about the project | "Uses tokio for async runtime" |
+| `pattern` | Recurring code or workflow patterns | "Prefer `anyhow::Result` in main" |
+| `preference` | User working preferences | "Use 4-space indentation" |
+| `insight` | Deeper understanding or analysis | "Codebase follows clean architecture" |
+| `error` | Known issues and their resolutions | "Don't use `git checkout` to rewind files" |
+| `workflow` | Standard operating procedures | "Update CHANGELOG.md before pushing" |
+
+### 7.5 Auto-Extraction
+
+When `memory_extraction_enabled` is true in the configuration, the agent automatically extracts memories from conversations. Key facts, patterns, and insights are identified and stored with appropriate categories and confidence scores.
+
+### 7.6 HTTP API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/memory/blocks` | List all memory blocks |
+| `GET` | `/memory/blocks/{label}` | Read a specific memory block |
+| `DELETE` | `/memory/blocks/{label}` | Delete a memory block |
+| `POST` | `/memory/search` | Semantic search across memories |
+| `POST` | `/memory/store` | Store a structured memory |
+| `POST` | `/memory/forget` | Delete memories matching criteria |
 
 ---
 
@@ -1937,43 +1994,530 @@ When a spec is activated via `/spec activate <id>`:
 
 ## 9. Teams
 
-*(Documentation pending — see codebase for current implementation.)*
+The team system enables multi-agent coordination with named teammates, shared task lists, mailbox messaging, and task assignment. Teams are persisted on disk and can be created, opened, closed, and cleaned up through slash commands.
+
+### 9.1 Core Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Team** | A named group of agents with shared state and tasks |
+| **Teammate** | An individual agent instance within a team |
+| **Task** | A work item with title, description, status, and optional dependencies |
+| **Mailbox** | Message queue per teammate for asynchronous communication |
+| **Memory Scope** | Per-teammate persistent memory (`user`, `project`, or `none`) |
+
+### 9.2 Team Lifecycle
+
+```mermaid
+graph LR
+    A[/team create <name>] --> B[Team Created]
+    B --> C[/team spawn <agent>]
+    C --> D[Teammate Running]
+    D --> E[/team task_create]
+    E --> F[Task Available]
+    F --> G[teammate claims task]
+    G --> H[Task In Progress]
+    H --> I[teammate completes task]
+    I --> J[Task Done]
+    J --> K{More tasks?}
+    K -- Yes --> F
+    K -- No --> L[/team cleanup]
+    L --> M[Team Destroyed]
+```
+
+### 9.3 Team Tools (21)
+
+| Tool | Purpose |
+|------|---------|
+| `team_create` | Create a new team with a unique name |
+| `team_spawn` | Spawn a teammate agent into the team |
+| `team_cleanup` | Tear down a team and remove its on-disk resources |
+| `team_status` | Get team member list, states, and task progress summary |
+| `team_idle` | Signal that a teammate has no more tasks to work on |
+| `team_task_create` | Add a new task to the team's shared task list |
+| `team_task_claim` | Claim the next available task (or a specific task ID) |
+| `team_task_complete` | Mark a claimed task as completed |
+| `team_task_list` | List all tasks with status, assignment, and dependencies |
+| `team_assign_task` | Assign a specific pending task to a named teammate |
+| `team_message` | Send a direct message to one team member |
+| `team_broadcast` | Send a message to all active teammates simultaneously |
+| `team_read_messages` | Read unread messages from the teammate's mailbox |
+| `team_shutdown_teammate` | Request graceful shutdown of a teammate (lead-only) |
+| `team_shutdown_ack` | Acknowledge a shutdown request and terminate |
+| `team_submit_plan` | Submit a plan to the team lead for approval |
+| `team_approve_plan` | Approve or reject a teammate's submitted plan (lead-only) |
+| `team_wait` | Block until teammates finish their current work |
+| `team_memory_read` | Read from a teammate's persistent memory directory |
+| `team_memory_write` | Write to a teammate's persistent memory directory |
+
+### 9.4 Team Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/team create <name>` | Create new team |
+| `/team open <name>` | Open existing team |
+| `/team close` | Close team session |
+| `/team delete <name>` | Delete team |
+| `/team clear` | Clear team state |
+| `/team tasks` | Show team tasks table |
+| `/team status` | Show team status |
+| `/team message <to> <content>` | Send message to teammate |
+| `/team broadcast <content>` | Broadcast to all teammates |
+| `/team spawn <agent>` | Spawn teammate agent |
+| `/team cleanup` | Cleanup team resources |
+
+### 9.5 Task Dependencies
+
+Tasks can declare dependencies on other tasks. A task cannot be claimed until all its dependencies are completed. This enables sequential workflows within parallel teams.
+
+### 9.6 Plan Approval Workflow
+
+Teammates can submit plans to the team lead for approval before starting implementation:
+
+1. Teammate calls `team_submit_plan` with their intended approach
+2. Lead receives the plan via `team_read_messages`
+3. Lead calls `team_approve_plan` with `approved: true` or `approved: false`
+4. If approved, teammate exits plan-pending mode and begins implementation
+5. If rejected, teammate receives feedback and revises
 
 ---
 
 ## 10. Swarm Mode
 
-*(Documentation pending — see codebase for current implementation.)*
+Swarm mode automatically decomposes a high-level goal into parallel subtasks, creates an ephemeral team, and coordinates execution. It is ideal for large tasks that can be broken into independent work items.
+
+### 10.1 How Swarm Works
+
+1. **Decomposition** — The LLM analyses the prompt and produces a JSON decomposition with 2–8 independent subtasks and optional dependency edges.
+2. **Team Creation** — An ephemeral team named `swarm-<timestamp>` is created.
+3. **Teammate Spawning** — One teammate is spawned per subtask with a tailored prompt.
+4. **Dependency Resolution** — Tasks with `depends_on` are blocked until prerequisites complete.
+5. **Progress Monitoring** — The TUI shows real-time status: spawning, blocked, in-progress, and completed counts.
+6. **Auto-Completion** — When all tasks finish, the swarm auto-summarises results.
+
+### 10.2 Swarm Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
+| `/swarm status` | Show live progress of the active swarm |
+| `/swarm cancel` | Cancel the active swarm and clean up |
+| `/swarm help` | Show usage help |
+
+### 10.3 Decomposition Format
+
+The LLM returns a JSON object with an array of subtasks:
+
+```json
+{
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Short title",
+      "description": "Detailed instructions for the agent...",
+      "depends_on": [],
+      "agent_type": "general",
+      "model": null
+    }
+  ]
+}
+```
+
+Each subtask has:
+- `id` — Unique identifier (e.g. `s1`, `s2`)
+- `title` — Short human-readable title
+- `description` — Full instructions for the teammate
+- `depends_on` — IDs of subtasks that must complete first
+- `agent_type` — Optional agent type override (defaults to `general`)
+- `model` — Optional model override in `provider/model` format
+
+### 10.4 Swarm State
+
+The TUI tracks swarm state including:
+- `team_name` — Name of the ephemeral backing team
+- `prompt` — Original user prompt
+- `decomposition` — The LLM-produced task breakdown
+- `spawned` — Whether all teammates have been spawned
+- `completed` — Whether the orchestrator has collected all results
+
+### 10.5 Limitations
+
+- Only one swarm can be active at a time; start a new one after cancelling the current swarm.
+- Requires a configured model with JSON mode support for reliable decomposition.
+- Subtask descriptions must be detailed enough for agents to work without further clarification.
 
 ---
 
 ## 11. Autopilot Mode
 
-*(Documentation pending — see codebase for current implementation.)*
+Autopilot mode enables the agent to operate autonomously, continuing to iterate on a task without user intervention until the task is complete, a safety limit is reached, or the user stops it.
+
+### 11.1 How Autopilot Works
+
+1. **Activation** — User runs `/autopilot on` with optional token and time budgets.
+2. **Autonomous Loop** — The agent processes messages, makes tool calls, and continues iterating automatically.
+3. **Completion** — The agent calls `task_complete` with a summary, or the user runs `/autopilot off`.
+4. **Safety Limits** — Hard stops prevent runaway execution.
+
+### 11.2 Autopilot Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/autopilot on [--max-tokens N] [--max-time N]` | Enable autonomous operation with optional limits |
+| `/autopilot off` | Disable autonomous operation and return to interactive mode |
+| `/autopilot status` | Show autopilot status, elapsed time, and remaining budget |
+
+### 11.3 Safety Limits
+
+| Limit | Default | Behaviour When Hit |
+|-------|---------|-------------------|
+| `max_steps` | 500 | Halt and ask user whether to continue |
+| Token budget | Optional (`--max-tokens`) | Stop and display summary |
+| Time limit | Optional (`--max-time` in seconds) | Stop and display summary |
+| Context window | Model-specific | Trigger automatic compaction |
+
+### 11.4 Completion Signalling
+
+Agents in autopilot mode call `task_complete` to signal completion:
+
+```
+task_complete(summary: "Implemented feature X with tests and documentation")
+```
+
+This publishes a `TaskCompleted` event, displays the summary to the user, and exits autopilot mode.
+
+### 11.5 Status Display
+
+When active, the status bar shows:
+- `⚡ autopilot` — Normal operation
+- `autopilot: time limit reached` — Time budget exhausted
+- `autopilot stopped: task complete` — Agent finished successfully
 
 ---
 
 ## 12. Orchestrator & Multi-Agent Coordination
 
-*(Documentation pending — see codebase for current implementation.)*
+The orchestrator provides primitives for coordinating multiple agents in a single workflow. It supports job dispatch, progress tracking, and result aggregation.
+
+### 12.1 Core Components
+
+| Component | Purpose |
+|-----------|---------|
+| `AgentRegistry` | Maintains a registry of available agents and their capabilities |
+| `Coordinator` | Dispatches jobs to agents and collects results |
+| `InProcessRouter` | Actor-style message routing between agents |
+| `JobDescriptor` | Defines a job with required capabilities and payload |
+
+### 12.2 Coordinator API
+
+```rust
+use ragent_agent::orchestrator::{Coordinator, JobDescriptor};
+
+let coord = Coordinator::new(registry);
+
+// Synchronous job (blocks until all agents respond)
+let result = coord.start_job_sync(JobDescriptor {
+    id: "job-1".to_string(),
+    required_capabilities: vec!["search".to_string()],
+    payload: "find TODOs".to_string(),
+}).await?;
+
+// Asynchronous job (returns job ID, subscribe to events)
+let job_id = coord.start_job_async(desc).await?;
+let mut events = coord.subscribe_job_events(&job_id).await?;
+```
+
+### 12.3 HTTP API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/orchestrator/metrics` | Return live counter snapshot |
+| `POST` | `/orchestrator/start` | Start a multi-agent job |
+| `GET` | `/orchestrator/jobs/{id}` | Poll job status and results |
+
+### 12.4 Conflict Resolution
+
+The `policy` submodule provides conflict resolution strategies:
+
+- **Last-write-wins** — Simple timestamp-based resolution
+- **Human-in-the-loop** — Escalate conflicts to the user for decision
+- **Merge strategies** — Automatic merging for compatible changes
+
+### 12.5 Transport Adapters
+
+The `transport` submodule supports pluggable communication:
+
+- `InProcessRouter` — In-process actor-style messaging
+- `HttpRouter` — HTTP-based inter-process communication
+- `RouterComposite` — Combine multiple transport layers
+
+### 12.6 Current Status
+
+The orchestrator is at MVP level with in-process coordination. HTTP endpoints are available but the full distributed coordination (leader election, cluster formation) is planned for a future milestone.
 
 ---
 
 ## 13. Custom Agents
 
-*(Documentation pending — see codebase for current implementation.)*
+Custom agents extend ragent's built-in agent personalities with user-defined profiles. Agents are stored as JSON (OASF format) or Markdown files and loaded automatically at startup.
+
+### 13.1 Discovery Paths
+
+Custom agents are discovered from two locations, with project-local taking precedence:
+
+| Priority | Directory |
+|----------|-----------|
+| 1 (lower) | `~/.ragent/agents/` |
+| 2 (higher) | `[PROJECT]/.ragent/agents/` |
+
+### 13.2 File Formats
+
+#### OASF JSON Format
+
+```json
+{
+  "name": "my-reviewer",
+  "description": "Code reviewer focused on security",
+  "version": "1.0.0",
+  "schema_version": "0.7.0",
+  "modules": [{
+    "type": "ragent/agent/v1",
+    "payload": {
+      "system_prompt": "You are an expert code reviewer...",
+      "mode": "primary",
+      "max_steps": 30,
+      "thinking": { "enabled": true, "level": "high" },
+      "permissions": [
+        { "permission": "file:write", "pattern": "src/**", "action": "allow" }
+      ],
+      "skills": ["security-review", "rust-linting"]
+    }
+  }]
+}
+```
+
+#### Markdown Format
+
+Uses YAML frontmatter between `---` delimiters with the markdown body as the system prompt:
+
+```markdown
+---
+name: my-reviewer
+version: 1.0.0
+model: anthropic/claude-sonnet-4-20250514
+skills:
+  - security-review
+permissions:
+  - permission: file:write
+    pattern: src/**
+    action: allow
+---
+
+You are an expert code reviewer focused on security vulnerabilities...
+```
+
+### 13.3 Agent Configuration Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `system_prompt` | string | The agent's personality and instructions |
+| `mode` | string | `primary` (main agent) or `secondary` (helper) |
+| `max_steps` | integer | Maximum tool calls per turn |
+| `thinking` | object | Reasoning configuration: `{ enabled, level, budget_tokens }` |
+| `permissions` | array | Per-agent permission rules |
+| `skills` | array | Skills this agent can invoke |
+| `model` | string | Default model in `provider/model` format |
+| `memory_scope` | string | `user`, `project`, or `none` |
+
+### 13.4 Agent Diagnostics
+
+Use `/agents` to list all loaded agents including custom ones. Custom agents are marked with a yellow `[custom]` badge. Diagnostics show any load errors or skipped files.
+
+### 13.5 OASF Annotations
+
+OASF records support taxonomy annotations for discoverability:
+
+- `skills` — OASF skill taxonomy (e.g. `software_engineering/code_review`)
+- `domains` — OASF domain taxonomy (e.g. `technology/software_development`)
+- `locators` — Source code or registry references
 
 ---
 
 ## 14. Skills System
 
-*(Documentation pending — see codebase for current implementation.)*
+Skills are loadable instruction packs that inject tools, prompts, and file context into agent sessions. Each skill is defined by a `SKILL.md` file with YAML frontmatter and a markdown body.
+
+### 14.1 Skill Discovery
+
+Skills are discovered from multiple sources with priority order:
+
+| Priority | Scope | Path |
+|----------|-------|------|
+| 0 | Bundled | Built into ragent binary |
+| 1 | Enterprise | Managed settings |
+| 2 | OpenSkills Global | `~/.agent/skills/`, `~/.claude/skills/` |
+| 3 | Personal | `~/.ragent/skills/<name>/SKILL.md` |
+| 4 | OpenSkills Project | `.agent/skills/`, `.claude/skills/` |
+| 5 | Project | `.ragent/skills/<name>/SKILL.md` |
+
+Higher-priority scopes override lower ones when names conflict.
+
+### 14.2 Skill Structure
+
+```
+.ragent/skills/
+  deploy/
+    SKILL.md            # Skill instructions and frontmatter (required)
+    scripts/            # Helper scripts the skill can invoke
+    templates/          # Template files for the agent to fill in
+    examples/           # Example outputs showing expected format
+    resources/          # Reference materials
+```
+
+### 14.3 SKILL.md Frontmatter
+
+```yaml
+---
+name: deploy
+version: 1.0.0
+description: Deploy the application to staging
+argument_hint: "[environment]"
+user_invocable: true
+disable_model_invocation: false
+allowed_tools:
+  - bash
+  - write
+model: "anthropic/claude-sonnet-4-20250514"
+context: fork
+agent: general-purpose
+---
+
+# Deploy Skill
+
+When the user types `/deploy [environment]`, deploy the application...
+```
+
+### 14.4 Skill Fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique identifier (lowercase, hyphens, max 64 chars) |
+| `description` | What the skill does; used for auto-invocation matching |
+| `argument_hint` | Shown during autocomplete (e.g. `"[environment]"`) |
+| `user_invocable` | If `false`, hidden from `/` menu; only agent can invoke |
+| `disable_model_invocation` | If `true`, only user can invoke via `/name` |
+| `allowed_tools` | Tools the agent can use without permission when this skill is active |
+| `model` | Override model when this skill is active |
+| `context` | `fork` to run in a forked subagent context |
+| `agent` | Subagent type when `context` is `fork` |
+
+### 14.5 Invocation
+
+Skills are invoked by including `/skillname` in a message or by the agent auto-invoking based on description matching. Arguments after the skill name are passed to the skill body via template substitution.
+
+### 14.6 Template Variables
+
+Skill bodies support variable substitution:
+
+| Variable | Description |
+|----------|-------------|
+| `$0` | Full argument string |
+| `$1`, `$2`, ... | Individual arguments |
+| `${RAGENT_SKILL_DIR}` | Directory containing the skill's `SKILL.md` |
+| `${RAGENT_SESSION_ID}` | Current session ID |
+| `${RAGENT_WORKING_DIR}` | Current working directory |
+
+### 14.7 Bundled Skills
+
+Ragent ships with 4 bundled skills:
+
+| Skill | Purpose |
+|-------|---------|
+| `simplify` | Review recently changed files for code quality, reuse, and efficiency issues |
+| `debug` | Troubleshoot current session by reading debug logs |
+| `security-audit` | Security-focused code review |
+| `test-coverage` | Analyse test coverage gaps |
+
+### 14.8 Dynamic Context Injection
+
+Skills can enable dynamic context with `allow_dynamic_context: true`. This allows `!command` syntax within the skill body to execute shell commands and inject their output into the context.
 
 ---
 
 ## 15. Prompt Optimization
 
-*(Documentation pending — see codebase for current implementation.)*
+The prompt optimization system transforms plain prompts into structured frameworks using template-based meta-prompts. No external API calls are needed — the optimization is performed by sending the framework's system prompt to the current LLM provider.
+
+### 15.1 Optimization Methods
+
+| Method | Name | Description |
+|--------|------|-------------|
+| `co_star` | CO-STAR | Context, Objective, Identity, Tone, Audience, Result |
+| `crispe` | CRISPE | Capacity/Role, Request, Intent, Steps, Persona, Examples |
+| `cot` | Chain-of-Thought | Step-by-step reasoning scaffold with self-checks |
+| `draw` | DRAW | Professional AI image prompt optimizer |
+| `rise` | RISE | Recursive Introspection — iterative self-improvement loop |
+| `o1_style` | O1-STYLE | Thinking/step/reflection/reward structured reasoning |
+| `meta` | Meta Prompting | Distil to a concise, high-signal meta-prompt |
+| `variational` | VARI | Variational planning content-generation scaffold |
+| `q_star` | Q* | XML Q*/A* intelligent iterative prompt optimizer |
+| `openai` | OpenAI | Detailed GPT-style system prompt with guidelines |
+| `claude` | Claude | Anthropic-style XML instruction generator with examples |
+| `microsoft` | Microsoft | Azure AI optimised prompt with quality targets |
+
+### 15.2 Usage
+
+**TUI:**
+```
+/opt help                    # Show method table
+/opt co_star Explain lifetimes
+/opt cot Solve two-sum
+/opt draw A futuristic city at sunset
+```
+
+**HTTP API:**
+```bash
+curl -s -X POST http://localhost:9100/opt \
+  -H "Authorization: Bearer $RAGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
+```
+
+### 15.3 How It Works
+
+1. The user selects a method and provides a raw prompt.
+2. The system loads the method's meta-prompt (system message) from the template library.
+3. The meta-prompt and user's input are sent to the current LLM provider.
+4. The LLM returns the optimised, structured prompt.
+5. The result is displayed in the TUI or returned via the HTTP API.
+
+### 15.4 Completer Trait
+
+The optimization is decoupled from any specific LLM backend via the `Completer` trait:
+
+```rust
+#[async_trait]
+pub trait Completer: Send + Sync {
+    async fn complete(&self, system: &str, user: &str) -> anyhow::Result<String>;
+}
+```
+
+Implementations connect to the session's active provider and model.
+
+### 15.5 Method Aliases
+
+Methods can be referenced by multiple aliases for convenience:
+
+| Method | Aliases |
+|--------|---------|
+| `co_star` | `costar`, `co-star` |
+| `crispe` | `crisper` |
+| `cot` | `chain_of_thought`, `chain-of-thought`, `chainofthought` |
+| `o1_style` | `o1-style`, `o1` |
+| `meta` | `meta_prompting`, `meta-prompting` |
+| `variational` | `vari` |
+| `q_star` | `qstar`, `q-star`, `q*` |
+| `microsoft` | `ms`, `azure` |
 
 ---
 
