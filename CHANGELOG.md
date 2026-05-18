@@ -1,11 +1,11 @@
 # Changelog
 
-## Version: 0.1.0-alpha.75
+## Version: 0.1.0-alpha.76
 
 ### Added
 - **Azure AI Foundry provider** — New `azure_foundry` provider for Microsoft Azure AI Foundry models. Supports OpenAI-compatible endpoints with `api-key` header authentication, dynamic model discovery, streaming chat completions, tool calling, vision, and reasoning levels (o1, o3-mini). Configurable via `AZURE_AI_FOUNDRY_API_KEY` and `AZURE_AI_FOUNDRY_BASE` environment variables or `ragent.json`.
 
-## Version: 0.1.0-alpha.74
+## Version: 0.1.0-alpha.75
 
 ### Fixed
 - **SPEC.md mermaid diagrams** — Fixed 2 diagrams (Figure 1 and Figure 7) where closing fences/`end` keywords were on the same line as node definitions, which broke rendering. All 14 diagrams now pass syntax validation and render correctly.
