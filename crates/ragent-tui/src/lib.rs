@@ -366,6 +366,13 @@ pub async fn run_tui(
         }
     };
 
+    // -- Spec manager startup --
+    let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
+    let _ = session_processor
+        .spec_manager
+        .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
+    app.spec_manager = Some(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
+
     // -- Session resume --
     if let Some(ref sid) = resume_session_id {
         app.status = "resuming session…".to_string();

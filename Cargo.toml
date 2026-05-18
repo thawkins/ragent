@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.70"
+version = "0.1.0-alpha.71"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -217,6 +217,8 @@ parking_lot = "0.12"
 # ── Encoding ───────────────────────────────────────────────────────────
 hex = "0.4"
 
+ragent-specs = { path = "crates/ragent-specs" }
+
 # ── Benchmarking ─────────────────────────────────────────────────────────
 criterion = { version = "0.5", features = ["html_reports"] }
 
@@ -237,6 +239,7 @@ embedded-llm = ["ragent-agent/embedded-llm"]
 ragent-agent = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
+ragent-specs = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }

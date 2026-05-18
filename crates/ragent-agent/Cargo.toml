@@ -67,6 +67,7 @@ ragent-tools-core = { path = "../ragent-tools-core" }
 ragent-tools-extended = { path = "../ragent-tools-extended" }
 ragent-tools-vcs = { path = "../ragent-tools-vcs" }
 ragent-types = { path = "../ragent-types" }
+ragent-specs = { path = "../ragent-specs" }
 
 [features]
 default = []

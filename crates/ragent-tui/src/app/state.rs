@@ -377,6 +377,17 @@ pub enum ProviderSetupStep {
         /// Index of the highlighted agent.
         selected: usize,
     },
+    /// Choosing which already-configured provider to switch to.
+    ///
+    /// Distinct from [`SelectProvider`] which lists *all* providers for first-time
+    /// setup. This variant lists only those that have usable credentials, and is
+    /// used by the `/model` slash-command flow.
+    SelectConfiguredProvider {
+        /// Configurable providers that have usable credentials.
+        providers: Vec<ConfiguredProvider>,
+        /// Index of the highlighted provider.
+        selected: usize,
+    },
     /// Choosing which provider to reset and remove credentials for.
     ResetProvider {
         /// Index of the highlighted provider in [`PROVIDER_LIST`].
@@ -410,7 +421,7 @@ pub enum ProviderSetupStep {
 }
 
 /// Information about a configured provider.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConfiguredProvider {
     /// Provider identifier (e.g. "anthropic").
     pub id: String,
@@ -590,9 +601,12 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "yolo",
         description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
     },
-    SlashCommandDef {
-        trigger: "autopilot",
-        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
+                      SlashCommandDef {
+                          trigger: "spec",
+                          description: "Specification management: /spec create|list|search|validate|status|task|help",
+                      },
+                      SlashCommandDef {
+                          trigger: "autopilot",        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
     },
     SlashCommandDef {
         trigger: "plan",
@@ -1001,7 +1015,12 @@ pub struct App {
     pub slash_menu: Option<SlashMenuState>,
     /// File reference autocomplete menu, shown when `@` is typed.
     pub file_menu: Option<FileMenuState>,
-    /// Whether directory mode should include hidden files/dirs.
+    /// Optional spec manager for reading and updating specifications.
+    /// Set when the user activates a spec via /spec activate.
+    pub spec_manager: Option<Arc<ragent_specs::SpecManager>>,
+    /// Currently active spec ID for context injection.
+    pub active_spec: Option<String>,
+    /// Whether to show hidden files in the file menu.
     pub file_menu_show_hidden: bool,
     /// Cached project files for `@` autocomplete (lazily populated).
     pub project_files_cache: Option<Vec<std::path::PathBuf>>,

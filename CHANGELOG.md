@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.71
+
+### Added
+- **Startup ASCII art banner** — The TUI now displays an ASCII art rendering of the application name on startup, followed by the version number and the exact date/time the binary was compiled.
+
 ## Version: 0.1.0-alpha.70
 
 ### Changed

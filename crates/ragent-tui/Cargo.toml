@@ -7,6 +7,9 @@ license.workspace = true
 [lints]
 workspace = true
 
+[build-dependencies]
+chrono = { workspace = true }
+
 [dependencies]
 ragent-core = { package = "ragent-agent", path = "../ragent-agent" }
 ragent-bench = { path = "../ragent-bench" }
@@ -35,6 +38,7 @@ image = { workspace = true }
 html2text = { workspace = true }
 pulldown-cmark = "0.12"
 ragent-prompt_opt = { path = "../ragent-prompt_opt" }
+ragent-specs = { path = "../ragent-specs" }
 async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }

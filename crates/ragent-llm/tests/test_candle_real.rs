@@ -1,8 +1,7 @@
 #[cfg(test)]
 mod tests {
     use ragent_config::InternalLlmConfig;
-    use ragent_llm::embedded::{EmbeddedRuntime, known_model_manifest};
-    use std::sync::Arc;
+    use ragent_llm::embedded::EmbeddedRuntime;
 
     #[tokio::test]
     async fn test_really_load_smollm() {

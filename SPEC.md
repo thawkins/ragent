@@ -295,6 +295,8 @@ graph LR
 | `ragent-tools-vcs` | 2.08% | GitHub and GitLab tool surface |
 | `ragent-tui` | 20.92% | Ratatui terminal interface |
 | `ragent-types` | 1.21% | Shared IDs, events, messages, and sanitization primitives |
+| `ragent-specs` | — | Spec lifecycle management: discovery, validation, status transitions, review, archival |
+| `ragent-bench` | — | Benchmark runner shared between TUI and CLI |
 
 Percentages are based on a fresh count of current Rust `.rs` lines across workspace crates (167,466 total).
 
@@ -1220,6 +1222,16 @@ Various inline widgets rendered within the message panel.
 | `/codeindex on\|off` | Toggle code indexing |
 | `/codeindex reindex` | Force full re-index |
 | `/codeindex status` | Show index status |
+| **Spec Management** ||
+| `/spec create <id> <feature>` | Generate SPEC.md + PLAN.md via explore agent |
+| `/spec list [status]` | List specs with optional status filter |
+| `/spec search <query>` | Full-text search across SPEC.md, PLAN.md, and REVIEW.md |
+| `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
+| `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
+| `/spec task <id>` | List tasks for a spec |
+| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
+| `/spec deactivate` | Deactivate the active spec |
+| `/spec coverage <id>` | Show requirement coverage report with linked tasks |
 | **Memory** ||
 | `/memory` | Open memory browser |
 | **Team** ||

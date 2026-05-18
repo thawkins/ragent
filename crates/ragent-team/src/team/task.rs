@@ -3,7 +3,7 @@
 //! `tasks.json` is shared among all teammates and the lead.  Concurrent writes
 //! are serialised using an exclusive `flock` on the file via the `fs2` crate.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 

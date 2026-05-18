@@ -549,9 +549,10 @@ impl App {
             code_index_stats_cache: None,
             code_index_stats_last_refresh: std::time::Instant::now(),
             code_index_busy: false,
-            code_index_watch_session: None,
-        }; // end Self { ... }
-
+                          code_index_watch_session: None,
+                          spec_manager: None,
+                          active_spec: None,
+                      }; // end Self { ... }
         // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
@@ -1810,6 +1811,10 @@ impl App {
             "selected_model_ctx_window",
             &entry.context_window.to_string(),
         );
+        // Persist the chosen model per-provider so it can be restored later (FR-003).
+        let _ = self
+            .storage
+            .set_setting(&format!("provider_{}_last_model", provider_id), &entry.id);
         self.selected_model = Some(model_value);
         self.selected_model_ctx_window = Some(entry.context_window);
         self.persist_selected_thinking_level(thinking_level);
@@ -1819,6 +1824,68 @@ impl App {
             source: ProviderSource::Database,
         });
         entry.name.clone()
+    }
+
+    /// Attempt to restore the last-used model for a provider from persistent storage.
+    ///
+    /// Reads the `provider_<id>_last_model` key. If found and the model still exists in
+    /// the provider's current model list, the model is selected immediately without
+    /// showing the model picker. If the persisted model is no longer available, the stale
+    /// key is pruned and `None` is returned so the caller can fall back to the full model
+    /// picker (FR-004).
+    ///
+    /// Returns `Some(entry)` when the model was restored successfully, or `None` if
+    /// no persisted model exists or it is stale.
+    pub fn try_restore_provider_model(
+        &mut self,
+        provider_id: &str,
+        provider_name: &str,
+    ) -> Option<ModelPickerEntry> {
+        let last_model_key = format!("provider_{}_last_model", provider_id);
+        let persisted = self.storage.get_setting(&last_model_key).ok().flatten();
+        let model_id = match persisted {
+            Some(ref mid) if !mid.is_empty() => mid.clone(),
+            _ => return None,
+        };
+
+        let models = self.models_for_provider(provider_id);
+        let lower_model_id = model_id.to_lowercase();
+
+        if let Some(entry) = models
+            .iter()
+            .find(|e| e.id.to_lowercase() == lower_model_id)
+        {
+            // Model still available — restore it without showing the picker (FR-003).
+            let model_value = format!("{}/{}", provider_id, entry.id);
+            let _ = self.storage.set_setting("selected_model", &model_value);
+            let _ = self.storage.set_setting("preferred_provider", provider_id);
+            let _ = self.storage.set_setting(
+                "selected_model_ctx_window",
+                &entry.context_window.to_string(),
+            );
+            // Re-persist with the correct casing from the current model list.
+            let _ = self
+                .storage
+                .set_setting(&last_model_key, &entry.id);
+            self.selected_model = Some(model_value);
+            self.selected_model_ctx_window = Some(entry.context_window);
+            let default_level = Self::default_thinking_level_for_entry(entry);
+            self.persist_selected_thinking_level(default_level);
+            self.configured_provider = Some(ConfiguredProvider {
+                id: provider_id.to_string(),
+                name: provider_name.to_string(),
+                source: ProviderSource::Database,
+            });
+            return Some(entry.clone());
+        }
+
+        // Stale model — prune the persisted key (FR-004).
+        let _ = self.storage.delete_setting(&last_model_key);
+        self.status = format!(
+            "Previous model `{}` is no longer available — please choose a new one",
+            model_id
+        );
+        None
     }
 
     /// Refresh `selected_model_ctx_window` from the provider's model list.
@@ -2197,6 +2264,8 @@ impl App {
 
     /// Detect the first configured provider by checking env vars and the database.
     ///
+    /// This delegates to [`Self::get_configured_providers`] and returns the first match.
+    ///
     /// # Examples
     ///
     /// ```rust,no_run
@@ -2210,6 +2279,34 @@ impl App {
     /// # }
     /// ```
     pub fn detect_provider(storage: &Storage) -> Option<ConfiguredProvider> {
+        Self::get_configured_providers(storage).into_iter().next()
+    }
+
+    /// Returns every provider whose credentials are currently available.
+    ///
+    /// Providers are returned in [`PROVIDER_LIST`] priority order.  A provider is
+    /// considered *configured* when one of the following holds:
+    ///
+    /// - Its expected environment variable is non-empty.
+    /// - A database-stored credential exists (e.g. `provider_<id>_key` in storage).
+    /// - An auto-discovery path succeeds (e.g. Copilot IDE token file).
+    ///
+    /// Providers that have been explicitly disabled via `provider_<id>_disabled` are
+    /// excluded.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use ragent_core::storage::Storage;
+    /// # use ragent_tui::App;
+    /// # fn example(storage: &Storage) {
+    /// let configured = App::get_configured_providers(storage);
+    /// for provider in &configured {
+    ///     println!("{}", provider.name);
+    /// }
+    /// # }
+    /// ```
+    pub fn get_configured_providers(storage: &Storage) -> Vec<ConfiguredProvider> {
         // Helper: returns true when the user has explicitly reset this provider.
         let is_disabled = |pid: &str| -> bool {
             storage
@@ -2219,131 +2316,125 @@ impl App {
                 .is_some()
         };
 
-        // Check for an explicit user preference first — this overrides auto-discovery
-        // so that e.g. selecting Ollama doesn't get overwritten by Copilot IDE tokens.
+        let mut configured: Vec<ConfiguredProvider> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        let mut push = |id: &str, name: &str, source: ProviderSource| {
+            if seen.insert(id.to_string()) {
+                configured.push(ConfiguredProvider {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    source,
+                });
+            }
+        };
+
+        // 1. Check for an explicit user preference first — this overrides auto-discovery
+        //    so that e.g. selecting Ollama doesn't get overwritten by Copilot IDE tokens.
         if let Ok(Some(preferred)) = storage.get_setting("preferred_provider") {
-            if !preferred.is_empty() && !is_disabled(&preferred) {
-                if let Some(&(pid, pname)) = PROVIDER_LIST.iter().find(|(id, _)| *id == preferred) {
-                    return Some(ConfiguredProvider {
-                        id: pid.to_string(),
-                        name: pname.to_string(),
-                        source: ProviderSource::Database,
-                    });
-                }
-            }
-        }
-
-        // Check Anthropic
-        if !is_disabled("anthropic") {
-            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-                if !key.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "anthropic".into(),
-                        name: "Anthropic (Claude)".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
-            }
-        }
-        // Check OpenAI
-        if !is_disabled("openai") {
-            if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-                if !key.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "openai".into(),
-                        name: "OpenAI (GPT)".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
-            }
-        }
-        // Check Generic OpenAI API
-        if !is_disabled("generic_openai") {
-            if let Ok(key) = std::env::var("GENERIC_OPENAI_API_KEY") {
-                if !key.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "generic_openai".into(),
-                        name: "Generic OpenAI API".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
-            } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
-                && !key.is_empty()
+            if !preferred.is_empty()
+                && !is_disabled(&preferred)
+                && let Some(&(pid, pname)) =
+                    PROVIDER_LIST.iter().find(|(id, _)| *id == preferred)
             {
-                return Some(ConfiguredProvider {
-                    id: "generic_openai".into(),
-                    name: "Generic OpenAI API".into(),
-                    source: ProviderSource::EnvVar,
-                });
-            }
-        }
-        // Check Copilot env var
-        if !is_disabled("copilot") {
-            if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
-                if !key.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "copilot".into(),
-                        name: "GitHub Copilot".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
-            }
-            // Check Copilot auto-discover (IDE config)
-            if ragent_core::provider::copilot::find_copilot_token().is_some() {
-                return Some(ConfiguredProvider {
-                    id: "copilot".into(),
-                    name: "GitHub Copilot".into(),
-                    source: ProviderSource::AutoDiscovered,
-                });
-            }
-            // Check Copilot via gh CLI
-            if ragent_core::provider::copilot::find_gh_cli_token().is_some() {
-                return Some(ConfiguredProvider {
-                    id: "copilot".into(),
-                    name: "GitHub Copilot".into(),
-                    source: ProviderSource::AutoDiscovered,
-                });
-            }
-        }
-        // Check Ollama (always available locally)
-        if !is_disabled("ollama") {
-            if let Ok(host) = std::env::var("OLLAMA_HOST") {
-                if !host.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "ollama".into(),
-                        name: "Ollama (Local)".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
-            }
-        }
-        if !is_disabled("ollama_cloud") {
-            if let Ok(key) = std::env::var("OLLAMA_API_KEY") {
-                if !key.is_empty() {
-                    return Some(ConfiguredProvider {
-                        id: "ollama_cloud".into(),
-                        name: "Ollama Cloud".into(),
-                        source: ProviderSource::EnvVar,
-                    });
-                }
+                push(pid, pname, ProviderSource::Database);
             }
         }
 
-        // Check database for any stored provider auth
+        // 2. Check each provider in PROVIDER_LIST order (env vars, then auto-discovery)
+        for &(pid, pname) in PROVIDER_LIST {
+            if is_disabled(pid) {
+                continue;
+            }
+            let found = match pid {
+                "anthropic" => std::env::var("ANTHROPIC_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "openai" => std::env::var("OPENAI_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "gemini" => std::env::var("GEMINI_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        std::env::var("GOOGLE_API_KEY")
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                    })
+                    .map(|_| ProviderSource::EnvVar),
+                "huggingface" => std::env::var("HF_TOKEN")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .or_else(|| {
+                        std::env::var("HUGGING_FACE_HUB_TOKEN")
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                    })
+                    .map(|_| ProviderSource::EnvVar),
+                "generic_openai" => {
+                    if let Ok(key) = std::env::var("GENERIC_OPENAI_API_KEY") {
+                        if !key.is_empty() {
+                            Some(ProviderSource::EnvVar)
+                        } else {
+                            None
+                        }
+                    } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                        if !key.is_empty() {
+                            Some(ProviderSource::EnvVar)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                "copilot" => {
+                    if let Ok(key) = std::env::var("GITHUB_COPILOT_TOKEN") {
+                        if !key.is_empty() {
+                            Some(ProviderSource::EnvVar)
+                        } else if ragent_core::provider::copilot::find_copilot_token().is_some() {
+                            Some(ProviderSource::AutoDiscovered)
+                        } else if ragent_core::provider::copilot::find_gh_cli_token().is_some() {
+                            Some(ProviderSource::AutoDiscovered)
+                        } else {
+                            None
+                        }
+                    } else if ragent_core::provider::copilot::find_copilot_token().is_some() {
+                        Some(ProviderSource::AutoDiscovered)
+                    } else if ragent_core::provider::copilot::find_gh_cli_token().is_some() {
+                        Some(ProviderSource::AutoDiscovered)
+                    } else {
+                        None
+                    }
+                }
+                "ollama" => std::env::var("OLLAMA_HOST")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "ollama_cloud" => std::env::var("OLLAMA_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                _ => None,
+            };
+            if let Some(source) = found {
+                push(pid, pname, source);
+            }
+        }
+
+        // 3. Check database for any stored provider auth (for providers not already found)
         for (pid, pname) in PROVIDER_LIST {
             if is_disabled(pid) {
                 continue;
             }
             if let Ok(Some(_key)) = storage.get_provider_auth(pid) {
-                return Some(ConfiguredProvider {
-                    id: pid.to_string(),
-                    name: pname.to_string(),
-                    source: ProviderSource::Database,
-                });
+                push(pid, pname, ProviderSource::Database);
             }
         }
 
-        None
+        configured
     }
 
     /// Refresh the configured-provider detection (e.g. after storing a new key).
@@ -2564,6 +2655,17 @@ impl App {
                     "accessibility".to_string(),
                 ]
             }
+            "spec" => {
+                vec![
+                    "help".to_string(),
+                    "create".to_string(),
+                    "list".to_string(),
+                    "search".to_string(),
+                    "validate".to_string(),
+                    "status".to_string(),
+                    "task".to_string(),
+                ]
+            }
             _ => Vec::new(),
         }
     }
@@ -2582,8 +2684,7 @@ impl App {
                     .to_string(),
             ),
             "model" => Some("[show]".to_string()),
-            "thinking" => Some("[auto|off|low|medium|high]".to_string()),
-            "theme" => Some("[toggle|light|dark]".to_string()),
+                                                                                  "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),                                        "thinking" => Some("[auto|off|low|medium|high]".to_string()),            "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
             "help" => Some("[<command>]".to_string()),
@@ -5385,26 +5486,57 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             }
             "model" => match args.trim() {
                 "" => {
-                    if let Some(ref prov) = self.configured_provider {
-                        let models = self.models_for_provider(&prov.id.clone());
-                        if models.is_empty() {
-                            self.provider_setup = None;
-                            self.status = format!(
-                                "⚠ No models available for {} — check provider setup and model discovery",
-                                prov.name
-                            );
-                        } else {
-                            let prov_name = prov.name.clone();
-                            let prov_id = prov.id.clone();
-                            self.provider_setup = Some(ProviderSetupStep::SelectModel {
-                                provider_id: prov_id,
-                                provider_name: prov_name,
-                                models,
-                                selected: 0,
-                            });
+                    let configured = Self::get_configured_providers(&self.storage);
+                    match configured.len() {
+                        0 => {
+                            self.status =
+                                "⚠ No providers configured — use /setup to add one".to_string();
                         }
-                    } else {
-                        self.status = "⚠ No provider configured — use /provider first".to_string();
+                        1 => {
+                            // Single configured provider — select it directly.
+                            let prov = &configured[0];
+                            let prov_id = prov.id.clone();
+                            let prov_name = prov.name.clone();
+                            // FR-003/FR-004: try persisted model restore, fallback to picker.
+                            if self
+                                .try_restore_provider_model(&prov_id, &prov_name)
+                                .is_some()
+                            {
+                                // Model was restored — show the Done confirmation.
+                                self.provider_setup = Some(ProviderSetupStep::Done {
+                                    provider_name: prov_name,
+                                    model_name: self
+                                        .selected_model
+                                        .as_ref()
+                                        .and_then(|m| m.split('/').nth(1))
+                                        .map(String::from),
+                                });
+                            } else {
+                                let models = self.models_for_provider(&prov_id);
+                                if models.is_empty() {
+                                    self.provider_setup = None;
+                                    self.status = format!(
+                                "⚠ No models available for {} — check provider setup and model discovery",
+                                prov_name
+                            );
+                                } else {
+                                    self.provider_setup =
+                                        Some(ProviderSetupStep::SelectModel {
+                                            provider_id: prov_id,
+                                            provider_name: prov_name,
+                                            models,
+                                            selected: 0,
+                                        });
+                                }
+                            }
+                        }
+                        _ => {
+                            self.provider_setup =
+                                Some(ProviderSetupStep::SelectConfiguredProvider {
+                                    providers: configured,
+                                    selected: 0,
+                                });
+                        }
                     }
                 }
                 "show" => {
@@ -6329,18 +6461,19 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         "project_local": true,
                                                         "blueprint": bp,
                                                     });
-                                                    let ctx = ragent_core::tool::ToolContext {
-                                                        session_id: sid_clone.clone(),
-                                                        working_dir: working_dir_clone.clone(),
-                                                        event_bus: event_bus.clone(),
-                                                        storage: Some(storage.clone()),
-                                                        task_manager: None,
-                                                        active_model: active_model_clone,
-                                                        team_context: None,
-                                                        team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
-                                                        code_index: None,
-                                                    };
-                                                    let _ = tool.execute(input, &ctx).await;
+                                                                                                          let ctx = ragent_core::tool::ToolContext {
+                                                                                                              session_id: sid_clone.clone(),
+                                                                                                              working_dir: working_dir_clone.clone(),
+                                                                                                              event_bus: event_bus.clone(),
+                                                                                                              storage: Some(storage.clone()),
+                                                                                                              task_manager: None,
+                                                                                                              active_model: active_model_clone,
+                                                                                                              team_context: None,
+                                                                                                              team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                                                                                              code_index: None,
+                                                                                                              spec_manager: session_processor.spec_manager.get().cloned(),
+                                                                                                              active_spec_id: session_processor.active_spec.lock().unwrap().clone(),
+                                                                                                          };                                                    let _ = tool.execute(input, &ctx).await;
                                                 }
                                             });
                                     });
@@ -8028,20 +8161,484 @@ Type `/swarm help` for more info.\n";
             "plan" => {
                 if args.is_empty() {
                     self.append_assistant_text(
-                        "From: /plan\n\
-                         Usage: `/plan <task description>`\n\n\
-                         The plan agent will analyse the codebase and produce a plan for your task. \
-                         You will be asked to approve or reject the plan before implementation begins."
-                    );
+                                      "From: /plan\n\
+                                       Usage: `/plan <task description>`\n\n\
+                                       The plan agent will analyse the codebase and produce a plan for your task. \
+                                       You will be asked to approve or reject the plan before implementation begins."
+                                  );
                 } else {
                     let sid = self.session_id.clone().unwrap_or_default();
                     self.execute_plan_delegation(&sid, args.to_string(), String::new());
                 }
             }
 
-            // ── /mode ────────────────────────────────────────────────────────
-            "mode" => {
-                let sub = args.trim().to_lowercase();
+                                                                                                              // ── /spec ────────────────────────────────────────────────────────
+                                                                                                              "spec" => {
+                                                                                                                  use ragent_specs::{SpecCommand, SpecManager, SpecFilter, validate};
+                                                                                                                  use ragent_specs::spec::SpecStatus;
+                                                                                                                  let cmd = SpecCommand::parse(args);
+                                                                                                                  match cmd {
+                                                                                                                      SpecCommand::Help => {
+                                                                                                                          self.append_assistant_text(SpecCommand::build_help_message());
+                                                                                                                          self.status = "spec: help".to_string();
+                                                                                                                      }
+                                                                                                                      SpecCommand::Create { specname, feature } => {
+                                                                                                                          let sid = self.session_id.clone().unwrap_or_default();
+                                                                                                                          self.append_assistant_text(
+                                                                                                                              &SpecCommand::build_create_message(&specname, &feature),
+                                                                                                                          );
+                                                                                                                          self.push_log_no_agent(
+                                                                                                                              LogLevel::Info,
+                                                                                                                              SpecCommand::build_create_log(&specname, &feature),
+                                                                                                                          );
+                                                      
+                                                                                                                          let explore_agent = self
+                                                                                                                              .cycleable_agents
+                                                                                                                              .iter()
+                                                                                                                              .find(|a| a.name == "explore")
+                                                                                                                              .cloned();
+                                                      
+                                                                                                                          let mut agent = explore_agent.unwrap_or_else(|| self.agent_info.clone());
+                                                                                                                          self.apply_selected_model_and_thinking(&mut agent);
+                                                                                                                          agent.permission = ragent_core::agent::default_permissions();
+                                                      
+                                                                                                                          let task = SpecCommand::build_create_prompt(&specname, &feature);
+                                                                                                                          let msg = Message::user_text(&sid, &task);
+                                                                                                                          self.messages.push(msg);
+                                                      
+                                                                                                                          let processor = self.session_processor.clone();
+                                                                                                                          let flag = Arc::new(AtomicBool::new(false));
+                                                                                                                          self.cancel_flag = Some(flag.clone());
+                                                                                                                          self.is_processing = true;
+                                                                                                                          self.status = SpecCommand::build_create_status(&specname);
+                                                      
+                                                                                                                          let event_bus = self.event_bus.clone();
+                                                                                                                          tokio::spawn(async move {
+                                                                                                                              if let Err(e) = processor.process_message(&sid, &task, &agent, flag).await {
+                                                                                                                                  tracing::warn!(error = %e, "spec: generation failed");
+                                                                                                                                  event_bus.publish(ragent_core::event::Event::AgentError {
+                                                                                                                                      session_id: sid,
+                                                                                                                                      error: format!("spec generation failed: {e}"),
+                                                                                                                                  });
+                                                                                                                              }
+                                                                                                                          });
+                                                                                                                      }
+                                                                                                                      SpecCommand::Validate { spec_id } => {
+                                                                                                                          let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                          let specs_root = working_dir.join("specs");
+                                                                                                                          let mgr = SpecManager::new(&specs_root);
+                                                                                                                          let rt = tokio::runtime::Handle::current();
+                                                                                                                          let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                              rt.block_on(async {
+                                                                                                                                  let specs = if let Some(id_str) = spec_id {
+                                                                                                                                      match ragent_specs::spec::SpecId::new(&id_str) {
+                                                                                                                                          Some(id) => {
+                                                                                                                                              match mgr.read_spec(&id).await {
+                                                                                                                                                  Ok(spec) => vec![spec],
+                                                                                                                                                  Err(e) => return Err(format!("spec: failed to read {}: {}", id_str, e)),
+                                                                                                                                              }
+                                                                                                                                          }
+                                                                                                                                          None => return Err(format!("spec: invalid spec ID: {}", id_str)),
+                                                                                                                                      }
+                                                                                                                                  } else {
+                                                                                                                                      match mgr.discover_specs().await {
+                                                                                                                                          Ok(specs) => specs,
+                                                                                                                                          Err(e) => return Err(format!("spec: discovery failed: {}", e)),
+                                                                                                                                      }
+                                                                                                                                  };
+                                                                                                                                  if specs.is_empty() {
+                                                                                                                                      return Ok("No specs found.".to_string());
+                                                                                                                                  }
+                                                                                                                                  let mut lines = vec!["From: /spec validate".to_string()];
+                                                                                                                                  for spec in &specs {
+                                                                                                                                      let report = validate(spec);
+                                                                                                                                      lines.push(format!("\n## Validation: `{}`", spec.id));
+                                                                                                                                      lines.push(report.format(spec.id.as_str()));
+                                                                                                                                  }
+                                                                                                                                  Ok(lines.join("\n"))
+                                                                                                                              })
+                                                                                                                          });
+                                                                                                                          match result {
+                                                                                                                              Ok(output) => {
+                                                                                                                                  self.append_assistant_text(&output);
+                                                                                                                                  self.status = "spec: validation complete".to_string();
+                                                                                                                              }
+                                                                                                                              Err(e) => {
+                                                                                                                                  self.status = format!("spec: {}", e);
+                                                                                                                                  self.append_assistant_text(&format!("From: /spec validate\n\n**Error:** {}", e));
+                                                                                                                              }
+                                                                                                                          }
+                                                                                                                      }
+                                                                                                                      SpecCommand::List { args } => {
+                                                                                                                          let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                          let specs_root = working_dir.join("specs");
+                                                                                                                          let mgr = SpecManager::new(&specs_root);
+                                                                                                                          let mut filter = SpecFilter::new();
+                                                                                                                          // Parse simple --status and --prefix args
+                                                                                                                          for token in args.split_whitespace() {
+                                                                                                                              if let Some(val) = token.strip_prefix("--status=") {
+                                                                                                                                  if let Some(status) = SpecStatus::parse(val) {
+                                                                                                                                      filter = filter.with_status(status);
+                                                                                                                                  }
+                                                                                                                              } else if let Some(val) = token.strip_prefix("--prefix=") {
+                                                                                                                                  filter = filter.with_id_prefix(val);
+                                                                                                                              } else if token == "--archived" {
+                                                                                                                                  filter = filter.with_archived();
+                                                                                                                              }
+                                                                                                                          }
+                                                                                                                          let rt = tokio::runtime::Handle::current();
+                                                                                                                          let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                              rt.block_on(async {
+                                                                                                                                  let specs = match mgr.list_specs(&filter).await {
+                                                                                                                                      Ok(s) => s,
+                                                                                                                                      Err(e) => return Err(format!("spec: list failed: {}", e)),
+                                                                                                                                  };
+                                                                                                                                  if specs.is_empty() {
+                                                                                                                                      return Ok("No specs found.".to_string());
+                                                                                                                                  }
+                                                                                                                                  let mut lines = vec!["From: /spec list".to_string(), String::new()];
+                                                                                                                                  lines.push(format!("| {:<20} | {:<12} | {:<30} |", "ID", "Status", "Title"));
+                                                                                                                                  lines.push("|".to_string() + &"-".repeat(22) + "|" + &"-".repeat(14) + "|" + &"-".repeat(32) + "|");
+                                                                                                                                  for spec in &specs {
+                                                                                                                                      lines.push(format!(
+                                                                                                                                          "| {:<20} | {:<12} | {:<30} |",
+                                                                                                                                          spec.id.as_str(),
+                                                                                                                                          spec.status.as_str(),
+                                                                                                                                          spec.title.chars().take(30).collect::<String>()
+                                                                                                                                      ));
+                                                                                                                                  }
+                                                                                                                                  Ok(lines.join("\n"))
+                                                                                                                              })
+                                                                                                                          });
+                                                                                                                          match result {
+                                                                                                                              Ok(output) => {
+                                                                                                                                  self.append_assistant_text(&output);
+                                                                                                                                  self.status = format!("spec: {} spec(s) listed", output.lines().count().saturating_sub(4));
+                                                                                                                              }
+                                                                                                                              Err(e) => {
+                                                                                                                                  self.status = format!("spec: {}", e);
+                                                                                                                              }
+                                                                                                                          }
+                                                                                                                      }
+                                                                                                                      SpecCommand::Search { query } => {
+                                                                                                                          let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                          let specs_root = working_dir.join("specs");
+                                                                                                                          let mgr = SpecManager::new(&specs_root);
+                                                                                                                          let rt = tokio::runtime::Handle::current();
+                                                                                                                          let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                              rt.block_on(async {
+                                                                                                                                  let results = match mgr.search_specs(&query).await {
+                                                                                                                                      Ok(r) => r,
+                                                                                                                                      Err(e) => return Err(format!("spec: search failed: {}", e)),
+                                                                                                                                  };
+                                                                                                                                  if results.is_empty() {
+                                                                                                                                      return Ok(format!("No specs found matching '{}'.", query));
+                                                                                                                                  }
+                                                                                                                                  let mut lines = vec![format!("From: /spec search '{}'", query), String::new()];
+                                                                                                                                  for r in &results {
+                                                                                                                                      lines.push(format!(
+                                                                                                                                          "## {} (score: {}, status: {})",
+                                                                                                                                          r.spec.id, r.score, r.spec.status
+                                                                                                                                      ));
+                                                                                                                                      lines.push(format!("**{}**", r.spec.title));
+                                                                                                                                      for snippet in &r.snippets {
+                                                                                                                                          lines.push(format!("- {}", snippet));
+                                                                                                                                      }
+                                                                                                                                      lines.push(String::new());
+                                                                                                                                  }
+                                                                                                                                  Ok(lines.join("\n"))
+                                                                                                                              })
+                                                                                                                          });
+                                                                                                                          match result {
+                                                                                                                              Ok(output) => {
+                                                                                                                                  self.append_assistant_text(&output);
+                                                                                                                                  self.status = format!("spec: search complete");
+                                                                                                                              }
+                                                                                                                              Err(e) => {
+                                                                                                                                  self.status = format!("spec: {}", e);
+                                                                                                                              }
+                                                                                                                          }
+                                                                                                                      }
+                                                                                                                                                                                                                                              SpecCommand::Status { spec_id, new_status } => {
+                                                                                                                                                                                                                                                  let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                                                                                                                                                  let specs_root = working_dir.join("specs");
+                                                                                                                                                                                                                                                  let mgr = SpecManager::new(&specs_root);
+                                                                                                                                                                                                                                                  let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                                                                                                                                                                                                                                                      Some(id) => id,
+                                                                                                                                                                                                                                                      None => {
+                                                                                                                                                                                                                                                          self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                                                                                                                                                                                                                                          return;
+                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                  };
+                                                                                                                                                                                                                                                  let rt = tokio::runtime::Handle::current();
+                                                                                                                                                                                                                                                  let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                                                                                                                                                      rt.block_on(async {
+                                                                                                                                                                                                                                                          let mut spec = match mgr.read_spec(&id).await {
+                                                                                                                                                                                                                                                              Ok(s) => s,
+                                                                                                                                                                                                                                                              Err(e) => return Err(format!("spec: failed to read {}: {}", spec_id, e)),
+                                                                                                                                                                                                                                                          };
+                                                                                                                                                                                                                                                          if let Some(new_status_str) = new_status {
+                                                                                                                                                                                                                                                              let new_status = match SpecStatus::parse(&new_status_str) {
+                                                                                                                                                                                                                                                                  Some(s) => s,
+                                                                                                                                                                                                                                                                  None => return Err(format!("spec: unknown status '{}'", new_status_str)),
+                                                                                                                                                                                                                                                              };
+                                                                                                                                                                                                                                                              if let Err(e) = mgr.transition(&mut spec, new_status, "user").await {
+                                                                                                                                                                                                                                                                  return Err(format!("spec: transition failed: {}", e));
+                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                              Ok(format!(
+                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** transitioned from `{}` to `{}`.",
+                                                                                                                                                                                                                                                                  spec.id, spec.status.as_str(), new_status.as_str()
+                                                                                                                                                                                                                                                              ))
+                                                                                                                                                                                                                                                          } else {
+                                                                                                                                                                                                                                                              let next = ragent_specs::manager::next_statuses(spec.status);
+                                                                                                                                                                                                                                                              let next_str = next.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+                                                                                                                                                                                                                                                              Ok(format!(
+                                                                                                                                                                                                                                                                  "From: /spec status\n\n**{}** — current status: `{}`\nAllowed transitions: {}",
+                                                                                                                                                                                                                                                                  spec.id, spec.status.as_str(), next_str
+                                                                                                                                                                                                                                                              ))
+                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                      })
+                                                                                                                                                                                                                                                  });
+                                                                                                                                                                                                                                                  match result {
+                                                                                                                                                                                                                                                      Ok(output) => {
+                                                                                                                                                                                                                                                          self.append_assistant_text(&output);
+                                                                                                                                                                                                                                                          self.status = "spec: status updated".to_string();
+                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                      Err(e) => {
+                                                                                                                                                                                                                                                          self.status = format!("spec: {}", e);
+                                                                                                                                                                                                                                                          self.append_assistant_text(&format!("From: /spec status\n\n**Error:** {}", e));
+                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                              SpecCommand::Task { spec_id, task_id, new_status } => {
+                                                                                                                                                                                                                                                  let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                                                                                                                                                  let specs_root = working_dir.join("specs");
+                                                                                                                                                                                                                                                  let mgr = SpecManager::new(&specs_root);
+                                                                                                                                                                                                                                                  let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                                                                                                                                                                                                                                                      Some(id) => id,
+                                                                                                                                                                                                                                                      None => {
+                                                                                                                                                                                                                                                          self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                                                                                                                                                                                                                                          return;
+                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                  };
+                                                                                                                                                                                                                                                  let rt = tokio::runtime::Handle::current();
+                                                                                                                                                                                                                                                  let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                                                                                                                                                      rt.block_on(async {
+                                                                                                                                                                                                                                                          let mut spec = match mgr.read_spec(&id).await {
+                                                                                                                                                                                                                                                              Ok(s) => s,
+                                                                                                                                                                                                                                                              Err(e) => return Err(format!("spec: failed to read {}: {}", spec_id, e)),
+                                                                                                                                                                                                                                                          };
+                                                                                                                                                                                                                                                          if let Some(task_id_str) = task_id {
+                                                                                                                                                                                                                                                              if let Some(new_status_str) = new_status {
+                                                                                                                                                                                                                                                                  let new_status = match ragent_specs::spec::TaskStatus::parse(&new_status_str) {
+                                                                                                                                                                                                                                                                      Some(s) => s,
+                                                                                                                                                                                                                                                                      None => return Err(format!("spec: unknown task status '{}'", new_status_str)),
+                                                                                                                                                                                                                                                                  };
+                                                                                                                                                                                                                                                                  if let Err(e) = mgr.update_task_status(&mut spec, &task_id_str, new_status).await {
+                                                                                                                                                                                                                                                                      return Err(format!("spec: task update failed: {}", e));
+                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                                  Ok(format!(
+                                                                                                                                                                                                                                                                      "From: /spec task\n\n**{}** task `{}` updated to `{}`.",
+                                                                                                                                                                                                                                                                      spec.id, task_id_str, new_status.as_str()
+                                                                                                                                                                                                                                                                  ))
+                                                                                                                                                                                                                                                              } else {
+                                                                                                                                                                                                                                                                  // Show specific task
+                                                                                                                                                                                                                                                                  let task = spec.tasks.iter().find(|t| t.id == task_id_str);
+                                                                                                                                                                                                                                                                  match task {
+                                                                                                                                                                                                                                                                      Some(t) => {
+                                                                                                                                                                                                                                                                          let mut lines = vec![
+                                                                                                                                                                                                                                                                              format!("From: /spec task\n\n## Task {} — {}", t.id, t.title),
+                                                                                                                                                                                                                                                                              format!("- **Status:** {}", t.status.as_str()),
+                                                                                                                                                                                                                                                                              format!("- **Effort:** {}", t.effort),
+                                                                                                                                                                                                                                                                              format!("- **Priority:** {}", t.priority),
+                                                                                                                                                                                                                                                                          ];
+                                                                                                                                                                                                                                                                          if !t.linked_requirements.is_empty() {
+                                                                                                                                                                                                                                                                              lines.push(format!("- **Requirements:** {}", t.linked_requirements.join(", ")));
+                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                          if !t.dependencies.is_empty() {
+                                                                                                                                                                                                                                                                              lines.push(format!("- **Dependencies:** {}", t.dependencies.join(", ")));
+                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                          if let Some(ts) = t.completed_at {
+                                                                                                                                                                                                                                                                              lines.push(format!("- **Completed:** {}", ts));
+                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                          Ok(lines.join("\n"))
+                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                      None => Err(format!("spec: task {} not found in {}", task_id_str, spec.id)),
+                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                          } else {
+                                                                                                                                                                                                                                                              // List all tasks
+                                                                                                                                                                                                                                                              let mut lines = vec![format!("From: /spec task\n\n## Tasks for **{}**", spec.id)];
+                                                                                                                                                                                                                                                              if spec.tasks.is_empty() {
+                                                                                                                                                                                                                                                                  lines.push("No tasks found.".to_string());
+                                                                                                                                                                                                                                                              } else {
+                                                                                                                                                                                                                                                                  lines.push("| ID | Title | Status | Effort | Priority |".to_string());
+                                                                                                                                                                                                                                                                  lines.push("|----|-------|--------|--------|----------|".to_string());
+                                                                                                                                                                                                                                                                  for t in &spec.tasks {
+                                                                                                                                                                                                                                                                      lines.push(format!(
+                                                                                                                                                                                                                                                                          "| {} | {} | {} | {} | {} |",
+                                                                                                                                                                                                                                                                          t.id, t.title, t.status.as_str(), t.effort, t.priority
+                                                                                                                                                                                                                                                                      ));
+                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                              Ok(lines.join("\n"))
+                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                      })
+                                                                                                                                                                                                                                                  });
+                                                                                                                                                                                                                                                  match result {
+                                                                                                                                                                                                                                                      Ok(output) => {
+                                                                                                                                                                                                                                                          self.append_assistant_text(&output);
+                                                                                                                                                                                                                                                          self.status = "spec: task complete".to_string();
+                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                      Err(e) => {
+                                                                                                                                                                                                                                                          self.status = format!("spec: {}", e);
+                                                                                                                                                                                                                                                          self.append_assistant_text(&format!("From: /spec task\n\n**Error:** {}", e));
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                                                                                                                      SpecCommand::Activate { spec_id } => {
+                                                                                                                                                                                                                                                                                                                                                                          let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                                                                                                                                                                                                                                                                          let specs_root = working_dir.join("specs");
+                                                                                                                                                                                                                                                                                                                                                                          let mgr = SpecManager::new(&specs_root);
+                                                                                                                                                                                                                                                                                                                                                                          let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                                                                                                                                                                                                                                                                                                                                                                              Some(id) => id,
+                                                                                                                                                                                                                                                                                                                                                                              None => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                                                                                                                                                                                                                                                                                                                                                                  return;
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                          };
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      let rt = tokio::runtime::Handle::current();
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      let result: Result<_, String> = tokio::task::block_in_place(|| {                                                                                                                                                                                                                                                                                                                                                                              rt.block_on(async {
+                                                                                                                                                                                                                                                                                                                                                                                  match mgr.read_spec(&id).await {
+                                                                                                                                                                                                                                                                                                                                                                                      Ok(spec) => Ok(spec),
+                                                                                                                                                                                                                                                                                                                                                                                      Err(e) => Err(format!("spec: failed to read {}: {}", spec_id, e)),
+                                                                                                                                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                                                                                                                                              })
+                                                                                                                                                                                                                                                                                                                                                                          });
+                                                                                                                                                                                                                                                                                                                                                                          match result {
+                                                                                                                                                                                                                                                                                                                                                                              Ok(spec) => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.active_spec = Some(spec_id.clone());
+                                                                                                                                                                                                                                                                                                                                                                                  self.spec_manager = Some(Arc::new(mgr));
+                                                                                                                                                                                                                                                                                                                                                                                  // Also set on the session processor so auto-updates work
+                                                                                                                                                                                                                                                                                                                                                                                  let _ = self.session_processor.active_spec.lock().unwrap().replace(spec_id.clone());
+                                                                                                                                                                                                                                                                                                                                                                                  let _ = self.session_processor.spec_manager.set(Arc::new(SpecManager::new(&specs_root)));
+                                                                                                                                                                                                                                                                                                                                                                                  self.append_assistant_text(&format!(
+                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
+                                                                                                                                                                                                                                                                                                                                                                                       Status: {}\n\
+                                                                                                                                                                                                                                                                                                                                                                                       Title: {}\n\
+                                                                                                                                                                                                                                                                                                                                                                                       Requirements: {}\n\
+                                                                                                                                                                                                                                                                                                                                                                                       Tasks: {}\n\n\
+                                                                                                                                                                                                                                                                                                                                                                                       This spec's requirements and tasks will be injected into the agent's system prompt.",
+                                                                                                                                                                                                                                                                                                                                                                                      spec.id, spec.status.as_str(), spec.title, spec.requirements.len(), spec.tasks.len()
+                                                                                                                                                                                                                                                                                                                                                                                  ));
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = format!("spec: {} activated", spec_id);
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                              Err(e) => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = format!("spec: {}", e);
+                                                                                                                                                                                                                                                                                                                                                                                  self.append_assistant_text(&format!("From: /spec activate\n\n**Error:** {}", e));
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                                                                                                                      SpecCommand::Deactivate => {
+                                                                                                                                                                                                                                                                                                                                                                          if self.active_spec.is_some() {
+                                                                                                                                                                                                                                                                                                                                                                              let prev = self.active_spec.take().unwrap();
+                                                                                                                                                                                                                                                                                                                                                                              self.spec_manager = None;
+                                                                                                                                                                                                                                                                                                                                                                              let _ = self.session_processor.active_spec.lock().unwrap().take();
+                                                                                                                                                                                                                                                                                                                                                                              self.append_assistant_text(&format!(
+                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
+                                                                                                                                                                                                                                                                                                                                                                                  prev
+                                                                                                                                                                                                                                                                                                                                                                              ));
+                                                                                                                                                                                                                                                                                                                                                                              self.status = "spec: deactivated".to_string();
+                                                                                                                                                                                                                                                                                                                                                                          } else {
+                                                                                                                                                                                                                                                                                                                                                                              self.append_assistant_text("From: /spec deactivate\n\nNo active spec to deactivate.");
+                                                                                                                                                                                                                                                                                                                                                                              self.status = "spec: no active spec".to_string();
+                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                                                                                                                      SpecCommand::Coverage { spec_id } => {
+                                                                                                                                                                                                                                                                                                                                                                          let working_dir = std::env::current_dir().unwrap_or_default();
+                                                                                                                                                                                                                                                                                                                                                                          let specs_root = working_dir.join("specs");
+                                                                                                                                                                                                                                                                                                                                                                          let mgr = SpecManager::new(&specs_root);
+                                                                                                                                                                                                                                                                                                                                                                          let id = match ragent_specs::spec::SpecId::new(&spec_id) {
+                                                                                                                                                                                                                                                                                                                                                                              Some(id) => id,
+                                                                                                                                                                                                                                                                                                                                                                              None => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                                                                                                                                                                                                                                                                                                                                                                  return;
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                          };
+                                                                                                                                                                                                                                                                                                                                                                          let rt = tokio::runtime::Handle::current();
+                                                                                                                                                                                                                                                                                                                                                                          let result: Result<String, String> = tokio::task::block_in_place(|| {
+                                                                                                                                                                                                                                                                                                                                                                              rt.block_on(async {
+                                                                                                                                                                                                                                                                                                                                                                                  let spec = match mgr.read_spec(&id).await {
+                                                                                                                                                                                                                                                                                                                                                                                      Ok(s) => s,
+                                                                                                                                                                                                                                                                                                                                                                                      Err(e) => return Err(format!("spec: failed to read {}: {}", spec_id, e)),
+                                                                                                                                                                                                                                                                                                                                                                                  };
+                                                                                                                                                                                                                                                                                                                                                                                  let mut lines = vec![
+                                                                                                                                                                                                                                                                                                                                                                                      format!("From: /spec coverage\n\n## Coverage Report: {}", spec.id),
+                                                                                                                                                                                                                                                                                                                                                                                      String::new(),
+                                                                                                                                                                                                                                                                                                                                                                                      format!("**Overall Coverage:** {:.1}%", spec.coverage_pct()),
+                                                                                                                                                                                                                                                                                                                                                                                      String::new(),
+                                                                                                                                                                                                                                                                                                                                                                                  ];
+                                                                                                                                                                                                                                                                                                                                                                                  let mut req_to_completed: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+                                                                                                                                                                                                                                                                                                                                                                                  let mut req_to_total: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+                                                                                                                                                                                                                                                                                                                                                                                  for task in &spec.tasks {
+                                                                                                                                                                                                                                                                                                                                                                                      for req_id in &task.linked_requirements {
+                                                                                                                                                                                                                                                                                                                                                                                          req_to_total.entry(req_id.as_str()).or_default().push(task.id.as_str());
+                                                                                                                                                                                                                                                                                                                                                                                          if task.status == ragent_specs::spec::TaskStatus::Completed {
+                                                                                                                                                                                                                                                                                                                                                                                              req_to_completed.entry(req_id.as_str()).or_default().push(task.id.as_str());
+                                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                                                                                                                                                  lines.push("### Requirements".to_string());
+                                                                                                                                                                                                                                                                                                                                                                                  for req in &spec.requirements {
+                                                                                                                                                                                                                                                                                                                                                                                      let completed = req_to_completed.get(req.id.as_str()).map_or(0, |v| v.len());
+                                                                                                                                                                                                                                                                                                                                                                                      let total = req_to_total.get(req.id.as_str()).map_or(0, |v| v.len());
+                                                                                                                                                                                                                                                                                                                                                                                      let covered = completed > 0 && completed == total;
+                                                                                                                                                                                                                                                                                                                                                                                      let symbol = if covered { "✅" } else { "⚪" };
+                                                                                                                                                                                                                                                                                                                                                                                      let detail = if total > 0 {
+                                                                                                                                                                                                                                                                                                                                                                                          format!(" ({} of {} linked tasks completed)", completed, total)
+                                                                                                                                                                                                                                                                                                                                                                                      } else {
+                                                                                                                                                                                                                                                                                                                                                                                          " (no linked tasks)".to_string()
+                                                                                                                                                                                                                                                                                                                                                                                      };
+                                                                                                                                                                                                                                                                                                                                                                                      lines.push(format!("{} `{}` — {}{}", symbol, req.id, req.text, detail));
+                                                                                                                                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                                                                                                                                                  lines.push(String::new());
+                                                                                                                                                                                                                                                                                                                                                                                  lines.push("### Tasks".to_string());
+                                                                                                                                                                                                                                                                                                                                                                                  for task in &spec.tasks {
+                                                                                                                                                                                                                                                                                                                                                                                      let reqs = if task.linked_requirements.is_empty() {
+                                                                                                                                                                                                                                                                                                                                                                                          "(unlinked)".to_string()
+                                                                                                                                                                                                                                                                                                                                                                                      } else {
+                                                                                                                                                                                                                                                                                                                                                                                          format!("[{}]", task.linked_requirements.join(", "))
+                                                                                                                                                                                                                                                                                                                                                                                      };
+                                                                                                                                                                                                                                                                                                                                                                                      let symbol = match task.status {
+                                                                                                                                                                                                                                                                                                                                                                                          ragent_specs::spec::TaskStatus::Completed => "✅",
+                                                                                                                                                                                                                                                                                                                                                                                          ragent_specs::spec::TaskStatus::InProgress => "🔄",
+                                                                                                                                                                                                                                                                                                                                                                                          ragent_specs::spec::TaskStatus::Blocked => "🚫",
+                                                                                                                                                                                                                                                                                                                                                                                          ragent_specs::spec::TaskStatus::Pending => "⏳",
+                                                                                                                                                                                                                                                                                                                                                                                      };
+                                                                                                                                                                                                                                                                                                                                                                                      lines.push(format!("{} `{}` — {} ({}) {}", symbol, task.id, task.title, task.status.as_str(), reqs));
+                                                                                                                                                                                                                                                                                                                                                                                  }
+                                                                                                                                                                                                                                                                                                                                                                                  Ok(lines.join("\n"))
+                                                                                                                                                                                                                                                                                                                                                                              })
+                                                                                                                                                                                                                                                                                                                                                                          });
+                                                                                                                                                                                                                                                                                                                                                                          match result {
+                                                                                                                                                                                                                                                                                                                                                                              Ok(output) => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.append_assistant_text(&output);
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = "spec: coverage complete".to_string();
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                              Err(e) => {
+                                                                                                                                                                                                                                                                                                                                                                                  self.status = format!("spec: {}", e);
+                                                                                                                                                                                                                                                                                                                                                                                  self.append_assistant_text(&format!("From: /spec coverage\n\n**Error:** {}", e));
+                                                                                                                                                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                                                                                                                                                      SpecCommand::Unknown(sub) if sub == "create" || sub == "validate" || sub == "status" || sub == "task" || sub == "activate" || sub == "coverage" => {
+                                                                                                                                                                                                                                                                                                                                                                          self.status = format!("Usage: /spec {} — try /spec help", sub);
+                                                                                                                                                                                                                                                                                                                                                                      }                                                                                                                                                                              SpecCommand::Unknown(sub) => {
+                                                                                                                                                                                                                                                                                                                                                                          self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");                                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                                          }
+                                                                                                                                                                                                                                      }
+                                                                                                                                                                                                                                      // ── /mode ────────────────────────────────────────────────────────
+                                                                                                                                                                                                                                      "mode" => {                let sub = args.trim().to_lowercase();
                 if sub.is_empty() || sub == "status" {
                     let current = self
                         .role_mode
@@ -8049,10 +8646,10 @@ Type `/swarm help` for more info.\n";
                         .map(|m| format!("{} {}", m.icon(), m.label()))
                         .unwrap_or_else(|| "normal (no role mode active)".to_string());
                     self.append_assistant_text(&format!(
-                        "From: /mode\nCurrent mode: **{current}**\n\n\
-                         Available modes: `architect` `coder` `reviewer` `debugger` `tester`\n\
-                         Use `/mode off` to return to normal mode."
-                    ));
+                                                                      "From: /mode\nCurrent mode: **{current}**\n\n\
+                                                                       Available modes: `architect` `coder` `reviewer` `debugger` `tester`\n\
+                                                                       Use `/mode off` to return to normal mode."
+                                                                  ));
                 } else if sub == "off" || sub == "normal" {
                     self.role_mode = None;
                     self.status = "mode: normal".to_string();
@@ -8066,20 +8663,19 @@ Type `/swarm help` for more info.\n";
                     self.role_mode = Some(mode);
                     self.status = format!("{icon} mode: {label}");
                     self.append_assistant_text(&format!(
-                        "From: /mode\n{icon} **{label} mode** activated.\n\
-                         The agent will now focus on {} tasks.",
-                        label
-                    ));
+                                                                      "From: /mode\n{icon} **{label} mode** activated.\n\
+                                                                       The agent will now focus on {} tasks.",
+                                                                      label
+                                                                  ));
                     self.push_log_no_agent(LogLevel::Info, format!("role mode: {label}"));
                 } else {
                     self.append_assistant_text(&format!(
-                        "From: /mode\nUnknown mode '{}'. \
-                         Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
-                        sub
-                    ));
+                                                                      "From: /mode\nUnknown mode '{}'. \
+                                                                       Available: `architect` `coder` `reviewer` `debugger` `tester` `off`",
+                                                                      sub
+                                                                  ));
                 }
             }
-
             "memory" => {
                 let project_mem = std::env::current_dir()
                     .unwrap_or_default()
@@ -9571,7 +10167,21 @@ Type `/swarm help` for more info.\n";
         if consume_selection {
             self.text_selection = None;
         }
-        let ((start_col, start_row), (end_col, end_row)) = sel.normalized();
+        let ((start_col, mut start_row), (end_col, mut end_row)) = sel.normalized();
+
+        // Account for pane scroll: the visible viewport starts at a scroll
+        // offset, not at content line 0. Without this adjustment, selecting
+        // text after scrolling copies from the wrong part of the buffer.
+        let scroll_top = match sel.pane {
+            SelectionPane::Messages => self.message_max_scroll.saturating_sub(self.scroll_offset),
+            SelectionPane::Log => self.log_max_scroll.saturating_sub(self.log_scroll_offset),
+            SelectionPane::Profile => {
+                self.profile_max_scroll.saturating_sub(self.profile_scroll_offset)
+            }
+            _ => 0,
+        };
+        start_row = start_row.saturating_add(scroll_top);
+        end_row = end_row.saturating_add(scroll_top);
 
         let lines: &[String] = match sel.pane {
             SelectionPane::Messages => &self.message_content_lines,

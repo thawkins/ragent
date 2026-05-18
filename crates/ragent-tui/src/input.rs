@@ -1364,6 +1364,75 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected });
             }
         },
+        ProviderSetupStep::SelectConfiguredProvider { providers, selected } => match key.code {
+            KeyCode::Up => {
+                let new = if selected == 0 {
+                    providers.len().saturating_sub(1)
+                } else {
+                    selected - 1
+                };
+                app.provider_setup = Some(ProviderSetupStep::SelectConfiguredProvider {
+                    providers,
+                    selected: new,
+                });
+            }
+            KeyCode::Down => {
+                let new = if providers.is_empty() {
+                    0
+                } else {
+                    (selected + 1) % providers.len()
+                };
+                app.provider_setup = Some(ProviderSetupStep::SelectConfiguredProvider {
+                    providers,
+                    selected: new,
+                });
+            }
+            KeyCode::Enter => {
+                if let Some(prov) = providers.get(selected).cloned() {
+                    let prov_id = prov.id.clone();
+                    let prov_name = prov.name.clone();
+                    // FR-003/FR-004: try persisted model restore, fallback to picker.
+                    if app
+                        .try_restore_provider_model(&prov_id, &prov_name)
+                        .is_some()
+                    {
+                        // Model was restored — show the Done confirmation.
+                        app.provider_setup = Some(ProviderSetupStep::Done {
+                            provider_name: prov_name,
+                            model_name: app
+                                .selected_model
+                                .as_ref()
+                                .and_then(|m| m.split('/').nth(1))
+                                .map(String::from),
+                        });
+                    } else {
+                        let models = app.models_for_provider(&prov_id);
+                        if models.is_empty() {
+                            app.provider_setup = None;
+                            app.status = format!(
+                            "⚠ No models available for {} — check provider setup and model discovery",
+                            prov_name
+                        );
+                        } else {
+                            app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                                provider_id: prov_id,
+                                provider_name: prov_name,
+                                models,
+                                selected: 0,
+                            });
+                        }
+                    }
+                } else {
+                    app.provider_setup = None;
+                }
+            }
+            _ => {
+                app.provider_setup = Some(ProviderSetupStep::SelectConfiguredProvider {
+                    providers,
+                    selected,
+                });
+            }
+        }
         ProviderSetupStep::ResetProvider { selected } => match key.code {
             KeyCode::Up => {
                 let new = if selected == 0 {
@@ -1384,6 +1453,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     .storage
                     .set_setting(&format!("provider_{pid}_disabled"), "true");
                 // Clear provider-specific settings
+                let _ = app
+                    .storage
+                    .delete_setting(&format!("provider_{pid}_last_model"));
                 if pid == "copilot" {
                     let _ = app.storage.delete_setting("copilot_api_base");
                 } else if pid == "generic_openai" {

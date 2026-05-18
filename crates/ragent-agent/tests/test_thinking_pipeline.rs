@@ -117,6 +117,8 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        active_spec: std::sync::Mutex::new(None),
+        spec_manager: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_agent::config::StreamConfig::default(),
         auto_approve: false,

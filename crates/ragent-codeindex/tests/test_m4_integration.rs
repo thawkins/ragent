@@ -173,7 +173,7 @@ fn test_worker_indexes_changed_file() {
         "sample_function should be findable after worker indexes the file"
     );
 
-    drop(idx);
+    let _ = idx;
     handle.stop();
 }
 
@@ -287,7 +287,7 @@ fn test_worker_manual_full_reindex() {
     let st = idx.status().unwrap();
     assert!(st.files_indexed > 0, "should have indexed files");
 
-    drop(idx);
+    let _ = idx;
     handle.stop();
 }
 
@@ -321,7 +321,7 @@ fn test_watch_session_start_stop() {
         st.files_indexed > 0,
         "initial reindex should have indexed files"
     );
-    drop(idx);
+    let _ = idx;
 
     session.stop();
     assert!(session.is_stopped());
@@ -358,7 +358,7 @@ fn test_watch_session_picks_up_new_file() {
     if !results.is_empty() {
         assert!(results[0].symbol_name.contains("brand_new"));
     }
-    drop(idx);
+    let _ = idx;
 
     session.stop();
 }

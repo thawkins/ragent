@@ -731,6 +731,53 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Left);
             frame.render_widget(paragraph, area);
         }
+        // Renderer for the configured-provider picker (used by `/model`).
+        ProviderSetupStep::SelectConfiguredProvider { providers, selected } => {
+            let mut lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    " Switch Provider ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+
+            for (i, prov) in providers.iter().enumerate() {
+                let (indicator, style) = if i == *selected {
+                    (
+                        "▸ ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("  ", Style::default().fg(Color::White))
+                };
+                let checkmark = " ✓";
+                lines.push(Line::from(vec![
+                    Span::styled(indicator, style),
+                    Span::styled(format!("{}", prov.name), style),
+                    Span::styled(checkmark, Style::default().fg(Color::Green)),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "↑/↓ navigate  Enter select  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Switch Provider ")
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
         ProviderSetupStep::ResetProvider { selected } => {
             let active_id = app.configured_provider.as_ref().map(|p| p.id.as_str());
             let mut lines: Vec<Line<'_>> = vec![

@@ -1,6 +1,15 @@
 # Release
 
-## Current Version: 0.1.0-alpha.70
+## Current Version: 0.1.0-alpha.71
+
+### Added
+- **Spec management tools** — New `spec_list`, `spec_read`, `spec_search`, `spec_coverage`, and `spec_task_update` tools for programmatic spec discovery, reading, and task-status updates.
+- **Configured provider selection** — TUI now supports selecting from pre-configured providers with model persistence.
+
+### Fixed
+- **Cut/paste issues** — Resolved various clipboard and text-selection bugs in the TUI.
+
+## Previous: 0.1.0-alpha.70
 
 ### Changed
 - **Update concurrency** — Improved concurrency handling across the codebase.

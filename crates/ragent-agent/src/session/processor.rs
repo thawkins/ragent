@@ -433,6 +433,12 @@ pub struct SessionProcessor {
     /// Optional code index for codebase search and symbol lookup.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
+    /// Active spec ID for context injection into agent prompts.
+    /// Set via `/spec activate` in the TUI or via programmatic API.
+    pub active_spec: std::sync::Mutex<Option<String>>,
+    /// Optional spec manager for reading and updating specifications.
+    /// Uses `OnceLock` so it can be set after the processor is constructed.
+    pub spec_manager: std::sync::OnceLock<Arc<ragent_specs::SpecManager>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
@@ -849,6 +855,50 @@ impl SessionProcessor {
                  If `team_task_claim` returns \"already has task\", complete that task first \
                  (step 3–4 above), then call `team_task_claim` again.\n\n",
             );
+        }
+
+        // Inject active spec context into the system prompt.
+        let active_spec_opt = self.active_spec.lock().unwrap().clone();
+        if let Some(ref active_spec_id) = active_spec_opt {
+            if let Some(ref spec_mgr) = self.spec_manager.get() {
+                if let Some(spec_id) = ragent_specs::spec::SpecId::new(active_spec_id) {
+                    let spec_result = spec_mgr.read_spec(&spec_id).await;
+                    match spec_result {
+                        Ok(spec) => {
+                            let mut spec_section = format!(
+                                "\n## Active Specification: {}\n\n\
+                                 **Status:** {}\n\
+                                 **Title:** {}\n\n\
+                                 ### Requirements\n\n",
+                                spec.id, spec.status.as_str(), spec.title
+                            );
+                            for req in &spec.requirements {
+                                spec_section.push_str(&format!(
+                                    "- `{}` ({:?}) — {}\n",
+                                    req.id, req.template, req.text
+                                ));
+                            }
+                            spec_section.push_str("\n### Tasks\n\n");
+                            for task in &spec.tasks {
+                                spec_section.push_str(&format!(
+                                    "- `{}` — {} ({})\n",
+                                    task.id, task.title, task.status.as_str()
+                                ));
+                            }
+                            spec_section.push_str(
+                                "\nWhen implementing this spec, use the spec_task_update tool to mark tasks as completed.\n"
+                            );
+                            system_prompt.push_str(&spec_section);
+                            tracing::info!(spec_id = %active_spec_id, "Injected active spec into system prompt");
+                        }
+                        Err(e) => {
+                            tracing::warn!(spec_id = %active_spec_id, error = %e, "Failed to read active spec for prompt injection");
+                        }
+                    }
+                } else {
+                    tracing::warn!("Invalid active spec ID: {}", active_spec_id);
+                }
+            }
         }
 
         // 4. Build chat messages from history with context window awareness
@@ -1550,22 +1600,23 @@ impl SessionProcessor {
                         input: input.clone(),
                     });
 
-                    let tool_ctx = ToolContext {
-                        session_id: session_id.to_string(),
-                        working_dir: working_dir.clone(),
-                        event_bus: self.event_bus.clone(),
-                        storage: Some(self.session_manager.storage().clone()),
-                        task_manager: self.task_manager.get().cloned(),
-                        active_model: Some(model_ref.clone()),
-                        team_context: team_context_for_session.clone(),
-                        team_manager: self
-                            .team_manager
-                            .get()
-                            .cloned()
-                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                        code_index: self.code_index.get().cloned(),
-                    };
-
+                                          let tool_ctx = ToolContext {
+                                              session_id: session_id.to_string(),
+                                              working_dir: working_dir.clone(),
+                                              event_bus: self.event_bus.clone(),
+                                              storage: Some(self.session_manager.storage().clone()),
+                                              task_manager: self.task_manager.get().cloned(),
+                                              active_model: Some(model_ref.clone()),
+                                              team_context: team_context_for_session.clone(),
+                                              team_manager: self
+                                                  .team_manager
+                                                  .get()
+                                                  .cloned()
+                                                  .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                                              code_index: self.code_index.get().cloned(),
+                                              spec_manager: self.spec_manager.get().cloned(),
+                                              active_spec_id: self.active_spec.lock().unwrap().clone(),
+                                          };
                     let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
@@ -1978,6 +2029,52 @@ impl SessionProcessor {
                 // If an agent switch or task completion was requested, exit the main loop too
                 if agent_switch_requested || task_complete_requested {
                     break;
+                }
+
+                // ── Auto task status updates ─────────────────────────
+                // After successful file write tools, automatically mark linked
+                // in_progress tasks as completed on the active spec.
+                {
+                    let active_spec_id = self.active_spec.lock().unwrap().clone();
+                    if let Some(ref spec_id_str) = active_spec_id {
+                        if let Some(ref spec_mgr) = self.spec_manager.get() {
+                            let completed_file_tools: Vec<&PendingToolCall> = tool_calls
+                                .iter()
+                                .filter(|tc| {
+                                    matches!(
+                                        tc.name.as_str(),
+                                        "write" | "edit" | "multiedit" | "patch" | "create" | "append_to_file"
+                                    )
+                                })
+                                .collect();
+                            if !completed_file_tools.is_empty() {
+                                if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
+                                    if let Ok(mut spec) = spec_mgr.read_spec(&id).await {
+                                        let mut updated = false;
+                                        for task in spec.tasks.iter_mut() {
+                                            if task.status == ragent_specs::spec::TaskStatus::InProgress {
+                                                task.status = ragent_specs::spec::TaskStatus::Completed;
+                                                task.completed_at = Some(
+                                                    std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap_or_default()
+                                                        .as_secs(),
+                                                );
+                                                updated = true;
+                                            }
+                                        }
+                                        if updated {
+                                            if let Err(e) = spec_mgr.write_spec(&spec).await {
+                                                tracing::warn!(error = %e, "Auto task update: failed to write spec");
+                                            } else {
+                                                tracing::info!(spec_id = %spec_id_str, "Auto-updated in_progress tasks to completed after file write");
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Add assistant message with tool uses to chat history

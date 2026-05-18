@@ -451,6 +451,8 @@ async fn main() -> Result<()> {
         team_manager: std::sync::OnceLock::new(),
         mcp_client: std::sync::OnceLock::new(),
         code_index: std::sync::OnceLock::new(),
+        active_spec: std::sync::Mutex::new(None),
+        spec_manager: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config,
         auto_approve: cli.yes,
@@ -503,6 +505,12 @@ async fn main() -> Result<()> {
             "MCP servers initialized"
         );
     }
+
+    // Initialize spec manager for all modes (TUI, serve, run, etc.)
+    let specs_root = std::env::current_dir().unwrap_or_default().join("specs");
+    let _ = session_processor
+        .spec_manager
+        .set(Arc::new(ragent_specs::SpecManager::new(&specs_root)));
 
     match cli.command {
         None => {

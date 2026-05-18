@@ -9,7 +9,7 @@
 //! periodic polling (see Milestone T6).
 
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock, RwLock};

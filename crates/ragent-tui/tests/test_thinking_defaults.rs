@@ -33,7 +33,9 @@ fn make_app() -> App {
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
-        auto_approve: false,
+        active_spec: std::sync::Mutex::new(None),
+          spec_manager: std::sync::OnceLock::new(),
+          auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");

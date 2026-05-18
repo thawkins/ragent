@@ -1,6 +1,9 @@
+#![allow(missing_docs)]
 /// Test the strip_timeout_prefix and split_bash_command logic
 ///
 /// Run with: cargo run --example test_timeout_strip
+///
+/// Utilities for testing bash command timeout stripping and splitting.
 
 fn strip_timeout_prefix(command: &str) -> &str {
     let trimmed = command.trim();

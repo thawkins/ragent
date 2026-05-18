@@ -37,9 +37,10 @@ fn test_state(token: &str) -> AppState {
         code_index: std::sync::OnceLock::new(),
         stream_config: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
-        auto_approve: false,
-    });
-
+                  auto_approve: false,
+                  active_spec: std::sync::Mutex::new(None),
+                  spec_manager: std::sync::OnceLock::new(),
+              });
     AppState {
         event_bus,
         config: Arc::new(tokio::sync::RwLock::new(Config::default())),

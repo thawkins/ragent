@@ -125,6 +125,13 @@ pub mod webfetch;
 pub mod websearch;
 pub mod write;
 
+/// Spec management tools.
+pub mod spec_coverage;
+pub mod spec_list;
+pub mod spec_read;
+pub mod spec_search;
+pub mod spec_task_update;
+
 /// Content formatting utilities for standardized tool output.
 pub mod format;
 /// Metadata builder for consistent tool output metadata.
@@ -299,6 +306,11 @@ pub struct ToolContext {
     /// Optional code index for codebase search and symbol lookup.
     /// `None` when code indexing is disabled or not yet initialised.
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
+    /// Optional spec manager for reading and updating specifications.
+    /// `None` when no specs/ directory is configured.
+    pub spec_manager: Option<Arc<ragent_specs::SpecManager>>,
+    /// Currently active spec ID for automatic task status updates.
+    pub active_spec_id: Option<String>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -1136,6 +1148,12 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(team_task_create::TeamTaskCreateTool));
     registry.register(Arc::new(team_task_list::TeamTaskListTool));
     registry.register(Arc::new(team_wait::TeamWaitTool));
+    // Spec management tools
+    registry.register(Arc::new(spec_read::SpecReadTool));
+    registry.register(Arc::new(spec_list::SpecListTool));
+    registry.register(Arc::new(spec_search::SpecSearchTool));
+    registry.register(Arc::new(spec_task_update::SpecTaskUpdateTool));
+    registry.register(Arc::new(spec_coverage::SpecCoverageTool));
     // Phase 1 — alias layer (commonly hallucinated tool names)
     registry.register(Arc::new(aliases::UpdateFileTool));
     registry.register(Arc::new(aliases::AskUserTool));
