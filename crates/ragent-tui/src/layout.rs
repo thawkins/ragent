@@ -307,36 +307,35 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 ),
             ]));
 
-            if provider_id == "generic_openai" {
-                lines.push(Line::from(""));
-                lines.push(Line::from(
-                    "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
-                ));
-                let endpoint_cursor_display = if *editing_endpoint {
-                    *endpoint_cursor
-                } else {
-                    endpoint_input.chars().count()
-                };
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if *editing_endpoint { "> " } else { "  " },
-                        Style::default().fg(Color::Cyan),
-                    ),
-                    Span::styled(
-                        if endpoint_input.is_empty() {
-                            "(use default/env)".to_string()
-                        } else {
-                            with_cursor_marker(endpoint_input, endpoint_cursor_display)
-                        },
-                        Style::default().fg(Color::White),
-                    ),
-                ]));
-                lines.push(Line::from(Span::styled(
-                    "Tab switches between API key and endpoint fields",
-                    Style::default().fg(Color::DarkGray),
-                )));
-            }
-
+                          if provider_id == "generic_openai" || provider_id == "azure_foundry" {
+                              lines.push(Line::from(""));
+                              lines.push(Line::from(
+                                  "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
+                              ));
+                              let endpoint_cursor_display = if *editing_endpoint {
+                                  *endpoint_cursor
+                              } else {
+                                  endpoint_input.chars().count()
+                              };
+                              lines.push(Line::from(vec![
+                                  Span::styled(
+                                      if *editing_endpoint { "> " } else { "  " },
+                                      Style::default().fg(Color::Cyan),
+                                  ),
+                                  Span::styled(
+                                      if endpoint_input.is_empty() {
+                                          "(use default/env)".to_string()
+                                      } else {
+                                          with_cursor_marker(endpoint_input, endpoint_cursor_display)
+                                      },
+                                      Style::default().fg(Color::White),
+                                  ),
+                              ]));
+                              lines.push(Line::from(Span::styled(
+                                  "Tab switches between API key and endpoint fields",
+                                  Style::default().fg(Color::DarkGray),
+                              )));
+                          }
             if let Some(err) = error {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(

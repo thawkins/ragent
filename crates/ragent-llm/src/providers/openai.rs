@@ -130,7 +130,7 @@ impl OpenAiClient {
     /// # Errors
     ///
     /// This function is infallible.
-    fn build_request_body(&self, request: &ChatRequest) -> Value {
+    pub(crate) fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
         // Add system message if present
@@ -311,6 +311,20 @@ impl LlmClient for OpenAiClient {
             bail!("OpenAI API error ({status}): {body}");
         }
 
+        self.parse_sse_stream(response).await
+    }
+}
+
+impl OpenAiClient {
+    /// Parse an SSE stream from an already-successful HTTP response.
+    ///
+    /// Extracted so that Azure Foundry (and other OpenAI-compatible providers)
+    /// can reuse the exact same event-parsing logic after sending their own
+    /// authenticated request.
+    pub(crate) async fn parse_sse_stream(
+        &self,
+        response: reqwest::Response,
+    ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
         let rate_limit_event = parse_openai_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
 

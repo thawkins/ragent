@@ -268,6 +268,7 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("gemini", "Google Gemini"),
     ("huggingface", "Hugging Face"),
     ("generic_openai", "Generic OpenAI API"),
+    ("azure_foundry", "Azure AI Foundry"),
     ("copilot", "GitHub Copilot"),
     ("ollama_cloud", "Ollama Cloud"),
     ("ollama", "Ollama (Local)"),

@@ -1968,6 +1968,11 @@ impl App {
                         .filter(|key| !key.is_empty())
                 }),
             "ollama_cloud" => self.ollama_cloud_api_key(),
+            "azure_foundry" => from_storage().or_else(|| {
+                std::env::var("AZURE_AI_FOUNDRY_API_KEY")
+                    .ok()
+                    .filter(|key| !key.is_empty())
+            }),
             _ => from_storage(),
         }
     }
@@ -2414,6 +2419,10 @@ impl App {
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
                 "ollama_cloud" => std::env::var("OLLAMA_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
@@ -3759,6 +3768,41 @@ impl App {
                     cached
                 } else {
                     self.selected_model_fallback_entries("ollama_cloud")
+                }
+            }
+            "azure_foundry" => {
+                let cached = self.cached_model_entries("azure_foundry");
+                if let Some(api_key) = self.provider_api_key("azure_foundry") {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(async {
+                                let base_url = std::env::var("AZURE_AI_FOUNDRY_BASE")
+                                    .ok()
+                                    .filter(|s| !s.is_empty())
+                                    .unwrap_or_else(|| "https://services.ai.azure.com".to_string());
+                                ragent_core::provider::azure_foundry::discover_azure_foundry_models(
+                                    &api_key, &base_url,
+                                )
+                                .await
+                            })
+                        });
+                        if let Ok(fetched) = result
+                            && !fetched.is_empty()
+                        {
+                            self.cache_discovered_models("azure_foundry", &fetched);
+                            self.picker_entries_from_models(fetched)
+                        } else if !cached.is_empty() {
+                            cached
+                        } else {
+                            default_entries()
+                        }
+                    } else {
+                        cached
+                    }
+                } else if !cached.is_empty() {
+                    cached
+                } else {
+                    default_entries()
                 }
             }
             "anthropic" => {

@@ -150,18 +150,18 @@ pub mod abbreviations {
 
     /// Get abbreviated provider name.
     pub fn provider(name: &str) -> &str {
-        match name {
-            "anthropic" => "An",
-            "claude" => "Cl",
-            "openai" => "OAI",
-            "gpt" => "GPT",
-            "gemini" => "Gm",
-            "hugging_face" => "HF",
-            "copilot" => "CoPilot",
-            "ollama" => "Oll",
-            _ => name,
-        }
-    }
+                  match name {
+                    "anthropic" => "An",
+                    "claude" => "Cl",
+                    "openai" => "OAI",
+                    "gpt" => "GPT",
+                    "gemini" => "Gm",
+                    "hugging_face" => "HF",
+                    "copilot" => "CoPilot",
+                    "ollama" => "Oll",
+                    "azure_foundry" => "AzF",
+                    _ => name,
+                }    }
 }
 
 /// Build status bar for a given area.
