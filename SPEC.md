@@ -34,8 +34,7 @@ graph LR
     SP --> LLM[LLM Provider]
     SP --> AP[Agent Profile]
     SP --> TR[Tool Registry]
-    TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, LSP, web, ...]
-```
+          TR --> Tools[File ops, bash, GitHub,<br/>code index, memory, teams,<br/>office docs, web, ...]```
 
 **Figure 1:** Core Execution Loop — High-level session/agent/tool flow
 
@@ -46,8 +45,8 @@ graph LR
 | **Multi-provider LLM** | 7 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
-| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, LSP, office/PDF, web, and MCP |
-| **Code Intelligence** | Tree-sitter parsing (15+ languages), Tantivy FTS, symbol/reference search, and optional LSP integration |
+| **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, office/PDF, web, and MCP |
+| **Code Intelligence** | Tree-sitter parsing (15+ languages), Tantivy FTS, symbol/reference search, and code index queries |
 | **Persistent Memory** | Three-tier system — file blocks, structured SQLite store, and optional embedding-based semantic search — with automatic extraction, decay, compaction, and a knowledge graph |
 | **Teams & Swarms** | Multi-agent coordination with named teammates, shared task lists, mailbox messaging, and swarm decomposition for parallel work |
 | **Security** | Permission rules (allow/deny/ask), 7-layer bash safety, file-path guards, secret redaction, resource limits, and YOLO mode for trusted environments |
@@ -115,6 +114,8 @@ the current state of all subsystems.
 
 6. [Code Index](#code-index)
 7. [Memory System](#memory-system)
+8. [Spec Management](#spec-management)
+
 ### Part III: Multi-Agent Coordination
 
 9. [Teams](#teams)
@@ -131,21 +132,20 @@ the current state of all subsystems.
 
 ### Part V: External Integrations
 
-17. [LSP Integration](#lsp-integration)
-18. [GitLab Integration](#gitlab-integration)
-19. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
+17. [GitLab Integration](#gitlab-integration)
+18. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
 
 ### Part VI: Reference Materials
 
-20. [Tool Reference](#tool-reference)
-21. [Office, LibreOffice, and PDF Document Tools](#office-libreoffice-and-pdf-document-tools)
-22. [CLI Command Reference](#cli-command-reference)
-23. [Testing & CI/CD](#testing-cicd)
+19. [Tool Reference](#tool-reference)
+20. [Office, LibreOffice, and PDF Document Tools](#office-libreoffice-and-pdf-document-tools)
+21. [CLI Command Reference](#cli-command-reference)
+22. [Testing & CI/CD](#testing-cicd)
 
 ### Part VII: Security & Operations
 
-24. [Security & Permissions](#security-permissions)
-25. [Auto-Update Mechanism](#auto-update-mechanism)
+23. [Security & Permissions](#security-permissions)
+24. [Auto-Update Mechanism](#auto-update-mechanism)
 
 **Appendices**
 
@@ -282,7 +282,7 @@ graph LR
 
 | Crate | LOC % | Purpose |
 |-------|------:|---------|
-| `ragent-agent` | 34.61% | Agent/runtime layer: sessions, orchestration, MCP/LSP, memory, tool registry |
+| `ragent-agent` | 34.61% | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
 | `ragent-codeindex` | 9.11% | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-config` | 1.29% | Configuration types, defaults, and parsing |
 | `ragent-llm` | 4.04% | Provider clients and model/provider registry |
@@ -291,7 +291,7 @@ graph LR
 | `ragent-storage` | 1.70% | SQLite storage, snapshots, and encrypted credential persistence |
 | `ragent-team` | 3.63% | Team runtime, team state, and team tools |
 | `ragent-tools-core` | 3.56% | Core shell/file/search tools |
-| `ragent-tools-extended` | 7.08% | Extended document/web/memory/codeindex/LSP tools |
+| `ragent-tools-extended` | 7.08% | Extended document/web/memory/codeindex tools |
 | `ragent-tools-vcs` | 2.08% | GitHub and GitLab tool surface |
 | `ragent-tui` | 20.92% | Ratatui terminal interface |
 | `ragent-types` | 1.21% | Shared IDs, events, messages, and sanitization primitives |
@@ -631,7 +631,6 @@ The following are aliases for commonly requested operations:
 | **Memory** | 12 | memory_read/write/replace/store/recall/forget/search/migrate |
 | **Team** | 21 | Team lifecycle, tasks, messaging, coordination |
 | **Sub-agent** | 5 | new_task, cancel_task, list_tasks, wait_tasks, task_complete |
-| **LSP** | 6 | lsp_hover, definition, references, symbols, diagnostics |
 | **Plan** | 2 | plan_enter, plan_exit |
 | **MCP** | 1 | mcp_tool (McpToolWrapper) |
 | **Interactive** | 4 | question, think, todo_read/write |
@@ -864,7 +863,7 @@ The primary interface where all conversation happens.
 | Component | Description |
 |-----------|-------------|
 | **Status Bar (Line 1)** | Shows session ID, agent name, working directory, git branch, and current status message |
-| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as LSP and code index |
+| **Status Bar (Line 2)** | Displays provider/model, quota or token usage, context utilization, active tasks, and service indicators such as code index |
 | **Messages Panel** | Scrollable conversation history with syntax highlighting and formatted tool calls |
 | **Input Area** | Multi-line text input with autocomplete support for slash commands and file references |
 | **Log Panel** | Toggleable panel showing step-numbered tool calls with pretty-printed JSON |
@@ -1009,39 +1008,7 @@ A small popup menu for text operations.
 
 ---
 
-#### 4.1.11 LSP Discovery Dialog (Overlay)
-
-An overlay listing discovered Language Server Protocol servers.
-
-**Purpose**: Enable code intelligence features by connecting to LSP servers.
-
-**Features**:
-- Numbered list of discovered servers
-- Server type and command preview
-- Number input to select and enable
-- Connection status feedback
-
-**Access**: `/lsp discover` command
-
----
-
-#### 4.1.12 LSP Edit Dialog (Overlay)
-
-Interactive dialog for managing configured LSP servers.
-
-**Purpose**: Enable/disable LSP servers without editing config files.
-
-**Features**:
-- Table of configured servers with enabled/disabled status
-- Arrow key navigation
-- Space/Enter to toggle status
-- Persistent changes to ragent.json
-
-**Access**: `/lsp edit` command
-
----
-
-#### 4.1.13 MCP Discovery Dialog (Overlay)
+#### 4.1.11 MCP Discovery Dialog (Overlay)
 
 An overlay for discovering Model Context Protocol servers.
 
@@ -1057,7 +1024,7 @@ An overlay for discovering Model Context Protocol servers.
 
 ---
 
-#### 4.1.14 Output View Overlay
+#### 4.1.12 Output View Overlay
 
 A scrollable panel for viewing raw agent or team member output.
 
@@ -1164,8 +1131,6 @@ Various inline widgets rendered within the message panel.
 | `history_picker` | History Picker | `/history`, Up arrow |
 | `permission_queue` | Permission Dialog | Auto (tool permission) |
 | `context_menu` | Right-Click Menu | Right-click |
-| `lsp_discover` | LSP Discovery | `/lsp discover` |
-| `lsp_edit` | LSP Edit | `/lsp edit` |
 | `mcp_discover` | MCP Discovery | `/mcp discover` |
 | `output_view` | Output View | Auto (tool output) |
 | `memory_browser` | Memory Browser | `/memory` |
@@ -1293,10 +1258,7 @@ HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be comp
 | `/gitlab status` | Show GitLab connection status |
 | **Todos** ||
 | `/todos` | Show TODO items |
-| **LSP & Skills** ||
-| `/lsp discover` | Discover LSP servers |
-| `/lsp connect <id>` | Connect to LSP server |
-| `/lsp disconnect <id>` | Disconnect LSP server |
+| **Skills** ||
 | `/skills` | List registered skills |
 | **Server & Diagnostics** ||
 | `/webapi enable` | Enable HTTP REST API |
@@ -1353,11 +1315,9 @@ graph TB
             MemoryBrowser["Memory Browser"]
             PlanApproval["Plan Approval"]
             ForceCleanup["Force-Cleanup"]
-            LSPDiscovery["LSP Discovery"]
-            MCPDiscovery["MCP Discovery"]
-            OutputView["Output View"]
-            Keybindings["Keybindings Help"]
-        end
+                          MCPDiscovery["MCP Discovery"]
+                          OutputView["Output View"]
+                          Keybindings["Keybindings Help"]        end
     end
 
     subgraph EventHandling["Event Handling"]
@@ -1876,6 +1836,144 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
 
 ---
 
+## 7. Memory System
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 8. Spec Management
+
+### 8.1 Overview
+
+The Spec Management system provides a structured workflow for writing, tracking, and enforcing software specifications alongside code. It ensures that every significant feature or change is preceded by a clear, reviewable specification that lives in version control under the `specs/` directory.
+
+**Key Features:**
+- **Directory conventions** — Standardised `specs/<spec-id>/` layout with `SPEC.md` and `PLAN.md`
+- **EARS templates** — Boilerplate generation with numbered requirement placeholders
+- **Validation** — Automated checks for spec completeness and EARS syntax compliance
+- **Status tracking** — State machine for spec lifecycle (draft → review → approved → implemented → verified → archived)
+- **Plan linkage** — Mandatory `PLAN.md` pairing with every `SPEC.md`
+- **Tool integration** — Slash commands and programmatic APIs for spec operations
+- **Reporting** — Listing, filtering, and coverage summaries across a project
+
+### 8.2 Directory Structure
+
+```
+specs/
+├── <spec-id>/
+│   ├── SPEC.md          # EARS-formatted specification
+│   └── PLAN.md          # Implementation plan with linked tasks
+├── <another-spec>/
+│   ├── SPEC.md
+│   └── PLAN.md
+└── ...
+```
+
+**Rules enforced by the system:**
+- Every spec lives in a subdirectory of `specs/` named after the spec identifier
+- Each spec directory must contain both `SPEC.md` and `PLAN.md`
+- Spec IDs use only alphanumeric characters, hyphens, and underscores
+
+### 8.3 Spec Lifecycle Status
+
+| Status | Meaning | Allowed Next States |
+|--------|---------|---------------------|
+| `draft` | Initial creation, requirements being written | `in_review` |
+| `in_review` | Under peer review | `draft` (with feedback), `approved` |
+| `approved` | Review passed, ready for implementation | `in_progress` |
+| `in_progress` | Being implemented | `implemented` |
+| `implemented` | Code complete, awaiting verification | `verified` |
+| `verified` | Tests pass, acceptance criteria met | `archived` |
+| `archived` | Retired spec | `draft` (reopen) |
+
+### 8.4 Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/spec create <id> <feature>` | Generate `SPEC.md` + `PLAN.md` via explore agent |
+| `/spec list [status]` | List specs with optional status filter |
+| `/spec search <query>` | Full-text search across `SPEC.md`, `PLAN.md`, and `REVIEW.md` |
+| `/spec validate [spec-id]` | Validate EARS compliance; all specs if no ID |
+| `/spec status <id> <status>` | Transition a spec to a new lifecycle status |
+| `/spec task <id>` | List tasks for a spec |
+| `/spec activate <id>` | Activate a spec for context injection into agent prompts |
+| `/spec deactivate` | Deactivate the active spec |
+| `/spec coverage <id>` | Show requirement coverage report with linked tasks |
+
+### 8.5 Programmatic Tools
+
+Five spec tools are available to agents for programmatic access:
+
+| Tool | Purpose |
+|------|---------|
+| `spec_list` | List all specs with optional status filter |
+| `spec_read` | Read a spec by ID — returns full markdown, requirements, tasks, and metadata |
+| `spec_search` | Full-text search across spec content |
+| `spec_coverage` | Generate a requirement coverage report |
+| `spec_task_update` | Update the status of a task within a spec |
+
+### 8.6 EARS Notation
+
+Requirements are written in EARS (Easy Approach to Requirements Syntax) notation. The system validates that every requirement conforms to one of five templates:
+
+1. **Ubiquitous** — `The <system> shall <requirement>.`
+2. **Event-Driven** — `When <event>, the <system> shall <requirement>.`
+3. **State-Driven** — `While <state>, the <system> shall <requirement>.`
+4. **Optional** — `Where <feature> is <configured>, the <system> shall <requirement>.`
+5. **Unwanted** — `If <condition>, the <system> shall <requirement>.`
+
+### 8.7 Active Spec Context Injection
+
+When a spec is activated via `/spec activate <id>`:
+- The spec's requirements and tasks are injected into the agent's system prompt
+- The agent receives structured context about the spec's goals and acceptance criteria
+- This keeps the agent aligned with the specification during implementation
+
+---
+
+## 9. Teams
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 10. Swarm Mode
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 11. Autopilot Mode
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 12. Orchestrator & Multi-Agent Coordination
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 13. Custom Agents
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 14. Skills System
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
+## 15. Prompt Optimization
+
+*(Documentation pending — see codebase for current implementation.)*
+
+---
+
 ## 16. Configuration
 
 ### 16.1 Configuration Files
@@ -1975,7 +2073,7 @@ users fix malformed configuration files quickly.
 
 ---
 
-## 17. LSP Integration
+## 17. GitLab Integration
 
 ### 24.3.1 Permission Request
 
@@ -2229,7 +2327,6 @@ All documentation markdown files are located in `docs/` except for these root fi
 - `huggingface` provider with dynamic model discovery and rate limit tracking
 - GitLab integration with issues, merge requests, pipelines, and jobs
 - Team coordination tools (21 tools for team lifecycle, tasks, messaging)
-- LSP integration with hover, definition, references, symbols, diagnostics
 - MCP (Model Context Protocol) client support
 - Skills system for loadable skill packs
 - Custom agent profiles via OASF format
