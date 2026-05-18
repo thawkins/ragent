@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.77
+
+### Added
+- **Azure endpoint logging** — Azure AI Foundry provider now logs the resolved endpoint via `tracing::info!` when connecting.
+
 ## Version: 0.1.0-alpha.76
 
 ### Added

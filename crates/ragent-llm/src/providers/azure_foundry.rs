@@ -104,9 +104,9 @@ impl Provider for AzureFoundryProvider {
             .or(env_endpoint.as_deref())
             .unwrap_or(DEFAULT_AZURE_FOUNDRY_HOST);
 
-        let client = AzureFoundryClient::new(api_key, resolved_base);
-        Ok(Box::new(client))
-    }
+                  let client = AzureFoundryClient::new(api_key, resolved_base);
+                tracing::info!(provider = "azure_foundry", endpoint = %resolved_base, "Connecting to Azure AI Foundry");
+                Ok(Box::new(client))    }
 }
 
 /// HTTP client for Azure AI Foundry.
