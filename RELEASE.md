@@ -1,11 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.73
+## Current Version: 0.1.0-alpha.74
 
 ### Fixed
-- **/model selection** — Fixed `/model` selection handling.
+- **SPEC.md mermaid diagrams** — Fixed 2 diagrams (Figure 1 and Figure 7) where closing fences/`end` keywords were on the same line as node definitions, which broke rendering. All 14 diagrams now pass syntax validation and render correctly.
 
-## Previous: 0.1.0-alpha.72
+## Previous: 0.1.0-alpha.73
 
 ### Added
 - **gen-spec-pdf.sh script** — New `scripts/gen-spec-pdf.sh` for converting Markdown specifications (with Mermaid diagrams) to PDF using Pandoc and Chromium.
