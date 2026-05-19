@@ -4,9 +4,9 @@ use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
-    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter,
-    best_exact_or_similarity_sample, count_passed_failed, evaluate_exact_match_case,
-    exact_match_count, first_sample_exact_match, pass_at_k, skipped_metrics_for_suite,
+    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, best_exact_or_similarity_sample,
+    count_passed_failed, evaluate_exact_match_case, exact_match_count, first_sample_exact_match,
+    pass_at_k, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: MultiPlEAdapter = MultiPlEAdapter;
@@ -59,9 +59,15 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
         }
 
         // Delegate to standard helper for remaining logic
-        evaluate_exact_match_case(case, generation, options, "MultiPL-E", |_passed, _similarity| {
-            "MultiPL-E native adapter uses normalized exact-match scoring as a functional-correctness proxy.".to_string()
-        })
+        evaluate_exact_match_case(
+            case,
+            generation,
+            options,
+            "MultiPL-E",
+            |_passed, _similarity| {
+                "MultiPL-E native adapter uses normalized exact-match scoring as a functional-correctness proxy.".to_string()
+            },
+        )
     }
 
     fn summarize(
@@ -76,10 +82,7 @@ impl BenchSuiteAdapter for MultiPlEAdapter {
         if options.no_exec || skipped == evaluations.len() {
             let sample_count = options.samples.max(1);
             return skipped_metrics_for_suite(
-                &[
-                    "pass_at_1",
-                    &format!("pass_at_{sample_count}"),
-                ],
+                &["pass_at_1", &format!("pass_at_{sample_count}")],
                 evaluations.len(),
                 "MultiPL-E",
             );

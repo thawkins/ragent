@@ -82,16 +82,18 @@ impl Provider for HuggingFaceProvider {
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
+        let url = base_url
+            .unwrap_or(HF_API_BASE)
+            .trim_end_matches('/')
+            .to_string();
         let client = HuggingFaceClient {
             api_key: api_key.to_string(),
-            base_url: base_url
-                .unwrap_or(HF_API_BASE)
-                .trim_end_matches('/')
-                .to_string(),
+            base_url: url.clone(),
             http: crate::provider::http_client::create_streaming_http_client(),
             wait_for_model,
             use_cache,
         };
+        tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", url), models_endpoint = %format!("{}/v1/models", url), "HuggingFace provider connected");
         Ok(Box::new(client))
     }
 }
@@ -448,8 +450,10 @@ impl LlmClient for HuggingFaceClient {
             .json(&body)
             .send()
             .await
-            .context("Failed to send request to HuggingFace API")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "HuggingFace chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to HuggingFace API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_else(|e| {
@@ -707,8 +711,10 @@ pub async fn discover_models(api_key: &str) -> Result<Vec<ModelInfo>> {
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .context("Failed to connect to HuggingFace router models API")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "HuggingFace model discovery failed");
+        })
+        .with_context(|| format!("Failed to connect to HuggingFace router models API at {url}"))?;
     if !response.status().is_success() {
         bail!(
             "HuggingFace router models API returned status {} when discovering models",

@@ -562,18 +562,18 @@ async fn main() -> Result<()> {
                 // Print startup banner before entering TUI alternate screen
                 print_banner();
 
-                ragent_tui::run_tui(
-                    event_bus,
-                    storage,
-                    provider_registry,
-                    session_processor,
-                    resolved_agent.clone(),
-                    cli.log,
-                    None,
-                    tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
-                )
-                .await?;
-            }
+                                  ragent_tui::run_tui(
+                                      event_bus,
+                                      storage,
+                                      provider_registry,
+                                      session_processor,
+                                      resolved_agent.clone(),
+                                      cli.log,
+                                      None,
+                                      tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
+                                      db_path.clone(),
+                                  )
+                                  .await?;            }
         }
         Some(Commands::Run { prompt }) => {
             tracing::info!("Starting headless run mode");
@@ -651,18 +651,18 @@ async fn main() -> Result<()> {
                 }
                 tracing::info!(session_id = %id, "Resuming session");
                 print_banner();
-                ragent_tui::run_tui(
-                    event_bus,
-                    storage,
-                    provider_registry,
-                    session_processor,
-                    resolved_agent.clone(),
-                    cli.log,
-                    Some(id),
-                    tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
-                )
-                .await?;
-            }
+                                  ragent_tui::run_tui(
+                                      event_bus,
+                                      storage,
+                                      provider_registry,
+                                      session_processor,
+                                      resolved_agent.clone(),
+                                      cli.log,
+                                      Some(id),
+                                      tui_log_rx.unwrap_or_else(|| ragent_tui::tracing_layer::tui_log_channel(1).1),
+                                      db_path.clone(),
+                                  )
+                                  .await?;            }
             SessionCommands::Export { id } => {
                 let messages = storage.get_messages(&id)?;
                 let json = serde_json::to_string_pretty(&messages)?;

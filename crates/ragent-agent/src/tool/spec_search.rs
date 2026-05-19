@@ -43,10 +43,9 @@ impl Tool for SpecSearchTool {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing required 'query' parameter"))?;
 
-        let spec_manager = ctx
-            .spec_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first."))?;
+        let spec_manager = ctx.spec_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first.")
+        })?;
 
         let results = spec_manager
             .search_specs(query)
@@ -61,14 +60,13 @@ impl Tool for SpecSearchTool {
             for result in &results {
                 lines.push(format!(
                     "## {} — {} (score: {})",
-                    result.spec.id,
-                    result.spec.title,
-                    result.score
+                    result.spec.id, result.spec.title, result.score
                 ));
                 lines.push(format!("Status: {}", result.spec.status.as_str()));
-                                  if !result.snippets.is_empty() {
-                                      lines.push("### Snippets".to_string());
-                                      for snippet in &result.snippets {                        lines.push(format!("> {}\n", snippet));
+                if !result.snippets.is_empty() {
+                    lines.push("### Snippets".to_string());
+                    for snippet in &result.snippets {
+                        lines.push(format!("> {}\n", snippet));
                     }
                 }
                 lines.push(String::new());

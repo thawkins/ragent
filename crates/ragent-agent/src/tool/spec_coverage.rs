@@ -43,10 +43,9 @@ impl Tool for SpecCoverageTool {
             .as_str()
             .context("Missing required 'spec_id' parameter")?;
 
-        let spec_manager = ctx
-            .spec_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first."))?;
+        let spec_manager = ctx.spec_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first.")
+        })?;
 
         let id = ragent_specs::spec::SpecId::new(spec_id_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid spec ID '{}'", spec_id_str))?;
@@ -59,10 +58,7 @@ impl Tool for SpecCoverageTool {
         let mut lines = vec![
             format!("## Coverage Report: {}", spec.id),
             String::new(),
-            format!(
-                "**Overall Coverage:** {:.1}%",
-                spec.coverage_pct()
-            ),
+            format!("**Overall Coverage:** {:.1}%", spec.coverage_pct()),
             String::new(),
         ];
 
@@ -94,17 +90,11 @@ impl Tool for SpecCoverageTool {
             let covered = completed > 0 && completed == total;
             let symbol = if covered { "✅" } else { "⚪" };
             let detail = if total > 0 {
-                format!(
-                    " ({} of {} linked tasks completed)",
-                    completed, total
-                )
+                format!(" ({} of {} linked tasks completed)", completed, total)
             } else {
                 " (no linked tasks)".to_string()
             };
-            lines.push(format!(
-                "{} `{}` — {}{}",
-                symbol, req.id, req.text, detail
-            ));
+            lines.push(format!("{} `{}` — {}{}", symbol, req.id, req.text, detail));
         }
 
         lines.push(String::new());
@@ -123,7 +113,11 @@ impl Tool for SpecCoverageTool {
             };
             lines.push(format!(
                 "{} `{}` — {} ({}) {}",
-                symbol, task.id, task.title, task.status.as_str(), reqs
+                symbol,
+                task.id,
+                task.title,
+                task.status.as_str(),
+                reqs
             ));
         }
 

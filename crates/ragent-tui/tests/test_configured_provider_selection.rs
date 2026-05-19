@@ -19,8 +19,8 @@ use ragent_core::{
     storage::Storage,
     tool,
 };
-use ragent_tui::app::ProviderSetupStep;
 use ragent_tui::App;
+use ragent_tui::app::ProviderSetupStep;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         session_processor,
         agent_info,
         false,
+        std::path::PathBuf::new(),
     )
 }
 
@@ -222,7 +223,10 @@ fn test_configured_picker_state_transition() {
         .expect("store key");
 
     let configured = App::get_configured_providers(&storage);
-    assert!(configured.len() >= 2, "should have at least 2 configured providers");
+    assert!(
+        configured.len() >= 2,
+        "should have at least 2 configured providers"
+    );
 
     // Simulate the dialog opening.
     app.provider_setup = Some(ProviderSetupStep::SelectConfiguredProvider {
@@ -267,20 +271,24 @@ fn test_model_persistence_cleared_on_reset() {
         .set_setting("provider_anthropic_last_model", "claude-sonnet-4-20250514")
         .expect("persist model");
 
-    assert!(storage
-        .get_setting("provider_anthropic_last_model")
-        .ok()
-        .flatten()
-        .is_some());
+    assert!(
+        storage
+            .get_setting("provider_anthropic_last_model")
+            .ok()
+            .flatten()
+            .is_some()
+    );
 
     // Simulate the reset flow: delete auth, set disabled, clear last_model.
     let _ = storage.delete_setting("provider_anthropic_last_model");
 
-    assert!(storage
-        .get_setting("provider_anthropic_last_model")
-        .ok()
-        .flatten()
-        .is_none());
+    assert!(
+        storage
+            .get_setting("provider_anthropic_last_model")
+            .ok()
+            .flatten()
+            .is_none()
+    );
 }
 
 // ── Sanity: model persistence key is independent of global selected_model ─

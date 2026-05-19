@@ -259,13 +259,20 @@ impl PermissionChecker {
     /// ```
     #[must_use]
     pub fn new(ruleset: PermissionRuleset) -> Self {
-        let mut rules_by_permission: HashMap<Permission, Vec<(globset::GlobMatcher, PermissionAction)>> = HashMap::new();
+        let mut rules_by_permission: HashMap<
+            Permission,
+            Vec<(globset::GlobMatcher, PermissionAction)>,
+        > = HashMap::new();
         let mut wildcard_rules: Vec<(globset::GlobMatcher, PermissionAction)> = Vec::new();
 
         // Pre-compile and index rules by permission type
         for rule in ruleset {
-            let Some(pattern) = &rule.pattern else { continue };
-            let Ok(glob) = globset::Glob::new(pattern) else { continue };
+            let Some(pattern) = &rule.pattern else {
+                continue;
+            };
+            let Ok(glob) = globset::Glob::new(pattern) else {
+                continue;
+            };
             let matcher = glob.compile_matcher();
 
             if matches!(rule.permission, Permission::Custom(ref s) if s == "*") {

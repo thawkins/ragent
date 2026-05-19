@@ -160,8 +160,9 @@ impl TaskStore {
             .read(true)
             .open(&self.path)
             .with_context(|| format!("open task store {}", self.path.display()))?;
-        file.lock_shared()
-            .with_context(|| format!("acquire shared lock on task store {}", self.path.display()))?;
+        file.lock_shared().with_context(|| {
+            format!("acquire shared lock on task store {}", self.path.display())
+        })?;
         let raw = fs::read_to_string(&self.path)
             .with_context(|| format!("read {}", self.path.display()))?;
         file.unlock()?;

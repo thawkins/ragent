@@ -58,13 +58,16 @@ impl Tool for SpecTaskUpdateTool {
             .as_str()
             .context("Missing required 'status' parameter")?;
 
-        let new_status = ragent_specs::spec::TaskStatus::parse(status_str)
-            .ok_or_else(|| anyhow::anyhow!("Unknown task status '{}'. Use: pending, in_progress, completed, blocked", status_str))?;
+        let new_status = ragent_specs::spec::TaskStatus::parse(status_str).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown task status '{}'. Use: pending, in_progress, completed, blocked",
+                status_str
+            )
+        })?;
 
-        let spec_manager = ctx
-            .spec_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first."))?;
+        let spec_manager = ctx.spec_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first.")
+        })?;
 
         let id = ragent_specs::spec::SpecId::new(spec_id_str)
             .ok_or_else(|| anyhow::anyhow!("Invalid spec ID '{}'", spec_id_str))?;

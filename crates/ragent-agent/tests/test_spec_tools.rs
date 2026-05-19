@@ -1,8 +1,8 @@
 //! Tests for spec agent tools.
 
 use ragent_agent::tool::{
-    spec_coverage::SpecCoverageTool, spec_list::SpecListTool, spec_read::SpecReadTool,
-    spec_search::SpecSearchTool, spec_task_update::SpecTaskUpdateTool, Tool, ToolContext,
+    Tool, ToolContext, spec_coverage::SpecCoverageTool, spec_list::SpecListTool,
+    spec_read::SpecReadTool, spec_search::SpecSearchTool, spec_task_update::SpecTaskUpdateTool,
 };
 use ragent_specs::{SpecIo, SpecManager};
 use serde_json::json;
@@ -354,9 +354,7 @@ async fn test_spec_read_with_invalid_id() {
     ctx.spec_manager = Some(Arc::new(mgr));
 
     let tool = SpecReadTool;
-    let result = tool
-        .execute(json!({"spec_id": "!!!bad-id!!!"}), &ctx)
-        .await;
+    let result = tool.execute(json!({"spec_id": "!!!bad-id!!!"}), &ctx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Invalid spec ID"));
 }
@@ -371,8 +369,6 @@ async fn test_spec_read_nonexistent_spec() {
     ctx.spec_manager = Some(Arc::new(mgr));
 
     let tool = SpecReadTool;
-    let result = tool
-        .execute(json!({"spec_id": "nonexistent"}), &ctx)
-        .await;
+    let result = tool.execute(json!({"spec_id": "nonexistent"}), &ctx).await;
     assert!(result.is_err());
 }

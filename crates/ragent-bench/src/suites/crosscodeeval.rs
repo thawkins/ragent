@@ -30,9 +30,17 @@ impl BenchSuiteAdapter for CrossCodeEvalAdapter {
         generation: &BenchGenerationResult,
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
-        evaluate_exact_match_case(case, generation, options, "CrossCodeEval", |_, similarity| {
-            format!("CrossCodeEval MVP adapter records completion accuracy and edit similarity from reconstructed prompt contexts. (similarity={similarity:.3})")
-        })
+        evaluate_exact_match_case(
+            case,
+            generation,
+            options,
+            "CrossCodeEval",
+            |_, similarity| {
+                format!(
+                    "CrossCodeEval MVP adapter records completion accuracy and edit similarity from reconstructed prompt contexts. (similarity={similarity:.3})"
+                )
+            },
+        )
     }
 
     fn summarize(

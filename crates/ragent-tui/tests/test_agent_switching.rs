@@ -38,8 +38,8 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
         active_spec: std::sync::Mutex::new(None),
-          spec_manager: std::sync::OnceLock::new(),
-          auto_approve: false,
+        spec_manager: std::sync::OnceLock::new(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -51,6 +51,7 @@ fn make_app(event_bus: Arc<EventBus>) -> App {
         session_processor,
         agent_info,
         false,
+        std::path::PathBuf::new(),
     )
 }
 

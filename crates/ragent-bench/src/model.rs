@@ -430,7 +430,23 @@ fn resolve_base_url(provider_id: &str, storage: &Storage, config: &Config) -> Op
                     .ok()
                     .filter(|s| !s.trim().is_empty())
             }),
-        _ => None,
+                  "azure_foundry" => storage
+                      .get_setting("azure_foundry_api_base")
+                      .ok()
+                      .flatten()
+                      .filter(|s| !s.trim().is_empty())
+                      .or_else(|| {
+                          config
+                              .provider
+                              .get("azure_foundry")
+                              .and_then(|provider| provider.api.as_ref())
+                              .and_then(|api| api.base_url.clone())
+                      })
+                      .or_else(|| {
+                          std::env::var("AZURE_AI_FOUNDRY_BASE")
+                              .ok()
+                              .filter(|s| !s.trim().is_empty())
+                      }),        _ => None,
     }
 }
 

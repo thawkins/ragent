@@ -317,14 +317,15 @@ impl Provider for CopilotProvider {
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
         let auth = resolve_copilot_auth(api_key, base_url).await?;
+        let url = auth.base_url.trim_end_matches('/').to_string();
         let client = CopilotClient {
             token: auth.token,
-            base_url: auth.base_url.trim_end_matches('/').to_string(),
+            base_url: url.clone(),
             http: crate::provider::http_client::create_streaming_http_client(),
         };
+        tracing::info!(chat_endpoint = %format!("{}/chat/completions", url), models_endpoint = %format!("{}/models", url), "Copilot provider connected");
         Ok(Box::new(client))
     }
-
     /// Returns the detected Copilot plan label (e.g. `"Pro"`, `"Business"`) from
     /// the cached session token, or `None` if no session token has been exchanged yet.
     ///
@@ -527,16 +528,20 @@ impl LlmClient for CopilotClient {
                 .send(),
         )
         .await
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Copilot chat request timed out");
+        })
         .map_err(|_| {
             anyhow::anyhow!("HTTP 408: Copilot API request timed out after {timeout_secs}s")
         })?
-        .context("Failed to connect to GitHub Copilot API")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Copilot chat request failed");
+        })
+        .with_context(|| format!("Failed to connect to GitHub Copilot API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();
-            tracing::error!(status = %status, body = %error_body, "copilot chat error");
-            // Extract a clean message from the JSON error response if possible.
+            tracing::error!(url = %url, status = %status, body = %error_body, "Copilot chat error"); // Extract a clean message from the JSON error response if possible.
             // Prefix with "HTTP {code}: " so callers can classify transient vs permanent.
             let detail = parse_api_error_message(&error_body).unwrap_or_else(|| status.to_string());
             bail!("HTTP {}: {}", status.as_u16(), detail);
@@ -1489,8 +1494,10 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .context("Failed to fetch Copilot models")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Copilot model discovery failed");
+        })
+        .with_context(|| format!("Failed to fetch Copilot models at {url}"))?;
     if !resp.status().is_success() {
         bail!("Copilot models endpoint returned HTTP {}", resp.status());
     }

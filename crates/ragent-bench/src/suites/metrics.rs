@@ -2,7 +2,7 @@
 
 use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;
-use crate::model::{BenchGenerationResult};
+use crate::model::BenchGenerationResult;
 use crate::suites::{BenchCaseEvaluation, BenchMetricEvaluation};
 
 /// Count exact-match samples against a normalized reference string.
@@ -255,7 +255,9 @@ pub(crate) fn evaluate_exact_match_case(
             selected_response,
             exact_match_count: exact_matches,
             first_sample_exact_match: first_exact,
-            notes: format!("{suite_name} prompt generated; evaluation skipped because --no-exec was set."),
+            notes: format!(
+                "{suite_name} prompt generated; evaluation skipped because --no-exec was set."
+            ),
             error_code: None,
             error_message: None,
         };
@@ -283,11 +285,13 @@ pub(crate) fn skipped_metrics_for_suite(
 ) -> Vec<BenchMetricEvaluation> {
     metric_names
         .iter()
-        .map(|name| skipped_metric(
-            name,
-            evaluations_len,
-            &format!("{suite_name} evaluation skipped because --no-exec was set."),
-        ))
+        .map(|name| {
+            skipped_metric(
+                name,
+                evaluations_len,
+                &format!("{suite_name} evaluation skipped because --no-exec was set."),
+            )
+        })
         .collect()
 }
 

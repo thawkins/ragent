@@ -146,7 +146,9 @@ impl Tool for TeamWaitTool {
                 content: format!(
                     "All teammates in team '{resolved_team_name}' are already idle.\n\n{summary}"
                 ),
-                metadata: Some(json!({ "team": resolved_team_name, "timed_out": false, "success": true })),
+                metadata: Some(
+                    json!({ "team": resolved_team_name, "timed_out": false, "success": true }),
+                ),
             });
         }
 

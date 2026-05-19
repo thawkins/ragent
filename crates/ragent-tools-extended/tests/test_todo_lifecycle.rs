@@ -160,7 +160,11 @@ async fn test_todo_full_lifecycle() {
         .execute(json!({}), &ctx)
         .await
         .expect("read should succeed");
-    assert!(out.content.contains("No TODO items found"), "empty read: {:?}", out.content);
+    assert!(
+        out.content.contains("No TODO items found"),
+        "empty read: {:?}",
+        out.content
+    );
 
     // ── 2. ADD ──────────────────────────────────────────────────────
     let out = write_tool
@@ -219,7 +223,10 @@ async fn test_todo_full_lifecycle() {
         .execute(json!({"status": "blocked"}), &ctx)
         .await
         .expect("read should succeed");
-    assert!(out.content.contains("No TODO items found with status 'blocked'"));
+    assert!(
+        out.content
+            .contains("No TODO items found with status 'blocked'")
+    );
 
     // ── 7. READ with status filter: in_progress ────────────────────
     let out = read_tool
@@ -322,10 +329,7 @@ async fn test_todo_update_invalid_status_errors() {
     let write_tool = TodoWriteTool;
 
     let err = write_tool
-        .execute(
-            json!({"action": "add", "id": "td-x", "title": "X"}),
-            &ctx,
-        )
+        .execute(json!({"action": "add", "id": "td-x", "title": "X"}), &ctx)
         .await
         .expect("seed add ok");
     // force ignore
@@ -348,9 +352,7 @@ async fn test_todo_read_invalid_status_errors() {
     let ctx = test_ctx(storage);
     let read_tool = TodoReadTool;
 
-    let res = read_tool
-        .execute(json!({"status": "bogus"}), &ctx)
-        .await;
+    let res = read_tool.execute(json!({"status": "bogus"}), &ctx).await;
     assert!(res.is_err(), "expected error for invalid status filter");
     let err = res.unwrap_err().to_string();
     assert!(err.contains("Invalid status filter 'bogus'"));

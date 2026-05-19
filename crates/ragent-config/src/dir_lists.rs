@@ -165,42 +165,42 @@ fn compile_patterns(patterns: &[String]) -> GlobSet {
 /// Load the directory lists from the merged global + project config.
 ///
 /// Call this once at startup. Subsequent loads (e.g. after `/reload`) replace
- /// the in-memory state.
- pub fn load_from_config() {
-     let lists = match crate::config::Config::load() {
-         Ok(cfg) => {
-             let mut allowlist = Vec::new();
-             let mut denylist = Vec::new();
- 
-             // Use the new dedicated dirs field from config
-             allowlist.extend(cfg.dirs.allowlist);
-             denylist.extend(cfg.dirs.denylist);
- 
-             DirLists {
-                 allowlist,
-                 denylist,
-             }
-         }
-         Err(e) => {
-             tracing::warn!("dir_lists: failed to load config: {e}");
-             DirLists::default()
-         }
-     };
- 
-     // Compile patterns for efficient matching
-     let compiled_allow = compile_patterns(&lists.allowlist);
-     let compiled_deny = compile_patterns(&lists.denylist);
- 
-     if let Ok(mut guard) = global().write() {
-         *guard = lists;
-     }
-     if let Ok(mut guard) = compiled_allowlist().write() {
-         *guard = compiled_allow;
-     }
-     if let Ok(mut guard) = compiled_denylist().write() {
-         *guard = compiled_deny;
-     }
- }
+/// the in-memory state.
+pub fn load_from_config() {
+    let lists = match crate::config::Config::load() {
+        Ok(cfg) => {
+            let mut allowlist = Vec::new();
+            let mut denylist = Vec::new();
+
+            // Use the new dedicated dirs field from config
+            allowlist.extend(cfg.dirs.allowlist);
+            denylist.extend(cfg.dirs.denylist);
+
+            DirLists {
+                allowlist,
+                denylist,
+            }
+        }
+        Err(e) => {
+            tracing::warn!("dir_lists: failed to load config: {e}");
+            DirLists::default()
+        }
+    };
+
+    // Compile patterns for efficient matching
+    let compiled_allow = compile_patterns(&lists.allowlist);
+    let compiled_deny = compile_patterns(&lists.denylist);
+
+    if let Ok(mut guard) = global().write() {
+        *guard = lists;
+    }
+    if let Ok(mut guard) = compiled_allowlist().write() {
+        *guard = compiled_allow;
+    }
+    if let Ok(mut guard) = compiled_denylist().write() {
+        *guard = compiled_deny;
+    }
+}
 // ── Read accessors ────────────────────────────────────────────────────────────
 
 /// Returns a snapshot of the current allowlist.

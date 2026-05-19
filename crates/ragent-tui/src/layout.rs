@@ -248,94 +248,94 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
-        ProviderSetupStep::EnterKey {
-            provider_id,
-            provider_name,
-            key_input,
-            key_cursor,
-            endpoint_input,
-            endpoint_cursor,
-            editing_endpoint,
-            error,
-            ..
-        } => {
-            let mut lines: Vec<Line<'_>> = vec![
-                Line::from(Span::styled(
-                    format!("Configure {}", provider_name),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from("Enter your API key:"),
-                Line::from(""),
-            ];
+          ProviderSetupStep::EnterKey {
+              provider_id,
+              provider_name,
+              key_field,
+              endpoint_field,
+              active_field,
+              error,
+              ..
+          } => {
+              let mut lines: Vec<Line<'_>> = vec![
+                  Line::from(Span::styled(
+                      format!("Configure {}", provider_name),
+                      Style::default()
+                          .fg(Color::Cyan)
+                          .add_modifier(Modifier::BOLD),
+                  )),
+                  Line::from(""),
+                  Line::from("Enter your API key:"),
+                  Line::from(""),
+              ];
 
-            // Show masked key input
-            let masked = if key_input.is_empty() {
-                String::new()
-            } else {
-                let char_count = key_input.chars().count();
-                if char_count <= 8 {
-                    "*".repeat(char_count)
-                } else {
-                    let first4: String = key_input.chars().take(4).collect();
-                    let last4: String = key_input
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect();
-                    format!("{}…{}", first4, last4)
-                }
-            };
-            let key_cursor_display = if !*editing_endpoint {
-                *key_cursor
-            } else {
-                masked.chars().count()
-            };
-            lines.push(Line::from(vec![
-                Span::styled(
-                    if !*editing_endpoint { "> " } else { "  " },
-                    Style::default().fg(Color::Cyan),
-                ),
-                Span::styled(
-                    with_cursor_marker(&masked, key_cursor_display),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
+              // Show masked key input
+              let key_text = key_field.text();
+              let masked = if key_text.is_empty() {
+                  String::new()
+              } else {
+                  let char_count = key_text.chars().count();
+                  if char_count <= 8 {
+                      "*".repeat(char_count)
+                  } else {
+                      let first4: String = key_text.chars().take(4).collect();
+                      let last4: String = key_text
+                          .chars()
+                          .rev()
+                          .take(4)
+                          .collect::<Vec<_>>()
+                          .into_iter()
+                          .rev()
+                          .collect();
+                      format!("{}…{}", first4, last4)
+                  }
+              };
+              let key_cursor_display = if *active_field == 0 {
+                  key_field.cursor()
+              } else {
+                  masked.chars().count()
+              };
+              lines.push(Line::from(vec![
+                  Span::styled(
+                      if *active_field == 0 { "> " } else { "  " },
+                      Style::default().fg(Color::Cyan),
+                  ),
+                  Span::styled(
+                      with_cursor_marker(&masked, key_cursor_display),
+                      Style::default().fg(Color::White),
+                  ),
+              ]));
 
-                          if provider_id == "generic_openai" || provider_id == "azure_foundry" {
-                              lines.push(Line::from(""));
-                              lines.push(Line::from(
-                                  "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
-                              ));
-                              let endpoint_cursor_display = if *editing_endpoint {
-                                  *endpoint_cursor
-                              } else {
-                                  endpoint_input.chars().count()
-                              };
-                              lines.push(Line::from(vec![
-                                  Span::styled(
-                                      if *editing_endpoint { "> " } else { "  " },
-                                      Style::default().fg(Color::Cyan),
-                                  ),
-                                  Span::styled(
-                                      if endpoint_input.is_empty() {
-                                          "(use default/env)".to_string()
-                                      } else {
-                                          with_cursor_marker(endpoint_input, endpoint_cursor_display)
-                                      },
-                                      Style::default().fg(Color::White),
-                                  ),
-                              ]));
-                              lines.push(Line::from(Span::styled(
-                                  "Tab switches between API key and endpoint fields",
-                                  Style::default().fg(Color::DarkGray),
-                              )));
-                          }
+              if provider_id == "generic_openai" || provider_id == "azure_foundry" {
+                  lines.push(Line::from(""));
+                  lines.push(Line::from(
+                      "Endpoint URL (optional, e.g. http://localhost:11434/v1):",
+                  ));
+                  let ep_text = endpoint_field.text();
+                  let endpoint_cursor_display = if *active_field == 1 {
+                      endpoint_field.cursor()
+                  } else {
+                      ep_text.chars().count()
+                  };
+                  lines.push(Line::from(vec![
+                      Span::styled(
+                          if *active_field == 1 { "> " } else { "  " },
+                          Style::default().fg(Color::Cyan),
+                      ),
+                      Span::styled(
+                          if ep_text.is_empty() {
+                              "(use default/env)".to_string()
+                          } else {
+                              with_cursor_marker(ep_text, endpoint_cursor_display)
+                          },
+                          Style::default().fg(Color::White),
+                      ),
+                  ]));
+                  lines.push(Line::from(Span::styled(
+                      "Tab switches between API key and endpoint fields",
+                      Style::default().fg(Color::DarkGray),
+                  )));
+              }
             if let Some(err) = error {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
@@ -744,7 +744,10 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             frame.render_widget(paragraph, area);
         }
         // Renderer for the configured-provider picker (used by `/model`).
-        ProviderSetupStep::SelectConfiguredProvider { providers, selected } => {
+        ProviderSetupStep::SelectConfiguredProvider {
+            providers,
+            selected,
+        } => {
             let mut lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
                     " Switch Provider ",
@@ -783,6 +786,53 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(" Switch Provider ")
+                .border_style(Style::default().fg(Color::Cyan));
+
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+        ProviderSetupStep::ShowProviderConfig {
+            providers,
+            selected,
+        } => {
+            let mut lines: Vec<Line<'_>> = vec![
+                Line::from(Span::styled(
+                    " Show Provider Configuration ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+
+            for (i, prov) in providers.iter().enumerate() {
+                let (indicator, style) = if i == *selected {
+                    (
+                        "▸ ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("  ", Style::default().fg(Color::White))
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(indicator, style),
+                    Span::styled(format!("{}", prov.name), style),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "↑/↓ navigate  Enter show config  Esc cancel",
+                Style::default().fg(Color::DarkGray),
+            )));
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Provider Config ")
                 .border_style(Style::default().fg(Color::Cyan));
 
             let paragraph = Paragraph::new(lines)

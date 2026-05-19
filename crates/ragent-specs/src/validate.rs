@@ -14,8 +14,7 @@ use std::sync::LazyLock;
 // ── EARS regex patterns ───────────────────────────────────────────────────
 
 static RE_UBIQUITOUS: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^the\s+.+\s+shall\s+.+$")
-        .expect("ubiquitous regex should compile")
+    Regex::new(r"(?i)^the\s+.+\s+shall\s+.+$").expect("ubiquitous regex should compile")
 });
 
 static RE_EVENT_DRIVEN: LazyLock<Regex> = LazyLock::new(|| {
@@ -39,8 +38,7 @@ static RE_UNWANTED: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static RE_SECTION_HEADER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(#{2,4})\s+(.+)$")
-        .expect("section header regex should compile")
+    Regex::new(r"^(#{2,4})\s+(.+)$").expect("section header regex should compile")
 });
 
 static RE_REQUIREMENT_HEADER: LazyLock<Regex> = LazyLock::new(|| {
@@ -49,14 +47,11 @@ static RE_REQUIREMENT_HEADER: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static RE_STATUS_FRONTMATTER: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^status:\s*(\S+)$")
-        .expect("status frontmatter regex should compile")
+    Regex::new(r"^status:\s*(\S+)$").expect("status frontmatter regex should compile")
 });
 
-static RE_TASK_ID: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\|\s*(T-\d+)\s*\|")
-        .expect("task ID regex should compile")
-});
+static RE_TASK_ID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\|\s*(T-\d+)\s*\|").expect("task ID regex should compile"));
 
 /// Severity of a validation issue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,11 +121,7 @@ pub struct Issue {
 
 impl Issue {
     /// Create a new issue.
-    pub fn new(
-        severity: Severity,
-        category: Category,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(severity: Severity, category: Category, message: impl Into<String>) -> Self {
         Self {
             severity,
             category,
@@ -194,7 +185,10 @@ impl Report {
 
     /// Count issues by severity.
     pub fn count_by_severity(&self, severity: Severity) -> usize {
-        self.issues.iter().filter(|i| i.severity == severity).count()
+        self.issues
+            .iter()
+            .filter(|i| i.severity == severity)
+            .count()
     }
 
     /// Sort issues by severity (errors first) then by line number.
@@ -221,28 +215,38 @@ impl Report {
     /// Format the report as a human-readable multi-line string.
     pub fn format(&self, spec_id: &str) -> String {
         let mut lines = vec![format!("Validation Report for `{}`", spec_id)];
-        lines.push(format!("Requirements: {} total, {} EARS-valid", 
-            self.requirement_count, self.valid_ears_count));
-        
+        lines.push(format!(
+            "Requirements: {} total, {} EARS-valid",
+            self.requirement_count, self.valid_ears_count
+        ));
+
         for (template, count) in &self.template_counts {
             lines.push(format!("  {}: {}", template.as_str(), count));
         }
-        
+
         let errors = self.count_by_severity(Severity::Error);
         let warnings = self.count_by_severity(Severity::Warning);
         let infos = self.count_by_severity(Severity::Info);
-        lines.push(format!("Issues: {} error(s), {} warning(s), {} info(s)", errors, warnings, infos));
+        lines.push(format!(
+            "Issues: {} error(s), {} warning(s), {} info(s)",
+            errors, warnings, infos
+        ));
         lines.push(String::new());
-        
+
         for issue in &self.issues {
-            let loc = issue.line.map_or_else(|| "file".to_string(), |l| format!("line {}", l));
-            let id = issue.id.as_ref().map_or_else(|| "".to_string(), |id| format!(" [{}]", id));
+            let loc = issue
+                .line
+                .map_or_else(|| "file".to_string(), |l| format!("line {}", l));
+            let id = issue
+                .id
+                .as_ref()
+                .map_or_else(|| "".to_string(), |id| format!(" [{}]", id));
             lines.push(format!(
                 "  [{}] {} — {}{} (at {})",
                 issue.severity, issue.category, issue.message, id, loc
             ));
         }
-        
+
         lines.join("\n")
     }
 }
@@ -487,10 +491,7 @@ pub fn validate_ears(spec: &Spec, report: &mut Report) {
     let mut fr_numbers: Vec<u32> = Vec::new();
     let mut nfr_numbers: Vec<u32> = Vec::new();
     for req in &reqs {
-        if let Some(caps) = Regex::new(r"^(\D+)-(\d+)$")
-            .unwrap()
-            .captures(&req.id)
-        {
+        if let Some(caps) = Regex::new(r"^(\D+)-(\d+)$").unwrap().captures(&req.id) {
             let prefix = &caps[1];
             let num: u32 = caps[2].parse().unwrap_or(0);
             match prefix {
@@ -531,10 +532,7 @@ pub fn validate_ears(spec: &Spec, report: &mut Report) {
                 Issue::new(
                     Severity::Error,
                     Category::EarsSyntax,
-                    format!(
-                        "Requirement {} does not match any EARS template",
-                        req.id
-                    ),
+                    format!("Requirement {} does not match any EARS template", req.id),
                 )
                 .with_line(req.ears_line)
                 .with_id(&req.id),
@@ -601,22 +599,14 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
 
     // Check that each task references a valid requirement
     for line in spec.plan_md.lines() {
-        for cap in Regex::new(r"(FR-\d+|NFR-\d+)")
-            .unwrap()
-            .find_iter(line)
-        {
+        for cap in Regex::new(r"(FR-\d+|NFR-\d+)").unwrap().find_iter(line) {
             let ref_id = cap.as_str();
             if !req_ids.iter().any(|id| id.eq_ignore_ascii_case(ref_id)) {
-                report.add(
-                    Issue::new(
-                        Severity::Warning,
-                        Category::Plan,
-                        format!(
-                            "PLAN.md references unknown requirement {}",
-                            ref_id
-                        ),
-                    ),
-                );
+                report.add(Issue::new(
+                    Severity::Warning,
+                    Category::Plan,
+                    format!("PLAN.md references unknown requirement {}", ref_id),
+                ));
             }
         }
     }
@@ -737,7 +727,9 @@ A plan.
     #[test]
     fn test_detect_ears_state_driven() {
         assert_eq!(
-            detect_ears_template("While the engine is running, the system shall monitor temperature."),
+            detect_ears_template(
+                "While the engine is running, the system shall monitor temperature."
+            ),
             Some(EarsTemplate::StateDriven)
         );
     }
@@ -760,14 +752,21 @@ A plan.
 
     #[test]
     fn test_detect_ears_invalid() {
-        assert_eq!(detect_ears_template("This is just a random sentence."), None);
+        assert_eq!(
+            detect_ears_template("This is just a random sentence."),
+            None
+        );
     }
 
     #[test]
     fn test_validate_valid_spec() {
         let spec = valid_spec();
         let report = validate(&spec);
-        assert!(!report.has_errors(), "valid spec should have no errors: {:?}", report);
+        assert!(
+            !report.has_errors(),
+            "valid spec should have no errors: {:?}",
+            report
+        );
     }
 
     #[test]
@@ -778,7 +777,10 @@ A plan.
         spec.plan_md = valid_spec().plan_md;
         let report = validate(&spec);
         assert!(report.has_errors());
-        let missing = report.issues.iter().any(|i| i.category == Category::MissingSection);
+        let missing = report
+            .issues
+            .iter()
+            .any(|i| i.category == Category::MissingSection);
         assert!(missing, "should flag missing sections");
     }
 
@@ -814,7 +816,12 @@ None.
         .to_string();
         spec.plan_md = "# Plan\n".to_string();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.message.contains("No requirements found")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("No requirements found"))
+        );
     }
 
     #[test]
@@ -853,7 +860,12 @@ None.
         .to_string();
         spec.plan_md = "# Plan\n".to_string();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.message.contains("Duplicate")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("Duplicate"))
+        );
     }
 
     #[test]
@@ -928,7 +940,12 @@ None.
         .to_string();
         spec.plan_md = "# Plan\n".to_string();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.category == Category::InvalidStatus));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.category == Category::InvalidStatus)
+        );
     }
 
     #[test]
@@ -938,7 +955,12 @@ None.
         spec.spec_md = valid_spec().spec_md;
         spec.plan_md = String::new();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.message.contains("PLAN.md is empty")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("PLAN.md is empty"))
+        );
     }
 
     #[test]
@@ -948,7 +970,12 @@ None.
         spec.spec_md = valid_spec().spec_md;
         spec.plan_md = "# Plan\n\nJust a title.\n".to_string();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.category == Category::Plan && i.message.contains("missing section")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.category == Category::Plan && i.message.contains("missing section"))
+        );
     }
 
     #[test]
@@ -974,7 +1001,12 @@ Plan.
 "#
         .to_string();
         let report = validate(&spec);
-        assert!(report.issues.iter().any(|i| i.message.contains("unknown requirement")));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|i| i.message.contains("unknown requirement"))
+        );
     }
 
     #[test]
@@ -1037,7 +1069,11 @@ Plan.
         let mut report = Report::new();
         report.requirement_count = 2;
         report.valid_ears_count = 1;
-        report.add(Issue::new(Severity::Error, Category::EarsSyntax, "Bad syntax").with_line(5).with_id("FR-001"));
+        report.add(
+            Issue::new(Severity::Error, Category::EarsSyntax, "Bad syntax")
+                .with_line(5)
+                .with_id("FR-001"),
+        );
         let formatted = report.format("my-spec");
         assert!(formatted.contains("Validation Report for `my-spec`"));
         assert!(formatted.contains("Requirements: 2 total, 1 EARS-valid"));

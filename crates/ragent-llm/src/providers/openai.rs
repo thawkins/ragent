@@ -104,7 +104,9 @@ impl Provider for OpenAiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
-        let client = OpenAiClient::new(api_key, base_url.unwrap_or(OPENAI_API_BASE));
+        let resolved = base_url.unwrap_or(OPENAI_API_BASE);
+        let client = OpenAiClient::new(api_key, resolved);
+        tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", resolved.trim_end_matches('/')), "OpenAI provider connected");
         Ok(Box::new(client))
     }
 }
@@ -293,7 +295,10 @@ impl LlmClient for OpenAiClient {
             .json(&body)
             .send()
             .await
-            .context("Failed to send request to OpenAI API")?;
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "OpenAI chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to OpenAI API at {url}"))?;
 
         if !response.status().is_success() {
             let status = response.status();

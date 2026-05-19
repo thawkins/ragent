@@ -49,8 +49,11 @@ impl Provider for GenericOpenAiProvider {
         let resolved_base = configured_endpoint
             .or(base_url)
             .or(env_endpoint.as_deref())
-            .unwrap_or(OPENAI_API_BASE);
-        let client = OpenAiClient::new(api_key, resolved_base);
+            .unwrap_or(OPENAI_API_BASE)
+            .trim_end_matches('/')
+            .to_string();
+        let client = OpenAiClient::new(api_key, &resolved_base);
+        tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", resolved_base), models_endpoint = %format!("{}/v1/models", resolved_base), "Generic OpenAI provider connected");
         Ok(Box::new(client))
     }
 }

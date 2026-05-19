@@ -48,8 +48,8 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
         active_spec: std::sync::Mutex::new(None),
-          spec_manager: std::sync::OnceLock::new(),
-          auto_approve: false,
+        spec_manager: std::sync::OnceLock::new(),
+        auto_approve: false,
     });
     let agent_info =
         agent::resolve_agent("general", &Default::default()).expect("resolve general agent");
@@ -61,6 +61,7 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         session_processor,
         agent_info,
         false,
+        std::path::PathBuf::new(),
     )
 }
 
@@ -600,7 +601,10 @@ fn test_slash_model_opens_provider_picker() {
     // No provider configured by default (no env vars in test)
     app.execute_slash_command("/model");
     assert!(
-        matches!(app.provider_setup, Some(ProviderSetupStep::SelectProvider { .. })),
+        matches!(
+            app.provider_setup,
+            Some(ProviderSetupStep::SelectProvider { .. })
+        ),
         "/model should open the provider picker"
     );
 }
@@ -691,15 +695,10 @@ fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discovery_is_
         .set_provider_auth("ollama_cloud", "sk-test")
         .expect("store ollama_cloud key");
     // Disable copilot so ollama_cloud is the sole configured provider.
-    let _ = app
-        .storage
-        .set_setting("provider_copilot_disabled", "true");
+    let _ = app.storage.set_setting("provider_copilot_disabled", "true");
     // Persist a last-model so the restore path finds it.
     app.storage
-        .set_setting(
-            "provider_ollama_cloud_last_model",
-            "deepseek-v4-flash",
-        )
+        .set_setting("provider_ollama_cloud_last_model", "deepseek-v4-flash")
         .expect("persist model");
     app.configured_provider = Some(ConfiguredProvider {
         id: "ollama_cloud".to_string(),
@@ -916,11 +915,9 @@ fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
     app.provider_setup = Some(ProviderSetupStep::EnterKey {
         provider_id: "generic_openai".to_string(),
         provider_name: "Generic OpenAI API".to_string(),
-        key_input: String::new(),
-        key_cursor: 0,
-        endpoint_input: String::new(),
-        endpoint_cursor: 0,
-        editing_endpoint: false,
+        key_field: ragent_tui::input_field::InputField::new(),
+        endpoint_field: ragent_tui::input_field::InputField::new(),
+        active_field: 0,
         error: None,
     });
 
@@ -937,12 +934,12 @@ fn test_generic_openai_enter_key_supports_endpoint_field_and_tab_toggle() {
 
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::EnterKey {
-            endpoint_input,
-            editing_endpoint,
+            endpoint_field,
+            active_field,
             ..
         } => {
-            assert!(*editing_endpoint);
-            assert_eq!(endpoint_input, "ht");
+            assert_eq!(*active_field, 1);
+            assert_eq!(endpoint_field.text(), "ht");
         }
         _ => panic!("expected EnterKey"),
     }
@@ -954,11 +951,9 @@ fn test_generic_openai_enter_key_persists_endpoint_setting() {
     app.provider_setup = Some(ProviderSetupStep::EnterKey {
         provider_id: "generic_openai".to_string(),
         provider_name: "Generic OpenAI API".to_string(),
-        key_input: "test-key".to_string(),
-        key_cursor: 8,
-        endpoint_input: "http://localhost:11434/v1".to_string(),
-        endpoint_cursor: 25,
-        editing_endpoint: false,
+        key_field: ragent_tui::input_field::InputField::with_text("test-key"),
+        endpoint_field: ragent_tui::input_field::InputField::with_text("http://localhost:11434/v1"),
+        active_field: 0,
         error: None,
     });
 
@@ -979,11 +974,9 @@ fn test_provider_setup_paste_text_into_key_field() {
     app.provider_setup = Some(ProviderSetupStep::EnterKey {
         provider_id: "ollama_cloud".to_string(),
         provider_name: "Ollama Cloud".to_string(),
-        key_input: String::new(),
-        key_cursor: 0,
-        endpoint_input: String::new(),
-        endpoint_cursor: 0,
-        editing_endpoint: false,
+        key_field: ragent_tui::input_field::InputField::new(),
+        endpoint_field: ragent_tui::input_field::InputField::new(),
+        active_field: 0,
         error: None,
     });
 
@@ -991,12 +984,11 @@ fn test_provider_setup_paste_text_into_key_field() {
 
     match app.provider_setup.as_ref().expect("provider setup present") {
         ProviderSetupStep::EnterKey {
-            key_input,
-            key_cursor,
+            key_field,
             ..
         } => {
-            assert_eq!(key_input, "cloud-key");
-            assert_eq!(*key_cursor, 9);
+            assert_eq!(key_field.text(), "cloud-key");
+            assert_eq!(key_field.cursor(), 9);
         }
         _ => panic!("expected EnterKey"),
     }
@@ -2284,9 +2276,21 @@ fn test_slash_spec_no_args_shows_help() {
 
     assert!(!app.messages.is_empty(), "spec should create a message");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("spec help"), "should show spec help: {}", text);
-    assert!(text.contains("spec create"), "should mention spec create: {}", text);
-    assert!(text.contains("specs/"), "should mention specs/ dir: {}", text);
+    assert!(
+        text.contains("spec help"),
+        "should show spec help: {}",
+        text
+    );
+    assert!(
+        text.contains("spec create"),
+        "should mention spec create: {}",
+        text
+    );
+    assert!(
+        text.contains("specs/"),
+        "should mention specs/ dir: {}",
+        text
+    );
     assert!(text.contains("PLAN.md"), "should mention PLAN.md: {}", text);
 }
 
@@ -2297,10 +2301,7 @@ async fn test_slash_spec_task_lists_tasks() {
 
     app.execute_slash_command("/spec task testspec");
 
-    assert!(
-        !app.messages.is_empty(),
-        "task should create a message"
-    );
+    assert!(!app.messages.is_empty(), "task should create a message");
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Tasks for") || text.contains("No tasks found") || text.contains("Error:"),
@@ -2316,10 +2317,7 @@ async fn test_slash_spec_validate_all() {
 
     app.execute_slash_command("/spec validate");
 
-    assert!(
-        !app.messages.is_empty(),
-        "validate should create a message"
-    );
+    assert!(!app.messages.is_empty(), "validate should create a message");
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Validation") || text.contains("No specs found") || text.contains("Error:"),
@@ -2336,15 +2334,72 @@ async fn test_slash_spec_create_starts_generation() {
     app.execute_slash_command("/spec create websocket Add real-time collaborative editing");
 
     assert_eq!(
-        app.status,
-        "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md…",
+        app.status, "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md…",
         "status should indicate generation"
     );
     assert!(app.is_processing, "should set is_processing");
-    assert!(!app.messages.is_empty(), "should push the spec task message");
+    assert!(
+        !app.messages.is_empty(),
+        "should push the spec task message"
+    );
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("specification writer"), "task should contain spec writer prompt");
+    assert!(
+        text.contains("specification writer"),
+        "task should contain spec writer prompt"
+    );
     assert!(text.contains("EARS notation"), "task should mention EARS");
-    assert!(text.contains("specs/websocket/SPEC.md"), "task should contain spec file path");
-    assert!(text.contains("specs/websocket/PLAN.md"), "task should contain plan file path");
+    assert!(
+        text.contains("specs/websocket/SPEC.md"),
+        "task should contain spec file path"
+    );
+    assert!(
+        text.contains("specs/websocket/PLAN.md"),
+        "task should contain plan file path"
+    );
+}
+
+// ── /config ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_slash_config_show_displays_paths() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/config show");
+
+    assert_eq!(app.status, "config: show");
+    assert!(!app.messages.is_empty(), "config show should create a message");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(
+        text.contains("Application Paths"),
+        "config show should contain Application Paths section"
+    );
+    assert!(
+        text.contains("Working directory"),
+        "config show should mention Working directory"
+    );
+    assert!(
+        text.contains("Config Files"),
+        "config show should contain Config Files section"
+    );
+    assert!(
+        text.contains("Database"),
+        "config show should mention Database"
+    );
+    assert!(
+        text.contains("Code Index"),
+        "config show should contain Code Index section"
+    );
+}
+
+#[test]
+fn test_slash_config_no_args_shows_usage() {
+    let mut app = make_app();
+    app.session_id = Some("test-session".to_string());
+
+    app.execute_slash_command("/config");
+
+    assert_eq!(app.status, "config: usage");
+    let text = app.messages.last().unwrap().text_content();
+    assert!(text.contains("Usage: `/config show`"), "should show usage hint");
 }

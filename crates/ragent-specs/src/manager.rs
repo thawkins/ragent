@@ -72,7 +72,12 @@ impl SpecManager {
 
     /// Write a spec back to disk, updating frontmatter status and audit trail.
     pub async fn write_spec(&self, spec: &Spec) -> Result<(), SpecError> {
-        let updated_spec_md = update_frontmatter(&spec.spec_md, spec.status, &spec.audit_trail, &spec.reviewers)?;
+        let updated_spec_md = update_frontmatter(
+            &spec.spec_md,
+            spec.status,
+            &spec.audit_trail,
+            &spec.reviewers,
+        )?;
         let mut spec = spec.clone();
         spec.spec_md = updated_spec_md;
         SpecIo::write_spec(&self.specs_root, &spec).await
@@ -152,8 +157,7 @@ impl SpecManager {
         let mut table_end = None;
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            if trimmed.eq_ignore_ascii_case("## Tasks")
-                || trimmed.eq_ignore_ascii_case("### Tasks")
+            if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks")
             {
                 in_task_section = true;
                 continue;
@@ -168,10 +172,8 @@ impl SpecManager {
         }
         let table_start = table_start.unwrap_or(lines.len());
         let table_end = table_end.unwrap_or(lines.len());
-        let mut new_lines: Vec<String> = lines[..table_start]
-            .iter()
-            .map(|l| l.to_string())
-            .collect();
+        let mut new_lines: Vec<String> =
+            lines[..table_start].iter().map(|l| l.to_string()).collect();
         new_lines.push(
             "| ID | Title | Requirement | Effort | Priority | Status | Dependencies |".to_string(),
         );
@@ -265,10 +267,7 @@ impl SpecManager {
     ///
     /// Returns matching specs ordered by relevance (title match > content match).
     /// Archived specs are excluded by default; pass `include_archived: true` to include them.
-    pub async fn search_specs(
-        &self,
-        query: &str,
-    ) -> Result<Vec<SpecSearchResult>, SpecError> {
+    pub async fn search_specs(&self, query: &str) -> Result<Vec<SpecSearchResult>, SpecError> {
         self.search_specs_filtered(query, false).await
     }
 
@@ -360,10 +359,7 @@ fn update_frontmatter(
         content
     };
 
-    let mut fm_lines = vec![
-        "---".to_string(),
-        format!("status: {}", status.as_str()),
-    ];
+    let mut fm_lines = vec!["---".to_string(), format!("status: {}", status.as_str())];
 
     if !audit_trail.is_empty() {
         fm_lines.push("audit:".to_string());
@@ -496,12 +492,27 @@ mod tests {
     #[test]
     fn test_allowed_transitions() {
         assert!(is_valid_transition(SpecStatus::Draft, SpecStatus::InReview));
-        assert!(is_valid_transition(SpecStatus::InReview, SpecStatus::Approved));
+        assert!(is_valid_transition(
+            SpecStatus::InReview,
+            SpecStatus::Approved
+        ));
         assert!(is_valid_transition(SpecStatus::InReview, SpecStatus::Draft));
-        assert!(is_valid_transition(SpecStatus::Approved, SpecStatus::InProgress));
-        assert!(is_valid_transition(SpecStatus::InProgress, SpecStatus::Implemented));
-        assert!(is_valid_transition(SpecStatus::Implemented, SpecStatus::Verified));
-        assert!(is_valid_transition(SpecStatus::Verified, SpecStatus::Archived));
+        assert!(is_valid_transition(
+            SpecStatus::Approved,
+            SpecStatus::InProgress
+        ));
+        assert!(is_valid_transition(
+            SpecStatus::InProgress,
+            SpecStatus::Implemented
+        ));
+        assert!(is_valid_transition(
+            SpecStatus::Implemented,
+            SpecStatus::Verified
+        ));
+        assert!(is_valid_transition(
+            SpecStatus::Verified,
+            SpecStatus::Archived
+        ));
         assert!(is_valid_transition(SpecStatus::Archived, SpecStatus::Draft));
     }
 
@@ -510,11 +521,23 @@ mod tests {
         // Same status
         assert!(!is_valid_transition(SpecStatus::Draft, SpecStatus::Draft));
         // Skip ahead
-        assert!(!is_valid_transition(SpecStatus::Draft, SpecStatus::Approved));
-        assert!(!is_valid_transition(SpecStatus::Draft, SpecStatus::Implemented));
+        assert!(!is_valid_transition(
+            SpecStatus::Draft,
+            SpecStatus::Approved
+        ));
+        assert!(!is_valid_transition(
+            SpecStatus::Draft,
+            SpecStatus::Implemented
+        ));
         // Backwards
-        assert!(!is_valid_transition(SpecStatus::Approved, SpecStatus::Draft));
-        assert!(!is_valid_transition(SpecStatus::Implemented, SpecStatus::InProgress));
+        assert!(!is_valid_transition(
+            SpecStatus::Approved,
+            SpecStatus::Draft
+        ));
+        assert!(!is_valid_transition(
+            SpecStatus::Implemented,
+            SpecStatus::InProgress
+        ));
     }
 
     #[test]

@@ -4,8 +4,8 @@ use crate::command::BenchRunOptions;
 use crate::data::BenchCaseFixture;
 use crate::model::BenchGenerationResult;
 use crate::suites::{
-    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, accuracy_metric,
-    codebleu_score, count_passed_failed, evaluate_exact_match_case, skipped_metrics_for_suite,
+    BenchCaseEvaluation, BenchMetricEvaluation, BenchSuiteAdapter, accuracy_metric, codebleu_score,
+    count_passed_failed, evaluate_exact_match_case, skipped_metrics_for_suite,
 };
 
 pub(super) static ADAPTER: AppsAdapter = AppsAdapter;
@@ -38,12 +38,14 @@ impl BenchSuiteAdapter for AppsAdapter {
         let (selected_response, similarity) =
             crate::suites::best_exact_or_similarity_sample(generation, &case.reference);
         let codebleu = codebleu_score(&selected_response, &case.reference);
-        
+
         evaluate_exact_match_case(case, generation, options, "APPS", |passed, _| {
             if passed {
                 "APPS native adapter records accuracy and CodeBLEU-style similarity for generated programs.".to_string()
             } else {
-                format!("APPS native adapter records accuracy and CodeBLEU-style similarity for generated programs. (similarity={similarity:.3}, codebleu={codebleu:.3})")
+                format!(
+                    "APPS native adapter records accuracy and CodeBLEU-style similarity for generated programs. (similarity={similarity:.3}, codebleu={codebleu:.3})"
+                )
             }
         })
     }

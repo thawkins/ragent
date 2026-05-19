@@ -117,14 +117,16 @@ impl Provider for AnthropicProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
+        let resolved = base_url
+            .unwrap_or(Self::API_BASE)
+            .trim_end_matches('/')
+            .to_string();
         let client = AnthropicClient {
             api_key: api_key.to_string(),
-            base_url: base_url
-                .unwrap_or(Self::API_BASE)
-                .trim_end_matches('/')
-                .to_string(),
+            base_url: resolved.clone(),
             http: crate::provider::http_client::create_streaming_http_client(),
         };
+        tracing::info!(chat_endpoint = %format!("{}/v1/messages", resolved), models_endpoint = %format!("{}/v1/models", resolved), "Anthropic provider connected");
         Ok(Box::new(client))
     }
 }
@@ -270,8 +272,10 @@ pub async fn list_anthropic_models(
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .context("Failed to fetch Anthropic models")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Anthropic model discovery failed");
+        })
+        .with_context(|| format!("Failed to fetch Anthropic models at {url}"))?;
     if !resp.status().is_success() {
         bail!("Anthropic models endpoint returned HTTP {}", resp.status());
     }
@@ -420,8 +424,10 @@ impl LlmClient for AnthropicClient {
             .json(&body)
             .send()
             .await
-            .context("Failed to send request to Anthropic API")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Anthropic chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to Anthropic API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_else(|e| {

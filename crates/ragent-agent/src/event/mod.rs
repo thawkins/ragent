@@ -8,7 +8,10 @@
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use tokio::sync::broadcast;
 
 /// Reason an LLM stopped generating a response.

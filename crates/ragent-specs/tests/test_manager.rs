@@ -1,4 +1,4 @@
-use ragent_specs::manager::{SpecManager, SpecFilter, SortBy, is_valid_transition};
+use ragent_specs::manager::{SortBy, SpecFilter, SpecManager, is_valid_transition};
 use ragent_specs::spec::SpecStatus;
 use std::path::PathBuf;
 
@@ -10,7 +10,10 @@ fn specs_root() -> PathBuf {
 async fn test_manager_real_project_discover() {
     let mgr = SpecManager::new(specs_root());
     let specs = mgr.discover_specs().await.unwrap();
-    assert!(!specs.is_empty(), "Should discover at least one spec in the project");
+    assert!(
+        !specs.is_empty(),
+        "Should discover at least one spec in the project"
+    );
     let ids: Vec<&str> = specs.iter().map(|s| s.id.as_str()).collect();
     assert!(ids.contains(&"testspec"), "Should find testspec");
 }
@@ -35,20 +38,22 @@ async fn test_manager_real_project_list_by_status() {
         .list_specs(&SpecFilter::new().with_status(SpecStatus::Draft))
         .await
         .unwrap();
-    assert!(!draft_specs.is_empty() || {
-        let all = mgr.list_specs(&SpecFilter::new().with_archived()).await.unwrap();
-        !all.is_empty()
-    });
+    assert!(
+        !draft_specs.is_empty() || {
+            let all = mgr
+                .list_specs(&SpecFilter::new().with_archived())
+                .await
+                .unwrap();
+            !all.is_empty()
+        }
+    );
 }
 
 #[tokio::test]
 async fn test_manager_real_project_search() {
     let mgr = SpecManager::new(specs_root());
     let results = mgr.search_specs("EARS").await.unwrap();
-    assert!(
-        !results.is_empty(),
-        "Should find specs mentioning EARS"
-    );
+    assert!(!results.is_empty(), "Should find specs mentioning EARS");
     let testspec = results.iter().find(|r| r.spec.id.as_str() == "testspec");
     assert!(testspec.is_some(), "testspec should mention EARS");
 }
@@ -59,7 +64,10 @@ async fn test_manager_real_project_search_snippets() {
     let results = mgr.search_specs("requirement").await.unwrap();
     assert!(!results.is_empty());
     for result in &results {
-        assert!(!result.snippets.is_empty(), "Search results should have snippets");
+        assert!(
+            !result.snippets.is_empty(),
+            "Search results should have snippets"
+        );
     }
 }
 
@@ -82,7 +90,10 @@ async fn test_manager_real_project_sorting() {
 async fn test_manager_real_project_read_and_validate_transitions() {
     let mgr = SpecManager::new(specs_root());
     let specs = mgr.discover_specs().await.unwrap();
-    let testspec = specs.into_iter().find(|s| s.id.as_str() == "testspec").unwrap();
+    let testspec = specs
+        .into_iter()
+        .find(|s| s.id.as_str() == "testspec")
+        .unwrap();
 
     let current = testspec.status;
     let next = match current {
@@ -116,7 +127,10 @@ fn test_transition_graph_completeness() {
             SpecStatus::Verified => vec![SpecStatus::Archived],
             SpecStatus::Archived => vec![SpecStatus::Draft],
         };
-        assert!(!next.is_empty(), "Every status must have at least one transition");
+        assert!(
+            !next.is_empty(),
+            "Every status must have at least one transition"
+        );
         for &to in &next {
             assert!(is_valid_transition(status, to));
         }

@@ -76,7 +76,9 @@ impl Provider for AzureFoundryProvider {
                 streaming: true,
                 vision: false,
                 tool_use: true,
-                thinking_levels: crate::provider::thinking::openai_thinking_levels_for_model("o3-mini"),
+                thinking_levels: crate::provider::thinking::openai_thinking_levels_for_model(
+                    "o3-mini",
+                ),
             },
             context_window: 200_000,
             max_output: Some(100_000),
@@ -102,9 +104,12 @@ impl Provider for AzureFoundryProvider {
         let resolved_base = configured_endpoint
             .or(base_url)
             .or(env_endpoint.as_deref())
-            .unwrap_or(DEFAULT_AZURE_FOUNDRY_HOST);
+            .unwrap_or(DEFAULT_AZURE_FOUNDRY_HOST)
+            .trim_end_matches('/')
+            .to_string();
 
-        let client = AzureFoundryClient::new(api_key, resolved_base);
+        let client = AzureFoundryClient::new(api_key, &resolved_base);
+        tracing::info!(chat_endpoint = %format!("{}/openai/v1/chat/completions", resolved_base), models_endpoint = %format!("{}/openai/v1/models", resolved_base), "Azure AI Foundry provider connected");
         Ok(Box::new(client))
     }
 }
@@ -140,7 +145,10 @@ impl AzureFoundryClient {
 ///
 /// Used by the TUI for dynamic model discovery without needing to construct
 /// a full client.
-pub async fn discover_azure_foundry_models(api_key: &str, base_url: &str) -> Result<Vec<ModelInfo>> {
+pub async fn discover_azure_foundry_models(
+    api_key: &str,
+    base_url: &str,
+) -> Result<Vec<ModelInfo>> {
     let base = base_url.trim_end_matches('/').to_string();
     let url = format!("{}/models", base);
     let response = crate::provider::http_client::create_http_client()
@@ -149,8 +157,10 @@ pub async fn discover_azure_foundry_models(api_key: &str, base_url: &str) -> Res
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
-        .context("Failed to connect to Azure AI Foundry")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Azure AI Foundry model discovery failed");
+        })
+        .with_context(|| format!("Failed to connect to Azure AI Foundry at {url}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -166,7 +176,8 @@ pub async fn discover_azure_foundry_models(api_key: &str, base_url: &str) -> Res
         .data
         .into_iter()
         .map(|m| {
-            let supports_tools = m.id.starts_with("gpt-4") || m.id == "o1" || m.id.starts_with("o3");
+            let supports_tools =
+                m.id.starts_with("gpt-4") || m.id == "o1" || m.id.starts_with("o3");
             let supports_vision = m.id.contains("o1") || m.id.contains("4o");
             let supports_reasoning = m.id == "o1" || m.id.starts_with("o3");
 
@@ -205,25 +216,37 @@ impl LlmClient for AzureFoundryClient {
     async fn chat(
         &self,
         request: crate::llm::ChatRequest,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>> {
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>>
+    {
         // Azure AI Foundry uses the OpenAI-compatible endpoint but with api-key header.
         // We override the request to use api-key instead of Authorization: Bearer.
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let url = if self.base_url.contains(".openai.azure.com") {
+            if self.base_url.ends_with("/openai") {
+                format!("{}/v1/chat/completions", self.base_url)
+            } else {
+                format!("{}/openai/v1/chat/completions", self.base_url)
+            }
+        } else {
+            format!("{}/openai/v1/chat/completions", self.base_url)
+        };
         let body = self.inner.build_request_body(&request);
 
-                            tracing::info!(
-                                endpoint = %url,
-                                model = %request.model,
-                                "[azure_foundry/{}] Sending chat request", request.model
-                            );        let response = crate::provider::http_client::create_streaming_http_client()
+        tracing::info!(
+            endpoint = %url,
+            model = %request.model,
+            "[azure_foundry/{}] Sending chat request", request.model
+        );
+        let response = crate::provider::http_client::create_streaming_http_client()
             .post(&url)
             .header("api-key", &self.api_key)
             .header("content-type", "application/json")
             .json(&body)
             .send()
             .await
-            .context("Failed to send request to Azure AI Foundry")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Azure AI Foundry chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to Azure AI Foundry at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let body_text = response.text().await.unwrap_or_else(|e| {

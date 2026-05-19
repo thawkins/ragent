@@ -52,8 +52,10 @@ impl OllamaCloudProvider {
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
-            .context("Failed to connect to Ollama Cloud")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Ollama Cloud model discovery failed");
+            })
+            .with_context(|| format!("Failed to connect to Ollama Cloud at {url}"))?;
         if !response.status().is_success() {
             bail!(
                 "Ollama Cloud API returned status {} from {}",
@@ -263,14 +265,16 @@ impl Provider for OllamaCloudProvider {
             api_key.to_string()
         };
 
+        let url = base_url
+            .unwrap_or(&self.base_url)
+            .trim_end_matches('/')
+            .to_string();
         let client = OllamaCloudClient {
             api_key: key,
-            base_url: base_url
-                .unwrap_or(&self.base_url)
-                .trim_end_matches('/')
-                .to_string(),
+            base_url: url.clone(),
             http: crate::provider::http_client::create_streaming_http_client(),
         };
+        tracing::info!(chat_endpoint = %format!("{}/api/chat", url), models_endpoint = %format!("{}/api/tags", url), "Ollama Cloud provider connected");
         Ok(Box::new(client))
     }
 }
@@ -481,11 +485,16 @@ impl LlmClient for OllamaCloudClient {
                 .send(),
         )
         .await
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Ollama Cloud chat request timed out");
+        })
         .map_err(|_| {
             anyhow::anyhow!("Ollama Cloud: initial response timed out after {timeout_secs}s")
         })?
-        .context("Failed to connect to Ollama Cloud")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Ollama Cloud chat request failed");
+        })
+        .with_context(|| format!("Failed to connect to Ollama Cloud at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();

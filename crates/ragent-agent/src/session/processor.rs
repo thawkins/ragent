@@ -379,9 +379,10 @@ pub(crate) async fn check_permission_with_prompt(
                         ..
                     })) if rid == request_id => {
                         // If user chose 'Always', record the grant
-                                                  if allowed && decision == crate::permission::PermissionDecision::Always {
-                                                      let mut c = checker.write();
-                                                      c.record_always(permission, resource);                            debug!(
+                        if allowed && decision == crate::permission::PermissionDecision::Always {
+                            let mut c = checker.write();
+                            c.record_always(permission, resource);
+                            debug!(
                                 "Recorded always-grant for permission={permission}, resource={resource}"
                             );
                         }
@@ -661,15 +662,30 @@ impl SessionProcessor {
                             .filter(|s| !s.trim().is_empty())
                     })
             }
-            _ => None,
+                          "azure_foundry" => {
+                              let cfg = crate::Config::load().ok();
+                              self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
+                                  .await
+                                  .ok()
+                                  .flatten()
+                                  .filter(|s: &String| !s.trim().is_empty())
+                                  .or_else(|| {
+                                      cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
+                                          .and_then(|p| p.api.and_then(|a| a.base_url))
+                                  })
+                                  .or_else(|| {
+                                      std::env::var("AZURE_AI_FOUNDRY_BASE")
+                                          .ok()
+                                          .filter(|s| !s.trim().is_empty())
+                                  })
+                          }            _ => None,
         };
-
-                  tracing::info!(
-                      provider = %model_ref.provider_id,
-                      model = %model_ref.model_id,
-                      endpoint = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
-                      "creating LLM client"
-                  );
+        tracing::info!(
+            provider = %model_ref.provider_id,
+            model = %model_ref.model_id,
+            endpoint = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
+            "creating LLM client"
+        );
         let client = {
             let _scope = profiler.scope("llm.create_client");
             match provider
@@ -869,7 +885,9 @@ impl SessionProcessor {
                                  **Status:** {}\n\
                                  **Title:** {}\n\n\
                                  ### Requirements\n\n",
-                                spec.id, spec.status.as_str(), spec.title
+                                spec.id,
+                                spec.status.as_str(),
+                                spec.title
                             );
                             for req in &spec.requirements {
                                 spec_section.push_str(&format!(
@@ -881,7 +899,9 @@ impl SessionProcessor {
                             for task in &spec.tasks {
                                 spec_section.push_str(&format!(
                                     "- `{}` — {} ({})\n",
-                                    task.id, task.title, task.status.as_str()
+                                    task.id,
+                                    task.title,
+                                    task.status.as_str()
                                 ));
                             }
                             spec_section.push_str(
@@ -929,7 +949,7 @@ impl SessionProcessor {
             )
         };
 
-                  let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
+        let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.
         // Note: history already contains the user message we just stored,
         // so we check for the absence of any assistant messages instead.
@@ -1028,11 +1048,12 @@ impl SessionProcessor {
         self.event_bus.set_step(session_id, 0);
         // Single-step agents (e.g. "chat") don't use tools — omit definitions
         // so providers aren't confused by unused tool schemas.
-        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = std::sync::Arc::new(if max_steps <= 1 {
-            Vec::new()
-        } else {
-            self.tool_registry.definitions()
-        });
+        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> =
+            std::sync::Arc::new(if max_steps <= 1 {
+                Vec::new()
+            } else {
+                self.tool_registry.definitions()
+            });
         let mut assistant_parts: Vec<MessagePart> = Vec::new();
         let mut agent_switch_requested = false;
         let mut task_complete_requested = false;
@@ -1154,21 +1175,22 @@ impl SessionProcessor {
                         }
                     }
 
-                                                        // Build request (fresh for each attempt)
-                                                        let attempt_request = ChatRequest {
-                                                            model: model_ref.model_id.clone(),
-                                                            messages: chat_messages.clone(),
-                                                            tools: (*tool_definitions).clone(),
-                                                            temperature: agent.temperature,
-                                                            top_p: agent.top_p,
-                                                            max_tokens: None,
-                                                            system: Some(system_prompt.clone()),
-                                                            options: agent.options.clone(),
-                                                            session_id: Some(session_id.to_string()),
-                                                            request_id: Some(Uuid::new_v4().to_string()),
-                                                            stream_timeout_secs: Some(self.stream_config.timeout_secs),
-                                                            thinking: agent.thinking.clone(),
-                                                        };                    self.event_bus.publish(Event::RequestStarted {
+                    // Build request (fresh for each attempt)
+                    let attempt_request = ChatRequest {
+                        model: model_ref.model_id.clone(),
+                        messages: chat_messages.clone(),
+                        tools: (*tool_definitions).clone(),
+                        temperature: agent.temperature,
+                        top_p: agent.top_p,
+                        max_tokens: None,
+                        system: Some(system_prompt.clone()),
+                        options: agent.options.clone(),
+                        session_id: Some(session_id.to_string()),
+                        request_id: Some(Uuid::new_v4().to_string()),
+                        stream_timeout_secs: Some(self.stream_config.timeout_secs),
+                        thinking: agent.thinking.clone(),
+                    };
+                    self.event_bus.publish(Event::RequestStarted {
                         session_id: session_id.to_string(),
                         outbound_bytes: chat_request_payload_bytes(&attempt_request),
                     });
@@ -1599,23 +1621,23 @@ impl SessionProcessor {
                         input: input.clone(),
                     });
 
-                                          let tool_ctx = ToolContext {
-                                              session_id: session_id.to_string(),
-                                              working_dir: working_dir.clone(),
-                                              event_bus: self.event_bus.clone(),
-                                              storage: Some(self.session_manager.storage().clone()),
-                                              task_manager: self.task_manager.get().cloned(),
-                                              active_model: Some(model_ref.clone()),
-                                              team_context: team_context_for_session.clone(),
-                                              team_manager: self
-                                                  .team_manager
-                                                  .get()
-                                                  .cloned()
-                                                  .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
-                                              code_index: self.code_index.get().cloned(),
-                                              spec_manager: self.spec_manager.get().cloned(),
-                                              active_spec_id: self.active_spec.lock().unwrap().clone(),
-                                          };
+                    let tool_ctx = ToolContext {
+                        session_id: session_id.to_string(),
+                        working_dir: working_dir.clone(),
+                        event_bus: self.event_bus.clone(),
+                        storage: Some(self.session_manager.storage().clone()),
+                        task_manager: self.task_manager.get().cloned(),
+                        active_model: Some(model_ref.clone()),
+                        team_context: team_context_for_session.clone(),
+                        team_manager: self
+                            .team_manager
+                            .get()
+                            .cloned()
+                            .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
+                        code_index: self.code_index.get().cloned(),
+                        spec_manager: self.spec_manager.get().cloned(),
+                        active_spec_id: self.active_spec.lock().unwrap().clone(),
+                    };
                     let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
@@ -2042,7 +2064,12 @@ impl SessionProcessor {
                                 .filter(|tc| {
                                     matches!(
                                         tc.name.as_str(),
-                                        "write" | "edit" | "multiedit" | "patch" | "create" | "append_to_file"
+                                        "write"
+                                            | "edit"
+                                            | "multiedit"
+                                            | "patch"
+                                            | "create"
+                                            | "append_to_file"
                                     )
                                 })
                                 .collect();
@@ -2051,8 +2078,11 @@ impl SessionProcessor {
                                     if let Ok(mut spec) = spec_mgr.read_spec(&id).await {
                                         let mut updated = false;
                                         for task in spec.tasks.iter_mut() {
-                                            if task.status == ragent_specs::spec::TaskStatus::InProgress {
-                                                task.status = ragent_specs::spec::TaskStatus::Completed;
+                                            if task.status
+                                                == ragent_specs::spec::TaskStatus::InProgress
+                                            {
+                                                task.status =
+                                                    ragent_specs::spec::TaskStatus::Completed;
                                                 task.completed_at = Some(
                                                     std::time::SystemTime::now()
                                                         .duration_since(std::time::UNIX_EPOCH)
@@ -2287,23 +2317,25 @@ impl SessionProcessor {
             }
         };
 
-                  // Build a minimal system prompt using the agent's configured prompt.
-                // Note: agents_md was already collected above with discovery info
-                let (git_status, readme, _, file_tree) =
-                    crate::agent::collect_prompt_context(&working_dir).await;
-                let run_init_config = crate::Config::load().unwrap_or_default();
-                let system_prompt = crate::agent::build_system_prompt_with_storage(
-                    agent,
-                    &working_dir,
-                    &file_tree,
-                    None,
-                    Some(&git_status),
-                    Some(&readme),
-                    Some(&agents_md),
-                    Some(self.session_manager.storage()),
-                    Some(&run_init_config.memory),
-                                );        let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
-                                           Please acknowledge them briefly.";        let init_messages = vec![ChatMessage {
+        // Build a minimal system prompt using the agent's configured prompt.
+        // Note: agents_md was already collected above with discovery info
+        let (git_status, readme, _, file_tree) =
+            crate::agent::collect_prompt_context(&working_dir).await;
+        let run_init_config = crate::Config::load().unwrap_or_default();
+        let system_prompt = crate::agent::build_system_prompt_with_storage(
+            agent,
+            &working_dir,
+            &file_tree,
+            None,
+            Some(&git_status),
+            Some(&readme),
+            Some(&agents_md),
+            Some(self.session_manager.storage()),
+            Some(&run_init_config.memory),
+        );
+        let init_text = "AGENTS.md project guidelines have been loaded.\n\n\
+                                           Please acknowledge them briefly.";
+        let init_messages = vec![ChatMessage {
             role: "user".to_string(),
             content: ChatContent::Text(init_text.to_string()),
         }];
@@ -2363,8 +2395,9 @@ impl SessionProcessor {
                 session_id: session_id.to_string(),
                 text: ack_text.clone(),
             });
-                        let init_user_text = "AGENTS.md project guidelines have been loaded.\n\n\
-                                                Please acknowledge them briefly.";            let user_msg = Message::new(
+            let init_user_text = "AGENTS.md project guidelines have been loaded.\n\n\
+                                                Please acknowledge them briefly.";
+            let user_msg = Message::new(
                 session_id,
                 Role::User,
                 vec![MessagePart::Text {
@@ -2663,53 +2696,55 @@ fn compact_history_with_atomic_tool_calls(
         }
     }
 
-          // Trim from the beginning, respecting atomic groups
-        // Use VecDeque for O(1) removal from front - fixes O(n²) complexity
-        let mut trimmed: std::collections::VecDeque<Message> = messages.iter().cloned().collect();
-        let mut current_tokens: usize = total_tokens;
-    
-        // Convert must_keep to account for VecDeque indexing
-        let mut must_keep: std::collections::HashSet<usize> = must_keep;
-    
-        while current_tokens > max_tokens && trimmed.len() > 2 {
-            // Always keep at least the last 2 messages (user query + context)
-            let to_remove = 0; // Try removing the oldest message
-    
-            // Check if removing this would break atomicity
-            let would_break_atomicity = must_keep.contains(&to_remove)
-                || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
-    
-            if would_break_atomicity {
-                // Skip this message and try the next
-                break;
-            }
-    
-            if let Some(msg) = trimmed.pop_front() {
-                let removed_tokens = estimate_tokens(&msg);
-                current_tokens = current_tokens.saturating_sub(removed_tokens);
-    
-                // Update indices in must_keep
-                let mut new_must_keep: std::collections::HashSet<usize> = std::collections::HashSet::new();
-                for &idx in &must_keep {
-                    if idx > to_remove {
-                        new_must_keep.insert(idx - 1);
-                    } else if idx != to_remove {
-                        new_must_keep.insert(idx);
-                    }
-                }
-                must_keep = new_must_keep;
-            }
+    // Trim from the beginning, respecting atomic groups
+    // Use VecDeque for O(1) removal from front - fixes O(n²) complexity
+    let mut trimmed: std::collections::VecDeque<Message> = messages.iter().cloned().collect();
+    let mut current_tokens: usize = total_tokens;
+
+    // Convert must_keep to account for VecDeque indexing
+    let mut must_keep: std::collections::HashSet<usize> = must_keep;
+
+    while current_tokens > max_tokens && trimmed.len() > 2 {
+        // Always keep at least the last 2 messages (user query + context)
+        let to_remove = 0; // Try removing the oldest message
+
+        // Check if removing this would break atomicity
+        let would_break_atomicity = must_keep.contains(&to_remove)
+            || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
+
+        if would_break_atomicity {
+            // Skip this message and try the next
+            break;
         }
-    
-        tracing::debug!(
-            original_count = messages.len(),
-            trimmed_count = trimmed.len(),
-            original_tokens = total_tokens,
-            final_tokens = current_tokens,
-            "Compacted message history"
-        );
-    
-        trimmed.into_iter().collect()}
+
+        if let Some(msg) = trimmed.pop_front() {
+            let removed_tokens = estimate_tokens(&msg);
+            current_tokens = current_tokens.saturating_sub(removed_tokens);
+
+            // Update indices in must_keep
+            let mut new_must_keep: std::collections::HashSet<usize> =
+                std::collections::HashSet::new();
+            for &idx in &must_keep {
+                if idx > to_remove {
+                    new_must_keep.insert(idx - 1);
+                } else if idx != to_remove {
+                    new_must_keep.insert(idx);
+                }
+            }
+            must_keep = new_must_keep;
+        }
+    }
+
+    tracing::debug!(
+        original_count = messages.len(),
+        trimmed_count = trimmed.len(),
+        original_tokens = total_tokens,
+        final_tokens = current_tokens,
+        "Compacted message history"
+    );
+
+    trimmed.into_iter().collect()
+}
 
 fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {
     if text.chars().count() <= max_chars {
@@ -2882,7 +2917,7 @@ async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
             MessagePart::Reasoning { .. } => {
                 // Skip reasoning parts in chat content
             }
-              MessagePart::Image(img) => {
+            MessagePart::Image(img) => {
                 // Read the file and encode as a base64 data URI using spawn_blocking
                 // to avoid blocking the async runtime for large image files.
                 let mime_type = img.mime_type.clone();
@@ -2902,7 +2937,8 @@ async fn parts_to_chat_content(parts: &[MessagePart]) -> ChatContent {
                         warn!(path = %path_display, error = %e, "spawn_blocking task failed");
                     }
                 }
-            }        }
+            }
+        }
     }
 
     ChatContent::Parts(content_parts)
@@ -3120,38 +3156,38 @@ mod tests {
         assert!(truncated.len() < content.len());
     }
 
-          #[tokio::test]
-          async fn test_history_to_chat_messages_uses_tool_output_content_field() {
-              let message = Message::new(
-                  "session-1",
-                  Role::Assistant,
-                  vec![MessagePart::ToolCall {
-                      tool: "read".to_string(),
-                      call_id: "call-1".to_string(),
-                      state: ToolCallState {
-                          status: ToolCallStatus::Completed,
-                          input: json!({"path": "src/lib.rs"}),
-                          output: Some(json!({
-                              "content": "fn main() {}\n",
-                              "line_count": 1
-                          })),
-                          error: None,
-                          duration_ms: Some(3),
-                      },
-                  }],
-              );
-    
-              let chat = history_to_chat_messages(&[message]).await;
-              assert_eq!(chat.len(), 2);
-    
-              let ChatContent::Parts(parts) = &chat[1].content else {
-                  panic!("expected tool result parts");
-              };
-              let ContentPart::ToolResult { content, .. } = &parts[0] else {
-                  panic!("expected tool result content");
-              };
-              assert_eq!(content, "fn main() {}\n");
-          }
+    #[tokio::test]
+    async fn test_history_to_chat_messages_uses_tool_output_content_field() {
+        let message = Message::new(
+            "session-1",
+            Role::Assistant,
+            vec![MessagePart::ToolCall {
+                tool: "read".to_string(),
+                call_id: "call-1".to_string(),
+                state: ToolCallState {
+                    status: ToolCallStatus::Completed,
+                    input: json!({"path": "src/lib.rs"}),
+                    output: Some(json!({
+                        "content": "fn main() {}\n",
+                        "line_count": 1
+                    })),
+                    error: None,
+                    duration_ms: Some(3),
+                },
+            }],
+        );
+
+        let chat = history_to_chat_messages(&[message]).await;
+        assert_eq!(chat.len(), 2);
+
+        let ChatContent::Parts(parts) = &chat[1].content else {
+            panic!("expected tool result parts");
+        };
+        let ContentPart::ToolResult { content, .. } = &parts[0] else {
+            panic!("expected tool result content");
+        };
+        assert_eq!(content, "fn main() {}\n");
+    }
     #[test]
     fn test_chat_request_payload_bytes_counts_serialized_request() {
         let request = ChatRequest {

@@ -1,6 +1,12 @@
 # Release
 
-## Current Version: 0.1.0-alpha.79
+## Current Version: 0.1.0-alpha.82
+
+### Added
+- **azProvider fixes** — Applied fixes to Azure provider implementation.
+- **`/config show`** — Added `/config show` slash command to display current configuration.
+
+## Previous: 0.1.0-alpha.81
 
 ### Fixed
 - **Azure endpoint logging** — TUI log panel now displays the full endpoint URL for Azure AI Foundry requests.

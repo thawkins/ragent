@@ -158,7 +158,9 @@ impl SpecIo {
     async fn modified_time(path: &Path) -> Result<u64, SpecError> {
         let meta = fs::metadata(path).await?;
         let mtime = meta.modified()?;
-        let dur = mtime.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        let dur = mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
         Ok(dur.as_secs())
     }
 
@@ -231,78 +233,82 @@ impl SpecIo {
         reviewers
     }
 
-        /// Parse tasks from PLAN.md content.
-        ///
-        /// Extracts task table rows with columns:
-        /// ID, Title, Requirement, Effort, Priority, Dependencies.
-        fn parse_tasks(plan_md: &str) -> Vec<crate::spec::Task> {
-            let mut tasks = Vec::new();
-            let mut in_task_section = false;
-            for line in plan_md.lines() {
-                let trimmed = line.trim();
-                if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks") {
-                    in_task_section = true;
-                    continue;
+    /// Parse tasks from PLAN.md content.
+    ///
+    /// Extracts task table rows with columns:
+    /// ID, Title, Requirement, Effort, Priority, Dependencies.
+    fn parse_tasks(plan_md: &str) -> Vec<crate::spec::Task> {
+        let mut tasks = Vec::new();
+        let mut in_task_section = false;
+        for line in plan_md.lines() {
+            let trimmed = line.trim();
+            if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks")
+            {
+                in_task_section = true;
+                continue;
+            }
+            if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
+                break;
+            }
+            if !in_task_section || (trimmed.starts_with("|") && trimmed.contains("ID")) {
+                continue;
+            }
+            // Parse table rows: | ID | Title | Req | Effort | Priority | Status | Dependencies |
+            let cells: Vec<&str> = trimmed
+                .split('|')
+                .map(|c| c.trim())
+                .filter(|c| !c.is_empty())
+                .collect();
+            if cells.len() >= 6 {
+                let id = cells[0].to_string();
+                if id.starts_with("T-") {
+                    let title = cells.get(1).copied().unwrap_or("").to_string();
+                    let req = cells.get(2).copied().unwrap_or("").to_string();
+                    let effort = cells.get(3).copied().unwrap_or("").to_string();
+                    let priority = cells.get(4).copied().unwrap_or("").to_string();
+                    // Status is column 5 if 7+ columns, otherwise fallback to Pending
+                    let status_str = cells.get(5).copied().unwrap_or("");
+                    let status = if cells.len() >= 7 {
+                        crate::spec::TaskStatus::parse(status_str)
+                            .unwrap_or(crate::spec::TaskStatus::Pending)
+                    } else {
+                        crate::spec::TaskStatus::Pending
+                    };
+                    let deps = cells
+                        .get(if cells.len() >= 7 { 6 } else { 5 })
+                        .map(|d| {
+                            if *d == "—" || *d == "-" || d.is_empty() {
+                                Vec::new()
+                            } else {
+                                d.split(',').map(|s| s.trim().to_string()).collect()
+                            }
+                        })
+                        .unwrap_or_default();
+                    tasks.push(crate::spec::Task {
+                        id: id.clone(),
+                        title,
+                        description: String::new(),
+                        linked_requirements: if req.is_empty() || req == "—" || req == "-" {
+                            Vec::new()
+                        } else {
+                            vec![req]
+                        },
+                        status,
+                        effort,
+                        priority,
+                        dependencies: deps,
+                        completed_at: if status == crate::spec::TaskStatus::Completed {
+                            Some(1) // Round-tripped from file; actual timestamp not preserved
+                        } else {
+                            None
+                        },
+                    });
                 }
-                if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
-                    break;
-                }
-                if !in_task_section || (trimmed.starts_with("|") && trimmed.contains("ID")) {
-                    continue;
-                }
-                                  // Parse table rows: | ID | Title | Req | Effort | Priority | Status | Dependencies |
-                                  let cells: Vec<&str> = trimmed
-                                      .split('|')
-                                      .map(|c| c.trim())
-                                      .filter(|c| !c.is_empty())
-                                      .collect();
-                                  if cells.len() >= 6 {
-                                      let id = cells[0].to_string();
-                                      if id.starts_with("T-") {
-                                          let title = cells.get(1).copied().unwrap_or("").to_string();
-                                          let req = cells.get(2).copied().unwrap_or("").to_string();
-                                          let effort = cells.get(3).copied().unwrap_or("").to_string();
-                                          let priority = cells.get(4).copied().unwrap_or("").to_string();
-                                          // Status is column 5 if 7+ columns, otherwise fallback to Pending
-                                          let status_str = cells.get(5).copied().unwrap_or("");
-                                          let status = if cells.len() >= 7 {
-                                              crate::spec::TaskStatus::parse(status_str)
-                                                  .unwrap_or(crate::spec::TaskStatus::Pending)
-                                          } else {
-                                              crate::spec::TaskStatus::Pending
-                                          };
-                                          let deps = cells
-                                              .get(if cells.len() >= 7 { 6 } else { 5 })
-                                              .map(|d| {
-                                                  if *d == "—" || *d == "-" || d.is_empty() {
-                                                      Vec::new()
-                                                  } else {
-                                                      d.split(',').map(|s| s.trim().to_string()).collect()
-                                                  }
-                                              })
-                                              .unwrap_or_default();
-                                                                                      tasks.push(crate::spec::Task {
-                                                                                          id: id.clone(),
-                                                                                          title,
-                                                                                          description: String::new(),
-                                                                                          linked_requirements: if req.is_empty() || req == "—" || req == "-" {
-                                                                                              Vec::new()
-                                                                                          } else {
-                                                                                              vec![req]
-                                                                                          },
-                                                                                          status,
-                                                                                          effort,
-                                                                                          priority,
-                                                                                          dependencies: deps,
-                                                                                          completed_at: if status == crate::spec::TaskStatus::Completed {
-                                                                                              Some(1) // Round-tripped from file; actual timestamp not preserved
-                                                                                          } else {
-                                                                                              None
-                                                                                          },
-                                                                                      });                                      }
-                                  }            }
-            tasks
-        }}
+            }
+        }
+        tasks
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -320,7 +326,10 @@ mod tests {
         assert!(dir.is_dir());
         assert!(dir.join("SPEC.md").is_file());
         assert!(dir.join("PLAN.md").is_file());
-        assert_eq!(fs::read_to_string(dir.join("SPEC.md")).await.unwrap(), spec_md);
+        assert_eq!(
+            fs::read_to_string(dir.join("SPEC.md")).await.unwrap(),
+            spec_md
+        );
     }
 
     #[tokio::test]
@@ -417,8 +426,14 @@ mod tests {
         let spec_path = root.join("write-test/SPEC.md");
         let plan_path = root.join("write-test/PLAN.md");
         assert!(spec_path.is_file());
-        assert_eq!(fs::read_to_string(spec_path).await.unwrap(), "# Updated Spec\n");
-        assert_eq!(fs::read_to_string(plan_path).await.unwrap(), "# Updated Plan\n");
+        assert_eq!(
+            fs::read_to_string(spec_path).await.unwrap(),
+            "# Updated Spec\n"
+        );
+        assert_eq!(
+            fs::read_to_string(plan_path).await.unwrap(),
+            "# Updated Plan\n"
+        );
     }
 
     #[tokio::test]

@@ -31,9 +31,17 @@ impl BenchSuiteAdapter for RepoBenchAdapter {
         options: &BenchRunOptions,
     ) -> BenchCaseEvaluation {
         // Note: RepoBench uses edit similarity directly as score, not as fallback
-        let result = evaluate_exact_match_case(case, generation, options, "RepoBench", |_, similarity| {
-            format!("RepoBench MVP adapter records exact-match and edit-similarity scoring; CodeBLEU follows in a later phase. (similarity={similarity:.3})")
-        });
+        let result = evaluate_exact_match_case(
+            case,
+            generation,
+            options,
+            "RepoBench",
+            |_, similarity| {
+                format!(
+                    "RepoBench MVP adapter records exact-match and edit-similarity scoring; CodeBLEU follows in a later phase. (similarity={similarity:.3})"
+                )
+            },
+        );
         // Override: RepoBench uses similarity as score even when passed
         BenchCaseEvaluation {
             score: Some(crate::suites::edit_similarity(

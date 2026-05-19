@@ -41,11 +41,7 @@ impl BenchSuiteAdapter for Ds1000Adapter {
         options: &BenchRunOptions,
     ) -> Vec<BenchMetricEvaluation> {
         if options.no_exec {
-            return skipped_metrics_for_suite(
-                &["accuracy"],
-                evaluations.len(),
-                "DS-1000",
-            );
+            return skipped_metrics_for_suite(&["accuracy"], evaluations.len(), "DS-1000");
         }
 
         let (passed, failed) = count_passed_failed(evaluations);

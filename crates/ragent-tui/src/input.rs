@@ -912,16 +912,27 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                       app.provider_setup = Some(ProviderSetupStep::EnterKey {
                                           provider_id: pid.to_string(),
                                           provider_name: pname.to_string(),
-                                          key_input: String::new(),
-                                          key_cursor: 0,
-                                          endpoint_input: app
-                                              .storage
-                                              .get_setting("generic_openai_api_base")
-                                              .ok()
-                                              .flatten()
-                                              .unwrap_or_default(),
-                                          endpoint_cursor: 0,
-                                          editing_endpoint: false,
+                                          key_field: crate::input_field::InputField::new(),
+                                          endpoint_field: if pid == "generic_openai" {
+                                              crate::input_field::InputField::with_text(
+                                                  app.storage
+                                                      .get_setting("generic_openai_api_base")
+                                                      .ok()
+                                                      .flatten()
+                                                      .unwrap_or_default(),
+                                              )
+                                          } else if pid == "azure_foundry" {
+                                              crate::input_field::InputField::with_text(
+                                                  app.storage
+                                                      .get_setting("azure_foundry_api_base")
+                                                      .ok()
+                                                      .flatten()
+                                                      .unwrap_or_default(),
+                                              )
+                                          } else {
+                                              crate::input_field::InputField::new()
+                                          },
+                                          active_field: 0,
                                           error: None,
                                       });
                                   }            }
@@ -929,246 +940,97 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
             }
         },
-        ProviderSetupStep::EnterKey {
-            provider_id,
-            provider_name,
-            mut key_input,
-            mut key_cursor,
-            mut endpoint_input,
-            mut endpoint_cursor,
-            mut editing_endpoint,
-            ..
-        } => match key.code {
-            KeyCode::Char('v')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-                app.paste_provider_setup_from_clipboard();
-            }
-            KeyCode::Enter => {
-                let trimmed = key_input.trim().to_string();
-                if trimmed.is_empty() {
-                    app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                        provider_id,
-                        provider_name,
-                        key_input,
-                        key_cursor,
-                        endpoint_input,
-                        endpoint_cursor,
-                        editing_endpoint,
-                        error: Some("API key cannot be empty.".to_string()),
-                    });
-                } else if provider_id == "copilot"
-                    && ragent_core::provider::copilot::is_pat_token(&trimmed)
-                {
-                    app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                        provider_id,
-                        provider_name,
-                        key_input,
-                        key_cursor,
-                        endpoint_input,
-                        endpoint_cursor,
-                        editing_endpoint,
-                        error: Some(
-                            "PATs (github_pat_/ghp_) are not supported by \
-                             the Copilot API. Run: gh auth refresh -s copilot"
-                                .to_string(),
-                        ),
-                    });
-                                  } else {
-                                      let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
-                                      if provider_id == "generic_openai" || provider_id == "azure_foundry" {
-                                          let endpoint = endpoint_input.trim();
-                                          if endpoint.is_empty() {
-                                              let _ = app.storage.delete_setting("generic_openai_api_base");
-                                          } else {
-                                              let _ = app.storage.set_setting("generic_openai_api_base", endpoint);
-                                          }
-                                      }
-                                      let _ = app
-                                          .storage
-                                          .delete_setting(&format!("provider_{provider_id}_disabled"));
-                                      app.refresh_provider();
-                                      let models = app.models_for_provider(&provider_id);
-                                      app.provider_setup = Some(ProviderSetupStep::SelectModel {
+          ProviderSetupStep::EnterKey {
+              provider_id,
+              provider_name,
+              mut key_field,
+              mut endpoint_field,
+              mut active_field,
+              ..
+          } => match key.code {
+              KeyCode::Enter => {
+                  let trimmed = key_field.text().trim().to_string();
+                  if trimmed.is_empty() {
+                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                          provider_id,
+                          provider_name,
+                          key_field,
+                          endpoint_field,
+                          active_field,
+                          error: Some("API key cannot be empty.".to_string()),
+                      });
+                  } else if provider_id == "copilot"
+                      && ragent_core::provider::copilot::is_pat_token(&trimmed)
+                  {
+                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                          provider_id,
+                          provider_name,
+                          key_field,
+                          endpoint_field,
+                          active_field,
+                          error: Some(
+                              "PATs (github_pat_/ghp_) are not supported by                                the Copilot API. Run: gh auth refresh -s copilot"
+                                  .to_string(),
+                          ),
+                      });
+                  } else {
+                      let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
+                      if provider_id == "generic_openai" || provider_id == "azure_foundry" {
+                          let endpoint = endpoint_field.text().trim();
+                          if endpoint.is_empty() {
+                              let _ = app.storage.delete_setting(&format!("{provider_id}_api_base"));
+                          } else {
+                              let _ = app.storage.set_setting(&format!("{provider_id}_api_base"), endpoint);
+                          }
+                      }
+                      let _ = app
+                          .storage
+                          .delete_setting(&format!("provider_{provider_id}_disabled"));
+                      app.refresh_provider();
+                      let models = app.models_for_provider(&provider_id);
+                      app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                          provider_id,
+                          provider_name,
+                          models,
+                          selected: 0,
+                      });
+                  }
+              }
+              KeyCode::Tab if provider_id == "generic_openai" || provider_id == "azure_foundry" => {
+                  active_field = if active_field == 0 { 1 } else { 0 };
+                  app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                      provider_id,
+                      provider_name,
+                      key_field,
+                      endpoint_field,
+                      active_field,
+                      error: None,
+                  });
+              }
+              _ => {
+                  let is_endpoint = provider_id == "generic_openai" || provider_id == "azure_foundry";
+                  let target = if is_endpoint && active_field == 1 {
+                      &mut endpoint_field
+                  } else {
+                      &mut key_field
+                  };
+                  let consumed = target.handle_key(key);
+                  if !consumed && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+                      && key.modifiers.contains(KeyModifiers::CONTROL)
+                      && !key.modifiers.contains(KeyModifiers::ALT) {
+                      target.paste_clipboard();
+                  }
+                                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
                                           provider_id,
                                           provider_name,
-                                          models,
-                                          selected: 0,
+                                          key_field,
+                                          endpoint_field,
+                                          active_field,
+                                          error: None,
                                       });
-                                  }            }
-                          KeyCode::Tab if provider_id == "generic_openai" || provider_id == "azure_foundry" => {
-                              editing_endpoint = !editing_endpoint;
-                              app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                                  provider_id,
-                                  provider_name,
-                                  key_input,
-                                  key_cursor,
-                                  endpoint_input,
-                                  endpoint_cursor,
-                                  editing_endpoint,
-                                  error: None,
-                              });
-                          }
-                          KeyCode::Char(c) => {
-                              if (provider_id == "generic_openai" || provider_id == "azure_foundry") && editing_endpoint {                    let insert_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor);
-                    endpoint_input.insert(insert_pos, c);
-                    endpoint_cursor += 1;
-                } else {
-                    let insert_pos = cursor_byte_pos(&key_input, key_cursor);
-                    key_input.insert(insert_pos, c);
-                    key_cursor += 1;
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::Backspace => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    if endpoint_cursor > 0 {
-                        let remove_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor - 1);
-                        endpoint_input.remove(remove_pos);
-                        endpoint_cursor -= 1;
-                    }
-                } else {
-                    if key_cursor > 0 {
-                        let remove_pos = cursor_byte_pos(&key_input, key_cursor - 1);
-                        key_input.remove(remove_pos);
-                        key_cursor -= 1;
-                    }
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::Delete => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    if endpoint_cursor < endpoint_input.chars().count() {
-                        let remove_pos = cursor_byte_pos(&endpoint_input, endpoint_cursor);
-                        endpoint_input.remove(remove_pos);
-                    }
-                } else if key_cursor < key_input.chars().count() {
-                    let remove_pos = cursor_byte_pos(&key_input, key_cursor);
-                    key_input.remove(remove_pos);
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::Left => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    endpoint_cursor = endpoint_cursor.saturating_sub(1);
-                } else {
-                    key_cursor = key_cursor.saturating_sub(1);
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::Right => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    endpoint_cursor = (endpoint_cursor + 1).min(endpoint_input.chars().count());
-                } else {
-                    key_cursor = (key_cursor + 1).min(key_input.chars().count());
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::Home => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    endpoint_cursor = 0;
-                } else {
-                    key_cursor = 0;
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            KeyCode::End => {
-                if provider_id == "generic_openai" && editing_endpoint {
-                    endpoint_cursor = endpoint_input.chars().count();
-                } else {
-                    key_cursor = key_input.chars().count();
-                }
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-            _ => {
-                app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                    provider_id,
-                    provider_name,
-                    key_input,
-                    key_cursor,
-                    endpoint_input,
-                    endpoint_cursor,
-                    editing_endpoint,
-                    error: None,
-                });
-            }
-        },
-        ProviderSetupStep::DeviceFlowPending {
-            user_code,
+                                  }
+                              },
+                            ProviderSetupStep::DeviceFlowPending {            user_code,
             verification_uri,
         } => match key.code {
             KeyCode::Esc => {
@@ -1382,7 +1244,10 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 app.provider_setup = Some(ProviderSetupStep::SelectAgent { agents, selected });
             }
         },
-        ProviderSetupStep::SelectConfiguredProvider { providers, selected } => match key.code {
+        ProviderSetupStep::SelectConfiguredProvider {
+            providers,
+            selected,
+        } => match key.code {
             KeyCode::Up => {
                 let new = if selected == 0 {
                     providers.len().saturating_sub(1)
@@ -1428,9 +1293,9 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         if models.is_empty() {
                             app.provider_setup = None;
                             app.status = format!(
-                            "⚠ No models available for {} — check provider setup and model discovery",
-                            prov_name
-                        );
+                                "⚠ No models available for {} — check provider setup and model discovery",
+                                prov_name
+                            );
                         } else {
                             app.provider_setup = Some(ProviderSetupStep::SelectModel {
                                 provider_id: prov_id,
@@ -1450,7 +1315,49 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     selected,
                 });
             }
-        }
+        },
+        ProviderSetupStep::ShowProviderConfig {
+            providers,
+            selected,
+        } => match key.code {
+            KeyCode::Up => {
+                let new = if selected == 0 {
+                    providers.len().saturating_sub(1)
+                } else {
+                    selected - 1
+                };
+                app.provider_setup = Some(ProviderSetupStep::ShowProviderConfig {
+                    providers,
+                    selected: new,
+                });
+            }
+            KeyCode::Down => {
+                let new = if providers.is_empty() {
+                    0
+                } else {
+                    (selected + 1) % providers.len()
+                };
+                app.provider_setup = Some(ProviderSetupStep::ShowProviderConfig {
+                    providers,
+                    selected: new,
+                });
+            }
+            KeyCode::Enter => {
+                if let Some(prov) = providers.get(selected).cloned() {
+                    let report = app.provider_config_report(&prov);
+                    app.append_assistant_text(&report);
+                    app.status = format!("provider show: {}", prov.name);
+                }
+                app.provider_setup = None;
+            }
+            _ => {
+                app.provider_setup = Some(ProviderSetupStep::ShowProviderConfig {
+                    providers,
+                    selected,
+                });
+            }
+        },
+
         ProviderSetupStep::ResetProvider { selected } => match key.code {
             KeyCode::Up => {
                 let new = if selected == 0 {
@@ -1474,12 +1381,13 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 let _ = app
                     .storage
                     .delete_setting(&format!("provider_{pid}_last_model"));
-                if pid == "copilot" {
-                    let _ = app.storage.delete_setting("copilot_api_base");
-                } else if pid == "generic_openai" {
-                    let _ = app.storage.delete_setting("generic_openai_api_base");
-                }
-                let is_active = app
+                                  if pid == "copilot" {
+                                      let _ = app.storage.delete_setting("copilot_api_base");
+                                  } else if pid == "generic_openai" {
+                                      let _ = app.storage.delete_setting("generic_openai_api_base");
+                                  } else if pid == "azure_foundry" {
+                                      let _ = app.storage.delete_setting("azure_foundry_api_base");
+                                  }                let is_active = app
                     .configured_provider
                     .as_ref()
                     .map_or(false, |p| p.id == pid);
@@ -1686,17 +1594,14 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     let handle = match tokio::runtime::Handle::try_current() {
         Ok(h) => h,
         Err(_) => {
-            app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                provider_id: "copilot".to_string(),
-                provider_name: "GitHub Copilot".to_string(),
-                key_input: String::new(),
-                key_cursor: 0,
-                endpoint_input: String::new(),
-                endpoint_cursor: 0,
-                editing_endpoint: false,
-                error: Some("Async runtime not available for device flow.".to_string()),
-            });
-            return;
+                          app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                              provider_id: "copilot".to_string(),
+                              provider_name: "GitHub Copilot".to_string(),
+                              key_field: crate::input_field::InputField::new(),
+                              endpoint_field: crate::input_field::InputField::new(),
+                              active_field: 0,
+                              error: Some("Async runtime not available for device flow.".to_string()),
+                          });            return;
         }
     };
 
@@ -1708,17 +1613,14 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     let flow = match start {
         Ok(f) => f,
         Err(e) => {
-            app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                provider_id: "copilot".to_string(),
-                provider_name: "GitHub Copilot".to_string(),
-                key_input: String::new(),
-                key_cursor: 0,
-                endpoint_input: String::new(),
-                endpoint_cursor: 0,
-                editing_endpoint: false,
-                error: Some(format!("Device flow failed: {e}")),
-            });
-            return;
+                          app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                              provider_id: "copilot".to_string(),
+                              provider_name: "GitHub Copilot".to_string(),
+                              key_field: crate::input_field::InputField::new(),
+                              endpoint_field: crate::input_field::InputField::new(),
+                              active_field: 0,
+                              error: Some(format!("Device flow failed: {e}")),
+                          });            return;
         }
     };
 

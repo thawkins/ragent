@@ -55,9 +55,15 @@ impl BenchSuiteAdapter for LiveCodeBenchAdapter {
         }
 
         // Delegate to standard helper for remaining logic
-        evaluate_exact_match_case(case, generation, options, "LiveCodeBench", |_passed, _similarity| {
-            "LiveCodeBench native adapter supports the codegeneration scenario and records pass@k-style metrics.".to_string()
-        })
+        evaluate_exact_match_case(
+            case,
+            generation,
+            options,
+            "LiveCodeBench",
+            |_passed, _similarity| {
+                "LiveCodeBench native adapter supports the codegeneration scenario and records pass@k-style metrics.".to_string()
+            },
+        )
     }
 
     fn summarize(

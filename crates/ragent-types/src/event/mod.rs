@@ -728,10 +728,7 @@ impl EventBus {
             }
             Err(broadcast::error::SendError(ev)) => {
                 // Buffer overflow — some receivers are lagging
-                tracing::warn!(
-                    "Event dropped (broadcast channel full): {}",
-                    ev.type_name()
-                );
+                tracing::warn!("Event dropped (broadcast channel full): {}", ev.type_name());
             }
         }
     }

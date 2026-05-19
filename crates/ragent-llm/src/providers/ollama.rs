@@ -89,8 +89,10 @@ impl OllamaProvider {
             .timeout(std::time::Duration::from_secs(5))
             .send()
             .await
-            .context("Failed to connect to Ollama server")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Ollama model discovery failed");
+            })
+            .with_context(|| format!("Failed to connect to Ollama server at {url}"))?;
         if !response.status().is_success() {
             bail!(
                 "Ollama API returned status {} from {}",
@@ -217,16 +219,20 @@ impl Provider for OllamaProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
-        let url = base_url.unwrap_or(&self.base_url);
+        let url = base_url
+            .unwrap_or(&self.base_url)
+            .trim_end_matches('/')
+            .to_string();
         let client = OllamaClient {
             api_key: if api_key.is_empty() {
                 None
             } else {
                 Some(api_key.to_string())
             },
-            base_url: url.trim_end_matches('/').to_string(),
+            base_url: url.clone(),
             http: crate::provider::http_client::create_streaming_http_client(),
         };
+        tracing::info!(chat_endpoint = %format!("{}/v1/chat/completions", url), models_endpoint = %format!("{}/api/tags", url), "Ollama provider connected");
         Ok(Box::new(client))
     }
 }
@@ -433,9 +439,14 @@ impl LlmClient for OllamaClient {
             req_builder.json(&body).send(),
         )
         .await
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Ollama chat request timed out");
+        })
         .map_err(|_| anyhow::anyhow!("Ollama: initial response timed out after {timeout_secs}s"))?
-        .context("Failed to connect to Ollama server — is it running?")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Ollama chat request failed");
+        })
+        .with_context(|| format!("Failed to connect to Ollama server at {url} — is it running?"))?;
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_default();

@@ -323,15 +323,11 @@ pub enum ProviderSetupStep {
         /// Human-readable display name.
         provider_name: String,
         /// The key text entered so far.
-        key_input: String,
-        /// Cursor position (char index) inside `key_input`.
-        key_cursor: usize,
+        key_field: crate::input_field::InputField,
         /// Optional API base URL (used by Generic OpenAI API provider).
-        endpoint_input: String,
-        /// Cursor position (char index) inside `endpoint_input`.
-        endpoint_cursor: usize,
-        /// Whether endpoint input is currently focused.
-        editing_endpoint: bool,
+        endpoint_field: crate::input_field::InputField,
+        /// Which field is currently focused (0 = key, 1 = endpoint).
+        active_field: u8,
         /// Optional error message from a previous attempt.
         error: Option<String>,
     },
@@ -384,6 +380,13 @@ pub enum ProviderSetupStep {
     /// setup. This variant lists only those that have usable credentials, and is
     /// used by the `/model` slash-command flow.
     SelectConfiguredProvider {
+        /// Configurable providers that have usable credentials.
+        providers: Vec<ConfiguredProvider>,
+        /// Index of the highlighted provider.
+        selected: usize,
+    },
+    /// Choosing which provider to show configuration for.
+    ShowProviderConfig {
         /// Configurable providers that have usable credentials.
         providers: Vec<ConfiguredProvider>,
         /// Index of the highlighted provider.
@@ -483,6 +486,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Cancel a background task (/cancel <task_id_prefix>)",
     },
     SlashCommandDef {
+        trigger: "config",
+        description: "Show application paths and configuration files: /config show",
+    },
+    SlashCommandDef {
         trigger: "context",
         description: "Manage context cache: /context refresh",
     },
@@ -528,7 +535,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "provider",
-        description: "Change the LLM provider (re-enters setup flow)",
+        description: "Change the LLM provider or show config: /provider show",
     },
     SlashCommandDef {
         trigger: "provider_reset",
@@ -602,12 +609,13 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "yolo",
         description: "Toggle YOLO mode — bypass all command validation and tool restrictions",
     },
-                      SlashCommandDef {
-                          trigger: "spec",
-                          description: "Specification management: /spec create|list|search|validate|status|task|help",
-                      },
-                      SlashCommandDef {
-                          trigger: "autopilot",        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
+    SlashCommandDef {
+        trigger: "spec",
+        description: "Specification management: /spec create|list|search|validate|status|task|help",
+    },
+    SlashCommandDef {
+        trigger: "autopilot",
+        description: "Autonomous operation: /autopilot on [--max-tokens N] [--max-time N] | off | status",
     },
     SlashCommandDef {
         trigger: "plan",
@@ -1132,19 +1140,20 @@ pub struct App {
     pub is_processing: bool,
     /// Cancellation flag shared with the processor task; set to `true` on ESC.
     pub cancel_flag: Option<Arc<AtomicBool>>,
-    /// True while an automatic pre-send compaction run is active.
-    pub auto_compact_in_progress: bool,
-    /// True while any compaction run (manual or auto) is active.
-    /// Used to trigger message-history replacement when the LLM finishes.
-    pub compact_in_progress: bool,
-    /// Set when an auto-compaction run returns an error.
-    pub auto_compact_failed: bool,
-    /// User message queued while auto-compaction runs: `(text, image_paths)`.
-    pub pending_send_after_compact: Option<(String, Vec<std::path::PathBuf>)>,
-    /// Whether the last agent run was halted by the user (ESC).
-    pub agent_halted: bool,
-    /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.
-    /// Step number comes from EventBus; sub_step is per-tool-call within a step.
+          /// True while an automatic pre-send compaction run is active.
+          pub auto_compact_in_progress: bool,
+          /// True while any compaction run (manual or auto) is active.
+          /// Used to trigger message-history replacement when the LLM finishes.
+          pub compact_in_progress: bool,
+          /// Set when an auto-compaction run returns an error.
+          pub auto_compact_failed: bool,
+          /// Path to the SQLite storage database.
+          pub db_path: std::path::PathBuf,
+          /// User message queued while auto-compaction runs: `(text, image_paths)`.
+          pub pending_send_after_compact: Option<(String, Vec<std::path::PathBuf>)>,
+                /// Whether the last agent run was halted by the user (ESC).
+                pub agent_halted: bool,
+                /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.    /// Step number comes from EventBus; sub_step is per-tool-call within a step.
     pub tool_step_map: HashMap<String, (String, u32, u32)>,
     /// Pending tool call args received before the ToolCallStart event. Some providers
     /// may emit args/result events before the start event; store them here and apply

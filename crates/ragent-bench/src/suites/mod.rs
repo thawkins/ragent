@@ -152,8 +152,27 @@ fn is_language_label(line: &str) -> bool {
     static LANG_SET: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
     let set = LANG_SET.get_or_init(|| {
         [
-            "c++", "cpp", "c#", "csharp", "dart", "go", "haskell", "java", "javascript", "js",
-            "julia", "kotlin", "lua", "php", "py", "python", "r", "rs", "rust", "scala", "ts",
+            "c++",
+            "cpp",
+            "c#",
+            "csharp",
+            "dart",
+            "go",
+            "haskell",
+            "java",
+            "javascript",
+            "js",
+            "julia",
+            "kotlin",
+            "lua",
+            "php",
+            "py",
+            "python",
+            "r",
+            "rs",
+            "rust",
+            "scala",
+            "ts",
             "typescript",
         ]
         .into_iter()

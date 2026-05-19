@@ -218,10 +218,10 @@ impl SpecCommand {
         )
     }
 
-        /// Build the prompt sent to the explore agent for spec generation.
-        pub fn build_create_prompt(specname: &str, feature: &str) -> String {
-            format!(
-                  r#"You are an expert specification writer. Create a specification and implementation plan for the following feature.
+    /// Build the prompt sent to the explore agent for spec generation.
+    pub fn build_create_prompt(specname: &str, feature: &str) -> String {
+        format!(
+            r#"You are an expert specification writer. Create a specification and implementation plan for the following feature.
     
                    **Feature:** {}
     
@@ -244,9 +244,10 @@ impl SpecCommand {
                       - Priority values: Critical, High, Medium, Low
     
                    Use the `write` tool to create both files. Ensure the spec is clear, testable, and complete."#,
-                  feature, specname, specname, specname
-              )
-          }}
+            feature, specname, specname, specname
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -261,12 +262,16 @@ mod tests {
     #[test]
     fn parse_create() {
         let cmd = SpecCommand::parse("create my-spec Add auth");
-        assert!(matches!(cmd, SpecCommand::Create { specname, feature } if specname == "my-spec" && feature == "Add auth"));
+        assert!(
+            matches!(cmd, SpecCommand::Create { specname, feature } if specname == "my-spec" && feature == "Add auth")
+        );
     }
 
     #[test]
     fn parse_create_missing_feature() {
-        assert!(matches!(SpecCommand::parse("create my-spec"), SpecCommand::Unknown(s) if s == "create"));
+        assert!(
+            matches!(SpecCommand::parse("create my-spec"), SpecCommand::Unknown(s) if s == "create")
+        );
     }
 
     #[test]

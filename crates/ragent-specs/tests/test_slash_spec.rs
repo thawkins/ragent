@@ -9,7 +9,10 @@ fn test_slash_spec_no_args_shows_help() {
     );
     let help = SpecCommand::build_help_message();
     assert!(help.contains("spec help"), "should show spec help: {help}");
-    assert!(help.contains("spec create"), "should mention spec create: {help}");
+    assert!(
+        help.contains("spec create"),
+        "should mention spec create: {help}"
+    );
     assert!(help.contains("specs/"), "should mention specs/ dir: {help}");
     assert!(help.contains("PLAN.md"), "should mention PLAN.md: {help}");
 }
@@ -25,8 +28,7 @@ fn test_slash_spec_create_starts_generation() {
 
     let status = SpecCommand::build_create_status(&specname);
     assert_eq!(
-        status,
-        "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md…",
+        status, "spec: writing specs/websocket/SPEC.md + specs/websocket/PLAN.md…",
         "status should indicate generation"
     );
 

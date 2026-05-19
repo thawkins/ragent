@@ -17,7 +17,11 @@ pub mod validate;
 pub use commands::SpecCommand;
 pub use error::SpecError;
 pub use io::SpecIo;
-pub use manager::{SpecManager, SpecFilter, SortBy, SpecSearchResult, is_valid_transition, next_statuses};
+pub use manager::{
+    SortBy, SpecFilter, SpecManager, SpecSearchResult, is_valid_transition, next_statuses,
+};
 pub use spec::{Plan, Requirement, Spec, SpecId, SpecStatus, Task, TaskStatus};
 pub use templates::{PlanTemplate, SpecTemplate};
-pub use validate::{validate, Report, Issue, Severity, Category, detect_ears_template, parse_requirements};
+pub use validate::{
+    Category, Issue, Report, Severity, detect_ears_template, parse_requirements, validate,
+};

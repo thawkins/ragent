@@ -68,9 +68,15 @@ impl StorageBackend for MockStorage {
     ) -> anyhow::Result<bool> {
         let mut lock = self.todos.lock().unwrap();
         if let Some(row) = lock.get_mut(id) {
-            if let Some(t) = title { row.title = t.to_string(); }
-            if let Some(s) = status { row.status = s.to_string(); }
-            if let Some(d) = description { row.description = d.to_string(); }
+            if let Some(t) = title {
+                row.title = t.to_string();
+            }
+            if let Some(s) = status {
+                row.status = s.to_string();
+            }
+            if let Some(d) = description {
+                row.description = d.to_string();
+            }
             row.updated_at = chrono::Utc::now().to_rfc3339();
             Ok(true)
         } else {
@@ -90,8 +96,12 @@ impl StorageBackend for MockStorage {
         Ok(count)
     }
 
-    fn get_memory(&self, _id: i64) -> anyhow::Result<Option<MemoryRow>> { Ok(None) }
-    fn get_memory_tags(&self, _id: i64) -> anyhow::Result<Vec<String>> { Ok(Vec::new()) }
+    fn get_memory(&self, _id: i64) -> anyhow::Result<Option<MemoryRow>> {
+        Ok(None)
+    }
+    fn get_memory_tags(&self, _id: i64) -> anyhow::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
     fn search_memories(
         &self,
         _query: &str,
@@ -99,17 +109,27 @@ impl StorageBackend for MockStorage {
         _source: Option<&str>,
         _limit: usize,
         _min_confidence: f64,
-    ) -> anyhow::Result<Vec<MemoryRow>> { Ok(Vec::new()) }
-    fn list_memories(&self, _project: &str, _limit: usize) -> anyhow::Result<Vec<MemoryRow>> { Ok(Vec::new()) }
-    fn store_memory_embedding(&self, _id: i64, _embedding_blob: &[u8]) -> anyhow::Result<bool> { Ok(false) }
-    fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> { Ok(Vec::new()) }
+    ) -> anyhow::Result<Vec<MemoryRow>> {
+        Ok(Vec::new())
+    }
+    fn list_memories(&self, _project: &str, _limit: usize) -> anyhow::Result<Vec<MemoryRow>> {
+        Ok(Vec::new())
+    }
+    fn store_memory_embedding(&self, _id: i64, _embedding_blob: &[u8]) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+    fn list_memory_embeddings(&self) -> anyhow::Result<Vec<(i64, Vec<u8>)>> {
+        Ok(Vec::new())
+    }
     fn search_memories_by_embedding(
         &self,
         _query_embedding: &[f32],
         _dimensions: usize,
         _limit: usize,
         _min_similarity: f32,
-    ) -> anyhow::Result<Vec<EmbeddingMatch>> { Ok(Vec::new()) }
+    ) -> anyhow::Result<Vec<EmbeddingMatch>> {
+        Ok(Vec::new())
+    }
 }
 
 fn ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
@@ -134,7 +154,10 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 1: READ empty list ───────────────────────────────────
     println!("[STEP 1] todo_read (empty list)");
-    let out = read_tool.execute(json!({}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 
@@ -164,7 +187,10 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 4: READ all ──────────────────────────────────────────
     println!("[STEP 4] todo_read status=all");
-    let out = read_tool.execute(json!({"status": "all"}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({"status": "all"}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 
@@ -182,7 +208,10 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 6: READ filtered by in_progress ──────────────────────
     println!("[STEP 6] todo_read status=in_progress");
-    let out = read_tool.execute(json!({"status": "in_progress"}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({"status": "in_progress"}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 
@@ -201,7 +230,10 @@ async fn demo_todo_lifecycle() {
     // ── Step 8: COMPLETE (in_progress → done) ─────────────────────
     println!("[STEP 8] todo_write action=complete");
     let out = write_tool
-        .execute(json!({"action": "complete", "id": "task-001"}), &ctx(storage.clone()))
+        .execute(
+            json!({"action": "complete", "id": "task-001"}),
+            &ctx(storage.clone()),
+        )
         .await
         .unwrap();
     println!("{}", out.content);
@@ -209,14 +241,20 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 9: READ filtered by done ─────────────────────────────
     println!("[STEP 9] todo_read status=done");
-    let out = read_tool.execute(json!({"status": "done"}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({"status": "done"}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 
     // ── Step 10: COMPLETE via alias "completed" ──────────────────
     println!("[STEP 10] todo_write action=completed (alias for complete)");
     let out = write_tool
-        .execute(json!({"action": "completed", "id": "task-002"}), &ctx(storage.clone()))
+        .execute(
+            json!({"action": "completed", "id": "task-002"}),
+            &ctx(storage.clone()),
+        )
         .await
         .unwrap();
     println!("{}", out.content);
@@ -224,14 +262,20 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 11: READ all (both done) ─────────────────────────────
     println!("[STEP 11] todo_read status=all (final state)");
-    let out = read_tool.execute(json!({"status": "all"}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({"status": "all"}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 
     // ── Step 12: REMOVE one ──────────────────────────────────────
     println!("[STEP 12] todo_write action=remove");
     let out = write_tool
-        .execute(json!({"action": "remove", "id": "task-001"}), &ctx(storage.clone()))
+        .execute(
+            json!({"action": "remove", "id": "task-001"}),
+            &ctx(storage.clone()),
+        )
         .await
         .unwrap();
     println!("{}", out.content);
@@ -248,7 +292,10 @@ async fn demo_todo_lifecycle() {
 
     // ── Step 14: READ empty ───────────────────────────────────────
     println!("[STEP 14] todo_read (verify empty)");
-    let out = read_tool.execute(json!({}), &ctx(storage.clone())).await.unwrap();
+    let out = read_tool
+        .execute(json!({}), &ctx(storage.clone()))
+        .await
+        .unwrap();
     println!("{}", out.content);
     println!();
 

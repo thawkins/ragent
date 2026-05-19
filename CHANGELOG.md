@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 0.1.0-alpha.82
+
+### Added
+- **azProvider fixes** — Applied fixes to Azure provider implementation.
+- **`/config show`** — Added `/config show` slash command to display current configuration.
+
 ## Version: 0.1.0-alpha.79
 
 ### Fixed

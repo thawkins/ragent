@@ -1048,7 +1048,10 @@ impl InstructionFileDiscovery {
             "Searching for instruction files: {}",
             self.searched_names.join(", ")
         ));
-        lines.push(format!("  Working directory: {}", self.working_dir.display()));
+        lines.push(format!(
+            "  Working directory: {}",
+            self.working_dir.display()
+        ));
         if let Some(ref global) = self.global_dir {
             lines.push(format!("  Global directory: {}", global.display()));
         }
@@ -1143,7 +1146,11 @@ pub fn collect_agents_md_content_with_discovery(
     let discovery = InstructionFileDiscovery {
         searched_names: AGENT_FILE_NAMES.iter().map(|s| s.to_string()).collect(),
         working_dir: working_dir.to_path_buf(),
-        global_dir: if used_global { global_dir.clone() } else { None },
+        global_dir: if used_global {
+            global_dir.clone()
+        } else {
+            None
+        },
         found_files: found.iter().map(|(_, p)| p.clone()).collect(),
     };
 
@@ -1199,8 +1206,8 @@ pub fn collect_agents_md_content_with_discovery(
 /// concatenated content.
 fn collect_agents_md_content(working_dir: &Path) -> String {
     collect_agents_md_content_with_discovery(working_dir).0
-}          
-            /// Build a system prompt for the given agent using cached context.#[must_use]
+}
+/// Build a system prompt for the given agent using cached context.#[must_use]
 pub fn build_system_prompt(
     agent: &AgentInfo,
     working_dir: &Path,

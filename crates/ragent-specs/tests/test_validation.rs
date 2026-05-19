@@ -1,5 +1,8 @@
-use ragent_specs::validate::{validate, parse_requirements, extract_sections, detect_ears_template, Report, Issue, Severity, Category};
-use ragent_specs::spec::{Spec, SpecId, EarsTemplate};
+use ragent_specs::spec::{EarsTemplate, Spec, SpecId};
+use ragent_specs::validate::{
+    Category, Issue, Report, Severity, detect_ears_template, extract_sections, parse_requirements,
+    validate,
+};
 use std::collections::HashMap;
 
 #[test]
@@ -98,23 +101,33 @@ fn test_extract_sections_from_real_spec() {
     let names: Vec<String> = sections.iter().map(|(_, n, _)| n.clone()).collect();
 
     assert!(
-        names.iter().any(|n| n.eq_ignore_ascii_case("Executive Summary")),
+        names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("Executive Summary")),
         "Should have Executive Summary"
     );
     assert!(
-        names.iter().any(|n| n.eq_ignore_ascii_case("Scope & Objectives")),
+        names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("Scope & Objectives")),
         "Should have Scope & Objectives"
     );
     assert!(
-        names.iter().any(|n| n.eq_ignore_ascii_case("Functional Requirements")),
+        names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("Functional Requirements")),
         "Should have Functional Requirements"
     );
     assert!(
-        names.iter().any(|n| n.eq_ignore_ascii_case("Non-Functional Requirements")),
+        names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("Non-Functional Requirements")),
         "Should have Non-Functional Requirements"
     );
     assert!(
-        names.iter().any(|n| n.eq_ignore_ascii_case("Constraints & Assumptions")),
+        names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("Constraints & Assumptions")),
         "Should have Constraints & Assumptions"
     );
 }
@@ -126,8 +139,18 @@ fn test_validate_empty_spec() {
 
     let report = validate(&spec);
     assert!(report.has_errors());
-    assert!(report.issues.iter().any(|i| i.message.contains("No requirements found")));
-    assert!(report.issues.iter().any(|i| i.message.contains("PLAN.md is empty")));
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.message.contains("No requirements found"))
+    );
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| i.message.contains("PLAN.md is empty"))
+    );
 }
 
 #[test]

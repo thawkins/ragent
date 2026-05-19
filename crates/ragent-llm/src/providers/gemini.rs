@@ -179,7 +179,12 @@ impl Provider for GeminiProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
-        let client = GeminiClient::new(api_key, base_url.unwrap_or(GEMINI_API_BASE));
+        let resolved = base_url
+            .unwrap_or(GEMINI_API_BASE)
+            .trim_end_matches('/')
+            .to_string();
+        let client = GeminiClient::new(api_key, &resolved);
+        tracing::info!(chat_endpoint = %format!("{}/v1beta/models/{{model}}:streamGenerateContent", resolved), models_endpoint = %format!("{}/v1beta/models", resolved), "Gemini provider connected");
         Ok(Box::new(client))
     }
 }
@@ -303,8 +308,10 @@ pub async fn list_gemini_models(api_key: &str, base_url: Option<&str>) -> Result
         .timeout(std::time::Duration::from_secs(15))
         .send()
         .await
-        .context("Failed to fetch Gemini models")?;
-
+        .inspect_err(|e| {
+            tracing::warn!(url = %url, error = %e, "Gemini model discovery failed");
+        })
+        .with_context(|| format!("Failed to fetch Gemini models at {url}"))?;
     if !resp.status().is_success() {
         bail!("Gemini models endpoint returned HTTP {}", resp.status());
     }
@@ -508,8 +515,10 @@ impl LlmClient for GeminiClient {
             .json(&body)
             .send()
             .await
-            .context("Failed to send request to Gemini API")?;
-
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Gemini chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to Gemini API at {url}"))?;
         if !response.status().is_success() {
             let status = response.status();
             let error_body = response.text().await.unwrap_or_else(|e| {

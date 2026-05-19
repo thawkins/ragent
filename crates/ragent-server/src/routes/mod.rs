@@ -264,7 +264,9 @@ async fn create_session(
     let storage = Arc::clone(&state.storage);
     let id_for_spawn = id.clone();
     let dir_for_spawn = directory.clone();
-    match tokio::task::spawn_blocking(move || storage.create_session(&id_for_spawn, &dir_for_spawn)).await {
+    match tokio::task::spawn_blocking(move || storage.create_session(&id_for_spawn, &dir_for_spawn))
+        .await
+    {
         Ok(Ok(())) => {
             state.event_bus.publish(Event::SessionCreated {
                 session_id: id.clone(),

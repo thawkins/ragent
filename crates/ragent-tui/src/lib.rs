@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod input;
+pub mod input_field;
 pub mod layout;
 pub mod layout_active_agents;
 pub mod layout_statusbar;
@@ -165,6 +166,7 @@ pub async fn run_tui(
     show_log: bool,
     resume_session_id: Option<String>,
     log_rx: TuiLogReceiver,
+    db_path: std::path::PathBuf,
 ) -> Result<()> {
     // Set up panic handler to ensure terminal state is restored on crashes
     // This handles panics, OOM, and segfaults by restoring the terminal before
@@ -196,6 +198,7 @@ pub async fn run_tui(
         session_processor.clone(),
         agent,
         show_log,
+        db_path,
     );
 
     // -- Render the very first frame so the user sees the TUI immediately --
@@ -250,12 +253,12 @@ pub async fn run_tui(
                 app.session_id = Some(session_id.clone());
                 app.register_primary_session_mapping();
 
-                                    // Render the ASCII art banner into the message window now that
-                                    // the session is valid (append_assistant_text requires session_id).
-                                    let banner = crate::logo::LOGO.join("\n");
-                                    app.append_assistant_text(&banner);
-                                    app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
-                                    app.force_new_message = true;
+                // Render the ASCII art banner into the message window now that
+                // the session is valid (append_assistant_text requires session_id).
+                let banner = crate::logo::LOGO.join("\n");
+                app.append_assistant_text(&banner);
+                app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
+                app.force_new_message = true;
                 app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;

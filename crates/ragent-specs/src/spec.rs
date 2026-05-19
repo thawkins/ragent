@@ -277,7 +277,12 @@ impl Spec {
             plan_md: String::new(),
             requirements: Vec::new(),
             tasks: Vec::new(),
-            audit_trail: vec![(now, "none".to_string(), "draft".to_string(), "system".to_string())],
+            audit_trail: vec![(
+                now,
+                "none".to_string(),
+                "draft".to_string(),
+                "system".to_string(),
+            )],
             reviewers: Vec::new(),
             review_md: String::new(),
             modified_at: now,
@@ -316,7 +321,8 @@ impl Spec {
             .unwrap_or_default()
             .as_secs();
         let old = self.status.as_str().to_string();
-        self.audit_trail.push((now, old, new_status.as_str().to_string(), actor.into()));
+        self.audit_trail
+            .push((now, old, new_status.as_str().to_string(), actor.into()));
         self.status = new_status;
         self.modified_at = now;
     }
@@ -383,8 +389,14 @@ mod tests {
         assert_eq!(SpecStatus::parse("draft"), Some(SpecStatus::Draft));
         assert_eq!(SpecStatus::parse("in_review"), Some(SpecStatus::InReview));
         assert_eq!(SpecStatus::parse("approved"), Some(SpecStatus::Approved));
-        assert_eq!(SpecStatus::parse("in_progress"), Some(SpecStatus::InProgress));
-        assert_eq!(SpecStatus::parse("implemented"), Some(SpecStatus::Implemented));
+        assert_eq!(
+            SpecStatus::parse("in_progress"),
+            Some(SpecStatus::InProgress)
+        );
+        assert_eq!(
+            SpecStatus::parse("implemented"),
+            Some(SpecStatus::Implemented)
+        );
         assert_eq!(SpecStatus::parse("verified"), Some(SpecStatus::Verified));
         assert_eq!(SpecStatus::parse("archived"), Some(SpecStatus::Archived));
         assert_eq!(SpecStatus::parse("unknown"), None);

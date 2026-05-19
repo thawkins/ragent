@@ -43,13 +43,16 @@ impl Tool for SpecReadTool {
             .as_str()
             .context("Missing required 'spec_id' parameter")?;
 
-        let spec_manager = ctx
-            .spec_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first."))?;
+        let spec_manager = ctx.spec_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first.")
+        })?;
 
-        let id = ragent_specs::spec::SpecId::new(spec_id_str)
-            .ok_or_else(|| anyhow::anyhow!("Invalid spec ID '{}'. Use only alphanumeric, hyphen, underscore.", spec_id_str))?;
+        let id = ragent_specs::spec::SpecId::new(spec_id_str).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid spec ID '{}'. Use only alphanumeric, hyphen, underscore.",
+                spec_id_str
+            )
+        })?;
 
         let spec = spec_manager
             .read_spec(&id)
@@ -125,7 +128,11 @@ impl Tool for SpecReadTool {
             spec.status.as_str(),
             spec.title,
             spec.spec_md,
-            if requirements.is_empty() { "(none)" } else { &requirements },
+            if requirements.is_empty() {
+                "(none)"
+            } else {
+                &requirements
+            },
             if tasks.is_empty() { "(none)" } else { &tasks },
             spec.coverage_pct()
         );

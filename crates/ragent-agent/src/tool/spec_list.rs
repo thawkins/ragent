@@ -38,10 +38,9 @@ impl Tool for SpecListTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
-        let spec_manager = ctx
-            .spec_manager
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first."))?;
+        let spec_manager = ctx.spec_manager.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Spec manager is not configured. Set up a specs/ directory first.")
+        })?;
 
         let mut filter = ragent_specs::manager::SpecFilter::new();
 
@@ -57,7 +56,10 @@ impl Tool for SpecListTool {
             .map_err(|e| anyhow::anyhow!("Failed to list specs: {}", e))?;
 
         let mut lines = vec![format!("Found {} spec(s):", specs.len()), String::new()];
-        lines.push(format!("| {:<20} | {:<14} | {:<30} | {:>6} |", "ID", "Status", "Title", "Cov%"));
+        lines.push(format!(
+            "| {:<20} | {:<14} | {:<30} | {:>6} |",
+            "ID", "Status", "Title", "Cov%"
+        ));
         lines.push(format!("|{:-<22}|{:-<16}|{:-<32}|{:-<8}|", "", "", "", ""));
 
         let count = specs.len();
