@@ -123,6 +123,7 @@ impl InternalLlmTaskKind {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_field_names)]
 struct InternalTaskProfile {
     max_prompt_chars: usize,
     max_output_chars: usize,
@@ -130,6 +131,7 @@ struct InternalTaskProfile {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_field_names)]
 struct EffectiveTaskLimits {
     max_prompt_chars: usize,
     max_output_chars: usize,

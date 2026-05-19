@@ -180,19 +180,17 @@ impl Tool for ReadTool {
         let total_lines = lines.len();
 
         // Validate line ranges against actual file length
-        if let Some(start) = start_line {
-            if start > total_lines {
+        if let Some(start) = start_line
+            && start > total_lines {
                 anyhow::bail!(
                     "Invalid line range: start_line ({start}) exceeds file length \
                      ({total_lines} lines). Use start_line={total_lines} or smaller."
                 );
             }
-        }
-        if let Some(end) = end_line {
-            if end > total_lines {
+        if let Some(end) = end_line
+            && end > total_lines {
                 end_line = Some(total_lines);
             }
-        }
 
         let (output, actual_start, actual_end, summarised) = match (start_line, end_line) {
             (Some(start), Some(end)) => {

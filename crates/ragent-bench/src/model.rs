@@ -48,7 +48,7 @@ pub struct ResolvedModelSelection {
 }
 
 /// One generated benchmark sample.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BenchGeneratedSample {
     /// Generated text content.
     pub text: String,
@@ -63,7 +63,7 @@ pub struct BenchGeneratedSample {
 }
 
 /// Model runner output for a single benchmark case.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BenchGenerationResult {
     /// Generated samples.
     pub samples: Vec<BenchGeneratedSample>,

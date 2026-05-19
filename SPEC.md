@@ -80,7 +80,7 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.48). The core architecture, tool system,
+Ragent is in **alpha** (v0.1.0-alpha.82). The core architecture, tool system,
 TUI, HTTP server, memory system, teams, and security layer are functional and
 under active development. The specification below documents
 the current state of all subsystems.
@@ -96,6 +96,14 @@ the current state of all subsystems.
 - Workspace crate reorganisation milestones extracted `ragent-types`, `ragent-config`, `ragent-storage`, and `ragent-llm`
 - Broad tool coverage including comprehensive team coordination tools
 - Native GitLab integration with issues, merge requests, and CI/CD pipeline management
+- **Azure AI Foundry provider** — New `azure_foundry` provider for Microsoft Azure AI Foundry with OpenAI-compatible endpoints, dynamic model discovery, streaming, tool calling, vision, and reasoning levels
+- **Azure endpoint logging** — Full endpoint URL displayed in TUI log panel for Azure AI Foundry requests
+- **`/config show` slash command** — Displays current resolved configuration in the TUI
+- **SPEC.md mermaid diagram fixes** — All 14 diagrams now pass syntax validation
+- **gen-spec-pdf.sh script** — Pandoc + Chromium-based Markdown-to-PDF conversion for specifications
+- **Startup ASCII art banner** — Application name rendered in ASCII art on TUI startup with compile timestamp
+- **`/codeindex lang` filtering** — Optional language parameter for code index results (e.g., `/codeindex lang rust`)
+- **Instruction file discovery logging** — Tracks which `AGENTS.md`-style files were found and where, with discovery summary logging
 
 ---
 
@@ -388,6 +396,7 @@ graph LR
 | **Hugging Face** | `huggingface` | `HF_TOKEN` | Streaming, tools, vision, dynamic model discovery |
 | **Generic OpenAI** | `generic_openai` | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
 | **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
+| **Azure AI Foundry** | `azure_foundry` | `AZURE_AI_FOUNDRY_API_KEY` | OpenAI-compatible endpoints, dynamic model discovery, streaming, tools, vision, reasoning |
 
 #### Provider Features
 
@@ -556,6 +565,46 @@ For dedicated deployments, configure the custom endpoint URL:
 **Model Listing:**
 ```bash
 ragent models --provider huggingface
+```
+
+#### Azure AI Foundry Provider
+
+The Azure AI Foundry provider connects to Microsoft Azure AI Foundry models via OpenAI-compatible endpoints with `api-key` header authentication. Supports dynamic model discovery, streaming chat completions, tool calling, vision, and reasoning levels.
+
+**Authentication:**
+- **Primary:** `AZURE_AI_FOUNDRY_API_KEY` environment variable
+- **Base URL:** `AZURE_AI_FOUNDRY_BASE` environment variable (optional, for custom endpoints)
+
+**Configuration Example (`ragent.json`):**
+```json
+{
+  "provider": {
+    "azure_foundry": {
+      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
+      "api": {
+        "base_url": "https://your-endpoint.azure.com"
+      },
+      "thinking": {
+        "enabled": true,
+        "level": "low"
+      }
+    }
+  }
+}
+```
+
+**Features:**
+- **OpenAI-Compatible API** — Uses `/v1/chat/completions` endpoint with `api-key` header
+- **Dynamic Model Discovery** — Automatically fetches available models from Azure endpoint
+- **Streaming Support** — Full SSE streaming
+- **Tool Support** — Function calling compatible with OpenAI tool format
+- **Vision Support** — Image understanding for vision-capable models
+- **Reasoning Levels** — Supports `low`, `medium`, `high`, `none` reasoning effort (o1, o3-mini models)
+- **Endpoint Logging** — Full resolved endpoint URL logged in TUI log panel for debugging
+
+**Model Listing:**
+```bash
+ragent models --provider azure_foundry
 ```
 
 ### 3.2 Tool System
@@ -1213,26 +1262,6 @@ Various inline widgets rendered within the message panel.
 | `/team broadcast <content>` | Broadcast to all teammates |
 | `/team spawn <agent>` | Spawn teammate agent |
 | `/team cleanup` | Cleanup team resources |
-
-### Benchmark Runner
-
-The TUI exposes a native benchmark workflow through `/bench` using the currently selected
-provider/model and the shared `ragent-bench` crate.
-
-- **Data roots:** `benches/data/<suite>/`
-- **Result workbooks:** `benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx`
-- **Virtual target:** `all` expands to every registered benchmark suite for both `/bench init` and `/bench run`
-- **Virtual target:** `full` is reserved for complete upstream dataset ingestion across every suite and stays gated until all suites implement full-data initialization
-- **Profiles:** `quick`, `standard`, and `agentic`
-- **Init modes:** default `/bench init` writes local sample fixtures; `/bench init <suite> --full` performs full upstream dataset ingestion when the suite supports it
-- **Background UX:** `/bench run ...` starts a background task, `/bench status` reports active or
-  completed state, `/bench open last` prints the latest workbook path(s), and `/bench cancel`
-  requests shutdown
-- **Resume:** `--resume` reuses an existing same-day workbook only when benchmark, model, and
-  config-hash sidecars match exactly
-
-The benchmark workbook schema is fixed across suites (`run`, `metrics`, `cases`, `artifacts`) so
-HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be compared directly.
 | **MCP** ||
 | `/mcp discover` | Discover MCP servers |
 | `/mcp list` | List connected MCP servers |
@@ -1274,6 +1303,26 @@ HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be comp
 | `/inputdiag` | Input diagnostics |
 | `/compact` | Compact context window |
 | `/agent_compact` | Compact agent description |
+
+### Benchmark Runner
+
+The TUI exposes a native benchmark workflow through `/bench` using the currently selected
+provider/model and the shared `ragent-bench` crate.
+
+- **Data roots:** `benches/data/<suite>/`
+- **Result workbooks:** `benches/<suite>/<YYYY-MM-DD UTC>/<provider>/<model>.xlsx`
+- **Virtual target:** `all` expands to every registered benchmark suite for both `/bench init` and `/bench run`
+- **Virtual target:** `full` is reserved for complete upstream dataset ingestion across every suite and stays gated until all suites implement full-data initialization
+- **Profiles:** `quick`, `standard`, and `agentic`
+- **Init modes:** default `/bench init` writes local sample fixtures; `/bench init <suite> --full` performs full upstream dataset ingestion when the suite supports it
+- **Background UX:** `/bench run ...` starts a background task, `/bench status` reports active or
+  completed state, `/bench open last` prints the latest workbook path(s), and `/bench cancel`
+  requests shutdown
+- **Resume:** `--resume` reuses an existing same-day workbook only when benchmark, model, and
+  config-hash sidecars match exactly
+
+The benchmark workbook schema is fixed across suites (`run`, `metrics`, `cases`, `artifacts`) so
+HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be compared directly.
 
 ### 4.3 Key Bindings
 
@@ -2010,18 +2059,18 @@ The team system enables multi-agent coordination with named teammates, shared ta
 
 ```mermaid
 graph LR
-    A[/team create <name>] --> B[Team Created]
-    B --> C[/team spawn <agent>]
+    A["/team create name"] --> B[Team Created]
+    B --> C["/team spawn agent"]
     C --> D[Teammate Running]
-    D --> E[/team task_create]
+    D --> E["/team task_create"]
     E --> F[Task Available]
     F --> G[teammate claims task]
     G --> H[Task In Progress]
     H --> I[teammate completes task]
     I --> J[Task Done]
     J --> K{More tasks?}
-    K -- Yes --> F
-    K -- No --> L[/team cleanup]
+    K -->|Yes| F
+    K -->|No| L["/team cleanup"]
     L --> M[Team Destroyed]
 ```
 
@@ -2548,7 +2597,12 @@ Methods can be referenced by multiple aliases for convenience:
     "openai": { /* ... */ },
     "copilot": { /* ... */ },
     "ollama": { /* ... */ },
-    "generic_openai": { /* ... */ }
+    "generic_openai": { /* ... */ },
+    "azure_foundry": {
+      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
+      "api": { "base_url": "https://your-endpoint.azure.com" },
+      "thinking": { "enabled": true, "level": "low" }
+    }
   },
   "defaultAgent": "coder",
   "permissions": [],
@@ -2622,24 +2676,66 @@ users fix malformed configuration files quickly.
 
 ## 17. GitLab Integration
 
-### 24.3.1 Permission Request
+Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, enabling agents to manage issues, merge requests, pipelines, and project metadata via the GitLab REST API.
 
-A `PermissionRequest` is published as an event to the TUI:
+### 17.1 Authentication
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | String | Unique request identifier |
-| `session_id` | String | Session that originated the request |
-| `permission` | String | Permission type (e.g. `"bash"`, `"edit"`) |
-| `patterns` | Vec<String> | Glob patterns describing target resources |
-| `metadata` | JSON | Tool-specific metadata (command text, file path, etc.) |
-| `tool_call_id` | Option<String> | Tool call that triggered the request |
-| `created_at` | u64 | Unix timestamp when the request was created |
-| `timeout_secs` | u64 | Timeout duration in seconds (default: 120) |
+**Configuration:**
+- **Instance URL:** The GitLab instance URL (e.g., `https://gitlab.com` or a self-hosted instance)
+- **Personal Access Token (PAT):** Stored securely in the ragent SQLite database via `/gitlab setup`
 
-**Permission Dialog Timeout:**
+**Slash Commands:**
+| Command | Purpose |
+|---------|---------|
+| `/gitlab setup` | Configure GitLab connection (instance URL + PAT) |
+| `/gitlab logout` | Remove stored GitLab credentials |
+| `/gitlab status` | Show GitLab connection status |
 
-Permission requests have a 120-second timeout (2 minutes). The TUI displays a countdown timer in the dialog title (format: `M:SS remaining`) that updates in real time via continuous redraw polling, even when the user is idle. When the timeout expires, the dialog shows `EXPIRED` and the request is automatically denied.
+### 17.2 Issue Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `gitlab_issues_list` | List issues with filtering | `project_id`, `state` (opened/closed/all), `labels`, `limit` |
+| `gitlab_issues_get` | Get issue details | `project_id`, `issue_iid` |
+| `gitlab_issues_create` | Create a new issue | `project_id`, `title`, `body`, `labels`, `assignee_ids` |
+| `gitlab_issues_comment` | Add comment to an issue | `project_id`, `issue_iid`, `body` |
+| `gitlab_issues_close` | Close an issue | `project_id`, `issue_iid` |
+
+### 17.3 Merge Request Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `gitlab_mr_list` | List merge requests | `project_id`, `state`, `target_branch`, `limit` |
+| `gitlab_mr_get` | Get MR details and diff | `project_id`, `mr_iid` |
+| `gitlab_mr_create` | Create a new merge request | `project_id`, `title`, `body`, `source_branch`, `target_branch` |
+| `gitlab_mr_merge` | Merge a merge request | `project_id`, `mr_iid`, `squash` |
+
+### 17.4 CI/CD Pipeline Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `gitlab_pipeline_list` | List pipelines | `project_id`, `status`, `limit` |
+| `gitlab_pipeline_get` | Get pipeline details | `project_id`, `pipeline_id` |
+| `gitlab_ci_list` | List CI jobs for a pipeline | `project_id`, `pipeline_id` |
+| `gitlab_ci_get` | Get CI job details and logs | `project_id`, `job_id` |
+
+### 17.5 Project Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `gitlab_project_get` | Get project metadata | `project_id` or `path_with_namespace` |
+
+### 17.6 Auto-Detection
+
+When operating inside a Git repository with a GitLab remote, ragent can auto-detect the `project_id` or `path_with_namespace` from the git remote configuration:
+
+```text
+git remote get-url origin
+→ https://gitlab.com/owner/repo.git  → path_with_namespace="owner/repo"
+→ git@gitlab.com:owner/repo.git      → path_with_namespace="owner/repo"
+```
+
+Falls back to explicit `project_id` or `path_with_namespace` parameters if detection fails.
 
 ---
 
@@ -2832,6 +2928,18 @@ graph TD
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.1.0-alpha.82 | 2026-05-20 | Azure AI Foundry provider fixes, `/config show` slash command |
+| v0.1.0-alpha.79 | 2026-05-18 | Azure endpoint logging in TUI log panel |
+| v0.1.0-alpha.76 | 2026-05-18 | Azure AI Foundry provider added |
+| v0.1.0-alpha.75 | 2026-05-18 | SPEC.md mermaid diagram syntax fixes |
+| v0.1.0-alpha.73 | 2026-05-18 | `/model` selection fix, version number display |
+| v0.1.0-alpha.72 | 2026-05-18 | gen-spec-pdf.sh script, Spec Management section |
+| v0.1.0-alpha.71 | 2026-05-18 | Startup ASCII art banner with compile timestamp |
+| v0.1.0-alpha.70 | 2026-05-17 | Concurrency improvements, todo fixes |
+| v0.1.0-alpha.68 | 2026-05-15 | `/codeindex lang` filtering, benchmark data cleanup |
+| v0.1.0-alpha.61 | 2025-01-17 | Instruction file discovery logging |
+| v0.1.0-alpha.60 | 2025-01-16 | `.local/share/ragent` in AGENTS.md search path |
+| v0.1.0-alpha.57 | 2025-01-16 | MS Office/LibreOffice fixes, todo summary updates |
 | v0.1.0-alpha.49 | 2025-01-17 | Permission dialog live countdown, config parse error enhancement, codeindex hardwired permissions, crate extraction milestones |
 | v0.1.0-alpha.48 | 2025-01-17 | Permission milestones complete, bash security layers, more permissions fixes |
 | v0.1.0-alpha.47 | 2025-01-17 | Crate reorganisation (ragent-types, ragent-config, ragent-storage, ragent-llm) |
@@ -2862,9 +2970,27 @@ All documentation markdown files are located in `docs/` except for these root fi
 
 ---
 
-## Appendix D: Changelog (2025-01-16 → 2025-01-17)
+## Appendix D: Changelog (2025-01-16 → 2025-04-21)
 
-### Added
+### Added (v0.1.0-alpha.76 → v0.1.0-alpha.82)
+- Azure AI Foundry provider — New `azure_foundry` provider for Microsoft Azure AI Foundry models
+- Azure endpoint logging — Full resolved endpoint URL displayed in TUI log panel
+- `/config show` slash command — Displays current resolved configuration
+- gen-spec-pdf.sh script — Pandoc + Chromium-based Markdown-to-PDF conversion
+- Startup ASCII art banner — Application name in ASCII art with compile timestamp
+- `/codeindex lang` filtering — Optional language parameter for code index results
+- Instruction file discovery logging — Tracks AGENTS.md-style file discovery with summary
+
+### Changed (v0.1.0-alpha.68 → v0.1.0-alpha.75)
+- Improved TUI slash-command autocomplete with safe `Esc` handling
+- SPEC.md mermaid diagram syntax fixes — All 14 diagrams now render correctly
+- Benchmark data cleanup — Removed unused dataset files
+
+### Fixed (v0.1.0-alpha.76 → v0.1.0-alpha.82)
+- Azure endpoint logging now shows full URL with model name
+- `/model` selection handling fixed
+
+### Earlier Changes (v0.1.0-alpha.47 → v0.1.0-alpha.68)
 - Permission dialog countdown timer with live TUI updates (120-second timeout)
 - Config parse error reporting with file path, line, column, and caret marker
 - Codeindex tools hardwired as always-allowed (read-only, no permission prompts)
@@ -2884,18 +3010,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Background agent spawning and management
 - Swarm mode for parallel task decomposition
 - Plan agent with human-in-the-loop approval
-
-### Changed
-- Improved TUI slash-command autocomplete with safe `Esc` handling
-- Updated workspace crate organization
 - Enhanced bash security with 7 layers and word-boundary matching
 - Permission system now supports per-agent rules and YOLO mode
-
-### Fixed
-- Permission dialog timeout now correctly uses 120 seconds
-- Countdown timer visually decrements in real time
-- Bash command name extraction for permission matching
-- Denied pattern matching with word boundaries
-- Safe command display in `/bash show` output
 
 ---

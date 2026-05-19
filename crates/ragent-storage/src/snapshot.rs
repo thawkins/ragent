@@ -294,20 +294,18 @@ fn apply_unified_diff(base: &str, diff: &str) -> Result<String> {
         }
         let (tag, content) = diff_line.split_at(1);
         match tag {
-            " " => {
+            " "
                 // Context line — output base line and advance
-                if base_idx < base_lines.len() {
+                if base_idx < base_lines.len() => {
                     result.push_str(base_lines[base_idx]);
                     result.push('\n');
                     base_idx += 1;
                 }
-            }
-            "-" => {
+            "-"
                 // Removed line — skip the matching base line
-                if base_idx < base_lines.len() {
+                if base_idx < base_lines.len() => {
                     base_idx += 1;
                 }
-            }
             "+" => {
                 // Added line — emit without consuming base
                 result.push_str(content);

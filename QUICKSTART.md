@@ -5,9 +5,11 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-alpha.57)
+## Highlights (0.1.0-alpha.82)
 
-- Image attachment support (Alt+V): paste images from clipboard or file URIs; pending attachments are displayed before sending.
+- **Azure AI Foundry support** — New provider for Microsoft Azure AI Foundry models with OpenAI-compatible endpoints.
+- **`/config show`** — Display current resolved configuration in the TUI.
+- **Image attachment support (Alt+V)**: paste images from clipboard or file URIs; pending attachments are displayed before sending.
 - Keybindings help panel (`?` on empty input) and a right-click context menu for input and message panels.
 - New `multiedit` and `patch` tools for atomic multi-file edits and unified diff patching.
 - Session-prefixed step numbers for clearer tool call tracing (`[sid:step]`).

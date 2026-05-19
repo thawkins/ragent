@@ -375,7 +375,7 @@ fn extract_command_names(cmd: &str) -> Vec<String> {
             }
             '\'' => {
                 // Single-quoted string - skip until closing quote
-                while let Some(qc) = chars.next() {
+                for qc in chars.by_ref() {
                     if qc == '\'' {
                         break;
                     }
@@ -430,13 +430,11 @@ fn contains_denied_command(cmd: &str) -> bool {
             if cmd_lower == *denied {
                 return true;
             }
-            if let Some(rest) = cmd_lower.strip_prefix(denied) {
-                if let Some(first_char) = rest.chars().next() {
-                    if !first_char.is_alphanumeric() && first_char != '_' && first_char != '-' {
+            if let Some(rest) = cmd_lower.strip_prefix(denied)
+                && let Some(first_char) = rest.chars().next()
+                    && !first_char.is_alphanumeric() && first_char != '_' && first_char != '-' {
                         return true;
                     }
-                }
-            }
         }
 
         // Check denied command patterns (commands with specific args like "sudo ", "su -")
@@ -531,7 +529,7 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
                     // D1 fix: Single-segment slash-prefixed tokens (e.g., /help, /start)
                     // are likely commands, not file paths - exclude from directory escape check.
                     // Only check as path if it contains a directory separator (e.g., /etc/passwd).
-                    if arg.len() > 1 && !arg[1..].contains('/') {
+                    if arg.len() > 1 && !arg.strip_prefix('/').unwrap_or(arg).contains('/') {
                         // Single segment after / - treat as command, not a file path
                         continue;
                     }

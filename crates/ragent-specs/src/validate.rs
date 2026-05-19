@@ -490,8 +490,9 @@ pub fn validate_ears(spec: &Spec, report: &mut Report) {
     // Check numbering gaps
     let mut fr_numbers: Vec<u32> = Vec::new();
     let mut nfr_numbers: Vec<u32> = Vec::new();
+    let re = Regex::new(r"^(\D+)-(\d+)$").unwrap();
     for req in &reqs {
-        if let Some(caps) = Regex::new(r"^(\D+)-(\d+)$").unwrap().captures(&req.id) {
+        if let Some(caps) = re.captures(&req.id) {
             let prefix = &caps[1];
             let num: u32 = caps[2].parse().unwrap_or(0);
             match prefix {
@@ -598,8 +599,9 @@ pub fn validate_plan(spec: &Spec, report: &mut Report) {
     let req_ids: Vec<String> = reqs.iter().map(|r| r.id.clone()).collect();
 
     // Check that each task references a valid requirement
+    let re = Regex::new(r"(FR-\d+|NFR-\d+)").unwrap();
     for line in spec.plan_md.lines() {
-        for cap in Regex::new(r"(FR-\d+|NFR-\d+)").unwrap().find_iter(line) {
+        for cap in re.find_iter(line) {
             let ref_id = cap.as_str();
             if !req_ids.iter().any(|id| id.eq_ignore_ascii_case(ref_id)) {
                 report.add(Issue::new(

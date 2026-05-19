@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// Tracks the raw text, a character-index cursor, and an optional keyboard-
 /// selection anchor.  All editing operations are character-oriented so that
 /// multi-byte UTF-8 content behaves correctly.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InputField {
     text: String,
     cursor: usize,
@@ -261,7 +261,7 @@ impl InputField {
     /// Copy the current selection to the system clipboard.
     pub fn copy_selection(&self) {
         if let Some(txt) = self.selected_text() {
-            let _ = Self::set_clipboard(&txt);
+            Self::set_clipboard(&txt);
         }
     }
 
@@ -269,7 +269,7 @@ impl InputField {
     pub fn cut_selection(&mut self) {
         if let Some((s, e)) = self.selection_range() {
             let txt: String = self.text.chars().skip(s).take(e - s).collect();
-            let _ = Self::set_clipboard(&txt);
+            Self::set_clipboard(&txt);
             self.remove_range(s, e);
             self.anchor = None;
         }
@@ -331,7 +331,7 @@ impl InputField {
     /// - Ctrl+K (delete to end)
     /// - Ctrl+U (clear)
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
-        use KeyCode::*;
+        use KeyCode::{Char, Backspace, Delete, Left, Right, Home, End};
 
         match key.code {
             Char('a') if key.modifiers == KeyModifiers::CONTROL => {

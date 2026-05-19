@@ -824,7 +824,7 @@ impl Config {
     pub fn save(&self, prefer_project: bool) -> anyhow::Result<()> {
         let path = if prefer_project {
             let project = PathBuf::from(".ragent/ragent.json");
-            if project.parent().map_or(false, |p| p.exists()) {
+            if project.parent().is_some_and(|p| p.exists()) {
                 project
             } else {
                 dirs::config_dir()

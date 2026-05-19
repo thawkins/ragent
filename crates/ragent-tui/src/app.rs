@@ -2022,7 +2022,7 @@ impl App {
         }
 
         // Standard per-token cost calculation
-        let avg_cost = (cost_input + cost_output) / 2.0;
+        let avg_cost = f64::midpoint(cost_input, cost_output);
 
         let tier = if avg_cost == 0.0 {
             "Free".to_string()
@@ -3599,7 +3599,7 @@ impl App {
             .collect();
         let baseline_cost = models
             .iter()
-            .map(|m| (m.cost.input + m.cost.output) / 2.0)
+            .map(|m| f64::midpoint(m.cost.input, m.cost.output))
             .filter(|c| *c > 0.0)
             .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .unwrap_or(0.001);
@@ -10082,19 +10082,17 @@ Type `/swarm help` for more info.\n";
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.history_picker = None;
             }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if picker.selected > 0 {
+            KeyCode::Up | KeyCode::Char('k')
+                if picker.selected > 0 => {
                     picker.selected -= 1;
                     if picker.selected < picker.scroll_offset {
                         picker.scroll_offset = picker.selected;
                     }
                 }
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if picker.selected + 1 < picker.entries.len() {
+            KeyCode::Down | KeyCode::Char('j')
+                if picker.selected + 1 < picker.entries.len() => {
                     picker.selected += 1;
                 }
-            }
             KeyCode::Enter => {
                 let chosen = picker.entries[picker.selected].clone();
                 self.history_picker = None;
@@ -10378,9 +10376,9 @@ Type `/swarm help` for more info.\n";
             }
 
             // Mouse move -> used for hover highlighting of file menu entries
-            MouseEventKind::Moved => {
+            MouseEventKind::Moved
                 // If file menu is open, update the highlighted row under the cursor.
-                if self.file_menu.is_some() {
+                if self.file_menu.is_some() => {
                     // Snapshot needed values without holding immutable borrows while mutating.
                     let input_area = self.active_input_widget_area();
                     let item_count = self
@@ -10416,7 +10414,6 @@ Type `/swarm help` for more info.\n";
                         }
                     }
                 }
-            }
 
             MouseEventKind::Up(MouseButton::Left) => {
                 self.scrollbar_drag = None;
@@ -11356,8 +11353,8 @@ Type `/swarm help` for more info.\n";
         // Mark UI dirty for any event handling
         self.needs_redraw = true;
         match event {
-            Event::SessionCreated { ref session_id } => {
-                if self.session_id.is_none() {
+            Event::SessionCreated { ref session_id }
+                if self.session_id.is_none() => {
                     self.session_id = Some(session_id.clone());
                     // Map the primary session's short_sid to the current agent name
                     let short_sid = short_session_id(session_id);
@@ -11371,40 +11368,36 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::TextDelta {
                 ref session_id,
                 ref text,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.stream_in_bytes += text.len() as u64;
                     self.append_assistant_text(text);
                 }
-            }
             Event::ReasoningDelta {
                 ref session_id,
                 ref text,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.stream_in_bytes += text.len() as u64;
                     self.append_reasoning_text(text);
                 }
-            }
             Event::RequestStarted {
                 ref session_id,
                 outbound_bytes,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.stream_in_bytes = 0;
                     self.stream_out_bytes = outbound_bytes;
                 }
-            }
             Event::ToolCallStart {
                 ref session_id,
                 ref call_id,
                 ref tool,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
                     // Get the current step count from the event bus (single source of truth)
                     let step = self.event_bus.current_step(session_id) as u32;
@@ -11450,15 +11443,14 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::ToolCallEnd {
                 ref session_id,
                 ref call_id,
                 ref tool,
                 ref error,
                 duration_ms,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.update_tool_call_status(
                         call_id,
                         error.is_none(),
@@ -11493,12 +11485,11 @@ Type `/swarm help` for more info.\n";
                         );
                     }
                 }
-            }
             Event::MessageStart {
                 ref session_id,
                 ref message_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.is_processing = true;
                     self.agent_halted = false;
                     self.set_status_working("processing");
@@ -11510,13 +11501,12 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::MessageEnd {
                 ref session_id,
                 ref message_id,
                 ref reason,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     // The "init" message_id is used exclusively by the AGENTS.md
                     // acknowledgment exchange that runs before the main agent loop.
                     // It must NOT reset processing state — the main loop hasn't
@@ -11615,7 +11605,6 @@ Type `/swarm help` for more info.\n";
                         }
                     }
                 }
-            }
             Event::PermissionRequested {
                 ref session_id,
                 ref request_id,
@@ -11708,8 +11697,8 @@ Type `/swarm help` for more info.\n";
                 ref request_id,
                 allowed,
                 ..
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     // Remove the specific answered request from the queue.
                     self.permission_queue.retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
@@ -11722,13 +11711,12 @@ Type `/swarm help` for more info.\n";
                         format!("permission {}", if allowed { "granted" } else { "denied" }),
                     );
                 }
-            }
             Event::QuestionAnswered {
                 ref session_id,
                 ref request_id,
                 ..
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.question_queue.retain(|r| r.id != *request_id);
                     self.pending_question_input.clear();
                     self.question_selected_index = 0;
@@ -11736,13 +11724,12 @@ Type `/swarm help` for more info.\n";
                         self.set_status_working("processing");
                     }
                 }
-            }
             Event::AgentSwitched {
                 ref session_id,
                 ref from,
                 ref to,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.agent_name = to.clone();
                     // Update the display name mapping for the current session
                     if let Some(ref sid) = self.session_id {
@@ -11754,26 +11741,24 @@ Type `/swarm help` for more info.\n";
                         format!("agent switched: {} → {}", from, to),
                     );
                 }
-            }
             Event::AgentSwitchRequested {
                 ref session_id,
                 ref to,
                 ref task,
                 ref context,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("agent switch requested → {} ({})", to, task),
                     );
                     self.pending_plan_task = Some((task.clone(), context.clone()));
                 }
-            }
             Event::AgentRestoreRequested {
                 ref session_id,
                 ref summary,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.push_log_no_agent(
                         LogLevel::Info,
                         format!("agent restore requested ({} chars)", summary.len()),
@@ -11785,12 +11770,11 @@ Type `/swarm help` for more info.\n";
                         cursor_approve: true,
                     });
                 }
-            }
             Event::TaskCompleted {
                 ref session_id,
                 ref summary,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
                     // Exit autopilot mode on task completion
                     if self.autopilot_enabled {
@@ -11805,24 +11789,22 @@ Type `/swarm help` for more info.\n";
                     }
                     self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
                 }
-            }
             Event::AgentNotice {
                 ref session_id,
                 ref message,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     let summary = summarise_error(message);
                     self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
                     self.status = summary.clone();
                     // Also display in the message window for visibility
                     self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
                 }
-            }
             Event::AgentError {
                 ref session_id,
                 ref error,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.is_processing = false;
                     self.cancel_flag = None;
                     self.agent_halted = false;
@@ -11843,13 +11825,12 @@ Type `/swarm help` for more info.\n";
                     self.status = format!("error: {}", summary);
                     self.append_assistant_text(&format!("⚠ {}", summary));
                 }
-            }
             Event::TokenUsage {
                 ref session_id,
                 input_tokens,
                 output_tokens,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.last_input_tokens = input_tokens;
                     self.token_usage.0 += input_tokens;
                     self.token_usage.1 += output_tokens;
@@ -11861,40 +11842,36 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::QuotaUpdate {
                 ref session_id,
                 percent,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.quota_percent = Some(percent);
                     self.push_log_no_agent(LogLevel::Info, format!("quota: {:.1}% used", percent));
                 }
-            }
-            Event::ToolsSent {
-                ref session_id,
-                ref tools,
-            } => {
-                if self.is_current_session(session_id) {
-                    // Only log the list of tools during system initialisation (first step).
-                    // The SessionProcessor increments the EventBus step at the start of
-                    // each loop iteration; the first LLM request corresponds to step 1.
-                    if self.event_bus.current_step(session_id) <= 1 {
-                        self.push_log_no_agent(
-                            LogLevel::Info,
-                            format!("tools sent: [{}]", tools.join(", ")),
-                        );
-                    }
-                }
-            }
-            Event::ModelResponse {
+                          Event::ToolsSent {
+                              ref session_id,
+                              ref tools,
+                          }
+                              if self.is_current_session(session_id)
+                                  && self.event_bus.current_step(session_id) <= 1 =>
+                          {
+                              // Only log the list of tools during system initialisation (first step).
+                              // The SessionProcessor increments the EventBus step at the start of
+                              // each loop iteration; the first LLM request corresponds to step 1.
+                              self.push_log_no_agent(
+                                  LogLevel::Info,
+                                  format!("tools sent: [{}]", tools.join(", ")),
+                              );
+                          }            Event::ModelResponse {
                 ref session_id,
                 ref text,
                 elapsed_ms,
                 input_tokens,
                 output_tokens,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(model_ref) = self.active_model_ref_string() {
                         self.llm_request_stats.push(LlmRequestStat {
                             model_ref,
@@ -11908,14 +11885,13 @@ Type `/swarm help` for more info.\n";
                         format!("model response ({elapsed_ms}ms): {text}"),
                     );
                 }
-            }
             Event::ToolCallArgs {
                 ref session_id,
                 ref call_id,
                 ref tool,
                 ref args,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.stream_in_bytes += (call_id.len() + tool.len() + args.len()) as u64;
                     // Try to apply args to an existing ToolCall part; if not found,
                     // store them pending until the ToolCallStart event arrives.
@@ -11960,7 +11936,6 @@ Type `/swarm help` for more info.\n";
                         );
                     }
                 }
-            }
             Event::ToolResult {
                 ref session_id,
                 ref call_id,
@@ -11970,8 +11945,8 @@ Type `/swarm help` for more info.\n";
                 ref metadata,
                 success,
                 ..
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
                     if *tool == "team_create"
                         && success
@@ -12009,7 +11984,6 @@ Type `/swarm help` for more info.\n";
                         format!("{}← {} {} {}", step_tag, tool, icon, content),
                     );
                 }
-            }
             Event::SubagentStart {
                 ref session_id,
                 ref task_id,
@@ -12018,8 +11992,8 @@ Type `/swarm help` for more info.\n";
                 ref task,
                 background,
                 ..
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     // Map the child session's short_sid to the agent name for display
                     let short_sid = short_session_id(child_session_id);
                     self.sid_to_display_name.insert(short_sid, agent.clone());
@@ -12057,15 +12031,14 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::SubagentComplete {
                 ref session_id,
                 ref task_id,
                 ref summary,
                 success,
                 ..
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                         self.active_tasks.remove(idx);
                     }
@@ -12080,12 +12053,11 @@ Type `/swarm help` for more info.\n";
                         ),
                     );
                 }
-            }
             Event::SubagentCancelled {
                 ref session_id,
                 ref task_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
                         self.active_tasks.remove(idx);
                     }
@@ -12094,14 +12066,13 @@ Type `/swarm help` for more info.\n";
                         format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
                     );
                 }
-            }
             Event::TeammateSpawned {
                 ref session_id,
                 ref team_name,
                 ref teammate_name,
                 ref agent_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     // Add new member to team_members if not already present.
                     if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
                         let member =
@@ -12144,15 +12115,14 @@ Type `/swarm help` for more info.\n";
                         format!("🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
                     );
                 }
-            }
             Event::TeammateMessage {
                 ref session_id,
                 ref team_name,
                 ref from,
                 ref to,
                 ref preview,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if from.as_str() != "lead" {
                         let counts = self
                             .team_message_counts
@@ -12169,15 +12139,14 @@ Type `/swarm help` for more info.\n";
                         format!("📨 [{team_name}] {from} → {to}: {preview}"),
                     );
                 }
-            }
             Event::TeammateP2PMessage {
                 ref session_id,
                 ref team_name,
                 ref from,
                 ref to,
                 ref preview,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     // Track sent count for sender.
                     let from_counts = self
                         .team_message_counts
@@ -12192,13 +12161,12 @@ Type `/swarm help` for more info.\n";
                         format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
                     );
                 }
-            }
             Event::TeammateIdle {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(m) = self
                         .team_members
                         .iter_mut()
@@ -12211,14 +12179,13 @@ Type `/swarm help` for more info.\n";
                         format!("💤 [{team_name}] Teammate {agent_id} is idle"),
                     );
                 }
-            }
             Event::TeammateFailed {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref error,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(m) = self
                         .team_members
                         .iter_mut()
@@ -12241,14 +12208,13 @@ Type `/swarm help` for more info.\n";
                         format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
                     );
                 }
-            }
             Event::TeamTaskClaimed {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref task_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(m) = self
                         .team_members
                         .iter_mut()
@@ -12262,14 +12228,13 @@ Type `/swarm help` for more info.\n";
                         format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
                     );
                 }
-            }
             Event::TeamTaskCompleted {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref task_id,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     if let Some(m) = self
                         .team_members
                         .iter_mut()
@@ -12282,12 +12247,11 @@ Type `/swarm help` for more info.\n";
                         format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
                     );
                 }
-            }
             Event::TeamCleanedUp {
                 ref session_id,
                 ref team_name,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.active_team = None;
                     self.team_members.clear();
                     self.team_message_counts.clear();
@@ -12305,20 +12269,17 @@ Type `/swarm help` for more info.\n";
                         format!("🗑️  Team '{team_name}' cleaned up"),
                     );
                 }
-            }
             Event::ShellCwdChanged {
                 ref session_id,
                 ref cwd,
-            } => {
-                if self.is_current_session(session_id) {
+            }
+                if self.is_current_session(session_id) => {
                     self.shell_cwd = Some(cwd.clone());
                 }
-            }
-            Event::UserInput { ref session_id, .. } => {
-                if self.is_current_session(session_id) {
+            Event::UserInput { ref session_id, .. }
+                if self.is_current_session(session_id) => {
                     self.set_status_working("processing");
                 }
-            }
             _ => {}
         }
 
@@ -12844,11 +12805,7 @@ Type `/swarm help` for more info.\n";
 
         // Progress bar
         let bar_width = 30;
-        let filled = if total > 0 {
-            (completed * bar_width) / total
-        } else {
-            0
-        };
+        let filled = total.saturating_mul(bar_width).checked_div(total).unwrap_or(0);
         let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
         output.push_str(&format!(
             "**Progress:** [{bar}] {completed}/{total} ({} in progress, {} pending)\n\n",

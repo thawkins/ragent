@@ -130,7 +130,7 @@ impl Tool for TeamSpawnTool {
 
             // Wait for the user's decision with a timeout to prevent indefinite blocking.
             let allowed = tokio::time::timeout(
-                std::time::Duration::from_secs(300), // 5 minute timeout
+                std::time::Duration::from_mins(5), // 5 minute timeout
                 async {
                     loop {
                         match rx.recv().await {

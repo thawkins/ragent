@@ -376,59 +376,58 @@ impl GeminiClient {
                 ChatContent::Text(text) => {
                     vec![json!({ "text": text })]
                 }
-                ChatContent::Parts(content_parts) => {
-                    content_parts
-                        .iter()
-                        .filter_map(|part| match part {
-                            ContentPart::Text { text } => Some(json!({ "text": text })),
-                            ContentPart::ImageUrl { url } => {
-                                // Handle data URIs for images
-                                if url.starts_with("data:") {
-                                    let mime = url
-                                        .strip_prefix("data:")
-                                        .and_then(|s| s.split(';').next())
-                                        .unwrap_or("image/jpeg");
-                                    let base64_data =
-                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
-                                    Some(json!({
-                                        "inlineData": {
-                                            "mimeType": mime,
-                                            "data": base64_data
-                                        }
-                                    }))
-                                } else {
-                                    // For non-data URLs, we can't directly use them in Gemini
-                                    // Gemini requires inline data or Google Cloud Storage URIs
-                                    Some(json!({ "text": format!("[Image: {}]", url) }))
-                                }
-                            }
-                            ContentPart::ToolResult {
-                                tool_use_id,
-                                content,
-                            } => {
-                                // Gemini uses functionResponse for tool results
-                                Some(json!({
-                                    "functionResponse": {
-                                        "name": tool_use_id.split('_').next().unwrap_or("tool"),
-                                        "response": {
-                                            "result": content
-                                        }
-                                    }
-                                }))
-                            }
-                            ContentPart::ToolUse { id: _, name, input } => {
-                                // Gemini uses functionCall for tool invocations
-                                Some(json!({
-                                    "functionCall": {
-                                        "name": name,
-                                        "args": input
-                                    }
-                                }))
-                            }
-                        })
-                        .collect()
-                }
-            };
+                                  ChatContent::Parts(content_parts) => {
+                                    content_parts
+                                        .iter()
+                                        .map(|part| match part {
+                                            ContentPart::Text { text } => json!({ "text": text }),
+                                            ContentPart::ImageUrl { url } => {
+                                                // Handle data URIs for images
+                                                if url.starts_with("data:") {
+                                                    let mime = url
+                                                        .strip_prefix("data:")
+                                                        .and_then(|s| s.split(';').next())
+                                                        .unwrap_or("image/jpeg");
+                                                    let base64_data =
+                                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
+                                                    json!({
+                                                        "inlineData": {
+                                                            "mimeType": mime,
+                                                            "data": base64_data
+                                                        }
+                                                    })
+                                                } else {
+                                                    // For non-data URLs, we can't directly use them in Gemini
+                                                    // Gemini requires inline data or Google Cloud Storage URIs
+                                                    json!({ "text": format!("[Image: {}]", url) })
+                                                }
+                                            }
+                                            ContentPart::ToolResult {
+                                                tool_use_id,
+                                                content,
+                                            } => {
+                                                // Gemini uses functionResponse for tool results
+                                                json!({
+                                                    "functionResponse": {
+                                                        "name": tool_use_id.split('_').next().unwrap_or("tool"),
+                                                        "response": {
+                                                            "result": content
+                                                        }
+                                                    }
+                                                })
+                                            }
+                                            ContentPart::ToolUse { id: _, name, input } => {
+                                                // Gemini uses functionCall for tool invocations
+                                                json!({
+                                                    "functionCall": {
+                                                        "name": name,
+                                                        "args": input
+                                                    }
+                                                })
+                                            }
+                                        })
+                                        .collect()
+                                }            };
 
             contents.push(json!({
                 "role": role,
@@ -629,11 +628,10 @@ impl LlmClient for GeminiClient {
                             if let Some(parts) = content["parts"].as_array() {
                                 for part in parts {
                                     // Text content
-                                    if let Some(text) = part["text"].as_str() {
-                                        if !text.is_empty() {
+                                    if let Some(text) = part["text"].as_str()
+                                        && !text.is_empty() {
                                             yield StreamEvent::TextDelta { text: text.to_string() };
                                         }
-                                    }
 
                                     // Function calls (tool use)
                                     if let Some(function_call) = part.get("functionCall") {
@@ -659,17 +657,15 @@ impl LlmClient for GeminiClient {
             // Handle any remaining data in buffer
             if !buffer.trim().is_empty() {
                 let line = buffer.trim().trim_end_matches(',').trim();
-                if !line.is_empty() && line != "[,]" {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(line) {
-                        if let Some(usage) = parsed.get("usageMetadata") {
+                if !line.is_empty() && line != "[,]"
+                    && let Ok(parsed) = serde_json::from_str::<Value>(line)
+                        && let Some(usage) = parsed.get("usageMetadata") {
                             let input_tokens = usage["promptTokenCount"].as_u64().unwrap_or(0);
                             let output_tokens = usage["candidatesTokenCount"].as_u64().unwrap_or(0);
                             if input_tokens > 0 || output_tokens > 0 {
                                 yield StreamEvent::Usage { input_tokens, output_tokens };
                             }
                         }
-                    }
-                }
             }
 
             // Ensure we emit a finish event if not already done

@@ -102,8 +102,8 @@ impl Tool for GitLogTool {
         // Parse structured data
         let mut commits = Vec::new();
         for line in stdout.lines() {
-            if oneline {
-                if let Some(hash_end) = line.find(' ') {
+            if oneline
+                && let Some(hash_end) = line.find(' ') {
                     let hash = &line[..hash_end];
                     let rest = &line[hash_end + 1..];
                     // Extract subject and author from format: "%h %s (%an, %ar)"
@@ -119,7 +119,6 @@ impl Tool for GitLogTool {
                         }));
                     }
                 }
-            }
         }
 
         Ok(ToolOutput {

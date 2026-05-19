@@ -361,7 +361,7 @@ pub(crate) async fn check_permission_with_prompt(
             });
 
             // Wait for reply with 120s timeout
-            let timeout = tokio::time::Duration::from_secs(120);
+            let timeout = tokio::time::Duration::from_mins(2);
             let deadline = tokio::time::Instant::now() + timeout;
 
             loop {
@@ -930,12 +930,11 @@ impl SessionProcessor {
         let context_window = self
             .provider_registry
             .get(&model_ref.provider_id)
-            .map(|p| {
+            .and_then(|p| {
                 p.default_models()
                     .into_iter()
                     .find(|m| m.id == model_ref.model_id)
             })
-            .flatten()
             .map(|m| m.context_window)
             .unwrap_or(128_000); // Default fallback                            
         // Compact history if needed to prevent context window overflow
@@ -2059,22 +2058,17 @@ impl SessionProcessor {
                     let active_spec_id = self.active_spec.lock().unwrap().clone();
                     if let Some(ref spec_id_str) = active_spec_id {
                         if let Some(ref spec_mgr) = self.spec_manager.get() {
-                            let completed_file_tools: Vec<&PendingToolCall> = tool_calls
-                                .iter()
-                                .filter(|tc| {
-                                    matches!(
-                                        tc.name.as_str(),
-                                        "write"
-                                            | "edit"
-                                            | "multiedit"
-                                            | "patch"
-                                            | "create"
-                                            | "append_to_file"
-                                    )
-                                })
-                                .collect();
-                            if !completed_file_tools.is_empty() {
-                                if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
+                                                          if tool_calls.iter().any(|tc| {
+                                                              matches!(
+                                                                  tc.name.as_str(),
+                                                                  "write"
+                                                                      | "edit"
+                                                                      | "multiedit"
+                                                                      | "patch"
+                                                                      | "create"
+                                                                      | "append_to_file"
+                                                              )
+                                                          }) {                                if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
                                     if let Ok(mut spec) = spec_mgr.read_spec(&id).await {
                                         let mut updated = false;
                                         for task in spec.tasks.iter_mut() {

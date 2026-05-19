@@ -106,14 +106,13 @@ impl Tool for MemoryWriteTool {
             let existing = storage.load(label_str, &scope, &ctx.working_dir)?;
 
             // Check read-only on existing block regardless of mode.
-            if let Some(ref block) = existing {
-                if block.read_only {
+            if let Some(ref block) = existing
+                && block.read_only {
                     anyhow::bail!(
                         "Memory block '{}' is read-only and cannot be modified",
                         label_str
                     );
                 }
-            }
 
             let block = if mode == "overwrite" {
                 MemoryBlock::new(label_str, scope.clone())

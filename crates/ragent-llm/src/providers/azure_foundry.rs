@@ -284,5 +284,6 @@ struct AzureFoundryModelsResponse {
 #[derive(Debug, Deserialize)]
 struct AzureFoundryModelEntry {
     id: String,
+    #[allow(dead_code)]
     object: String,
 }

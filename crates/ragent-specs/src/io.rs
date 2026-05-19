@@ -181,9 +181,7 @@ impl SpecIo {
         if !content.starts_with("---") {
             return None;
         }
-        let Some(end) = content[3..].find("---") else {
-            return None;
-        };
+        let end = content[3..].find("---")?;
         let frontmatter = &content[3..3 + end];
         for line in frontmatter.lines() {
             let trimmed = line.trim();

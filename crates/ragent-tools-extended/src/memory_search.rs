@@ -169,14 +169,12 @@ impl MemorySearchTool {
 
         let memories = storage.list_memories("", 10_000)?;
         for mem in &memories {
-            if !embedded_ids.contains(&mem.id) {
-                if let Ok(embedding) = provider.embed(&mem.content) {
-                    if !embedding.is_empty() {
+            if !embedded_ids.contains(&mem.id)
+                && let Ok(embedding) = provider.embed(&mem.content)
+                    && !embedding.is_empty() {
                         let blob = serialise_embedding(&embedding);
                         let _ = storage.store_memory_embedding(mem.id, &blob);
                     }
-                }
-            }
         }
 
         // Search by similarity.
@@ -276,7 +274,7 @@ impl MemorySearchTool {
             return Ok(0);
         }
 
-        output.push_str(&format!("Found matching memory blocks:\n\n"));
+        output.push_str("Found matching memory blocks:\n\n");
         for (i, resolved) in results.iter().enumerate() {
             output.push_str(&format!(
                 "{}. [block/{}] {} (scope: {}{})\n   {}\n\n",

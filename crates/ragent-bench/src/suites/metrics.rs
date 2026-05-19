@@ -7,7 +7,7 @@ use crate::suites::{BenchCaseEvaluation, BenchMetricEvaluation};
 
 /// Count exact-match samples against a normalized reference string.
 #[must_use]
-pub(crate) fn exact_match_count(generation: &BenchGenerationResult, reference: &str) -> usize {
+pub fn exact_match_count(generation: &BenchGenerationResult, reference: &str) -> usize {
     let normalized_reference = normalized_code(reference);
     generation
         .samples
@@ -18,7 +18,7 @@ pub(crate) fn exact_match_count(generation: &BenchGenerationResult, reference: &
 
 /// Return whether the first sample matches exactly after normalization.
 #[must_use]
-pub(crate) fn first_sample_exact_match(
+pub fn first_sample_exact_match(
     generation: &BenchGenerationResult,
     reference: &str,
 ) -> bool {
@@ -31,7 +31,7 @@ pub(crate) fn first_sample_exact_match(
 
 /// Pick the best sample by exact match first, then edit similarity.
 #[must_use]
-pub(crate) fn best_exact_or_similarity_sample(
+pub fn best_exact_or_similarity_sample(
     generation: &BenchGenerationResult,
     reference: &str,
 ) -> (String, f64) {
@@ -45,13 +45,12 @@ pub(crate) fn best_exact_or_similarity_sample(
             (sample.text.clone(), if exact { 1.0 } else { similarity })
         })
         .max_by(|left, right| left.1.total_cmp(&right.1))
-        .map(|(text, score)| (text, score))
         .unwrap_or_else(|| (String::new(), 0.0))
 }
 
 /// Normalize code-like content for text-based comparisons.
 #[must_use]
-pub(crate) fn normalized_code(value: &str) -> String {
+pub fn normalized_code(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -62,7 +61,7 @@ pub(crate) fn normalized_code(value: &str) -> String {
 /// - Uses single Vec allocation for right-side character collection
 /// - Computes left-side length without collecting
 #[must_use]
-pub(crate) fn edit_similarity(actual: &str, expected: &str) -> f64 {
+pub fn edit_similarity(actual: &str, expected: &str) -> f64 {
     let left = normalized_code(actual);
     let right = normalized_code(expected);
     if left.is_empty() && right.is_empty() {
@@ -97,7 +96,7 @@ pub(crate) fn edit_similarity(actual: &str, expected: &str) -> f64 {
 
 /// Compute a lightweight CodeBLEU-style token overlap score in the range `[0, 1]`.
 #[must_use]
-pub(crate) fn codebleu_score(actual: &str, expected: &str) -> f64 {
+pub fn codebleu_score(actual: &str, expected: &str) -> f64 {
     if normalized_code(actual) == normalized_code(expected) {
         return 1.0;
     }
@@ -115,16 +114,13 @@ pub(crate) fn codebleu_score(actual: &str, expected: &str) -> f64 {
         overlap_precision(&ngrams(&actual_tokens, 2), &ngrams(&expected_tokens, 2));
     let syntax_overlap = syntax_keyword_overlap(&actual_tokens, &expected_tokens);
     let textual_similarity = edit_similarity(actual, expected);
-    (unigram_precision * 0.3
-        + bigram_precision * 0.2
-        + syntax_overlap * 0.2
-        + textual_similarity * 0.3)
+    textual_similarity.mul_add(0.3, syntax_overlap.mul_add(0.2, unigram_precision.mul_add(0.3, bigram_precision * 0.2)))
         .clamp(0.0, 1.0)
 }
 
 /// Compute pass@k from the number of generated samples and successes.
 #[must_use]
-pub(crate) fn pass_at_k(sample_count: usize, successful_samples: usize, k: usize) -> f64 {
+pub fn pass_at_k(sample_count: usize, successful_samples: usize, k: usize) -> f64 {
     if sample_count == 0 || successful_samples == 0 || k == 0 {
         return 0.0;
     }
@@ -141,7 +137,7 @@ pub(crate) fn pass_at_k(sample_count: usize, successful_samples: usize, k: usize
 
 /// Compute a resolution-rate style metric.
 #[must_use]
-pub(crate) fn resolution_rate(resolved_count: usize, attempted_count: usize) -> f64 {
+pub fn resolution_rate(resolved_count: usize, attempted_count: usize) -> f64 {
     if attempted_count == 0 {
         0.0
     } else {
@@ -151,7 +147,7 @@ pub(crate) fn resolution_rate(resolved_count: usize, attempted_count: usize) -> 
 
 /// Build a skipped ratio metric row.
 #[must_use]
-pub(crate) fn skipped_metric(
+pub fn skipped_metric(
     metric_name: &str,
     skipped_count: usize,
     notes: &str,
@@ -169,7 +165,7 @@ pub(crate) fn skipped_metric(
 
 /// Build an accuracy-style ratio metric row.
 #[must_use]
-pub(crate) fn accuracy_metric(
+pub fn accuracy_metric(
     metric_name: &str,
     passed_count: usize,
     failed_count: usize,
@@ -190,7 +186,7 @@ pub(crate) fn accuracy_metric(
 
 /// Build an average-valued metric row.
 #[must_use]
-pub(crate) fn average_metric(
+pub fn average_metric(
     metric_name: &str,
     values: &[f64],
     passed_count: usize,
@@ -215,7 +211,7 @@ pub(crate) fn average_metric(
 
 /// Compute pass@1 (first-sample exact match rate) from evaluations.
 #[must_use]
-pub(crate) fn pass_at_1(evaluations: &[BenchCaseEvaluation]) -> f64 {
+pub fn pass_at_1(evaluations: &[BenchCaseEvaluation]) -> f64 {
     if evaluations.is_empty() {
         return 0.0;
     }
@@ -236,7 +232,7 @@ pub(crate) fn pass_at_1(evaluations: &[BenchCaseEvaluation]) -> f64 {
 ///
 /// For suites that need custom logic, use the individual metric functions instead.
 #[must_use]
-pub(crate) fn evaluate_exact_match_case(
+pub fn evaluate_exact_match_case(
     case: &BenchCaseFixture,
     generation: &BenchGenerationResult,
     options: &BenchRunOptions,
@@ -278,7 +274,7 @@ pub(crate) fn evaluate_exact_match_case(
 
 /// Generate skipped metrics for multiple metric names when no_exec is set.
 #[must_use]
-pub(crate) fn skipped_metrics_for_suite(
+pub fn skipped_metrics_for_suite(
     metric_names: &[&str],
     evaluations_len: usize,
     suite_name: &str,
@@ -297,7 +293,7 @@ pub(crate) fn skipped_metrics_for_suite(
 
 /// Count passed and failed evaluations.
 #[must_use]
-pub(crate) fn count_passed_failed(evaluations: &[BenchCaseEvaluation]) -> (usize, usize) {
+pub fn count_passed_failed(evaluations: &[BenchCaseEvaluation]) -> (usize, usize) {
     let passed = evaluations.iter().filter(|e| e.status == "passed").count();
     let failed = evaluations.iter().filter(|e| e.status == "failed").count();
     (passed, failed)

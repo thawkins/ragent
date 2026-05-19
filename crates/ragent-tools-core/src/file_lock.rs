@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
-static FILE_LOCKS: LazyLock<Arc<RwLock<HashMap<PathBuf, Arc<Mutex<()>>>>>> =
+type FileLockMap = HashMap<PathBuf, Arc<Mutex<()>>>;
+
+static FILE_LOCKS: LazyLock<Arc<RwLock<FileLockMap>>> =
     LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
 
 /// Acquire an exclusive lock for editing a file.

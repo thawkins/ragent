@@ -18,16 +18,12 @@ use crate::app::App;
 
 /// Configuration for status bar rendering.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct StatusBarConfig {
     /// Enable verbose output (show full paths, complete labels)
     pub verbose: bool,
 }
 
-impl Default for StatusBarConfig {
-    fn default() -> Self {
-        Self { verbose: false }
-    }
-}
 
 /// Responsive mode based on terminal width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,9 +40,9 @@ impl ResponsiveMode {
     /// Determine mode from terminal width.
     pub fn from_width(width: u16) -> Self {
         match width {
-            0..=79 => ResponsiveMode::Minimal,
-            80..=119 => ResponsiveMode::Compact,
-            _ => ResponsiveMode::Full,
+            0..=79 => Self::Minimal,
+            80..=119 => Self::Compact,
+            _ => Self::Full,
         }
     }
 }

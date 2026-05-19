@@ -59,6 +59,7 @@ pub struct ResolvedBlock {
 /// # Returns
 ///
 /// `Ok(Some(ResolvedBlock))` if a block was found, `Ok(None)` otherwise.
+#[allow(clippy::ptr_arg)]
 pub fn resolve_block(
     label: &str,
     working_dir: &PathBuf,
@@ -127,6 +128,7 @@ pub fn resolve_block(
 /// # Returns
 ///
 /// A sorted, deduplicated list of block labels.
+#[allow(clippy::ptr_arg)]
 pub fn list_all_labels(
     working_dir: &PathBuf,
     config: &CrossProjectConfig,
@@ -185,6 +187,7 @@ pub fn list_all_labels(
 /// # Returns
 ///
 /// A list of matching blocks with their resolved scopes.
+#[allow(clippy::ptr_arg)]
 pub fn search_blocks_cross_project(
     query: &str,
     working_dir: &PathBuf,
@@ -201,8 +204,8 @@ pub fn search_blocks_cross_project(
     let mut project_matched: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for label in &project_labels {
-        if let Ok(Some(block)) = storage.load(label, &BlockScope::Project, working_dir) {
-            if block.content.to_lowercase().contains(&query_lower) {
+        if let Ok(Some(block)) = storage.load(label, &BlockScope::Project, working_dir)
+            && block.content.to_lowercase().contains(&query_lower) {
                 project_matched.insert(label.clone());
                 results.push(ResolvedBlock {
                     block,
@@ -210,7 +213,6 @@ pub fn search_blocks_cross_project(
                     shadowed: false,
                 });
             }
-        }
     }
 
     // Search global blocks if cross-project is enabled.
@@ -223,8 +225,8 @@ pub fn search_blocks_cross_project(
             if config.project_override && project_matched.contains(label) {
                 continue;
             }
-            if let Ok(Some(block)) = storage.load(label, &BlockScope::Global, working_dir) {
-                if block.content.to_lowercase().contains(&query_lower) {
+            if let Ok(Some(block)) = storage.load(label, &BlockScope::Global, working_dir)
+                && block.content.to_lowercase().contains(&query_lower) {
                     let shadowed = project_matched.contains(label);
                     results.push(ResolvedBlock {
                         block,
@@ -232,7 +234,6 @@ pub fn search_blocks_cross_project(
                         shadowed,
                     });
                 }
-            }
         }
     }
 

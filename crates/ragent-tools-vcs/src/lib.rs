@@ -41,19 +41,12 @@ pub mod storage {
 
 /// The result of a tool execution, including optional structured metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ToolOutput {
     pub content: String,
     pub metadata: Option<Value>,
 }
 
-impl Default for ToolOutput {
-    fn default() -> Self {
-        Self {
-            content: String::new(),
-            metadata: None,
-        }
-    }
-}
 
 /// Execution context passed to each tool invocation.
 #[derive(Clone)]

@@ -182,11 +182,10 @@ impl InferenceControls {
         if self.cancel_flag.load(Ordering::Relaxed) {
             return Err(EmbeddedInferenceError::Cancelled);
         }
-        if let Some(deadline) = self.deadline {
-            if Instant::now() >= deadline {
+        if let Some(deadline) = self.deadline
+            && Instant::now() >= deadline {
                 return Err(EmbeddedInferenceError::DeadlineExceeded);
             }
-        }
         Ok(())
     }
 }
@@ -717,7 +716,7 @@ impl EmbeddedRuntime {
         #[cfg(feature = "embedded-llm")]
         {
             let backend = Arc::new(CandleBackend::new(&self.config));
-            return self.prepare_backend(manifest, backend);
+            self.prepare_backend(manifest, backend)
         }
         #[cfg(not(feature = "embedded-llm"))]
         bail!("ragent-llm was built without the embedded-llm feature");
@@ -1059,8 +1058,8 @@ pub fn known_model_manifest(model_id: &str) -> Option<EmbeddedModelManifest> {
 /// Returns an error if no GGUF file is found in the directory.
 pub fn discover_manifest_in_dir(model_id: &str, model_dir: &Path) -> Result<EmbeddedModelManifest> {
     let mut artifacts = Vec::new();
-    if model_dir.exists() {
-        if let Ok(entries) = fs::read_dir(model_dir) {
+    if model_dir.exists()
+        && let Ok(entries) = fs::read_dir(model_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("gguf") {
@@ -1079,7 +1078,6 @@ pub fn discover_manifest_in_dir(model_id: &str, model_dir: &Path) -> Result<Embe
                 }
             }
         }
-    }
 
     if artifacts.is_empty() {
         bail!(

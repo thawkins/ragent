@@ -77,11 +77,10 @@ impl Tool for GitlabListIssuesTool {
         let limit = input["limit"].as_u64().unwrap_or(20).min(100);
 
         let mut path = format!("/projects/{project}/issues?state={state}&per_page={limit}");
-        if let Some(labels) = input["labels"].as_str() {
-            if !labels.is_empty() {
+        if let Some(labels) = input["labels"].as_str()
+            && !labels.is_empty() {
                 path.push_str(&format!("&labels={labels}"));
             }
-        }
 
         let issues = client.get(&path).await?;
         let arr = issues
@@ -419,8 +418,8 @@ impl Tool for GitlabCloseIssueTool {
             .as_u64()
             .context("Missing required parameter 'iid'")?;
 
-        if let Some(comment) = input["comment"].as_str() {
-            if !comment.is_empty() {
+        if let Some(comment) = input["comment"].as_str()
+            && !comment.is_empty() {
                 client
                     .post(
                         &format!("/projects/{project}/issues/{iid}/notes"),
@@ -428,7 +427,6 @@ impl Tool for GitlabCloseIssueTool {
                     )
                     .await?;
             }
-        }
 
         client
             .put(

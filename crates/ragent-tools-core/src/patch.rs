@@ -102,7 +102,7 @@ impl Tool for PatchTool {
             // Apply hunks in reverse order so earlier hunks don't shift line numbers
             // for later ones.
             let mut sorted_hunks: Vec<&Hunk> = fp.hunks.iter().collect();
-            sorted_hunks.sort_by(|a, b| b.old_start.cmp(&a.old_start));
+            sorted_hunks.sort_by_key(|b| std::cmp::Reverse(b.old_start));
 
             for (i, hunk) in sorted_hunks.iter().enumerate() {
                 lines = apply_hunk(&lines, hunk, fuzz).with_context(|| {
@@ -353,7 +353,7 @@ fn apply_hunk(file_lines: &[String], hunk: &Hunk, fuzz: usize) -> Result<Vec<Str
         let _context_offset = fuzz_level; // lines trimmed from top
 
         if let Some(pos) = find_match(file_lines, &trimmed_old, target_line) {
-            let actual_pos = if fuzz_level > 0 { pos } else { pos };
+            let actual_pos = pos;
             // Build result: lines before + new content + lines after
             let mut result = Vec::with_capacity(file_lines.len());
             result.extend(file_lines[..actual_pos].iter().cloned());

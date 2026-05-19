@@ -470,11 +470,10 @@ fn extract_slides(content: &Value) -> Result<Vec<Value>> {
     }
 
     // 2. Content is a JSON string — parse and recurse
-    if let Some(s) = content.as_str() {
-        if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+    if let Some(s) = content.as_str()
+        && let Ok(parsed) = serde_json::from_str::<Value>(s) {
             return extract_slides(&parsed);
         }
-    }
 
     if let Some(obj) = content.as_object() {
         // 3. Explicit "slides" key
@@ -492,11 +491,10 @@ fn extract_slides(content: &Value) -> Result<Vec<Value>> {
 
         // 5. Heuristic: find the first value that is an array of objects
         for v in obj.values() {
-            if let Some(arr) = v.as_array() {
-                if !arr.is_empty() && arr[0].is_object() {
+            if let Some(arr) = v.as_array()
+                && !arr.is_empty() && arr[0].is_object() {
                     return Ok(arr.clone());
                 }
-            }
         }
     }
 

@@ -236,7 +236,7 @@ impl SpecManager {
         // Sort
         match filter.sort_by {
             SortBy::ModifiedAt => {
-                specs.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+                specs.sort_by_key(|b| std::cmp::Reverse(b.modified_at));
             }
             SortBy::Status => {
                 let order = |s: SpecStatus| match s {
@@ -331,7 +331,7 @@ impl SpecManager {
             }
         }
 
-        results.sort_by(|a, b| b.score.cmp(&a.score));
+        results.sort_by_key(|b| std::cmp::Reverse(b.score));
         Ok(results)
     }
 }
@@ -343,8 +343,8 @@ fn update_frontmatter(
     audit_trail: &[(u64, String, String, String)],
     reviewers: &[String],
 ) -> Result<String, SpecError> {
-    let body_start = if content.starts_with("---") {
-        if let Some(end) = content[3..].find("---") {
+    let body_start = if let Some(rest) = content.strip_prefix("---") {
+        if let Some(end) = rest.find("---") {
             3 + end + 3
         } else {
             0

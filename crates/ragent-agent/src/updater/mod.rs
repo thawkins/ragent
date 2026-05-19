@@ -126,7 +126,7 @@ pub async fn download_and_replace(download_url: &str) -> Result<()> {
     let current_exe = std::env::current_exe().context("Cannot determine current binary path")?;
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_mins(5))
         .user_agent("ragent-updater/1.0")
         .build()?;
 

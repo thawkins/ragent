@@ -151,17 +151,15 @@ impl OllamaShowResponse {
         }
 
         for (key, value) in &self.model_info {
-            if key.ends_with(".context_length")
+            if (key.ends_with(".context_length")
                 || key.ends_with(".context_window")
                 || key.ends_with(".num_ctx")
                 || key.ends_with(".n_ctx")
                 || key.ends_with(".max_position_embeddings")
-                || key.ends_with(".max_sequence_length")
-            {
-                if let Some(len) = parse_usize_value(value) {
+                || key.ends_with(".max_sequence_length"))
+                && let Some(len) = parse_usize_value(value) {
                     return Some(len);
                 }
-            }
         }
         None
     }

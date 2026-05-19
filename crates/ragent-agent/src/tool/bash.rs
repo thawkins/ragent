@@ -346,9 +346,10 @@ fn strip_heredoc_bodies(cmd: &str) -> String {
 /// token after each operator (or at the start). Returns a list of command names.
 ///
 /// Examples:
-/// - "mkfs /dev/sda" → ["mkfs"]
-/// - "ls | grep foo" → ["ls", "grep"]
-/// - "cd tmp && mkfs" → ["cd", "mkfs"]
+/// - `mkfs /dev/sda` -> `["mkfs"]`
+/// - `ls | grep foo` -> `["ls", "grep"]`
+/// - `cd tmp && mkfs` -> `["cd", "mkfs"]`
+#[allow(clippy::doc_link_with_quotes)]
 fn extract_command_names(cmd: &str) -> Vec<String> {
     let mut commands = Vec::new();
     let mut current = String::new();
@@ -375,7 +376,7 @@ fn extract_command_names(cmd: &str) -> Vec<String> {
             }
             '\'' => {
                 // Single-quoted string - skip until closing quote
-                while let Some(qc) = chars.next() {
+                for qc in chars.by_ref() {
                     if qc == '\'' {
                         break;
                     }

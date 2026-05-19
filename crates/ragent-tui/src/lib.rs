@@ -185,7 +185,7 @@ pub async fn run_tui(
 
     // Create the terminal guard - it will automatically restore terminal state on drop
     // We don't need to reference it after creation - Drop handles cleanup
-    let _terminal_guard = TerminalGuard::new()?;
+    let terminal_guard = TerminalGuard::new()?;
     // Now create the ratatui terminal
     let stdout = std::io::stdout();
     let backend = CrosstermBackend::new(stdout);
@@ -435,11 +435,8 @@ pub async fn run_tui(
     while app.is_running {
         // Drain ALL pending events before rendering so the screen
         // always reflects the latest state.
-        loop {
-            match event_rx.try_recv() {
-                Ok(event) => app.handle_event(event),
-                Err(_) => break, // Empty or Disconnected
-            }
+        while let Ok(event) = event_rx.try_recv() {
+            app.handle_event(event);
         }
 
         // Drain tracing records captured by TuiTracingLayer into the log panel.
@@ -503,12 +500,11 @@ pub async fn run_tui(
                                                               while ct_event::poll(std::time::Duration::ZERO)? {
                                                                   match ct_event::read()? {
                                                                       CtEvent::Key(key) => { app.handle_key_event(key); got_input = true; }
-                                                                      CtEvent::Mouse(mouse) => {
+                                                                      CtEvent::Mouse(mouse)
                                                                           // Only process mouse events when mouse mode is enabled
-                                                                          if app.mouse_enabled {
+                                                                          if app.mouse_enabled => {
                                                                               app.handle_mouse_event(mouse); got_input = true;
                                                                           }
-                                                                      }
                                                                       CtEvent::Paste(text) => {
                                                                           // Insert pasted text as a single operation
                                                                           // Strip carriage returns but preserve newlines
@@ -546,7 +542,7 @@ pub async fn run_tui(
     // -- Restore terminal FIRST so the user gets a clean shell immediately --
     // Drop the terminal guard now (before slow cleanup) to leave alternate screen
     // and disable raw mode. This prevents the "stuck in TUI" appearance.
-    drop(_terminal_guard);
+    drop(terminal_guard);
 
     // -- Safety-net: force exit after 3 seconds if cleanup hangs --
     tokio::spawn(async {

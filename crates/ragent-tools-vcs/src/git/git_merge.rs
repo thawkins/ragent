@@ -95,12 +95,11 @@ impl Tool for GitMergeTool {
 
         if has_conflicts {
             for line in stderr.lines() {
-                if line.contains("CONFLICT") {
-                    if let Some(start) = line.rfind("in ") {
+                if line.contains("CONFLICT")
+                    && let Some(start) = line.rfind("in ") {
                         let file = line[start + 3..].trim();
                         conflicted.push(file.to_string());
                     }
-                }
             }
         }
 

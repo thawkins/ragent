@@ -235,13 +235,12 @@ pub(crate) fn find_replacement_range(
     if n > 0 && !needle_lines_trimmed.iter().all(|l| l.is_empty()) {
         let mut lws_matches: Vec<usize> = Vec::new(); // start line indices
         'outer: for start_idx in 0..=content_lines.len().saturating_sub(n) {
-            for i in 0..n {
-                let file_line = content_lines.get(start_idx + i).copied().unwrap_or("");
-                if file_line.trim_start() != needle_lines_trimmed[i] {
-                    continue 'outer;
-                }
-            }
-            lws_matches.push(start_idx);
+                          for (i, needle_line) in needle_lines_trimmed.iter().enumerate() {
+                              let file_line = content_lines.get(start_idx + i).copied().unwrap_or("");
+                              if file_line.trim_start() != *needle_line {
+                                  continue 'outer;
+                              }
+                          }            lws_matches.push(start_idx);
         }
         match lws_matches.len() {
             0 => {}
@@ -276,19 +275,18 @@ pub(crate) fn find_replacement_range(
     if n5 > 0 && needle_lines_collapsed.iter().any(|l| !l.is_empty()) {
         let mut cws_matches: Vec<usize> = Vec::new();
         'cws: for start_idx in 0..=content_lines.len().saturating_sub(n5) {
-            for i in 0..n5 {
-                let file_collapsed = content_lines
-                    .get(start_idx + i)
-                    .copied()
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if file_collapsed != needle_lines_collapsed[i] {
-                    continue 'cws;
-                }
-            }
-            cws_matches.push(start_idx);
+                          for (i, needle_line) in needle_lines_collapsed.iter().enumerate() {
+                              let file_collapsed = content_lines
+                                  .get(start_idx + i)
+                                  .copied()
+                                  .unwrap_or("")
+                                  .split_whitespace()
+                                  .collect::<Vec<_>>()
+                                  .join(" ");
+                              if file_collapsed != *needle_line {
+                                  continue 'cws;
+                              }
+                          }            cws_matches.push(start_idx);
         }
         match cws_matches.len() {
             0 => {}

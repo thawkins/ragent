@@ -1247,6 +1247,7 @@ impl Storage {
     /// # Errors
     ///
     /// Returns an error if the insert fails (e.g., invalid category).
+    #[allow(clippy::too_many_arguments)]
     pub fn create_memory(
         &self,
         content: &str,
@@ -1418,22 +1419,20 @@ impl Storage {
 
         // Build parameter list.
         let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-        if let Some(cats) = categories {
-            if !cats.is_empty() {
+        if let Some(cats) = categories
+            && !cats.is_empty() {
                 for cat in cats {
                     params_vec.push(Box::new(cat.clone()));
                 }
             }
-        }
         params_vec.push(Box::new(safe_query));
         params_vec.push(Box::new(min_confidence));
-        if let Some(tags) = tags {
-            if !tags.is_empty() {
+        if let Some(tags) = tags
+            && !tags.is_empty() {
                 for tag in tags {
                     params_vec.push(Box::new(tag.clone()));
                 }
             }
-        }
         params_vec.push(Box::new(limit as i64));
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -1571,8 +1570,8 @@ impl Storage {
             params_vec.push(Box::new(cat.to_string()));
             param_idx += 1;
         }
-        if let Some(tags) = tags {
-            if !tags.is_empty() {
+        if let Some(tags) = tags
+            && !tags.is_empty() {
                 let placeholders: Vec<String> = (0..tags.len())
                     .map(|i| format!("?{}", param_idx + i))
                     .collect();
@@ -1584,7 +1583,6 @@ impl Storage {
                     params_vec.push(Box::new(tag.clone()));
                 }
             }
-        }
 
         let where_clause = conditions.join(" AND ");
         let sql = format!("SELECT id FROM memories WHERE {where_clause}");
@@ -1686,24 +1684,24 @@ impl Storage {
         Ok(())
     }
 
-    /// Delete memories using a [`ForgetFilter`](crate::memory::store::ForgetFilter).
-    ///
-    /// Handles both the `Id` variant (single delete) and `Filter` variant
-    /// (criteria-based delete).
-    ///
-    /// # Arguments
-    ///
-    /// * `filter` - The filter specifying which memories to delete.
-    /// * `session_id` - Session ID for auditing (unused in core delete, but required for API consistency).
-    ///
-    /// # Returns
-    ///
-    /// Number of deleted memories.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the delete fails.
     // FIXME(M5): Restore when memory module extracted
+    // /// Delete memories using a [`ForgetFilter`](crate::memory::store::ForgetFilter).
+    // ///
+    // /// Handles both the `Id` variant (single delete) and `Filter` variant
+    // /// (criteria-based delete).
+    // ///
+    // /// # Arguments
+    // ///
+    // /// * `filter` - The filter specifying which memories to delete.
+    // /// * `session_id` - Session ID for auditing (unused in core delete, but required for API consistency).
+    // ///
+    // /// # Returns
+    // ///
+    // /// Number of deleted memories.
+    // ///
+    // /// # Errors
+    // ///
+    // /// Returns an error if the delete fails.
     //     pub fn delete_memories(
     //         &self,
     //         filter: crate::memory::store::ForgetFilter,
@@ -1764,18 +1762,18 @@ impl Storage {
         Ok(rows)
     }
 
-    /// Search structured memories by cosine similarity against a query embedding.
-    ///
-    /// Loads all stored memory embeddings and computes brute-force cosine
-    /// similarity. Returns results ranked by similarity (highest first).
-    ///
-    /// This approach is acceptable for up to ~10K memories. For larger datasets,
-    /// consider using `sqlite-vec` for ANN search.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
     // FIXME(M5): Restore when memory module extracted
+    // /// Search structured memories by cosine similarity against a query embedding.
+    // ///
+    // /// Loads all stored memory embeddings and computes brute-force cosine
+    // /// similarity. Returns results ranked by similarity (highest first).
+    // ///
+    // /// This approach is acceptable for up to ~10K memories. For larger datasets,
+    // /// consider using `sqlite-vec` for ANN search.
+    // ///
+    // /// # Errors
+    // ///
+    // /// Returns an error if the query fails.
     //     pub fn search_memories_by_embedding(
     //         &self,
     //         query_embedding: &[f32],
@@ -1885,12 +1883,12 @@ impl Storage {
         Ok(conn.last_insert_rowid())
     }
 
-    /// List all knowledge graph entities.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
     // FIXME(M5): Restore when memory module extracted
+    // /// List all knowledge graph entities.
+    // ///
+    // /// # Errors
+    // ///
+    // /// Returns an error if the query fails.
     //     pub fn list_entities(&self) -> Result<Vec<crate::memory::knowledge_graph::Entity>> {
     //         let conn = lock_conn!(self)?;
     //         let mut stmt = conn.prepare(
@@ -1911,11 +1909,11 @@ impl Storage {
     //         Ok(entities)
     //     }
 
-    /// List all knowledge graph relationships.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
+    // List all knowledge graph relationships.
+    //
+    // # Errors
+    //
+    // Returns an error if the query fails.
     // FIXME(M5): Restore when memory module extracted
     //     pub fn list_relationships(&self) -> Result<Vec<crate::memory::knowledge_graph::Relationship>> {
     //         let conn = lock_conn!(self)?;
@@ -1938,12 +1936,12 @@ impl Storage {
     //         Ok(relationships)
     //     }
 
-    /// Execute a knowledge graph query: find all entities and relationships
-    /// connected to a given entity (1-hop neighbours).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the query fails.
+    // Execute a knowledge graph query: find all entities and relationships
+    // connected to a given entity (1-hop neighbours).
+    //
+    // # Errors
+    //
+    // Returns an error if the query fails.
     // FIXME(M5): Restore when memory module extracted
     //     pub fn query_entity_neighbours(
     //         &self,

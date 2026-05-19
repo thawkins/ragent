@@ -91,13 +91,12 @@ fn copilot_premium_multiplier(model_id: &str) -> Option<f64> {
 
         _ => {
             // Fallback pattern matching for variations
-            if id_lower.contains("gpt-4o") && !id_lower.contains("mini") {
-                Some(0.0) // GPT-4o variants are included
-            } else if id_lower.contains("gpt-4.1") {
-                Some(0.0) // GPT-4.1 is included
-            } else if id_lower.contains("gpt-5-mini") || id_lower.contains("gpt5-mini") {
-                Some(0.0) // GPT-5 mini is included
-            } else if id_lower.contains("sonnet") {
+                          if (id_lower.contains("gpt-4o") && !id_lower.contains("mini"))
+                                || id_lower.contains("gpt-4.1")
+                                || id_lower.contains("gpt-5-mini")
+                                || id_lower.contains("gpt5-mini")
+                            {
+                                Some(0.0)            } else if id_lower.contains("sonnet") {
                 Some(1.0) // Claude Sonnet models
             } else if id_lower.contains("haiku") {
                 Some(0.33) // Claude Haiku models

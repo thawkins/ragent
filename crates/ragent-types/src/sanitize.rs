@@ -141,7 +141,7 @@ pub fn redact_secrets(msg: &str) -> String {
         && !registry.is_empty()
     {
         let mut secrets: Vec<&str> = registry.iter().map(String::as_str).collect();
-        secrets.sort_by(|a, b| b.len().cmp(&a.len()));
+        secrets.sort_by_key(|b| std::cmp::Reverse(b.len()));
         for secret in secrets {
             if result.contains(secret) {
                 result = result.replace(secret, "[REDACTED]");

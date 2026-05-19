@@ -9,7 +9,7 @@
 //! corruption on crash.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::block::{BlockScope, MemoryBlock, resolve_block_dir};
 
@@ -25,19 +25,19 @@ pub trait BlockStorage: Send + Sync {
         &self,
         label: &str,
         scope: &BlockScope,
-        working_dir: &PathBuf,
+        working_dir: &Path,
     ) -> Result<Option<MemoryBlock>>;
 
     /// Save a memory block, creating or overwriting the file.
     ///
     /// Enforces the block's content limit. Writes are atomic.
-    fn save(&self, block: &MemoryBlock, working_dir: &PathBuf) -> Result<()>;
+    fn save(&self, block: &MemoryBlock, working_dir: &Path) -> Result<()>;
 
     /// List all memory block labels in the given scope.
-    fn list(&self, scope: &BlockScope, working_dir: &PathBuf) -> Result<Vec<String>>;
+    fn list(&self, scope: &BlockScope, working_dir: &Path) -> Result<Vec<String>>;
 
     /// Delete a memory block by label and scope.
-    fn delete(&self, label: &str, scope: &BlockScope, working_dir: &PathBuf) -> Result<()>;
+    fn delete(&self, label: &str, scope: &BlockScope, working_dir: &Path) -> Result<()>;
 }
 
 /// File-based implementation of [`BlockStorage`].
@@ -52,7 +52,7 @@ impl FileBlockStorage {
     }
 
     /// Resolve the full file path for a block.
-    fn block_path(label: &str, scope: &BlockScope, working_dir: &PathBuf) -> Result<PathBuf> {
+    fn block_path(label: &str, scope: &BlockScope, working_dir: &Path) -> Result<PathBuf> {
         let dir = resolve_block_dir(scope, working_dir)?;
         Ok(dir.join(format!("{label}.md")))
     }
@@ -69,7 +69,7 @@ impl BlockStorage for FileBlockStorage {
         &self,
         label: &str,
         scope: &BlockScope,
-        working_dir: &PathBuf,
+        working_dir: &Path,
     ) -> Result<Option<MemoryBlock>> {
         let path = Self::block_path(label, scope, working_dir)?;
         if !path.exists() {
@@ -81,7 +81,7 @@ impl BlockStorage for FileBlockStorage {
         Ok(Some(block))
     }
 
-    fn save(&self, block: &MemoryBlock, working_dir: &PathBuf) -> Result<()> {
+    fn save(&self, block: &MemoryBlock, working_dir: &Path) -> Result<()> {
         // Enforce content limit before writing.
         if let Err(e) = block.check_content_limit() {
             anyhow::bail!("{e}");
@@ -104,7 +104,7 @@ impl BlockStorage for FileBlockStorage {
         Ok(())
     }
 
-    fn list(&self, scope: &BlockScope, working_dir: &PathBuf) -> Result<Vec<String>> {
+    fn list(&self, scope: &BlockScope, working_dir: &Path) -> Result<Vec<String>> {
         let dir = resolve_block_dir(scope, working_dir)?;
         if !dir.exists() {
             return Ok(Vec::new());
@@ -134,7 +134,7 @@ impl BlockStorage for FileBlockStorage {
         Ok(labels)
     }
 
-    fn delete(&self, label: &str, scope: &BlockScope, working_dir: &PathBuf) -> Result<()> {
+    fn delete(&self, label: &str, scope: &BlockScope, working_dir: &Path) -> Result<()> {
         let path = Self::block_path(label, scope, working_dir)?;
         if !path.exists() {
             anyhow::bail!("Memory block '{label}' not found at {}", path.display());
@@ -149,6 +149,7 @@ impl BlockStorage for FileBlockStorage {
 ///
 /// Returns a vector of (scope, block) pairs. Files that cannot be parsed
 /// are silently skipped (logged via tracing).
+#[allow(clippy::ptr_arg)]
 pub fn load_all_blocks(
     storage: &dyn BlockStorage,
     working_dir: &PathBuf,
@@ -179,6 +180,7 @@ pub fn load_all_blocks(
 /// This handles backward compatibility: existing MEMORY.md files that don't
 /// have YAML frontmatter are loaded as blocks with label "MEMORY" and the
 /// given default scope.
+#[allow(clippy::ptr_arg)]
 pub fn load_legacy_memory(scope: &BlockScope, working_dir: &PathBuf) -> Option<MemoryBlock> {
     let dir = resolve_block_dir(scope, working_dir).ok()?;
     let path = dir.join("MEMORY.md");

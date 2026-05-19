@@ -47,20 +47,20 @@ impl ButtonVariant {
     /// Get the background color for this variant (enabled state)
     pub fn enabled_bg_color(self) -> Color {
         match self {
-            ButtonVariant::Primary => theme::colors::FOCUS_COLOR,
-            ButtonVariant::Secondary => theme::colors::PRIMARY,
-            ButtonVariant::Danger => theme::colors::DIALOG_DANGER,
-            ButtonVariant::Success => theme::colors::DIALOG_SUCCESS,
+            Self::Primary => theme::colors::FOCUS_COLOR,
+            Self::Secondary => theme::colors::PRIMARY,
+            Self::Danger => theme::colors::DIALOG_DANGER,
+            Self::Success => theme::colors::DIALOG_SUCCESS,
         }
     }
 
     /// Get the background color for this variant (active/focused state)
     pub fn active_bg_color(self) -> Color {
         match self {
-            ButtonVariant::Primary => theme::colors::FOCUS_COLOR,
-            ButtonVariant::Secondary => theme::colors::PRIMARY,
-            ButtonVariant::Danger => theme::colors::DIALOG_DANGER,
-            ButtonVariant::Success => theme::colors::DIALOG_SUCCESS,
+            Self::Primary => theme::colors::FOCUS_COLOR,
+            Self::Secondary => theme::colors::PRIMARY,
+            Self::Danger => theme::colors::DIALOG_DANGER,
+            Self::Success => theme::colors::DIALOG_SUCCESS,
         }
     }
 

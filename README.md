@@ -276,10 +276,7 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.57** — Early development with MS Office/LibreOffice presentation writer fixes and todo_write result summary updates.
-Recent updates include expanded Teams lifecycle commands (`/team open|close|delete|clear`),
-tabular `/team tasks`, automatic pre-send context compaction, Copilot reasoning-level
-selection, improved model metadata/compatibility handling, and a consolidated security remediation plan (SECPLAN.md).
+**v0.1.0-alpha.82** — Early development with Azure AI Foundry provider support, config display command, and various provider logging improvements. Recent updates include Azure endpoint logging, `/config show` slash command, and the Microsoft Azure AI Foundry provider integration.
 
 ## License
 

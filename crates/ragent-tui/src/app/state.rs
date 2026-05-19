@@ -425,7 +425,7 @@ pub enum ProviderSetupStep {
 }
 
 /// Information about a configured provider.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfiguredProvider {
     /// Provider identifier (e.g. "anthropic").
     pub id: String,

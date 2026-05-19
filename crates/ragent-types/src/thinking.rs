@@ -17,8 +17,10 @@ use serde::{Deserialize, Serialize};
 /// See the provider-specific adapter implementations for the exact mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ThinkingLevel {
     /// Let the model/provider decide the appropriate thinking depth.
+    #[default]
     Auto,
     /// No reasoning / thinking — standard chat completion.
     Off,
@@ -37,11 +39,6 @@ impl ThinkingLevel {
     }
 }
 
-impl Default for ThinkingLevel {
-    fn default() -> Self {
-        Self::Auto
-    }
-}
 
 /// Configuration for model thinking/reasoning behaviour.
 ///

@@ -6,7 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Scope determining where a memory block is stored.
 ///
@@ -252,7 +252,7 @@ impl MemoryBlock {
 ///
 /// - [`BlockScope::Global`] → `~/.ragent/memory/`
 /// - [`BlockScope::Project`] → `<working_dir>/.ragent/memory/`
-pub fn resolve_block_dir(scope: &BlockScope, working_dir: &PathBuf) -> anyhow::Result<PathBuf> {
+pub fn resolve_block_dir(scope: &BlockScope, working_dir: &Path) -> anyhow::Result<PathBuf> {
     match scope {
         BlockScope::Global => {
             let home = dirs::home_dir().ok_or_else(|| {

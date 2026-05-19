@@ -174,11 +174,10 @@ fn estimate_page_count(content: &Value) -> usize {
     if let Some(elements) = content["elements"].as_array() {
         // Count explicit page breaks in elements
         for elem in elements {
-            if let Some(elem_type) = elem["type"].as_str() {
-                if elem_type == "page_break" {
+            if let Some(elem_type) = elem["type"].as_str()
+                && elem_type == "page_break" {
                     page_count += 1;
                 }
-            }
         }
     }
 

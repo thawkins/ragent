@@ -321,6 +321,7 @@ fn run_humaneval_hidden_tests(
             "exec(test_source, namespace)".to_string(),
             "candidate = namespace.get(entry_point)".to_string(),
             "if candidate is None:".to_string(),
+#[allow(clippy::literal_string_with_formatting_args)]
             "    raise AssertionError(f'entry point {entry_point} was not defined')".to_string(),
             "check = namespace.get('check')".to_string(),
             "if check is None:".to_string(),

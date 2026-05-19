@@ -377,7 +377,7 @@ pub fn compact_blocks(
     let size_limit = config.block_size_limit();
 
     for scope in &[BlockScope::Project, BlockScope::Global] {
-        let labels = match block_storage.list(scope, &working_dir.to_path_buf()) {
+        let labels = match block_storage.list(scope, working_dir) {
             Ok(l) => l,
             Err(e) => {
                 warn!(scope = ?scope, error = %e, "Failed to list blocks for compaction");
@@ -388,8 +388,7 @@ pub fn compact_blocks(
         for label in &labels {
             result.blocks_checked += 1;
 
-            let block = match block_storage.load(label, scope, &working_dir.to_path_buf()) {
-                Ok(Some(b)) => b,
+                          let block = match block_storage.load(label, scope, working_dir) {                Ok(Some(b)) => b,
                 Ok(None) => continue,
                 Err(e) => {
                     warn!(label, error = %e, "Failed to load block for compaction");
@@ -413,8 +412,7 @@ pub fn compact_blocks(
                 let mut compacted_block = block.clone();
                 compacted_block.content = compacted;
 
-                if let Err(e) = block_storage.save(&compacted_block, &working_dir.to_path_buf()) {
-                    warn!(label, error = %e, "Failed to save compacted block");
+                                  if let Err(e) = block_storage.save(&compacted_block, working_dir) {                    warn!(label, error = %e, "Failed to save compacted block");
                     continue;
                 }
 

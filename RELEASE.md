@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.82
+## Current Version: 0.1.0-alpha.83
+
+### Fixed
+- **SPEC.md fixes** — Fixed malformed benchmark runner table, corrected Team Lifecycle mermaid diagram syntax, replaced misplaced GitLab Integration section with proper content, and updated version references throughout.
+
+## Previous: 0.1.0-alpha.82
 
 ### Added
 - **azProvider fixes** — Applied fixes to Azure provider implementation.

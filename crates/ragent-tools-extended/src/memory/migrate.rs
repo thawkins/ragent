@@ -110,6 +110,7 @@ fn slugify_heading(heading: &str) -> String {
 /// When `execute` is false, returns a description of what would be done.
 ///
 /// The original MEMORY.md is never deleted — it remains as a backup.
+#[allow(clippy::ptr_arg)]
 pub fn migrate_memory_md(
     content: &str,
     scope: &BlockScope,

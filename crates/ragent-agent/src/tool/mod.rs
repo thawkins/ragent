@@ -603,7 +603,7 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
         self.inner
             .search_memories(
                 query,
-                categories.as_ref().map(|values| values.as_slice()),
+                categories.as_deref(),
                 None,
                 limit,
                 min_confidence,

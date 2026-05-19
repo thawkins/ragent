@@ -251,7 +251,7 @@ impl HuggingFaceClient {
         // Sort by descending length so longer names are replaced first,
         // preventing partial matches (e.g. `write_file` before `write`).
         let mut names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
-        names.sort_by(|a, b| b.len().cmp(&a.len()));
+        names.sort_by_key(|b| std::cmp::Reverse(b.len()));
         for name in names {
             let safe = Self::safe_tool_name(name);
             // Only replace bare occurrences — skip if already prefixed
@@ -462,8 +462,8 @@ impl LlmClient for HuggingFaceClient {
             });
 
             // Parse HF-specific error responses
-            if status.as_u16() == 503 {
-                if let Ok(err_json) = serde_json::from_str::<HfErrorResponse>(&body_text) {
+            if status.as_u16() == 503
+                && let Ok(err_json) = serde_json::from_str::<HfErrorResponse>(&body_text) {
                     let wait_msg = err_json
                         .estimated_time
                         .map(|t| format!(" (estimated wait: {t:.0}s)"))
@@ -474,7 +474,6 @@ impl LlmClient for HuggingFaceClient {
                          Please try again in a moment."
                     );
                 }
-            }
 
             if status.as_u16() == 403 {
                 bail!(
@@ -883,8 +882,7 @@ fn format_model_display_name(model_id: &str) -> String {
         .rsplit_once('/')
         .map(|(_, name)| name)
         .unwrap_or(repo_id)
-        .replace('-', " ")
-        .replace('_', " ");
+        .replace(['-', '_'], " ");
 
     match provider_suffix {
         Some(provider) => format!("{name} ({provider})"),
