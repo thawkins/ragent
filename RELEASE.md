@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.83
+## Current Version: 0.1.0-alpha.84
+
+### Added
+- **Azure test script** — Added `scripts/getresult.sh` for testing Azure AI Foundry chat completions.
+
+## Previous: 0.1.0-alpha.83
 
 ### Fixed
 - **SPEC.md fixes** — Fixed malformed benchmark runner table, corrected Team Lifecycle mermaid diagram syntax, replaced misplaced GitLab Integration section with proper content, and updated version references throughout.

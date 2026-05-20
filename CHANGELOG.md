@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.84
+
+### Added
+- **Azure test script** — Added `scripts/getresult.sh` for testing Azure AI Foundry chat completions.
+
 ## Version: 0.1.0-alpha.83
 
 ### Fixed
