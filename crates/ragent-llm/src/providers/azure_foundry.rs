@@ -3,7 +3,8 @@
 //! Azure AI Foundry provides OpenAI-compatible chat completions via a single
 //! REST endpoint. Authentication uses the `api-key` header (Azure convention)
 //! or `Authorization: Bearer` as a fallback. Model discovery is supported via
-//! the `/models` endpoint.
+//! the `/openai/models?api-version=2024-10-21` endpoint (Azure OpenAI Service
+//! compatible).
 //!
 //! # Configuration
 //!
@@ -150,7 +151,8 @@ pub async fn discover_azure_foundry_models(
     base_url: &str,
 ) -> Result<Vec<ModelInfo>> {
     let base = base_url.trim_end_matches('/').to_string();
-    let url = format!("{}/models", base);
+    // Use the Azure OpenAI Service /models endpoint with api-version
+    let url = format!("{}/openai/models?api-version=2024-10-21", base);
     let response = crate::provider::http_client::create_http_client()
         .get(&url)
         .header("api-key", api_key)
