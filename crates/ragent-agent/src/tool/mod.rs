@@ -813,14 +813,14 @@ impl Tool for ExtractedExtendedToolAdapter {
             },
         );
 
-        let tool_ctx = ragent_tools_extended::ToolContext {
-            session_id: ctx.session_id.clone(),
-            working_dir: ctx.working_dir.clone(),
-            event_bus: tool_bus,
-            storage: storage_adapter,
-            code_index: ctx.code_index.clone(),
-        };
-        let result = self
+                  let tool_ctx = ragent_tools_extended::ToolContext {
+                      session_id: ctx.session_id.clone(),
+                      working_dir: ctx.working_dir.clone(),
+                      event_bus: tool_bus,
+                      storage: storage_adapter,
+                      code_index: ctx.code_index.clone(),
+                      config: None, // config is not available in the adapter layer
+                  };        let result = self
             .inner
             .execute(input, &tool_ctx)
             .await

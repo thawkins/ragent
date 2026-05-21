@@ -162,6 +162,9 @@ pub struct ToolContext {
     pub event_bus: Arc<EventBus>,
     pub storage: Option<Arc<dyn storage::StorageBackend>>,
     pub code_index: Option<Arc<ragent_codeindex::CodeIndex>>,
+    /// Optional ragent configuration loaded from config files.
+    /// Provides tools access to settings like API keys, permissions, etc.
+    pub config: Option<Arc<ragent_config::Config>>,
 }
 
 /// A tool that an agent can invoke to perform actions.

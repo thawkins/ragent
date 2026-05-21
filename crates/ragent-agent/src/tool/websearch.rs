@@ -28,11 +28,11 @@ impl Tool for WebSearchTool {
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &'static str {
-        "Search the web and return results with titles, URLs, and snippets. \
-         Requires a TAVILY_API_KEY environment variable to be set."
-    }
-
+          fn description(&self) -> &'static str {
+              "Search the web and return results with titles, URLs, and snippets. \
+               Requires a TAVILY_API_KEY environment variable or 'tavily_api_key' \
+               in ragent.json config to be set."
+          }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -60,8 +60,8 @@ impl Tool for WebSearchTool {
     /// # Errors
     ///
     /// Returns an error if the `query` parameter is missing or empty,
-    /// if the `TAVILY_API_KEY` environment variable is not set, or if the
-    /// search request fails.
+    /// if the Tavily API key is not found in the `TAVILY_API_KEY` environment
+    /// variable or `ragent.json` config, or if the search request fails.
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> Result<ToolOutput> {
         let query = input["query"]
             .as_str()
@@ -76,13 +76,21 @@ impl Tool for WebSearchTool {
             .unwrap_or(DEFAULT_NUM_RESULTS)
             .min(MAX_NUM_RESULTS);
 
-        let api_key = std::env::var("TAVILY_API_KEY").map_err(|_| {
-            anyhow::anyhow!(
-                "No search API key configured. Set the TAVILY_API_KEY environment \
-                 variable to enable web search. Get a free key at https://tavily.com"
-            )
-        })?;
-
+                  // Try environment variable first, then fall back to config
+                  let api_key = std::env::var("TAVILY_API_KEY")
+                      .ok()
+                      .or_else(|| {
+                          crate::Config::load()
+                              .ok()
+                              .and_then(|cfg| cfg.tavily_api_key)
+                      })
+                      .ok_or_else(|| {
+                          anyhow::anyhow!(
+                              "No search API key configured. Set the TAVILY_API_KEY environment \
+                               variable or add 'tavily_api_key' to your ragent.json config file. \
+                               Get a free key at https://tavily.com"
+                          )
+                      })?;
         let results = tavily_search(&api_key, query, num_results).await?;
 
         // Format results as readable text

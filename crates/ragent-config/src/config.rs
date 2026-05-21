@@ -54,6 +54,12 @@ pub struct Config {
     /// User-defined directory/file path allowlist and denylist additions.
     #[serde(default)]
     pub dirs: DirsConfig,
+    /// Tavily search API key for the websearch tool.
+    ///
+    /// Can also be set via the `TAVILY_API_KEY` environment variable. The
+    /// environment variable takes precedence over this config field.
+    #[serde(default)]
+    pub tavily_api_key: Option<String>,
     /// Code index configuration (codebase indexing & search).
     #[serde(default)]
     pub code_index: CodeIndexConfig,

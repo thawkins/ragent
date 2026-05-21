@@ -1039,6 +1039,17 @@ pub fn tool_result_summary(
                 Some(thought.to_string())
             }
         }
+        "task_complete" => {
+            let summary = out
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if summary.is_empty() {
+                Some("Task complete".to_string())
+            } else {
+                Some(format!("✅ {}", summary))
+            }
+        }
         // ═══════════════════════════════════════════════════════════════════
         // 📝 PLANNING
         // ═══════════════════════════════════════════════════════════════════
@@ -1696,6 +1707,21 @@ impl<'a> MessageWidget<'a> {
                                     )));
                                 }
                             }
+                          } else if tool == "task_complete" {
+                              // Render the full task completion summary
+                              if let Some(summary) = state
+                                  .output
+                                  .as_ref()
+                                  .and_then(|out| out.get("summary"))
+                                  .and_then(|v| v.as_str())
+                              {
+                                  for line in summary.lines() {
+                                      lines.push(Line::from(Span::styled(
+                                          format!("  ✅ {}", line),
+                                          Style::default().fg(Color::Green),
+                                      )));
+                                  }
+                              }
                         } else if tool == "multiedit" {
                             // Render per-file edit stats as a tabular list
                             if let Some(file_stats) = state
