@@ -269,6 +269,7 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("huggingface", "Hugging Face"),
     ("generic_openai", "Generic OpenAI API"),
     ("azure_foundry", "Azure AI Foundry"),
+    ("azure_resource", "Azure Resource (File)"),
     ("copilot", "GitHub Copilot"),
     ("ollama_cloud", "Ollama Cloud"),
     ("ollama", "Ollama (Local)"),
@@ -337,6 +338,15 @@ pub enum ProviderSetupStep {
         user_code: String,
         /// URL the user must visit (e.g. `https://github.com/login/device`).
         verification_uri: String,
+    },
+    /// Choosing an Azure deployment from the user's azureresources.json file.
+    SelectAzureResource {
+        /// Parsed entries from the file.
+        entries: Vec<ragent_core::provider::azure_resource::AzureResourceEntry>,
+        /// Index of the highlighted entry.
+        selected: usize,
+        /// Optional error message (e.g. file not found).
+        error: Option<String>,
     },
     /// Choosing which model to use from the selected provider.
     SelectModel {

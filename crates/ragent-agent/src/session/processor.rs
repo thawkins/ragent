@@ -2449,7 +2449,29 @@ impl SessionProcessor {
             );
         }
 
-        // Check common environment variable names
+        // Azure Foundry: also check azure_resource_last_selection for key config
+        if provider_id == "azure_foundry" {
+            if let Ok(Some(last)) =
+                self.storage_op(|s| s.get_setting("azure_resource_last_selection")).await
+            {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
+                    // Direct api_key takes precedence
+                    if let Some(key) = parsed.get("api_key").and_then(|v| v.as_str()) {
+                        if !key.is_empty() {
+                            return Ok(key.to_string());
+                        }
+                    }
+                    // Fall back to api_key_env
+                    if let Some(env_var) = parsed.get("api_key_env").and_then(|v| v.as_str()) {
+                        if let Ok(key) = std::env::var(env_var)
+                            && !key.is_empty()
+                        {
+                            return Ok(key);
+                        }
+                    }
+                }
+            }
+        }
         let env_vars = match provider_id {
             "anthropic" => vec!["ANTHROPIC_API_KEY"],
             "openai" => vec!["OPENAI_API_KEY"],
@@ -2457,6 +2479,7 @@ impl SessionProcessor {
             "huggingface" => vec!["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"],
             "generic_openai" => vec!["OPENAI_API_KEY", "GENERIC_OPENAI_API_KEY"],
             "ollama_cloud" => vec!["OLLAMA_API_KEY"],
+            "azure_foundry" => vec!["AZURE_AI_FOUNDRY_API_KEY"],
             _ => vec![],
         };
 

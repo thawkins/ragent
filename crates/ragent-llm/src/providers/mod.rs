@@ -5,6 +5,7 @@
 
 pub mod anthropic;
 pub mod azure_foundry;
+pub mod azure_resource;
 pub mod copilot;
 pub mod gemini;
 pub mod generic_openai;
@@ -267,6 +268,7 @@ pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));
     registry.register(Box::new(azure_foundry::AzureFoundryProvider));
+    registry.register(Box::new(azure_resource::AzureResourceProvider::new()));
     registry.register(Box::new(copilot::CopilotProvider::new()));
     registry.register(Box::new(gemini::GeminiProvider));
     registry.register(Box::new(openai::OpenAiProvider));

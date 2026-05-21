@@ -2420,11 +2420,21 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
-                "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
-                    .ok()
-                    .filter(|k| !k.is_empty())
-                    .map(|_| ProviderSource::EnvVar),
-                _ => None,
+                                  "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
+                                      .ok()
+                                      .filter(|k| !k.is_empty())
+                                      .map(|_| ProviderSource::EnvVar),
+                                  "azure_resource" => {
+                                      // Azure Resource is "configured" when azureresources.json exists
+                                      let config_path = dirs::home_dir()
+                                          .map(|h| h.join(".config").join("ragent").join("azureresources.json"))
+                                          .filter(|p| p.exists())
+                                          .or_else(|| {
+                                              let p = std::path::PathBuf::from(".ragent").join("azureresources.json");
+                                              if p.exists() { Some(p) } else { None }
+                                          });
+                                      config_path.map(|_| ProviderSource::Database)
+                                  }                _ => None,
             };
             if let Some(source) = found {
                 push(pid, pname, source);

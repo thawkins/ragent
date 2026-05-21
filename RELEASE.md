@@ -1,6 +1,14 @@
 # Release
 
-## Current Version: 0.1.0-alpha.85
+## Current Version: 0.1.0-alpha.86
+
+### Added
+- **Azure Resource (File) provider** — New `azure_resource` provider that reads Azure endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`. Supports multiple resource entries with per-endpoint API keys, environment-variable-based keys, custom context windows, capability tags, and thinking configuration.
+- **Azure Resource documentation** — Added `docs/userdocs/azure-resource.md` with full JSON schema, field reference, copy-pasteable example, and troubleshooting guide.
+- **Azure Resource integration tests** — Added `crates/ragent-tui/tests/test_azure_resource_flow.rs` covering provider listing, persistence round-trip, stale selection cleanup, ModelInfo conversion, and backend resolution.
+- **`azureresource.json` file format spec** — Added `specs/AzureResource/FILEFORMAT.md` documenting the complete `azureresources.json` schema, validation rules, and mapping to internal `ModelInfo`.
+
+## Previous: 0.1.0-alpha.85
 
 ### Added
 - **Azure test script** — Added `scripts/getresult.sh` for testing Azure AI Foundry chat completions.
@@ -27,72 +35,3 @@
 - **Azure endpoint logging** — TUI log panel now displays the full endpoint URL for Azure AI Foundry requests, not just the `[provider/model]` prefix.
 
 ## Previous: 0.1.0-alpha.77
-
-### Added
-- **Azure endpoint logging** — Azure AI Foundry provider now logs the resolved endpoint via `tracing::info!` when connecting.
-
-## Previous: 0.1.0-alpha.76
-
-### Added
-- **gen-spec-pdf.sh script** — New `scripts/gen-spec-pdf.sh` for converting Markdown specifications (with Mermaid diagrams) to PDF using Pandoc and Chromium.
-
-### Changed
-- **SPEC.md updates** — Removed LSP references and added a dedicated Spec Management section documenting the spec tool suite.
-
-## Previous: 0.1.0-alpha.71
-
-### Changed
-- **Update concurrency** — Improved concurrency handling across the codebase.
-- **Fix todos** — Resolved outstanding todo issues.
-
-## Previous: 0.1.0-alpha.68
-
-### Added
-- **`/codeindex` language filtering** — The `/codeindex` slash command now supports an optional `lang` parameter (e.g., `/codeindex lang rust`) to filter code index results by programming language.
-
-### Changed
-- **Benchmark data cleanup** — Removed unused benchmark dataset files from `benches/data/` for multiple languages and suites, reducing repository size significantly.
-
-## Previous: 0.1.0-alpha.67
-
-### Changed
-- **Version bump** — Incremented to 0.1.0-alpha.66.
-
-## Previous: 0.1.0-alpha.65
-
-### Added
-- **Instruction file discovery tracking** — The `collect_agents_md_content_with_discovery()` function now returns structured discovery information (`InstructionFileDiscovery`) showing which instruction files were searched for, where they were looked for (working directory and global directory), and which files were actually found. Discovery summaries are logged and emitted as `AgentNotice` events.
-
-### Changed
-- **AgentNotice visibility** — `AgentNotice` events are now displayed prominently in the TUI message window with a "📋 **Agent Notice**" header, in addition to being logged and shown in the status bar.
-- **Formatting improvements** — AGENTS.md acknowledgment prompt now includes better line breaks for readability.
-
-## Previous: 0.1.0-alpha.60
-
-### Added
-- **Global AGENTS.md search path** — The `collect_agents_md_content()` function now searches `~/.local/share/ragent/` for AGENTS.md-style instruction files (AGENTS.md, CLAUDE.md, .ragent.md, INSTRUCTIONS.md). If any local project files exist, they take precedence; otherwise global files are used as a fallback.
-
-### Changed
-- **AGENTS.md loading behavior** — Local project files now replace (rather than append to) global instruction files. This allows a single global configuration while still supporting project-specific overrides.
-
-## Previous: 0.1.0-alpha.59
-
-### Added
-- **Benchmark runner subsystem** — New `ragent-bench` crate with suite registry (`quick`, `standard`, `agentic` profiles), workbook output (XLSX with `run`, `metrics`, `cases`, `artifacts` sheets), data initialization (sample fixtures and full upstream download), and a `LiveBenchModelRunner` that drives generation via the current provider/model. Includes HumanEval, MBPP, and a Phase-6 native suite adapter.
-- **`/bench` TUI slash commands** — Full benchmark workflow in the terminal: `/bench list`, `/bench init <suite-or-all>`, `/bench run <target>` (background task with progress), `/bench status`, `/bench open last`, and `/bench cancel`. Results written to `benches/<suite>/<YYYY-MM-DD>/<provider>/<model>.xlsx`.
-- **Benchmark documentation** — New `docs/userdocs/bench.md` and `docs/userdocs/bench.pdf` covering usage, architecture, and workbook schema.
-- **XLSX native writer** — `ragent-tools-core/src/xlsx.rs` for creating Office Open XML (OOXML) workbooks without external dependencies.
-
-### Changed
-- **HuggingFace model discovery rewritten** — Switched from the HuggingFace Hub API (`/api/models?pipeline_tag=text-generation`) to the authenticated router API (`/v1/models`), keeping only models with at least one live provider and filtering by text input/output modalities. Now captures per-provider context length, max output, and pricing.
-- **Tool alias cleanup** — Removed 13 deprecated aliases (`view_file`, `read_file`, `get_file_contents`, `open_file`, `list_files`, `list_directory`, `find_files`, `search_in_repo`, `file_search`, `replace_in_file`, `run_shell_command`, `run_terminal_cmd`, `execute_bash`, `execute_code`). Only `update_file` and `run_code` remain as aliases for `write` and `bash` respectively.
-- **Unified config types** — `ragent-agent` now re-exports `Config`, `StreamConfig`, `MemoryConfig`, `ToolVisibilityConfig`, `AgentConfig`, and other config types directly from `ragent-config`, removing the `ragent-agent/src/config/` module entirely. Permission rules are converted between config and runtime types via a new `config_permission_rule_to_runtime()` helper.
-- **Enhanced codeindex grep guidance** — System prompt now tells the LLM that `grep` requires the `pattern` parameter.
-- **AGENTS.md expanded** — Full tool reference section, code intelligence decision flow, shell execution rules, test organization, and other project guidelines added.
-- **Processor import cleanup** — `bash_lists` and `dir_lists` references migrated from `crate::` to `ragent_config::`.
-- **Cargo.lock updated** — New dependencies for benchmark crate (flate2, sha2, rust_xlsxwriter, uuid).
-
-## Previous: 0.1.0-alpha.54
-
-### Changed
-- **Remove some features and add more feature switches** — Removed the legacy journal subsystem (journal tools, journal viewer panel, journal API routes, journal memory backend) in favour of the newer structured-memory and embedding-based memory stores. Added stream-config default overrides (`timeout_secs`, `max_retries`, `retry_backoff_secs`) so agents can tune network resilience without editing code. Updated tool-visibility metadata across agent and config crates. Simplified TUI layout and status-bar rendering. Reduced binary size and API surface.

@@ -581,8 +581,72 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 );
             }
         }
-        ProviderSetupStep::SelectThinkingLevel {
-            model, selected, ..
+                  ProviderSetupStep::SelectAzureResource {
+                      entries,
+                      selected,
+                      error,
+                  } => {
+                      let mut lines: Vec<Line<'_>> = vec![
+                          Line::from(Span::styled(
+                              "Select Azure Resource",
+                              Style::default()
+                                  .fg(Color::Cyan)
+                                  .add_modifier(Modifier::BOLD),
+                          )),
+                          Line::from(""),
+                      ];
+        
+                      if let Some(err) = error {
+                          lines.push(Line::from(Span::styled(
+                              err.as_str(),
+                              Style::default().fg(Color::Yellow),
+                          )));
+                          lines.push(Line::from(""));
+                      } else if entries.is_empty() {
+                          lines.push(Line::from(Span::styled(
+                              "No resources found.",
+                              Style::default().fg(Color::Yellow),
+                          )));
+                          lines.push(Line::from(""));
+                          lines.push(Line::from(
+                              "Place an azureresources.json file in ~/.config/ragent/ or .ragent/",
+                          ));
+                      } else {
+                          for (i, entry) in entries.iter().enumerate() {
+                              let (indicator, style) = if i == *selected {
+                                  (
+                                      "▸ ",
+                                      Style::default()
+                                          .fg(Color::Cyan)
+                                          .add_modifier(Modifier::BOLD),
+                                  )
+                              } else {
+                                  ("  ", Style::default().fg(Color::White))
+                              };
+                              lines.push(Line::from(vec![
+                                  Span::styled(indicator, style),
+                                  Span::styled(entry.name.clone(), style),
+                              ]));
+                          }
+                      }
+        
+                      lines.push(Line::from(""));
+                      lines.push(Line::from(Span::styled(
+                          "↑/↓ to move, Enter to select, Esc to cancel",
+                          Style::default().fg(Color::DarkGray),
+                      )));
+        
+                      let block = Block::default()
+                          .borders(Borders::ALL)
+                          .title(" Select Azure Resource ")
+                          .border_style(Style::default().fg(Color::Cyan));
+        
+                      let paragraph = Paragraph::new(lines)
+                          .block(block)
+                          .alignment(Alignment::Center);
+                      frame.render_widget(paragraph, area);
+                  }
+                  ProviderSetupStep::SelectThinkingLevel {            model, selected, ..
         } => {
             let lines: Vec<Line<'_>> = model
                 .thinking_levels

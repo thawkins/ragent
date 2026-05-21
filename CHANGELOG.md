@@ -1,5 +1,12 @@
 # Changelog
 
+## Version: 0.1.0-alpha.86
+
+### Added
+- **Azure Resource (File) provider** — New `azure_resource` provider that reads Azure endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`. Supports multiple resource entries with per-endpoint API keys, environment-variable-based keys, custom context windows, capability tags, and thinking configuration. TUI integration includes a dedicated picker (`/setup` → Azure Resource (File)), last-selection persistence, and automatic resolution to the `azure_foundry` backend.
+- **Azure Resource documentation** — Added `docs/userdocs/azure-resource.md` with full JSON schema, field reference, copy-pasteable example, and troubleshooting guide.
+- **Azure Resource integration tests** — Added `crates/ragent-tui/tests/test_azure_resource_flow.rs` covering provider listing, persistence round-trip, stale selection cleanup, ModelInfo conversion, and backend resolution.
+
 ## Version: 0.1.0-alpha.85
 
 ### Changed
