@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.85
+
+### Changed
+- **Version bump** — Incremented pre-release version for release.
+
 ## Version: 0.1.0-alpha.84
 
 ### Added
