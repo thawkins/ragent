@@ -1239,7 +1239,7 @@ users fix malformed configuration files quickly.
 
 The ragent TUI is built on a multi-layer architecture with a main chat screen, modal overlays, popup windows, and sidebar panels. Each window serves a specific purpose in the user workflow.
 
-#### 6.1.1.1 Main Screen (Chat)
+#### 6.1.1 Main Screen (Chat)
 
 The primary interface where all conversation happens.
 
@@ -1257,7 +1257,7 @@ The primary interface where all conversation happens.
 
 ---
 
-#### 6.1.2.1 Provider Setup Dialog (Modal)
+#### 6.1.2 Provider Setup Dialog (Modal)
 
 Multi-step wizard for configuring LLM providers.
 
@@ -1275,7 +1275,7 @@ Multi-step wizard for configuring LLM providers.
 
 ---
 
-#### 6.1.4.1 Agents Popup Window
+#### 6.1.3 Agents Popup Window
 
 A floating popup window showing active background agents and their status.
 
@@ -1292,7 +1292,7 @@ A floating popup window showing active background agents and their status.
 
 ---
 
-#### 6.1.5.1 Teams Popup Window
+#### 6.1.4 Teams Popup Window
 
 A floating popup for team coordination when managing multiple teammates.
 
@@ -1309,7 +1309,7 @@ A floating popup for team coordination when managing multiple teammates.
 
 ---
 
-#### 6.1.6.1 Slash Command Autocomplete Menu
+#### 6.1.5 Slash Command Autocomplete Menu
 
 An inline popup menu that appears when typing `/` in the input area.
 
@@ -1326,7 +1326,7 @@ An inline popup menu that appears when typing `/` in the input area.
 
 ---
 
-#### 6.1.7.1 File Reference Autocomplete Menu (`@` Menu)
+#### 6.1.6 File Reference Autocomplete Menu (`@` Menu)
 
 An inline popup for selecting files when using `@` references.
 
@@ -1343,7 +1343,7 @@ An inline popup for selecting files when using `@` references.
 
 ---
 
-#### 6.1.8.1 History Picker Overlay
+#### 6.1.7 History Picker Overlay
 
 A scrollable overlay for browsing and reusing previous inputs.
 
@@ -1359,7 +1359,7 @@ A scrollable overlay for browsing and reusing previous inputs.
 
 ---
 
-#### 6.1.9.1 Permission Dialog (Modal)
+#### 6.1.8 Permission Dialog (Modal)
 
 Centered modal for approving or denying permission requests.
 
@@ -1375,7 +1375,7 @@ Centered modal for approving or denying permission requests.
 
 ---
 
-#### 6.1.10.1 Context Menu (Right-Click)
+#### 6.1.9 Context Menu (Right-Click)
 
 A small popup menu for text operations.
 
@@ -1391,7 +1391,7 @@ A small popup menu for text operations.
 
 ---
 
-#### 6.1.11.1 MCP Discovery Dialog (Overlay)
+#### 6.1.10 MCP Discovery Dialog (Overlay)
 
 An overlay for discovering Model Context Protocol servers.
 
@@ -1407,7 +1407,7 @@ An overlay for discovering Model Context Protocol servers.
 
 ---
 
-#### 6.1.12.1 Output View Overlay
+#### 6.1.11 Output View Overlay
 
 A scrollable panel for viewing raw agent or team member output.
 
@@ -1423,7 +1423,7 @@ A scrollable panel for viewing raw agent or team member output.
 
 ---
 
-#### 6.1.15.1 Memory Browser Overlay
+#### 6.1.12 Memory Browser Overlay
 
 A full-panel overlay for browsing memory blocks.
 
@@ -1440,7 +1440,7 @@ A full-panel overlay for browsing memory blocks.
 
 ---
 
-#### 6.1.16.1 Plan Approval Dialog (Modal)
+#### 6.1.13 Plan Approval Dialog (Modal)
 
 A centered dialog for approving or rejecting plans from the plan agent.
 
@@ -1457,7 +1457,7 @@ A centered dialog for approving or rejecting plans from the plan agent.
 
 ---
 
-#### 6.1.18.1 Force-Cleanup Confirmation Modal
+#### 6.1.14 Force-Cleanup Confirmation Modal
 
 A confirmation dialog for destructive team cleanup operations.
 
@@ -1473,7 +1473,7 @@ A confirmation dialog for destructive team cleanup operations.
 
 ---
 
-#### 6.1.19.1 Keybindings Help Panel (Overlay)
+#### 6.1.15 Keybindings Help Panel (Overlay)
 
 A scrollable help panel showing all keyboard shortcuts.
 
@@ -1489,7 +1489,7 @@ A scrollable help panel showing all keyboard shortcuts.
 
 ---
 
-#### 6.1.20.1 Session/Message Widget Overlays
+#### 6.1.16 Session/Message Widget Overlays
 
 Various inline widgets rendered within the message panel.
 
@@ -1502,7 +1502,7 @@ Various inline widgets rendered within the message panel.
 
 ---
 
-#### 6.1.21.1 Window State Summary
+#### 6.1.17 Window State Summary
 
 | State Field | Window | Access |
 |-------------|--------|--------|
