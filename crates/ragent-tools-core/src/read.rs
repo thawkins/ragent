@@ -97,12 +97,13 @@ impl Tool for ReadTool {
     ///
     /// Returns an error if the description string cannot be converted or returned.
     fn description(&self) -> &'static str {
-        "Read file contents. For large files (>100 lines) called without a line range, \
-         returns the first 100 lines plus a section map of the file's structure. \
-         Use start_line/end_line to read specific sections. \
-         IMPORTANT: start_line and end_line must not exceed the file's total line count. \
-         The response always includes total_lines in metadata."
-    }
+                "Read file contents. For large files (>100 lines) called without a line range, \
+                   returns the first 100 lines plus a section map of the file's structure. \
+                   Use start_line/end_line to read specific sections. \
+                   CRITICAL: start_line and end_line are ABSOLUTE 1-based line numbers (not offsets or counts). \
+                   To read lines 200-300, use start_line=200, end_line=300 (NOT end_line=100). \
+                   Both must not exceed the file's total line count. \
+                   The response always includes total_lines in metadata."    }
 
     fn parameters_schema(&self) -> Value {
         json!({
@@ -115,12 +116,12 @@ impl Tool for ReadTool {
                 "start_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Starting line number (1-based, inclusive). Must not exceed the file's total line count."
+                    "description": "Starting line number (1-based, absolute, inclusive). This is the actual line number in the file, NOT an offset or count. Must be <= total_lines."
                 },
                 "end_line": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Ending line number (1-based, inclusive). Must not exceed the file's total line count."
+                    "description": "Ending line number (1-based, absolute, inclusive). This is the actual line number in the file, NOT a length or count. Must be >= start_line and <= total_lines."
                 }
             },
             "required": ["path"],
