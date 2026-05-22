@@ -118,45 +118,41 @@ the current state of all subsystems.
 1. [Overview](#overview)
 2. [Architecture](#architecture)
 3. [Core Features](#core-features)
-4. [Terminal User Interface (TUI)](#terminal-user-interface-tui)
-5. [HTTP Server & API](#http-server-api)
+4. [Security & Permissions](#security-permissions)
+5. [Configuration](#configuration)
 
-### Part II: Data & Knowledge Systems
+### Part II: User Interface & API
 
-6. [Code Index](#code-index)
-7. [Memory System](#memory-system)
-8. [Spec Management](#spec-management)
+6. [Terminal User Interface (TUI)](#terminal-user-interface-tui)
+7. [HTTP Server & API](#http-server-api)
 
-### Part III: Multi-Agent Coordination
+### Part III: Data & Knowledge Systems
 
-9. [Teams](#teams)
-10. [Swarm Mode](#swarm-mode)
-11. [Autopilot Mode](#autopilot-mode)
-12. [Orchestrator & Multi-Agent Coordination](#orchestrator-multi-agent-coordination)
+8. [Code Index](#code-index)
+9. [Memory System](#memory-system)
+10. [Spec Management](#spec-management)
 
-### Part IV: Customization & Extension
+### Part IV: Agent Customization & Extension
 
-13. [Custom Agents](#custom-agents)
-14. [Skills System](#skills-system)
-15. [Prompt Optimization](#prompt-optimization)
-16. [Configuration](#configuration)
+11. [Custom Agents](#custom-agents)
+12. [Skills System](#skills-system)
+13. [Prompt Optimization](#prompt-optimization)
 
-### Part V: External Integrations
+### Part V: Multi-Agent Coordination
 
-17. [GitLab Integration](#gitlab-integration)
-18. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
+14. [Teams](#teams)
+15. [Swarm Mode](#swarm-mode)
+16. [Autopilot Mode](#autopilot-mode)
+17. [Orchestrator & Multi-Agent Coordination](#orchestrator-multi-agent-coordination)
 
-### Part VI: Reference Materials
+### Part VI: External Integrations
 
-19. [Tool Reference](#tool-reference)
-20. [Office, LibreOffice, and PDF Document Tools](#office-libreoffice-and-pdf-document-tools)
-21. [CLI Command Reference](#cli-command-reference)
-22. [Testing & CI/CD](#testing-cicd)
+18. [GitLab Integration](#gitlab-integration)
+19. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
 
-### Part VII: Security & Operations
+### Part VII: Operations & Reference
 
-23. [Security & Permissions](#security-permissions)
-24. [Auto-Update Mechanism](#auto-update-mechanism)
+20. [Auto-Update Mechanism](#auto-update-mechanism)
 
 **Appendices**
 
@@ -178,11 +174,11 @@ the current state of all subsystems.
 | 7 | [TUI Component Architecture](#44-tui-component-architecture) | Terminal User Interface | UI layout and event wiring |
 | 8 | [HTTP API Request Flow](#54-http-api-request-flow) | HTTP Server & API | REST + SSE lifecycle |
 | 9 | [Code Index Pipeline](#62-architecture) | Code Index | File scan → parse → index → search |
-| 10 | [Permission Security Layers](#241-permission-security-layers) | Security & Permissions | 5-layer defense-in-depth |
-| 11 | [Bash Security — 7 Layers](#242-bash-security--7-layers) | Security & Permissions | Bash command defense flow |
-| 12 | [Permission Request Flow](#243-permission-request-flow) | Security & Permissions | From tool call to user decision |
-| 13 | [Permission Rules Evaluation](#244-permission-rules-evaluation) | Security & Permissions | Rule matching and resolution |
-| 16 | [Agent Execution Loop Phases](#37-agent-execution-loop-phases) | Core Features | One complete turn from input to response |
+| 10 | [Permission Security Layers](#41-permission-security-layers) | Security & Permissions | 5-layer defense-in-depth |
+| 11 | [Bash Security — 7 Layers](#42-bash-security--7-layers) | Security & Permissions | Bash command defense flow |
+| 12 | [Permission Request Flow](#43-permission-request-flow) | Security & Permissions | From tool call to user decision |
+| 13 | [Permission Rules Evaluation](#44-permission-rules-evaluation) | Security & Permissions | Rule matching and resolution |
+| 14 | [Agent Execution Loop Phases](#37-agent-execution-loop-phases) | Core Features | One complete turn from input to response |
 
 ---
 
@@ -207,6 +203,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 - **Zero external dependencies** — Self-contained binary with SQLite, Tantivy, and tree-sitter compiled in
 
 ---
+
 
 
 ## 2. Architecture
@@ -379,6 +376,7 @@ graph LR
 ---
 
 ---
+
 
 
 ## 3. Core Features
@@ -957,13 +955,291 @@ Responses are streamed token-by-token so the user sees progress in real time:
 ---
 
 
-## 4. Terminal User Interface (TUI)
 
-### 4.1 TUI Windows and Overlay Panels
+## 4. Security & Permissions
+
+### 4.1 Permission Security Layers
+
+The permission system is a multi-layered defense-in-depth architecture that controls every tool invocation.
+
+```mermaid
+graph TD
+    subgraph Layer0["Layer 0: Hardwired Rules"]
+        H1[CodeIndex tools → Always Allow]
+    end
+
+    subgraph Layer1["Layer 1: Permission Rules"]
+        R1[Config rules: allow / deny / ask]
+        R2[Per-agent rules]
+        R3[YOLO mode bypass]
+    end
+
+    subgraph Layer2["Layer 2: Bash Security (7 Layers)"]
+        B1[Safe Command Whitelist]
+        B2[Banned Commands]
+        B3[Denied Patterns]
+        B4[Directory Escape Prevention]
+        B5[Syntax Validation]
+        B6[Obfuscation Detection]
+        B7[User Allowlist/Denylist]
+    end
+
+    subgraph Layer3["Layer 3: File Path Guards"]
+        F1[Path canonicalization]
+        F2[Directory escape check]
+        F3[Symlink resolution]
+        F4[Workspace boundary enforcement]
+    end
+
+    subgraph Layer4["Layer 4: Resource Limits"]
+        L1[Token budget tracking]
+        L2[Context window limits]
+        L3[Max iterations]
+        L4[Timeout enforcement]
+    end
+
+    subgraph Layer5["Layer 5: Secret Redaction"]
+        S1[API key masking in logs]
+        S2[Credential storage encryption]
+    end
+
+    ToolCall["Tool Call"] --> Layer0
+    Layer0 -->|if not hardwired| Layer1
+    Layer1 -->|bash command| Layer2
+    Layer1 -->|file operation| Layer3
+    Layer1 -->|all calls| Layer4
+    Layer1 -->|logging| Layer5
+    Layer2 -->|pass| Decision{Allow?}
+    Layer3 -->|pass| Decision
+    Decision -->|Yes| Execute["Execute Tool"]
+    Decision -->|Ask| UserPrompt["Show Permission Dialog"]
+    UserPrompt -->|Approve| Execute
+    UserPrompt -->|Deny| Reject["Return Denied Error"]
+    Decision -->|No| Reject
+```
+
+**Figure 10:** Permission Security Layers — 5-layer defense-in-depth
+
+---
+
+### 4.2 Bash Security — 7 Layers
+
+```mermaid
+graph LR
+    A[bash command] --> B{Layer 1<br/>Safe Command?}
+    B -- Yes --> Z[Always Grant]
+    B -- No --> C{Layer 2<br/>Banned Command?}
+    C -- Yes --> X[Deny]
+    C -- No --> D{Layer 3<br/>Denied Pattern?}
+    D -- Yes --> X
+    D -- No --> E{Layer 4<br/>Directory Escape?}
+    E -- Yes --> X
+    E -- No --> F{Layer 5<br/>Syntax Valid?}
+    F -- No --> X
+    F -- Yes --> G{Layer 6<br/>Obfuscated?}
+    G -- Yes --> X
+    G -- No --> H{Layer 7<br/>User List Match?}
+    H -- Deny --> X
+    H -- Allow --> Y[Permission Check]
+    Y --> Z
+```
+
+**Figure 11:** Bash Security — 7 Layers — Bash command defense flow
+
+**Layer Details:**
+
+| Layer | Name | Description | Test Count |
+|-------|------|-------------|-----------:|
+| 1 | Safe Command Whitelist | 51 commands auto-approved (cat, ls, git, cargo, etc.) | 15 |
+| 2 | Banned Commands | 22 commands always blocked (mkfs, fdisk, useradd, etc.) | 6 |
+| 3 | Denied Patterns | 46 destructive patterns (rm -rf /, fork bombs, etc.) | 8 |
+| 4 | Directory Escape Prevention | Blocks cd/pushd outside workspace | 4 |
+| 5 | Syntax Validation | Runs `sh -n -c` with 1s timeout | 3 |
+| 6 | Obfuscation Detection | Detects base64\|bash, python exec, hex escapes | 5 |
+| 7 | User Allowlist/Denylist | User-configurable via `/bash allow/deny` | 4 |
+
+---
+
+### 4.3 Permission Request Flow
+
+```mermaid
+sequenceDiagram
+    participant SP as Session Processor
+    participant PC as PermissionChecker
+    participant EB as Event Bus
+    participant TUI as TUI / HTTP
+    participant User as User
+
+    SP->>PC: check_permission(tool, params)
+    PC->>PC: Evaluate rules (last match wins)
+    alt Action = Allow
+        PC-->>SP: Decision::Allow
+    else Action = Deny
+        PC-->>SP: Decision::Deny
+    else Action = Ask
+        PC->>EB: Event::PermissionRequested
+        EB->>TUI: Show permission dialog
+        TUI-->>User: Display countdown (M:SS)
+        loop Every 100ms
+            TUI->>TUI: Redraw dialog
+        end
+        User-->>TUI: y / n / always
+        TUI->>EB: Event::PermissionReplied
+        EB->>PC: Forward decision
+        alt Timeout (120s)
+            TUI->>TUI: Show EXPIRED
+            TUI->>EB: Auto-deny
+        end
+        PC-->>SP: Decision::Once / Always / Deny
+    end
+```
+
+**Figure 12:** Permission Request Flow — From tool call to user decision
+
+---
+
+### 4.4 Permission Rules Evaluation
+
+Rules are evaluated in order, with **last match wins** semantics:
+
+```mermaid
+graph TD
+    A[Permission Request] --> B[Load Default Rules]
+    B --> C[Load Global Config Rules]
+    C --> D[Load Agent-Specific Rules]
+    D --> E{Rule Matches?}
+    E -->|No| F[Next Rule]
+    F --> E
+    E -->|Yes| G{Action}
+    G -->|Allow| H[Grant]
+    G -->|Deny| I[Reject]
+    G -->|Ask| J[Prompt User]
+```
+
+**Figure 13:** Permission Rules Evaluation — Rule matching and resolution
+
+**Default Rules:**
+- Read operations → Allow
+- Edit operations → Ask
+- Bash execution → Ask
+- Web access → Ask
+- Todo management → Allow
+
+---
+
+
+## 5. Configuration
+
+### 5.1 Configuration Files
+
+| File | Purpose |
+|------|---------|
+| `ragent.json` | Project-level configuration |
+| `ragent.jsonc` | Project-level (with comments) |
+| `~/.config/ragent/config.json` | User-global configuration |
+
+### 5.2 Configuration Schema
+
+```jsonc
+{
+  "provider": {
+    "anthropic": {
+      "env": ["ANTHROPIC_API_KEY"],
+      "thinking": { "enabled": true, "level": "low" },
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "thinking": { "enabled": true, "level": "high", "budget_tokens": 16000 }
+        }
+      }
+    },
+    "openai": { /* ... */ },
+    "copilot": { /* ... */ },
+    "ollama": { /* ... */ },
+    "generic_openai": { /* ... */ },
+    "azure_foundry": {
+      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
+      "api": { "base_url": "https://your-endpoint.azure.com" },
+      "thinking": { "enabled": true, "level": "low" }
+    }
+  },
+  "defaultAgent": "coder",
+  "permissions": [],
+  "skill_dirs": [],
+  "code_index": {
+    "enabled": true,
+    "max_file_size": 1048576
+  },
+  "memory": {
+    "auto_extract": { "enabled": false, "require_confirmation": true },
+    "semantic": { "enabled": false, "dimensions": 384 },
+    "compaction": { "enabled": true, "block_size_limit": 4096 },
+    "eviction": { "auto": false, "stale_days": 30 }
+  },
+  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
+  "bash": {
+    "allowlist": [],
+    "denylist": []
+  },
+  "hooks": [
+    { "trigger": "on_session_start", "command": "echo 'Session started'" }
+  ]
+}
+```
+
+Additional top-level configuration keys:
+
+- `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
+- `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
+- `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
+
+Thinking configuration uses the shared `ThinkingConfig` type:
+
+- `level` — `auto`, `off`, `low`, `medium`, or `high`
+- `enabled` — explicit on/off switch for providers that separate enablement from effort
+- `budget_tokens` — optional Anthropic thinking budget
+- `display` — optional Anthropic display mode (`full`, `summarized`, `omitted`)
+
+`ThinkingLevel` defaults to `auto`. In the TUI, `/thinking` changes the current session's effective reasoning level while model picker defaults still follow the precedence above.
+
+### 5.3 Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `GENERIC_OPENAI_API_KEY` | Generic OpenAI-compatible key |
+| `GITHUB_COPILOT_TOKEN` | GitHub Copilot token |
+| `OLLAMA_HOST` | Ollama server URL |
+| `RAGENT_LOG_LEVEL` | Log level (trace/debug/info/warn/error) |
+| `RAGENT_YES` | Auto-approve all permissions |
+
+### 5.4 Configuration Error Reporting
+
+Configuration parsing errors are surfaced with actionable diagnostics rather than
+only a generic parse failure. When JSON or JSONC parsing fails, ragent reports:
+
+- the full config file path,
+- the line and column number,
+- the problematic source line, and
+- a caret (`^`) pointing at the error position.
+
+This applies to normal config loading and explicit `--config` CLI usage, helping
+users fix malformed configuration files quickly.
+
+---
+
+# Part V: External Integrations
+
+---
+
+
+## 6. Terminal User Interface (TUI)
+
+### 6.1 TUI Windows and Overlay Panels
 
 The ragent TUI is built on a multi-layer architecture with a main chat screen, modal overlays, popup windows, and sidebar panels. Each window serves a specific purpose in the user workflow.
 
-#### 4.1.1 Main Screen (Chat)
+#### 6.1.1.1 Main Screen (Chat)
 
 The primary interface where all conversation happens.
 
@@ -981,7 +1257,7 @@ The primary interface where all conversation happens.
 
 ---
 
-#### 4.1.2 Provider Setup Dialog (Modal)
+#### 6.1.2.1 Provider Setup Dialog (Modal)
 
 Multi-step wizard for configuring LLM providers.
 
@@ -999,7 +1275,7 @@ Multi-step wizard for configuring LLM providers.
 
 ---
 
-#### 4.1.4 Agents Popup Window
+#### 6.1.4.1 Agents Popup Window
 
 A floating popup window showing active background agents and their status.
 
@@ -1016,7 +1292,7 @@ A floating popup window showing active background agents and their status.
 
 ---
 
-#### 4.1.5 Teams Popup Window
+#### 6.1.5.1 Teams Popup Window
 
 A floating popup for team coordination when managing multiple teammates.
 
@@ -1033,7 +1309,7 @@ A floating popup for team coordination when managing multiple teammates.
 
 ---
 
-#### 4.1.6 Slash Command Autocomplete Menu
+#### 6.1.6.1 Slash Command Autocomplete Menu
 
 An inline popup menu that appears when typing `/` in the input area.
 
@@ -1050,7 +1326,7 @@ An inline popup menu that appears when typing `/` in the input area.
 
 ---
 
-#### 4.1.7 File Reference Autocomplete Menu (`@` Menu)
+#### 6.1.7.1 File Reference Autocomplete Menu (`@` Menu)
 
 An inline popup for selecting files when using `@` references.
 
@@ -1067,7 +1343,7 @@ An inline popup for selecting files when using `@` references.
 
 ---
 
-#### 4.1.8 History Picker Overlay
+#### 6.1.8.1 History Picker Overlay
 
 A scrollable overlay for browsing and reusing previous inputs.
 
@@ -1083,7 +1359,7 @@ A scrollable overlay for browsing and reusing previous inputs.
 
 ---
 
-#### 4.1.9 Permission Dialog (Modal)
+#### 6.1.9.1 Permission Dialog (Modal)
 
 Centered modal for approving or denying permission requests.
 
@@ -1099,7 +1375,7 @@ Centered modal for approving or denying permission requests.
 
 ---
 
-#### 4.1.10 Context Menu (Right-Click)
+#### 6.1.10.1 Context Menu (Right-Click)
 
 A small popup menu for text operations.
 
@@ -1115,7 +1391,7 @@ A small popup menu for text operations.
 
 ---
 
-#### 4.1.11 MCP Discovery Dialog (Overlay)
+#### 6.1.11.1 MCP Discovery Dialog (Overlay)
 
 An overlay for discovering Model Context Protocol servers.
 
@@ -1131,7 +1407,7 @@ An overlay for discovering Model Context Protocol servers.
 
 ---
 
-#### 4.1.12 Output View Overlay
+#### 6.1.12.1 Output View Overlay
 
 A scrollable panel for viewing raw agent or team member output.
 
@@ -1147,7 +1423,7 @@ A scrollable panel for viewing raw agent or team member output.
 
 ---
 
-#### 4.1.15 Memory Browser Overlay
+#### 6.1.15.1 Memory Browser Overlay
 
 A full-panel overlay for browsing memory blocks.
 
@@ -1164,7 +1440,7 @@ A full-panel overlay for browsing memory blocks.
 
 ---
 
-#### 4.1.16 Plan Approval Dialog (Modal)
+#### 6.1.16.1 Plan Approval Dialog (Modal)
 
 A centered dialog for approving or rejecting plans from the plan agent.
 
@@ -1181,7 +1457,7 @@ A centered dialog for approving or rejecting plans from the plan agent.
 
 ---
 
-#### 4.1.18 Force-Cleanup Confirmation Modal
+#### 6.1.18.1 Force-Cleanup Confirmation Modal
 
 A confirmation dialog for destructive team cleanup operations.
 
@@ -1197,7 +1473,7 @@ A confirmation dialog for destructive team cleanup operations.
 
 ---
 
-#### 4.1.19 Keybindings Help Panel (Overlay)
+#### 6.1.19.1 Keybindings Help Panel (Overlay)
 
 A scrollable help panel showing all keyboard shortcuts.
 
@@ -1213,7 +1489,7 @@ A scrollable help panel showing all keyboard shortcuts.
 
 ---
 
-#### 4.1.20 Session/Message Widget Overlays
+#### 6.1.20.1 Session/Message Widget Overlays
 
 Various inline widgets rendered within the message panel.
 
@@ -1226,7 +1502,7 @@ Various inline widgets rendered within the message panel.
 
 ---
 
-#### 4.1.21 Window State Summary
+#### 6.1.21.1 Window State Summary
 
 | State Field | Window | Access |
 |-------------|--------|--------|
@@ -1247,7 +1523,7 @@ Various inline widgets rendered within the message panel.
 
 ---
 
-### 4.2 Slash Commands
+### 6.2 Slash Commands
 
 | Command | Purpose |
 |---------|---------|
@@ -1380,7 +1656,7 @@ provider/model and the shared `ragent-bench` crate.
 The benchmark workbook schema is fixed across suites (`run`, `metrics`, `cases`, `artifacts`) so
 HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be compared directly.
 
-### 4.3 Key Bindings
+### 6.3 Key Bindings
 
 | Key | Action |
 |-----|--------|
@@ -1396,7 +1672,7 @@ HumanEval, MBPP, RepoBench, SWE-bench, and the native Phase 6 suites can be comp
 | `p` | Open provider setup |
 | `?` (empty input) | Show keybindings help |
 
-### 4.4 TUI Component Architecture
+### 6.4 TUI Component Architecture
 
 ```mermaid
 graph TB
@@ -1457,16 +1733,17 @@ graph TB
 ---
 
 
-## 5. HTTP Server & API
 
-### 5.1 Server Commands
+## 7. HTTP Server & API
+
+### 7.1 Server Commands
 
 ```bash
 ragent serve              # Start server on default port (9100)
 ragent serve --port 8080  # Custom port
 ```
 
-### 5.2 API Endpoints
+### 7.2 API Endpoints
 
 #### Health & Status
 
@@ -1593,7 +1870,7 @@ ragent serve --port 8080  # Custom port
 }
 ```
 
-### 5.3 Authentication
+### 7.3 Authentication
 
 - Bearer token generated on server startup
 - Token displayed in console: `Server token: {token}`
@@ -1601,7 +1878,7 @@ ragent serve --port 8080  # Custom port
 
 ---
 
-### 5.4 HTTP API Request Flow
+### 7.4 HTTP API Request Flow
 
 ```mermaid
 sequenceDiagram
@@ -1646,9 +1923,10 @@ sequenceDiagram
 
 ---
 
-## 6. Code Index
 
-### 6.1 Overview
+## 8. Code Index
+
+### 8.1 Overview
 
 The Code Index is a built-in codebase indexing, search, and retrieval system that provides agents with deep, structured understanding of the codebase. Unlike simple text search (grep), it extracts symbols, their relationships, and enables semantic code exploration.
 
@@ -1660,7 +1938,7 @@ The Code Index is a built-in codebase indexing, search, and retrieval system tha
 - **Real-time file watching** — Automatic re-indexing on file changes
 - **Fast search** — Sub-100ms symbol lookup across large codebases
 
-### 6.2 Architecture
+### 8.2 Architecture
 
 ```mermaid
 graph TB
@@ -1714,7 +1992,7 @@ graph TB
 | **Tree Cache** | LRU cache of parse trees for incremental re-parsing |
 | **Background Worker** | Async indexing worker with debounce, dedup, and batching |
 
-### 6.3 Supported Languages
+### 8.3 Supported Languages
 
 | Language | Extensions | Symbols Extracted |
 |----------|------------|-------------------|
@@ -1732,7 +2010,7 @@ graph TB
 | **Gradle (Kotlin)** | `.gradle.kts` | Classes, functions, properties, type aliases, imports, companion objects, DSL calls |
 | **Maven** | `pom.xml` | Project coordinates, dependencies, modules, plugins, profiles, properties, repositories |
 
-### 6.4 Data Model
+### 8.4 Data Model
 
 #### Indexed Files
 ```rust
@@ -1776,7 +2054,7 @@ struct Symbol {
 | `field` | Struct/class field |
 | `variant` | Enum variant |
 
-### 6.6 Control
+### 8.6 Control
 
 ```bash
 /codeindex on           # Enable indexing
@@ -1800,7 +2078,7 @@ Configuration in `ragent.json`:
 }
 ```
 
-### 6.7 Code Index Tools
+### 8.7 Code Index Tools
 
 All tools are available to agents and can be called directly in conversations.
 Because they perform local, read-only analysis, the codeindex tool family is
@@ -1944,11 +2222,12 @@ Trigger a full re-index of the codebase. Use after major file changes or when se
 
 ---
 
-## 7. Memory System
+
+## 9. Memory System
 
 The memory system provides persistent, structured storage of facts, patterns, preferences, and insights across sessions. It operates across three tiers with automatic extraction, decay, compaction, and optional semantic search.
 
-### 7.1 Three-Tier Architecture
+### 9.1 Three-Tier Architecture
 
 | Tier | Storage | Access | Purpose |
 |------|---------|--------|---------|
@@ -1956,7 +2235,7 @@ The memory system provides persistent, structured storage of facts, patterns, pr
 | **Structured Store** | SQLite (`memory` table) | `memory_store` / `memory_recall` / `memory_forget` | Typed, tagged, confidence-scored facts with full-text search |
 | **Semantic Search** | ONNX embeddings (optional) | `memory_search` | Embedding-based similarity search via `all-MiniLM-L6-v2` |
 
-### 7.2 Memory Tools
+### 9.2 Memory Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -1969,7 +2248,7 @@ The memory system provides persistent, structured storage of facts, patterns, pr
 | `memory_search` | Semantic similarity search (embeddings-based) |
 | `memory_migrate` | Analyse a flat `MEMORY.md` and propose splitting into named blocks |
 
-### 7.3 Memory Browser
+### 9.3 Memory Browser
 
 The TUI provides a full-panel memory browser accessible via `/memory`:
 
@@ -1979,7 +2258,7 @@ The TUI provides a full-panel memory browser accessible via `/memory`:
 - Keyboard navigation (`j`/`k`, `Enter`, `Esc`)
 - Search and filter capabilities
 
-### 7.4 Structured Memory Categories
+### 9.4 Structured Memory Categories
 
 | Category | Description | Example |
 |----------|-------------|---------|
@@ -1990,11 +2269,11 @@ The TUI provides a full-panel memory browser accessible via `/memory`:
 | `error` | Known issues and their resolutions | "Don't use `git checkout` to rewind files" |
 | `workflow` | Standard operating procedures | "Update CHANGELOG.md before pushing" |
 
-### 7.5 Auto-Extraction
+### 9.5 Auto-Extraction
 
 When `memory_extraction_enabled` is true in the configuration, the agent automatically extracts memories from conversations. Key facts, patterns, and insights are identified and stored with appropriate categories and confidence scores.
 
-### 7.6 HTTP API Endpoints
+### 9.6 HTTP API Endpoints
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -2007,9 +2286,10 @@ When `memory_extraction_enabled` is true in the configuration, the agent automat
 
 ---
 
-## 8. Spec Management
 
-### 8.1 Overview
+## 10. Spec Management
+
+### 10.1 Overview
 
 The Spec Management system provides a structured workflow for writing, tracking, and enforcing software specifications alongside code. It ensures that every significant feature or change is preceded by a clear, reviewable specification that lives in version control under the `specs/` directory.
 
@@ -2022,7 +2302,7 @@ The Spec Management system provides a structured workflow for writing, tracking,
 - **Tool integration** — Slash commands and programmatic APIs for spec operations
 - **Reporting** — Listing, filtering, and coverage summaries across a project
 
-### 8.2 Directory Structure
+### 10.2 Directory Structure
 
 ```
 specs/
@@ -2040,7 +2320,7 @@ specs/
 - Each spec directory must contain both `SPEC.md` and `PLAN.md`
 - Spec IDs use only alphanumeric characters, hyphens, and underscores
 
-### 8.3 Spec Lifecycle Status
+### 10.3 Spec Lifecycle Status
 
 | Status | Meaning | Allowed Next States |
 |--------|---------|---------------------|
@@ -2052,7 +2332,7 @@ specs/
 | `verified` | Tests pass, acceptance criteria met | `archived` |
 | `archived` | Retired spec | `draft` (reopen) |
 
-### 8.4 Slash Commands
+### 10.4 Slash Commands
 
 | Command | Purpose |
 |---------|---------|
@@ -2066,7 +2346,7 @@ specs/
 | `/spec deactivate` | Deactivate the active spec |
 | `/spec coverage <id>` | Show requirement coverage report with linked tasks |
 
-### 8.5 Programmatic Tools
+### 10.5 Programmatic Tools
 
 Five spec tools are available to agents for programmatic access:
 
@@ -2078,7 +2358,7 @@ Five spec tools are available to agents for programmatic access:
 | `spec_coverage` | Generate a requirement coverage report |
 | `spec_task_update` | Update the status of a task within a spec |
 
-### 8.6 EARS Notation
+### 10.6 EARS Notation
 
 Requirements are written in EARS (Easy Approach to Requirements Syntax) notation. The system validates that every requirement conforms to one of five templates:
 
@@ -2088,7 +2368,7 @@ Requirements are written in EARS (Easy Approach to Requirements Syntax) notation
 4. **Optional** — `Where <feature> is <configured>, the <system> shall <requirement>.`
 5. **Unwanted** — `If <condition>, the <system> shall <requirement>.`
 
-### 8.7 Active Spec Context Injection
+### 10.7 Active Spec Context Injection
 
 When a spec is activated via `/spec activate <id>`:
 - The spec's requirements and tasks are injected into the agent's system prompt
@@ -2097,276 +2377,12 @@ When a spec is activated via `/spec activate <id>`:
 
 ---
 
-## 9. Teams
 
-The team system enables multi-agent coordination with named teammates, shared task lists, mailbox messaging, and task assignment. Teams are persisted on disk and can be created, opened, closed, and cleaned up through slash commands.
-
-### 9.1 Core Concepts
-
-| Concept | Description |
-|---------|-------------|
-| **Team** | A named group of agents with shared state and tasks |
-| **Teammate** | An individual agent instance within a team |
-| **Task** | A work item with title, description, status, and optional dependencies |
-| **Mailbox** | Message queue per teammate for asynchronous communication |
-| **Memory Scope** | Per-teammate persistent memory (`user`, `project`, or `none`) |
-
-### 9.2 Team Lifecycle
-
-```mermaid
-graph LR
-    A["/team create name"] --> B[Team Created]
-    B --> C["/team spawn agent"]
-    C --> D[Teammate Running]
-    D --> E["/team task_create"]
-    E --> F[Task Available]
-    F --> G[teammate claims task]
-    G --> H[Task In Progress]
-    H --> I[teammate completes task]
-    I --> J[Task Done]
-    J --> K{More tasks?}
-    K -->|Yes| F
-    K -->|No| L["/team cleanup"]
-    L --> M[Team Destroyed]
-```
-
-### 9.3 Team Tools (21)
-
-| Tool | Purpose |
-|------|---------|
-| `team_create` | Create a new team with a unique name |
-| `team_spawn` | Spawn a teammate agent into the team |
-| `team_cleanup` | Tear down a team and remove its on-disk resources |
-| `team_status` | Get team member list, states, and task progress summary |
-| `team_idle` | Signal that a teammate has no more tasks to work on |
-| `team_task_create` | Add a new task to the team's shared task list |
-| `team_task_claim` | Claim the next available task (or a specific task ID) |
-| `team_task_complete` | Mark a claimed task as completed |
-| `team_task_list` | List all tasks with status, assignment, and dependencies |
-| `team_assign_task` | Assign a specific pending task to a named teammate |
-| `team_message` | Send a direct message to one team member |
-| `team_broadcast` | Send a message to all active teammates simultaneously |
-| `team_read_messages` | Read unread messages from the teammate's mailbox |
-| `team_shutdown_teammate` | Request graceful shutdown of a teammate (lead-only) |
-| `team_shutdown_ack` | Acknowledge a shutdown request and terminate |
-| `team_submit_plan` | Submit a plan to the team lead for approval |
-| `team_approve_plan` | Approve or reject a teammate's submitted plan (lead-only) |
-| `team_wait` | Block until teammates finish their current work |
-| `team_memory_read` | Read from a teammate's persistent memory directory |
-| `team_memory_write` | Write to a teammate's persistent memory directory |
-
-### 9.4 Team Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/team create <name>` | Create new team |
-| `/team open <name>` | Open existing team |
-| `/team close` | Close team session |
-| `/team delete <name>` | Delete team |
-| `/team clear` | Clear team state |
-| `/team tasks` | Show team tasks table |
-| `/team status` | Show team status |
-| `/team message <to> <content>` | Send message to teammate |
-| `/team broadcast <content>` | Broadcast to all teammates |
-| `/team spawn <agent>` | Spawn teammate agent |
-| `/team cleanup` | Cleanup team resources |
-
-### 9.5 Task Dependencies
-
-Tasks can declare dependencies on other tasks. A task cannot be claimed until all its dependencies are completed. This enables sequential workflows within parallel teams.
-
-### 9.6 Plan Approval Workflow
-
-Teammates can submit plans to the team lead for approval before starting implementation:
-
-1. Teammate calls `team_submit_plan` with their intended approach
-2. Lead receives the plan via `team_read_messages`
-3. Lead calls `team_approve_plan` with `approved: true` or `approved: false`
-4. If approved, teammate exits plan-pending mode and begins implementation
-5. If rejected, teammate receives feedback and revises
-
----
-
-## 10. Swarm Mode
-
-Swarm mode automatically decomposes a high-level goal into parallel subtasks, creates an ephemeral team, and coordinates execution. It is ideal for large tasks that can be broken into independent work items.
-
-### 10.1 How Swarm Works
-
-1. **Decomposition** — The LLM analyses the prompt and produces a JSON decomposition with 2–8 independent subtasks and optional dependency edges.
-2. **Team Creation** — An ephemeral team named `swarm-<timestamp>` is created.
-3. **Teammate Spawning** — One teammate is spawned per subtask with a tailored prompt.
-4. **Dependency Resolution** — Tasks with `depends_on` are blocked until prerequisites complete.
-5. **Progress Monitoring** — The TUI shows real-time status: spawning, blocked, in-progress, and completed counts.
-6. **Auto-Completion** — When all tasks finish, the swarm auto-summarises results.
-
-### 10.2 Swarm Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
-| `/swarm status` | Show live progress of the active swarm |
-| `/swarm cancel` | Cancel the active swarm and clean up |
-| `/swarm help` | Show usage help |
-
-### 10.3 Decomposition Format
-
-The LLM returns a JSON object with an array of subtasks:
-
-```json
-{
-  "tasks": [
-    {
-      "id": "s1",
-      "title": "Short title",
-      "description": "Detailed instructions for the agent...",
-      "depends_on": [],
-      "agent_type": "general",
-      "model": null
-    }
-  ]
-}
-```
-
-Each subtask has:
-- `id` — Unique identifier (e.g. `s1`, `s2`)
-- `title` — Short human-readable title
-- `description` — Full instructions for the teammate
-- `depends_on` — IDs of subtasks that must complete first
-- `agent_type` — Optional agent type override (defaults to `general`)
-- `model` — Optional model override in `provider/model` format
-
-### 10.4 Swarm State
-
-The TUI tracks swarm state including:
-- `team_name` — Name of the ephemeral backing team
-- `prompt` — Original user prompt
-- `decomposition` — The LLM-produced task breakdown
-- `spawned` — Whether all teammates have been spawned
-- `completed` — Whether the orchestrator has collected all results
-
-### 10.5 Limitations
-
-- Only one swarm can be active at a time; start a new one after cancelling the current swarm.
-- Requires a configured model with JSON mode support for reliable decomposition.
-- Subtask descriptions must be detailed enough for agents to work without further clarification.
-
----
-
-## 11. Autopilot Mode
-
-Autopilot mode enables the agent to operate autonomously, continuing to iterate on a task without user intervention until the task is complete, a safety limit is reached, or the user stops it.
-
-### 11.1 How Autopilot Works
-
-1. **Activation** — User runs `/autopilot on` with optional token and time budgets.
-2. **Autonomous Loop** — The agent processes messages, makes tool calls, and continues iterating automatically.
-3. **Completion** — The agent calls `task_complete` with a summary, or the user runs `/autopilot off`.
-4. **Safety Limits** — Hard stops prevent runaway execution.
-
-### 11.2 Autopilot Slash Commands
-
-| Command | Purpose |
-|---------|---------|
-| `/autopilot on [--max-tokens N] [--max-time N]` | Enable autonomous operation with optional limits |
-| `/autopilot off` | Disable autonomous operation and return to interactive mode |
-| `/autopilot status` | Show autopilot status, elapsed time, and remaining budget |
-
-### 11.3 Safety Limits
-
-| Limit | Default | Behaviour When Hit |
-|-------|---------|-------------------|
-| `max_steps` | 500 | Halt and ask user whether to continue |
-| Token budget | Optional (`--max-tokens`) | Stop and display summary |
-| Time limit | Optional (`--max-time` in seconds) | Stop and display summary |
-| Context window | Model-specific | Trigger automatic compaction |
-
-### 11.4 Completion Signalling
-
-Agents in autopilot mode call `task_complete` to signal completion:
-
-```
-task_complete(summary: "Implemented feature X with tests and documentation")
-```
-
-This publishes a `TaskCompleted` event, displays the summary to the user, and exits autopilot mode.
-
-### 11.5 Status Display
-
-When active, the status bar shows:
-- `⚡ autopilot` — Normal operation
-- `autopilot: time limit reached` — Time budget exhausted
-- `autopilot stopped: task complete` — Agent finished successfully
-
----
-
-## 12. Orchestrator & Multi-Agent Coordination
-
-The orchestrator provides primitives for coordinating multiple agents in a single workflow. It supports job dispatch, progress tracking, and result aggregation.
-
-### 12.1 Core Components
-
-| Component | Purpose |
-|-----------|---------|
-| `AgentRegistry` | Maintains a registry of available agents and their capabilities |
-| `Coordinator` | Dispatches jobs to agents and collects results |
-| `InProcessRouter` | Actor-style message routing between agents |
-| `JobDescriptor` | Defines a job with required capabilities and payload |
-
-### 12.2 Coordinator API
-
-```rust
-use ragent_agent::orchestrator::{Coordinator, JobDescriptor};
-
-let coord = Coordinator::new(registry);
-
-// Synchronous job (blocks until all agents respond)
-let result = coord.start_job_sync(JobDescriptor {
-    id: "job-1".to_string(),
-    required_capabilities: vec!["search".to_string()],
-    payload: "find TODOs".to_string(),
-}).await?;
-
-// Asynchronous job (returns job ID, subscribe to events)
-let job_id = coord.start_job_async(desc).await?;
-let mut events = coord.subscribe_job_events(&job_id).await?;
-```
-
-### 12.3 HTTP API Endpoints
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/orchestrator/metrics` | Return live counter snapshot |
-| `POST` | `/orchestrator/start` | Start a multi-agent job |
-| `GET` | `/orchestrator/jobs/{id}` | Poll job status and results |
-
-### 12.4 Conflict Resolution
-
-The `policy` submodule provides conflict resolution strategies:
-
-- **Last-write-wins** — Simple timestamp-based resolution
-- **Human-in-the-loop** — Escalate conflicts to the user for decision
-- **Merge strategies** — Automatic merging for compatible changes
-
-### 12.5 Transport Adapters
-
-The `transport` submodule supports pluggable communication:
-
-- `InProcessRouter` — In-process actor-style messaging
-- `HttpRouter` — HTTP-based inter-process communication
-- `RouterComposite` — Combine multiple transport layers
-
-### 12.6 Current Status
-
-The orchestrator is at MVP level with in-process coordination. HTTP endpoints are available but the full distributed coordination (leader election, cluster formation) is planned for a future milestone.
-
----
-
-## 13. Custom Agents
+## 11. Custom Agents
 
 Custom agents extend ragent's built-in agent personalities with user-defined profiles. Agents are stored as JSON (OASF format) or Markdown files and loaded automatically at startup.
 
-### 13.1 Discovery Paths
+### 11.1 Discovery Paths
 
 Custom agents are discovered from two locations, with project-local taking precedence:
 
@@ -2375,7 +2391,7 @@ Custom agents are discovered from two locations, with project-local taking prece
 | 1 (lower) | `~/.ragent/agents/` |
 | 2 (higher) | `[PROJECT]/.ragent/agents/` |
 
-### 13.2 File Formats
+### 11.2 File Formats
 
 #### OASF JSON Format
 
@@ -2421,7 +2437,7 @@ permissions:
 You are an expert code reviewer focused on security vulnerabilities...
 ```
 
-### 13.3 Agent Configuration Fields
+### 11.3 Agent Configuration Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -2434,11 +2450,11 @@ You are an expert code reviewer focused on security vulnerabilities...
 | `model` | string | Default model in `provider/model` format |
 | `memory_scope` | string | `user`, `project`, or `none` |
 
-### 13.4 Agent Diagnostics
+### 11.4 Agent Diagnostics
 
 Use `/agents` to list all loaded agents including custom ones. Custom agents are marked with a yellow `[custom]` badge. Diagnostics show any load errors or skipped files.
 
-### 13.5 OASF Annotations
+### 11.5 OASF Annotations
 
 OASF records support taxonomy annotations for discoverability:
 
@@ -2448,11 +2464,12 @@ OASF records support taxonomy annotations for discoverability:
 
 ---
 
-## 14. Skills System
+
+## 12. Skills System
 
 Skills are loadable instruction packs that inject tools, prompts, and file context into agent sessions. Each skill is defined by a `SKILL.md` file with YAML frontmatter and a markdown body.
 
-### 14.1 Skill Discovery
+### 12.1 Skill Discovery
 
 Skills are discovered from multiple sources with priority order:
 
@@ -2467,7 +2484,7 @@ Skills are discovered from multiple sources with priority order:
 
 Higher-priority scopes override lower ones when names conflict.
 
-### 14.2 Skill Structure
+### 12.2 Skill Structure
 
 ```
 .ragent/skills/
@@ -2479,7 +2496,7 @@ Higher-priority scopes override lower ones when names conflict.
     resources/          # Reference materials
 ```
 
-### 14.3 SKILL.md Frontmatter
+### 12.3 SKILL.md Frontmatter
 
 ```yaml
 ---
@@ -2502,7 +2519,7 @@ agent: general-purpose
 When the user types `/deploy [environment]`, deploy the application...
 ```
 
-### 14.4 Skill Fields
+### 12.4 Skill Fields
 
 | Field | Description |
 |-------|-------------|
@@ -2516,11 +2533,11 @@ When the user types `/deploy [environment]`, deploy the application...
 | `context` | `fork` to run in a forked subagent context |
 | `agent` | Subagent type when `context` is `fork` |
 
-### 14.5 Invocation
+### 12.5 Invocation
 
 Skills are invoked by including `/skillname` in a message or by the agent auto-invoking based on description matching. Arguments after the skill name are passed to the skill body via template substitution.
 
-### 14.6 Template Variables
+### 12.6 Template Variables
 
 Skill bodies support variable substitution:
 
@@ -2532,7 +2549,7 @@ Skill bodies support variable substitution:
 | `${RAGENT_SESSION_ID}` | Current session ID |
 | `${RAGENT_WORKING_DIR}` | Current working directory |
 
-### 14.7 Bundled Skills
+### 12.7 Bundled Skills
 
 Ragent ships with 4 bundled skills:
 
@@ -2543,17 +2560,18 @@ Ragent ships with 4 bundled skills:
 | `security-audit` | Security-focused code review |
 | `test-coverage` | Analyse test coverage gaps |
 
-### 14.8 Dynamic Context Injection
+### 12.8 Dynamic Context Injection
 
 Skills can enable dynamic context with `allow_dynamic_context: true`. This allows `!command` syntax within the skill body to execute shell commands and inject their output into the context.
 
 ---
 
-## 15. Prompt Optimization
+
+## 13. Prompt Optimization
 
 The prompt optimization system transforms plain prompts into structured frameworks using template-based meta-prompts. No external API calls are needed — the optimization is performed by sending the framework's system prompt to the current LLM provider.
 
-### 15.1 Optimization Methods
+### 13.1 Optimization Methods
 
 | Method | Name | Description |
 |--------|------|-------------|
@@ -2570,7 +2588,7 @@ The prompt optimization system transforms plain prompts into structured framewor
 | `claude` | Claude | Anthropic-style XML instruction generator with examples |
 | `microsoft` | Microsoft | Azure AI optimised prompt with quality targets |
 
-### 15.2 Usage
+### 13.2 Usage
 
 **TUI:**
 ```
@@ -2588,7 +2606,7 @@ curl -s -X POST http://localhost:9100/opt \
   -d '{"method":"co_star","prompt":"Explain Rust lifetimes"}'
 ```
 
-### 15.3 How It Works
+### 13.3 How It Works
 
 1. The user selects a method and provides a raw prompt.
 2. The system loads the method's meta-prompt (system message) from the template library.
@@ -2596,7 +2614,7 @@ curl -s -X POST http://localhost:9100/opt \
 4. The LLM returns the optimised, structured prompt.
 5. The result is displayed in the TUI or returned via the HTTP API.
 
-### 15.4 Completer Trait
+### 13.4 Completer Trait
 
 The optimization is decoupled from any specific LLM backend via the `Completer` trait:
 
@@ -2609,7 +2627,7 @@ pub trait Completer: Send + Sync {
 
 Implementations connect to the session's active provider and model.
 
-### 15.5 Method Aliases
+### 13.5 Method Aliases
 
 Methods can be referenced by multiple aliases for convenience:
 
@@ -2626,115 +2644,281 @@ Methods can be referenced by multiple aliases for convenience:
 
 ---
 
-## 16. Configuration
 
-### 16.1 Configuration Files
+## 14. Teams
 
-| File | Purpose |
+The team system enables multi-agent coordination with named teammates, shared task lists, mailbox messaging, and task assignment. Teams are persisted on disk and can be created, opened, closed, and cleaned up through slash commands.
+
+### 14.1 Core Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Team** | A named group of agents with shared state and tasks |
+| **Teammate** | An individual agent instance within a team |
+| **Task** | A work item with title, description, status, and optional dependencies |
+| **Mailbox** | Message queue per teammate for asynchronous communication |
+| **Memory Scope** | Per-teammate persistent memory (`user`, `project`, or `none`) |
+
+### 14.2 Team Lifecycle
+
+```mermaid
+graph LR
+    A["/team create name"] --> B[Team Created]
+    B --> C["/team spawn agent"]
+    C --> D[Teammate Running]
+    D --> E["/team task_create"]
+    E --> F[Task Available]
+    F --> G[teammate claims task]
+    G --> H[Task In Progress]
+    H --> I[teammate completes task]
+    I --> J[Task Done]
+    J --> K{More tasks?}
+    K -->|Yes| F
+    K -->|No| L["/team cleanup"]
+    L --> M[Team Destroyed]
+```
+
+### 14.3 Team Tools (21)
+
+| Tool | Purpose |
 |------|---------|
-| `ragent.json` | Project-level configuration |
-| `ragent.jsonc` | Project-level (with comments) |
-| `~/.config/ragent/config.json` | User-global configuration |
+| `team_create` | Create a new team with a unique name |
+| `team_spawn` | Spawn a teammate agent into the team |
+| `team_cleanup` | Tear down a team and remove its on-disk resources |
+| `team_status` | Get team member list, states, and task progress summary |
+| `team_idle` | Signal that a teammate has no more tasks to work on |
+| `team_task_create` | Add a new task to the team's shared task list |
+| `team_task_claim` | Claim the next available task (or a specific task ID) |
+| `team_task_complete` | Mark a claimed task as completed |
+| `team_task_list` | List all tasks with status, assignment, and dependencies |
+| `team_assign_task` | Assign a specific pending task to a named teammate |
+| `team_message` | Send a direct message to one team member |
+| `team_broadcast` | Send a message to all active teammates simultaneously |
+| `team_read_messages` | Read unread messages from the teammate's mailbox |
+| `team_shutdown_teammate` | Request graceful shutdown of a teammate (lead-only) |
+| `team_shutdown_ack` | Acknowledge a shutdown request and terminate |
+| `team_submit_plan` | Submit a plan to the team lead for approval |
+| `team_approve_plan` | Approve or reject a teammate's submitted plan (lead-only) |
+| `team_wait` | Block until teammates finish their current work |
+| `team_memory_read` | Read from a teammate's persistent memory directory |
+| `team_memory_write` | Write to a teammate's persistent memory directory |
 
-### 16.2 Configuration Schema
+### 14.4 Team Slash Commands
 
-```jsonc
+| Command | Purpose |
+|---------|---------|
+| `/team create <name>` | Create new team |
+| `/team open <name>` | Open existing team |
+| `/team close` | Close team session |
+| `/team delete <name>` | Delete team |
+| `/team clear` | Clear team state |
+| `/team tasks` | Show team tasks table |
+| `/team status` | Show team status |
+| `/team message <to> <content>` | Send message to teammate |
+| `/team broadcast <content>` | Broadcast to all teammates |
+| `/team spawn <agent>` | Spawn teammate agent |
+| `/team cleanup` | Cleanup team resources |
+
+### 14.5 Task Dependencies
+
+Tasks can declare dependencies on other tasks. A task cannot be claimed until all its dependencies are completed. This enables sequential workflows within parallel teams.
+
+### 14.6 Plan Approval Workflow
+
+Teammates can submit plans to the team lead for approval before starting implementation:
+
+1. Teammate calls `team_submit_plan` with their intended approach
+2. Lead receives the plan via `team_read_messages`
+3. Lead calls `team_approve_plan` with `approved: true` or `approved: false`
+4. If approved, teammate exits plan-pending mode and begins implementation
+5. If rejected, teammate receives feedback and revises
+
+---
+
+
+## 15. Swarm Mode
+
+Swarm mode automatically decomposes a high-level goal into parallel subtasks, creates an ephemeral team, and coordinates execution. It is ideal for large tasks that can be broken into independent work items.
+
+### 15.1 How Swarm Works
+
+1. **Decomposition** — The LLM analyses the prompt and produces a JSON decomposition with 2–8 independent subtasks and optional dependency edges.
+2. **Team Creation** — An ephemeral team named `swarm-<timestamp>` is created.
+3. **Teammate Spawning** — One teammate is spawned per subtask with a tailored prompt.
+4. **Dependency Resolution** — Tasks with `depends_on` are blocked until prerequisites complete.
+5. **Progress Monitoring** — The TUI shows real-time status: spawning, blocked, in-progress, and completed counts.
+6. **Auto-Completion** — When all tasks finish, the swarm auto-summarises results.
+
+### 15.2 Swarm Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/swarm <prompt>` | Decompose a goal into parallel subtasks and spawn a team |
+| `/swarm status` | Show live progress of the active swarm |
+| `/swarm cancel` | Cancel the active swarm and clean up |
+| `/swarm help` | Show usage help |
+
+### 15.3 Decomposition Format
+
+The LLM returns a JSON object with an array of subtasks:
+
+```json
 {
-  "provider": {
-    "anthropic": {
-      "env": ["ANTHROPIC_API_KEY"],
-      "thinking": { "enabled": true, "level": "low" },
-      "models": {
-        "claude-sonnet-4-20250514": {
-          "thinking": { "enabled": true, "level": "high", "budget_tokens": 16000 }
-        }
-      }
-    },
-    "openai": { /* ... */ },
-    "copilot": { /* ... */ },
-    "ollama": { /* ... */ },
-    "generic_openai": { /* ... */ },
-    "azure_foundry": {
-      "env": ["AZURE_AI_FOUNDRY_API_KEY"],
-      "api": { "base_url": "https://your-endpoint.azure.com" },
-      "thinking": { "enabled": true, "level": "low" }
+  "tasks": [
+    {
+      "id": "s1",
+      "title": "Short title",
+      "description": "Detailed instructions for the agent...",
+      "depends_on": [],
+      "agent_type": "general",
+      "model": null
     }
-  },
-  "defaultAgent": "coder",
-  "permissions": [],
-  "skill_dirs": [],
-  "code_index": {
-    "enabled": true,
-    "max_file_size": 1048576
-  },
-  "memory": {
-    "auto_extract": { "enabled": false, "require_confirmation": true },
-    "semantic": { "enabled": false, "dimensions": 384 },
-    "compaction": { "enabled": true, "block_size_limit": 4096 },
-    "eviction": { "auto": false, "stale_days": 30 }
-  },
-  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
-  "bash": {
-    "allowlist": [],
-    "denylist": []
-  },
-  "hooks": [
-    { "trigger": "on_session_start", "command": "echo 'Session started'" }
   ]
 }
 ```
 
-Additional top-level configuration keys:
+Each subtask has:
+- `id` — Unique identifier (e.g. `s1`, `s2`)
+- `title` — Short human-readable title
+- `description` — Full instructions for the teammate
+- `depends_on` — IDs of subtasks that must complete first
+- `agent_type` — Optional agent type override (defaults to `general`)
+- `model` — Optional model override in `provider/model` format
 
-- `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
-- `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
-- `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
+### 15.4 Swarm State
 
-Thinking configuration uses the shared `ThinkingConfig` type:
+The TUI tracks swarm state including:
+- `team_name` — Name of the ephemeral backing team
+- `prompt` — Original user prompt
+- `decomposition` — The LLM-produced task breakdown
+- `spawned` — Whether all teammates have been spawned
+- `completed` — Whether the orchestrator has collected all results
 
-- `level` — `auto`, `off`, `low`, `medium`, or `high`
-- `enabled` — explicit on/off switch for providers that separate enablement from effort
-- `budget_tokens` — optional Anthropic thinking budget
-- `display` — optional Anthropic display mode (`full`, `summarized`, `omitted`)
+### 15.5 Limitations
 
-`ThinkingLevel` defaults to `auto`. In the TUI, `/thinking` changes the current session's effective reasoning level while model picker defaults still follow the precedence above.
-
-### 16.3 Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `GENERIC_OPENAI_API_KEY` | Generic OpenAI-compatible key |
-| `GITHUB_COPILOT_TOKEN` | GitHub Copilot token |
-| `OLLAMA_HOST` | Ollama server URL |
-| `RAGENT_LOG_LEVEL` | Log level (trace/debug/info/warn/error) |
-| `RAGENT_YES` | Auto-approve all permissions |
-
-### 16.4 Configuration Error Reporting
-
-Configuration parsing errors are surfaced with actionable diagnostics rather than
-only a generic parse failure. When JSON or JSONC parsing fails, ragent reports:
-
-- the full config file path,
-- the line and column number,
-- the problematic source line, and
-- a caret (`^`) pointing at the error position.
-
-This applies to normal config loading and explicit `--config` CLI usage, helping
-users fix malformed configuration files quickly.
+- Only one swarm can be active at a time; start a new one after cancelling the current swarm.
+- Requires a configured model with JSON mode support for reliable decomposition.
+- Subtask descriptions must be detailed enough for agents to work without further clarification.
 
 ---
 
-# Part V: External Integrations
+
+## 16. Autopilot Mode
+
+Autopilot mode enables the agent to operate autonomously, continuing to iterate on a task without user intervention until the task is complete, a safety limit is reached, or the user stops it.
+
+### 16.1 How Autopilot Works
+
+1. **Activation** — User runs `/autopilot on` with optional token and time budgets.
+2. **Autonomous Loop** — The agent processes messages, makes tool calls, and continues iterating automatically.
+3. **Completion** — The agent calls `task_complete` with a summary, or the user runs `/autopilot off`.
+4. **Safety Limits** — Hard stops prevent runaway execution.
+
+### 16.2 Autopilot Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/autopilot on [--max-tokens N] [--max-time N]` | Enable autonomous operation with optional limits |
+| `/autopilot off` | Disable autonomous operation and return to interactive mode |
+| `/autopilot status` | Show autopilot status, elapsed time, and remaining budget |
+
+### 16.3 Safety Limits
+
+| Limit | Default | Behaviour When Hit |
+|-------|---------|-------------------|
+| `max_steps` | 500 | Halt and ask user whether to continue |
+| Token budget | Optional (`--max-tokens`) | Stop and display summary |
+| Time limit | Optional (`--max-time` in seconds) | Stop and display summary |
+| Context window | Model-specific | Trigger automatic compaction |
+
+### 16.4 Completion Signalling
+
+Agents in autopilot mode call `task_complete` to signal completion:
+
+```
+task_complete(summary: "Implemented feature X with tests and documentation")
+```
+
+This publishes a `TaskCompleted` event, displays the summary to the user, and exits autopilot mode.
+
+### 16.5 Status Display
+
+When active, the status bar shows:
+- `⚡ autopilot` — Normal operation
+- `autopilot: time limit reached` — Time budget exhausted
+- `autopilot stopped: task complete` — Agent finished successfully
 
 ---
 
-## 17. GitLab Integration
+
+## 17. Orchestrator & Multi-Agent Coordination
+
+The orchestrator provides primitives for coordinating multiple agents in a single workflow. It supports job dispatch, progress tracking, and result aggregation.
+
+### 17.1 Core Components
+
+| Component | Purpose |
+|-----------|---------|
+| `AgentRegistry` | Maintains a registry of available agents and their capabilities |
+| `Coordinator` | Dispatches jobs to agents and collects results |
+| `InProcessRouter` | Actor-style message routing between agents |
+| `JobDescriptor` | Defines a job with required capabilities and payload |
+
+### 17.2 Coordinator API
+
+```rust
+use ragent_agent::orchestrator::{Coordinator, JobDescriptor};
+
+let coord = Coordinator::new(registry);
+
+// Synchronous job (blocks until all agents respond)
+let result = coord.start_job_sync(JobDescriptor {
+    id: "job-1".to_string(),
+    required_capabilities: vec!["search".to_string()],
+    payload: "find TODOs".to_string(),
+}).await?;
+
+// Asynchronous job (returns job ID, subscribe to events)
+let job_id = coord.start_job_async(desc).await?;
+let mut events = coord.subscribe_job_events(&job_id).await?;
+```
+
+### 17.3 HTTP API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/orchestrator/metrics` | Return live counter snapshot |
+| `POST` | `/orchestrator/start` | Start a multi-agent job |
+| `GET` | `/orchestrator/jobs/{id}` | Poll job status and results |
+
+### 17.4 Conflict Resolution
+
+The `policy` submodule provides conflict resolution strategies:
+
+- **Last-write-wins** — Simple timestamp-based resolution
+- **Human-in-the-loop** — Escalate conflicts to the user for decision
+- **Merge strategies** — Automatic merging for compatible changes
+
+### 17.5 Transport Adapters
+
+The `transport` submodule supports pluggable communication:
+
+- `InProcessRouter` — In-process actor-style messaging
+- `HttpRouter` — HTTP-based inter-process communication
+- `RouterComposite` — Combine multiple transport layers
+
+### 17.6 Current Status
+
+The orchestrator is at MVP level with in-process coordination. HTTP endpoints are available but the full distributed coordination (leader election, cluster formation) is planned for a future milestone.
+
+---
+
+
+## 18. GitLab Integration
 
 Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, enabling agents to manage issues, merge requests, pipelines, and project metadata via the GitLab REST API.
 
-### 17.1 Authentication
+### 18.1 Authentication
 
 **Configuration:**
 - **Instance URL:** The GitLab instance URL (e.g., `https://gitlab.com` or a self-hosted instance)
@@ -2747,7 +2931,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `/gitlab logout` | Remove stored GitLab credentials |
 | `/gitlab status` | Show GitLab connection status |
 
-### 17.2 Issue Tools
+### 18.2 Issue Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -2757,7 +2941,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_issues_comment` | Add comment to an issue | `project_id`, `issue_iid`, `body` |
 | `gitlab_issues_close` | Close an issue | `project_id`, `issue_iid` |
 
-### 17.3 Merge Request Tools
+### 18.3 Merge Request Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -2766,7 +2950,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_mr_create` | Create a new merge request | `project_id`, `title`, `body`, `source_branch`, `target_branch` |
 | `gitlab_mr_merge` | Merge a merge request | `project_id`, `mr_iid`, `squash` |
 
-### 17.4 CI/CD Pipeline Tools
+### 18.4 CI/CD Pipeline Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -2775,13 +2959,13 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_ci_list` | List CI jobs for a pipeline | `project_id`, `pipeline_id` |
 | `gitlab_ci_get` | Get CI job details and logs | `project_id`, `job_id` |
 
-### 17.5 Project Tools
+### 18.5 Project Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
 | `gitlab_project_get` | Get project metadata | `project_id` or `path_with_namespace` |
 
-### 17.6 Auto-Detection
+### 18.6 Auto-Detection
 
 When operating inside a Git repository with a GitLab remote, ragent can auto-detect the `project_id` or `path_with_namespace` from the git remote configuration:
 
@@ -2799,178 +2983,15 @@ Falls back to explicit `project_id` or `path_with_namespace` parameters if detec
 
 ---
 
-## 24. Security & Permissions
 
-### 24.1 Permission Security Layers
+## 19. MCP Integration (Model Context Protocol)
 
-The permission system is a multi-layered defense-in-depth architecture that controls every tool invocation.
-
-```mermaid
-graph TD
-    subgraph Layer0["Layer 0: Hardwired Rules"]
-        H1[CodeIndex tools → Always Allow]
-    end
-
-    subgraph Layer1["Layer 1: Permission Rules"]
-        R1[Config rules: allow / deny / ask]
-        R2[Per-agent rules]
-        R3[YOLO mode bypass]
-    end
-
-    subgraph Layer2["Layer 2: Bash Security (7 Layers)"]
-        B1[Safe Command Whitelist]
-        B2[Banned Commands]
-        B3[Denied Patterns]
-        B4[Directory Escape Prevention]
-        B5[Syntax Validation]
-        B6[Obfuscation Detection]
-        B7[User Allowlist/Denylist]
-    end
-
-    subgraph Layer3["Layer 3: File Path Guards"]
-        F1[Path canonicalization]
-        F2[Directory escape check]
-        F3[Symlink resolution]
-        F4[Workspace boundary enforcement]
-    end
-
-    subgraph Layer4["Layer 4: Resource Limits"]
-        L1[Token budget tracking]
-        L2[Context window limits]
-        L3[Max iterations]
-        L4[Timeout enforcement]
-    end
-
-    subgraph Layer5["Layer 5: Secret Redaction"]
-        S1[API key masking in logs]
-        S2[Credential storage encryption]
-    end
-
-    ToolCall["Tool Call"] --> Layer0
-    Layer0 -->|if not hardwired| Layer1
-    Layer1 -->|bash command| Layer2
-    Layer1 -->|file operation| Layer3
-    Layer1 -->|all calls| Layer4
-    Layer1 -->|logging| Layer5
-    Layer2 -->|pass| Decision{Allow?}
-    Layer3 -->|pass| Decision
-    Decision -->|Yes| Execute["Execute Tool"]
-    Decision -->|Ask| UserPrompt["Show Permission Dialog"]
-    UserPrompt -->|Approve| Execute
-    UserPrompt -->|Deny| Reject["Return Denied Error"]
-    Decision -->|No| Reject
-```
-
-**Figure 10:** Permission Security Layers — 5-layer defense-in-depth
+*(Section pending — see Table of Contents for planned content)*
 
 ---
 
-### 24.2 Bash Security — 7 Layers
 
-```mermaid
-graph LR
-    A[bash command] --> B{Layer 1<br/>Safe Command?}
-    B -- Yes --> Z[Always Grant]
-    B -- No --> C{Layer 2<br/>Banned Command?}
-    C -- Yes --> X[Deny]
-    C -- No --> D{Layer 3<br/>Denied Pattern?}
-    D -- Yes --> X
-    D -- No --> E{Layer 4<br/>Directory Escape?}
-    E -- Yes --> X
-    E -- No --> F{Layer 5<br/>Syntax Valid?}
-    F -- No --> X
-    F -- Yes --> G{Layer 6<br/>Obfuscated?}
-    G -- Yes --> X
-    G -- No --> H{Layer 7<br/>User List Match?}
-    H -- Deny --> X
-    H -- Allow --> Y[Permission Check]
-    Y --> Z
-```
-
-**Figure 11:** Bash Security — 7 Layers — Bash command defense flow
-
-**Layer Details:**
-
-| Layer | Name | Description | Test Count |
-|-------|------|-------------|-----------:|
-| 1 | Safe Command Whitelist | 51 commands auto-approved (cat, ls, git, cargo, etc.) | 15 |
-| 2 | Banned Commands | 22 commands always blocked (mkfs, fdisk, useradd, etc.) | 6 |
-| 3 | Denied Patterns | 46 destructive patterns (rm -rf /, fork bombs, etc.) | 8 |
-| 4 | Directory Escape Prevention | Blocks cd/pushd outside workspace | 4 |
-| 5 | Syntax Validation | Runs `sh -n -c` with 1s timeout | 3 |
-| 6 | Obfuscation Detection | Detects base64\|bash, python exec, hex escapes | 5 |
-| 7 | User Allowlist/Denylist | User-configurable via `/bash allow/deny` | 4 |
-
----
-
-### 24.3 Permission Request Flow
-
-```mermaid
-sequenceDiagram
-    participant SP as Session Processor
-    participant PC as PermissionChecker
-    participant EB as Event Bus
-    participant TUI as TUI / HTTP
-    participant User as User
-
-    SP->>PC: check_permission(tool, params)
-    PC->>PC: Evaluate rules (last match wins)
-    alt Action = Allow
-        PC-->>SP: Decision::Allow
-    else Action = Deny
-        PC-->>SP: Decision::Deny
-    else Action = Ask
-        PC->>EB: Event::PermissionRequested
-        EB->>TUI: Show permission dialog
-        TUI-->>User: Display countdown (M:SS)
-        loop Every 100ms
-            TUI->>TUI: Redraw dialog
-        end
-        User-->>TUI: y / n / always
-        TUI->>EB: Event::PermissionReplied
-        EB->>PC: Forward decision
-        alt Timeout (120s)
-            TUI->>TUI: Show EXPIRED
-            TUI->>EB: Auto-deny
-        end
-        PC-->>SP: Decision::Once / Always / Deny
-    end
-```
-
-**Figure 12:** Permission Request Flow — From tool call to user decision
-
----
-
-### 24.4 Permission Rules Evaluation
-
-Rules are evaluated in order, with **last match wins** semantics:
-
-```mermaid
-graph TD
-    A[Permission Request] --> B[Load Default Rules]
-    B --> C[Load Global Config Rules]
-    C --> D[Load Agent-Specific Rules]
-    D --> E{Rule Matches?}
-    E -->|No| F[Next Rule]
-    F --> E
-    E -->|Yes| G{Action}
-    G -->|Allow| H[Grant]
-    G -->|Deny| I[Reject]
-    G -->|Ask| J[Prompt User]
-```
-
-**Figure 13:** Permission Rules Evaluation — Rule matching and resolution
-
-**Default Rules:**
-- Read operations → Allow
-- Edit operations → Ask
-- Bash execution → Ask
-- Web access → Ask
-- Todo management → Allow
-
----
-
-## 25. Auto-Update Mechanism
+## 20. Auto-Update Mechanism
 
 *(To be documented)*
 
