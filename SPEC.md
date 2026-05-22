@@ -1,4 +1,26 @@
 
+<div style="page-break-after: always; text-align: center; padding-top: 15em;">
+
+<h1 style="font-size: 3em; margin-bottom: 0.2em;">ragent</h1>
+<h2 style="font-size: 1.5em; font-weight: normal; color: #555; margin-top: 0;">Technical Specification</h2>
+
+<p style="margin-top: 4em; font-size: 1.1em;">
+      <strong>Version:</strong> 0.1.0-alpha.89</p>
+<p style="font-size: 1.1em;">
+  <strong>Date:</strong> 2026-05-22
+</p>
+<p style="font-size: 1.1em;">
+  <strong>Author:</strong> Tim Hawkins &lt;tim.thawkins@gmail.com&gt;
+</p>
+
+<p style="margin-top: 6em; font-size: 0.9em; color: #777;">
+  <a href="https://github.com/thawkins/ragent">github.com/thawkins/ragent</a>
+</p>
+
+</div>
+
+---
+
 ## Executive Summary
 
 Ragent is an open-source AI coding agent for the terminal, written entirely in
@@ -44,7 +66,7 @@ graph LR
 
 | Capability | Summary |
 |-----------|---------|
-| **Multi-provider LLM** | 8 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
+| **Multi-provider LLM** | 10 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
 | **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, office/PDF, web, and MCP |
@@ -80,12 +102,14 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.86). The core architecture, tool system,
+Ragent is in **alpha** (v0.1.0-alpha.88). The core architecture, tool system,
 TUI, HTTP server, memory system, teams, and security layer are functional and
 under active development. The specification below documents
 the current state of all subsystems.
 
 **Current Release Highlights:**
+- **Version alpha.88** — Fixed context compaction bug in `compact_history_with_atomic_tool_calls`; resolved premature loop break when trimming tool call pairs
+- **Version alpha.87** — Fixed `read` tool instructions (clarified `end_line` is absolute line number); strengthened remote push prohibitions in `AGENTS.md`; reorganized SPEC.md sections and numbering
 - **Azure Resource (File) provider** — New `azure_resource` provider reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`, supporting multiple Azure endpoints with per-resource API keys, environment-variable auth, capability tags, and thinking configuration
 - **Permission System Milestones Complete:**
   - Milestone 1: Core Permission System (7 tasks, 20 tests passing)
@@ -663,14 +687,16 @@ ragent models --provider azure_resource
 
 ### 3.2 Tool System
 
-#### File Operations Tools (26)
+#### File Operations Tools (14)
 
 | Tool | Purpose |
 |------|---------|
 | `read` | Read file contents with line range support |
-| `write` | Create new files |
-| `edit` | Replace text in existing files |
+| `write` | Create or overwrite files |
 | `create` | Create new file (alternative to write) |
+| `edit` | Replace text in existing files |
+| `multiedit` | Atomic multi-file edits |
+| `patch` | Apply unified diff patches |
 | `rm` | Delete single files |
 | `move_file` | Move/rename files and directories |
 | `copy_file` | Copy files to new location |
@@ -680,29 +706,19 @@ ragent models --provider azure_resource
 | `diff_files` | Compare two files |
 | `glob` | Find files matching glob patterns |
 | `list` | List directory contents |
-  | `multiedit` | Atomic multi-file edits |
-  | `patch` | Apply unified diff patches |
-  | `file_ops_tool` | Combined file operations |
-#### File Operation Aliases
 
-The following are aliases for commonly requested operations:
+#### File Operation Aliases
 
 | Alias | Maps To |
 |-------|---------|
-| `read` | `read` |
-| `list_files`, `list_directory` | `list` |
-| `find_files` | `glob` |
-| `update_file` | `edit` |
-| `file_search` | `grep` |
-
-#### Execution Tools (10)
+| `update_file` | `write` |
+#### Execution Tools (3)
 
 | Tool | Purpose |
 |------|---------|
 | `bash` | Execute shell commands with security restrictions |
 | `bash_reset` | Reset bash shell state |
-| `execute_python` | Run Python code snippets |
-| `run_code` / `execute_code` / `execute_bash` / `run_shell_command` / `run_terminal_cmd` | Aliases for bash/code execution |
+| `run_code` | Alias for `bash` (legacy name compatibility) |
 
 #### Interactive Tools (3)
 
@@ -724,29 +740,30 @@ The following are aliases for commonly requested operations:
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| **File Operations** | 26 | read, write, edit, create, rm, move, copy, mkdir, append, diff, multiedit, patch, etc. |
-| **Execution** | 10 | bash, bash_reset, execute_python, aliases |
-| **Search** | 4 | grep and aliases |
+| **File Operations** | 14 | read, write, create, edit, multiedit, patch, rm, move, copy, mkdir, append, file_info, diff, glob, list |
+| **Execution** | 3 | bash, bash_reset, run_code (alias) |
+| **Search** | 1 | grep |
 | **Web** | 3 | webfetch, websearch, http_request |
 | **Office** | 6 | office_read/write/info, libre_read/write/info |
 | **PDF** | 2 | pdf_read, pdf_write |
 | **Code Index** | 6 | codeindex_search, symbols, references, dependencies, status, reindex |
 | **GitHub** | 10 | Issues and PR management |
 | **GitLab** | 19 | Issues, merge requests, pipelines, and jobs |
-| **Memory** | 12 | memory_read/write/replace/store/recall/forget/search/migrate |
-| **Team** | 21 | Team lifecycle, tasks, messaging, coordination |
+| **Memory** | 8 | memory_read, write, replace, store, recall, forget, search, migrate |
+| **Team** | 20 | Team lifecycle, tasks, messaging, coordination |
 | **Sub-agent** | 5 | new_task, cancel_task, list_tasks, wait_tasks, task_complete |
 | **Plan** | 2 | plan_enter, plan_exit |
 | **MCP** | 1 | mcp_tool (McpToolWrapper) |
-| **Interactive** | 4 | question, think, todo_read/write |
+| **Interactive** | 4 | question, think, todo_read, todo_write |
 | **Utility** | 3 | calculator, get_env |
-#### Team Tools (21)
+
+**Total registered tools: ~111** (across all three tool crates plus aliases).
+#### Team Tools (20)
 
 | Tool | Purpose |
 |------|---------|
 | `team_create` | Create new team |
 | `team_spawn` | Spawn teammate agent |
-| `team_cleanup` | Cleanup team resources |
 | `team_status` | Get team status |
 | `team_idle` | Signal idle state |
 | `team_task_create` | Create team task |
@@ -1137,16 +1154,53 @@ graph TD
     "max_file_size": 1048576
   },
   "memory": {
-    "auto_extract": { "enabled": false, "require_confirmation": true },
+    "enabled": true,
+    "structured": { "enabled": true },
     "semantic": { "enabled": false, "dimensions": 384 },
+    "auto_extract": { "enabled": false, "require_confirmation": true },
     "compaction": { "enabled": true, "block_size_limit": 4096 },
-    "eviction": { "auto": false, "stale_days": 30 }
+    "eviction": { "auto": false, "stale_days": 30 },
+    "decay": { "enabled": true, "half_life_days": 7 }
   },
-  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
+  "tool_visibility": {
+    "office": true,
+    "github": true,
+    "gitlab": true,
+    "teams": true,
+    "agents": true,
+    "plan": true,
+    "codeindex": true
+  },
+  "dirs": {
+    "allowlist": [],
+    "denylist": []
+  },
   "bash": {
     "allowlist": [],
     "denylist": []
   },
+  "gitlab": {
+    "instance_url": "https://gitlab.com",
+    "token": null,
+    "username": null
+  },
+  "internal_llm": {
+    "enabled": false,
+    "model": null,
+    "threads": 4,
+    "gpu_layers": 0,
+    "context_window": 8192,
+    "max_output_tokens": 2048,
+    "timeout_ms": 30000,
+    "max_parallel_requests": 2,
+    "allowed_tasks": ["session_title", "prompt_context", "memory_extraction"]
+  },
+  "stream": {
+    "timeout_secs": 120,
+    "max_retries": 3,
+    "retry_backoff_secs": 2
+  },
+  "hidden_tools": ["github_list_issues", "gitlab_list_mrs"],
   "hooks": [
     { "trigger": "on_session_start", "command": "echo 'Session started'" }
   ]
@@ -1156,6 +1210,13 @@ graph TD
 Additional top-level configuration keys:
 
 - `hidden_tools` — List of tool names to hide from LLM tool definitions and system-prompt tool listings. Hidden tools remain registered and executable; they are simply not advertised to the model. When configs are merged across layers, `hidden_tools` is unioned so entries from both global and project configs are honoured.
+- `tool_visibility` — Toggle visibility of 7 tool families (`office`, `github`, `gitlab`, `teams`, `agents`, `plan`, `codeindex`). Tools in a hidden family are not advertised to the LLM but remain executable.
+- `dirs` — Directory and file path allowlist / denylist for the permission system.
+- `bash` — User-defined bash command allowlist and denylist.
+- `gitlab` — GitLab instance URL and personal access token for native integration.
+- `internal_llm` — Embedded local LLM configuration for helper tasks (session titles, prompt context, memory extraction).
+- `stream` — LLM streaming timeouts and retry behaviour.
+- `memory` — Full memory system configuration with `structured`, `semantic`, `auto_extract`, `compaction`, `eviction`, and `decay` sub-sections.
 - `provider.<id>.thinking` — Provider-wide default reasoning configuration used when a selected model has no more specific override.
 - `provider.<id>.models.<model>.thinking` — Per-model default reasoning configuration. Precedence is user selection → agent default → model config → provider config → built-in default.
 
@@ -1176,9 +1237,16 @@ Thinking configuration uses the shared `ThinkingConfig` type:
 | `OPENAI_API_KEY` | OpenAI API key |
 | `GENERIC_OPENAI_API_KEY` | Generic OpenAI-compatible key |
 | `GITHUB_COPILOT_TOKEN` | GitHub Copilot token |
-| `OLLAMA_HOST` | Ollama server URL |
+| `GEMINI_API_KEY` | Google Gemini API key |
+| `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | Hugging Face API token |
+| `RAGENT_API_KEY_HUGGINGFACE` | Hugging Face token (ragent convention) |
+| `OLLAMA_API_KEY` | Ollama Cloud authentication |
+| `OLLAMA_HOST` | Ollama local server URL |
+| `AZURE_AI_FOUNDRY_API_KEY` | Azure AI Foundry API key |
+| `AZURE_AI_FOUNDRY_BASE` | Azure AI Foundry custom base URL |
 | `RAGENT_LOG_LEVEL` | Log level (trace/debug/info/warn/error) |
 | `RAGENT_YES` | Auto-approve all permissions |
+| `RAGENT_TOKEN` | HTTP API Bearer token |
 
 ### 5.4 Configuration Error Reporting
 
@@ -1195,10 +1263,7 @@ users fix malformed configuration files quickly.
 
 ---
 
-# Part V: External Integrations
-
 ---
-
 
 ## 6. Terminal User Interface (TUI)
 
@@ -1515,6 +1580,8 @@ Various inline widgets rendered within the message panel.
 | **Context & Config** ||
 | `/context refresh` | Clear cached file tree, git status, README |
 | `/browse_refresh` | Refresh @ file-picker project index |
+| `/config show` | Display all application paths and resolved configuration |
+| `/dirs` | Manage directory / file permission lists (allow/deny) |
 | `/reload [all\|config\|mcp\|skills\|agents]` | Reload customizations |
 | `/init` | Analyze project and write to PROJECT_ANALYSIS.md |
 | **Tasks** ||
@@ -1578,6 +1645,8 @@ Various inline widgets rendered within the message panel.
 | **Agent Modes & Planning** ||
 | `/mode <role>` | Set agent role: architect, coder, reviewer, debugger, tester, off |
 | `/plan <description>` | Delegate planning to the plan agent |
+| `/profile on\|off` | Toggle the agent-loop profiler panel |
+| `/theme default\|high-contrast` | Switch UI colour theme |
 | **GitHub Integration** ||
 | `/github login` | Authenticate with GitHub |
 | `/github logout` | Remove GitHub credentials |
@@ -1599,6 +1668,8 @@ Various inline widgets rendered within the message panel.
 | **UI & History** ||
 | `/log` | Toggle log panel visibility |
 | `/history` | Browse previous inputs |
+| `/status [clear]` | Show status message history |
+| `/mouse on\|off` | Toggle mouse support |
 | `/inputdiag` | Input diagnostics |
 | `/compact` | Compact context window |
 | `/agent_compact` | Compact agent description |
@@ -2645,7 +2716,7 @@ graph LR
     L --> M[Team Destroyed]
 ```
 
-### 14.3 Team Tools (21)
+### 14.3 Team Tools (20)
 
 | Tool | Purpose |
 |------|---------|
@@ -3094,14 +3165,71 @@ Falls back to explicit `project_id` or `path_with_namespace` parameters if detec
 
 ## 19. MCP Integration (Model Context Protocol)
 
-*(Section pending — see Table of Contents for planned content)*
+The MCP subsystem acts as a client for the [Model Context Protocol](https://modelcontextprotocol.io/), letting ragent discover, connect to, and call tools hosted by external MCP servers. The integration is built on the `rmcp` crate and is currently functional for local-stdio servers.
+
+### 19.1 Discovery
+
+MCP servers are discovered by scanning the system `PATH` for known executable names. The following servers are recognised out of the box:
+
+| Server | Executable(s) | Purpose |
+|--------|--------------|---------|
+| Filesystem | `mcp-server-filesystem` | Local file browsing |
+| GitHub | `mcp-server-github`, `gh-mcp` | GitHub API access |
+| Git | `mcp-server-git` | Git repository operations |
+| PostgreSQL | `mcp-server-postgres` | Database queries |
+| SQLite | `mcp-server-sqlite` | SQLite queries |
+| Memory | `mcp-server-memory` | Persistent memory store |
+| Brave Search | `mcp-server-brave-search` | Web search |
+| Fetch | `mcp-server-fetch` | HTTP fetch |
+| Puppeteer | `mcp-server-puppeteer` | Browser automation |
+
+**TUI slash command:** `/mcp discover` — scan PATH and list discovered servers.
+
+### 19.2 Configuration
+
+Discovered servers can be persisted in `ragent.json` under the `mcp_servers` key. Each entry specifies the transport (currently `stdio` only) and any required environment variables or working-directory overrides.
+
+```json
+{
+  "mcp_servers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["/home/user/projects"]
+    }
+  }
+}
+```
+
+### 19.3 Tool Bridging
+
+When an MCP server is connected, its exposed tools are wrapped by `McpToolWrapper` and injected into the active tool registry. The wrapper translates between ragent's native `Tool` trait and MCP's JSON-RPC tool schema, so the LLM can invoke MCP tools exactly like built-in tools.
+
+**TUI slash commands:**
+| Command | Purpose |
+|---------|---------|
+| `/mcp list` | List connected MCP servers and their tools |
+| `/mcp call <server> <tool>` | Call an MCP tool directly from the TUI |
+
+### 19.4 Status
+
+- **Implemented:** Discovery, stdio client, tool wrapping, TUI commands.
+- **Not yet implemented:** SSE transport, remote MCP servers, resource subscriptions.
 
 ---
 
 
 ## 20. Auto-Update Mechanism
 
-*(To be documented)*
+> **Status:** Planned — not yet implemented.
+
+An automatic update check is on the roadmap. The TUI already reserves the `/update` and `/update install` slash commands, but they currently return a "not implemented" message. When completed, this subsystem will:
+
+- Query a GitHub releases endpoint for the latest version tag.
+- Compare against the compile-time version baked into the binary.
+- Offer a one-command download-and-replace flow for supported platforms.
+
+Until then, users should update via `cargo install` or by downloading the latest release binary manually.
 
 ---
 
@@ -3113,7 +3241,9 @@ Falls back to explicit `project_id` or `path_with_namespace` parameters if detec
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| v0.1.0-alpha.86 | 2026-05-21 | Azure Resource (File) provider — file-based endpoint catalog, `azureresources.json` schema, TUI integration, integration tests |
+| v0.1.0-alpha.88 | 2025-01-22 | Fixed context compaction bug in `compact_history_with_atomic_tool_calls`; resolved premature loop break when trimming tool call pairs |
+| v0.1.0-alpha.87 | 2025-01-22 | Fixed `read` tool instructions (clarified `end_line` is absolute); strengthened remote push prohibitions in `AGENTS.md`; reorganized SPEC.md sections and numbering |
+| v0.1.0-alpha.86 | 2025-01-21 | Azure Resource (File) provider — file-based endpoint catalog, `azureresources.json` schema, TUI integration, integration tests |
 | v0.1.0-alpha.82 | 2026-05-20 | Azure AI Foundry provider fixes, `/config show` slash command |
 | v0.1.0-alpha.79 | 2026-05-18 | Azure endpoint logging in TUI log panel |
 | v0.1.0-alpha.76 | 2026-05-18 | Azure AI Foundry provider added |
@@ -3197,7 +3327,7 @@ All documentation markdown files are located in `docs/` except for these root fi
 - `gemini` provider with massive context windows (up to 2M tokens)
 - `huggingface` provider with dynamic model discovery and rate limit tracking
 - GitLab integration with issues, merge requests, pipelines, and jobs
-- Team coordination tools (21 tools for team lifecycle, tasks, messaging)
+- Team coordination tools (20 tools for team lifecycle, tasks, messaging)
 - MCP (Model Context Protocol) client support
 - Skills system for loadable skill packs
 - Custom agent profiles via OASF format

@@ -2642,7 +2642,7 @@ async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
 /// estimated token count is below the threshold. It ensures that when a
 /// message containing tool calls is retained, the corresponding tool result
 /// messages are also retained, preventing incomplete tool call pairs.
-fn compact_history_with_atomic_tool_calls(
+pub fn compact_history_with_atomic_tool_calls(
     messages: &[Message],
     context_window: usize,
     _max_output_tokens: usize,
@@ -2677,6 +2677,7 @@ fn compact_history_with_atomic_tool_calls(
             .sum();
         text_len / CHARS_PER_TOKEN + 10 // Base overhead per message
     };
+
     // Build a map of tool call IDs to their result indices
     let mut tool_call_indices: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -2698,10 +2699,16 @@ fn compact_history_with_atomic_tool_calls(
         return messages.to_vec();
     }
 
-    // Need to compact - identify which messages must be kept together
-    // Messages with tool calls must keep their corresponding results
-    let mut must_keep: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    // Build prefix sums of token counts for O(1) range queries
+    let mut prefix: Vec<usize> = Vec::with_capacity(messages.len() + 1);
+    prefix.push(0);
+    for msg in messages {
+        prefix.push(prefix.last().unwrap() + estimate_tokens(msg));
+    }
 
+    // Identify atomic groups: each tool call in an assistant message + the
+    // corresponding user message that carries the result.
+    let mut protected: Vec<bool> = vec![false; messages.len()];
     for (idx, msg) in messages.iter().enumerate() {
         if msg.role == Role::Assistant {
             let has_tool_calls = msg
@@ -2709,63 +2716,53 @@ fn compact_history_with_atomic_tool_calls(
                 .iter()
                 .any(|p| matches!(p, MessagePart::ToolCall { .. }));
             if has_tool_calls {
-                must_keep.insert(idx);
-                // The result is in the user message that follows
+                protected[idx] = true; // The assistant call
                 if idx + 1 < messages.len() {
-                    must_keep.insert(idx + 1);
+                    protected[idx + 1] = true; // The user result that follows
                 }
             }
         }
     }
 
-    // Trim from the beginning, respecting atomic groups
-    // Use VecDeque for O(1) removal from front - fixes O(n²) complexity
-    let mut trimmed: std::collections::VecDeque<Message> = messages.iter().cloned().collect();
-    let mut current_tokens: usize = total_tokens;
-
-    // Convert must_keep to account for VecDeque indexing
-    let mut must_keep: std::collections::HashSet<usize> = must_keep;
-
-    while current_tokens > max_tokens && trimmed.len() > 2 {
-        // Always keep at least the last 2 messages (user query + context)
-        let to_remove = 0; // Try removing the oldest message
-
-        // Check if removing this would break atomicity
-        let would_break_atomicity = must_keep.contains(&to_remove)
-            || (to_remove > 0 && must_keep.contains(&(to_remove - 1)));
-
-        if would_break_atomicity {
-            // Skip this message and try the next
-            break;
+    // Find the largest suffix (keep from `cut` to end) that stays under the
+    // token budget.  We try `cut` values from oldest → newest so that we
+    // drop as much as necessary while keeping the most recent context.
+    let mut best_cut = messages.len(); // Start with 0 messages kept
+    for cut in 0..messages.len() {
+        // Count how many protected messages we would drop in [cut, end)
+        let dropped_protected = &protected[cut..messages.len()]
+            .iter()
+            .filter(|&&p| p)
+            .count();
+        if *dropped_protected > 0 {
+            continue; // Can't cut here without splitting a tool call pair
         }
 
-        if let Some(msg) = trimmed.pop_front() {
-            let removed_tokens = estimate_tokens(&msg);
-            current_tokens = current_tokens.saturating_sub(removed_tokens);
-
-            // Update indices in must_keep
-            let mut new_must_keep: std::collections::HashSet<usize> =
-                std::collections::HashSet::new();
-            for &idx in &must_keep {
-                if idx > to_remove {
-                    new_must_keep.insert(idx - 1);
-                } else if idx != to_remove {
-                    new_must_keep.insert(idx);
-                }
-            }
-            must_keep = new_must_keep;
+        let suffix_tokens = prefix[messages.len()] - prefix[cut];
+        if suffix_tokens <= max_tokens {
+            best_cut = cut;
+            break; // First valid cut from the left = drops the most
         }
     }
+
+    // If no valid cut found (even 1 message is over budget), keep just the last message
+    if best_cut == messages.len() {
+        best_cut = messages.len().saturating_sub(1);
+    }
+
+    let trimmed: Vec<Message> = messages[best_cut..].to_vec();
+    let final_tokens: usize = trimmed.iter().map(estimate_tokens).sum();
 
     tracing::debug!(
         original_count = messages.len(),
         trimmed_count = trimmed.len(),
         original_tokens = total_tokens,
-        final_tokens = current_tokens,
+        final_tokens = final_tokens,
+        cut_at = best_cut,
         "Compacted message history"
     );
 
-    trimmed.into_iter().collect()
+    trimmed
 }
 
 fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {

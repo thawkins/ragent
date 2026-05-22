@@ -7,6 +7,9 @@
 pub mod processor;
 pub mod profiler;
 
+// Re-export the compaction helper so tests can exercise it directly.
+pub use processor::compact_history_with_atomic_tool_calls;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

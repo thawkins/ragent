@@ -2,48 +2,85 @@
 
 An AI coding agent for the terminal, built in Rust.
 
-ragent is a Rust coding agent inspired various coding agents like Roocode, ClaudCode, Copilot-cli and Opencode. It provides multi-provider LLM orchestration, a
-built-in tool system, a terminal UI, and a client/server architecture, all compiled
-into a single statically-linked binary with no runtime dependencies.
+ragent is a Rust coding agent inspired by RooCode, Claude Code, Copilot CLI and
+OpenCode. It provides multi-provider LLM orchestration, a comprehensive built-in
+tool system, a terminal UI, and a client/server architecture — all compiled into a
+single statically-linked binary with zero runtime dependencies.
 
 It is implemented in Rust as a learning exercise for the author.
 
 ## Features
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, and Ollama
+- **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
+  GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
+  Azure AI Foundry, and Azure Resource (File) provider
   out of the box, with an extensible provider trait for adding more
-- **8 built-in tools** — file read/write/create/edit, bash execution, grep, glob, directory
-  listing, and interactive questions
-- **15 extended tools** — multiedit, patch, webfetch, websearch, plan delegation,
-  todo management, office document read/write/info, PDF read/write, and file deletion (rm)
-- **3 sub-agent tools** — new_task, cancel_task, list_tasks for spawning and managing
-  background agents
-- **Terminal UI** — full-screen ratatui interface with provider setup
-  dialog, slash-command autocomplete, agent cycling, streaming chat, step-numbered
-  tool calls with pretty-printed JSON in the log panel
+- **Comprehensive tool system** — ~111 registered tools across 15 categories:
+  - **File operations** — read, write, create, edit, multiedit, patch, rm, move, copy,
+    mkdir, append, file_info, diff, glob, list
+  - **Shell** — bash, bash_reset (7-layer security with safe-command whitelist,
+    banned commands, denied patterns, directory escape prevention, syntax validation,
+    obfuscation detection, and user allowlist/denylist)
+  - **Search** — grep
+  - **Web** — webfetch, websearch, http_request
+  - **Code intelligence** — codeindex_search, codeindex_symbols, codeindex_references,
+    codeindex_dependencies, codeindex_status, codeindex_reindex (read-only,
+    hardwired always-allowed)
+  - **Memory** — memory_read, memory_write, memory_replace, memory_store,
+    memory_recall, memory_forget, memory_search, memory_migrate
+  - **Teams** — 20 tools for team lifecycle, tasks, messaging, and coordination
+  - **GitHub & GitLab** — 29 native VCS tools for issues, PRs/MRs, pipelines, CI/CD,
+    and repository management
+  - **Office & PDF** — office_read/write/info, libre_read/write/info, pdf_read, pdf_write
+  - **Sub-agents** — new_task, cancel_task, list_tasks, wait_tasks, task_complete
+  - **Planning** — plan_enter, plan_exit
+  - **MCP** — mcp_tool (McpToolWrapper) for external Model Context Protocol servers
+  - **Interactive** — question, think, todo_read, todo_write
+  - **Utility** — calculator, get_env
+- **Terminal UI** — full-screen ratatui interface with provider setup dialog,
+  slash-command autocomplete, agent cycling, streaming chat with markdown and syntax
+  highlighting, step-numbered tool calls with pretty-printed JSON in the log panel,
+  and a live permission countdown timer (120-second timeout with EXPIRED state)
 - **HTTP server** — axum-based REST + SSE API so any frontend can drive the agent
-- **Session management** — persistent conversation history stored in SQLite
-- **Permission system** — configurable rules that gate file writes, shell commands,
-  and external access before they execute
-- **Agent presets** — coder, task, architect, ask, debug, code-review, and custom
-  agents with tailored system prompts
-- **Project guidelines** — auto-loads `AGENTS.md` from the project root into the
-  system prompt so agents follow project-specific conventions
-- **MCP client** — Model Context Protocol support for extending tool capabilities
-  via external servers (stub, in progress)
+- **Session management** — persistent conversation history stored in SQLite;
+  list, resume, export, and import sessions
+- **Permission system** — multi-layered defense-in-depth with hardwired rules
+  (codeindex tools always allowed), configurable allow/deny/ask rules, 7-layer bash
+  security, file-path guards, and YOLO mode for trusted environments
+- **Agent presets** — general, coder, task, architect, ask, debug, code-review, and
+  orchestrator agents with tailored system prompts
+- **Custom agents** — user-defined agents via JSON (OASF format) or Markdown profiles
+- **Project guidelines** — auto-loads `AGENTS.md` from the project root (and
+  `~/.local/share/ragent/`) into the system prompt so agents follow project-specific
+  conventions
+- **MCP client** — Model Context Protocol support with auto-discovery of 9 known
+  server types, stdio client, tool bridging, and TUI commands (`/mcp discover`,
+  `/mcp list`, `/mcp call`)
 - **Snapshot & undo** — file snapshots before edits so changes can be rolled back
-- **Event bus** — internal pub/sub for real-time UI updates
+- **Event bus** — internal tokio pub/sub for real-time UI updates across all components
 - **Background agents** — spawn and run multiple sub-agents concurrently for parallel
   task execution, with REST API and TUI monitoring
 - **Prompt optimization** — `/opt <method> <prompt>` transforms any prompt into structured
   frameworks (CO-STAR, CRISPE, CoT, DRAW, RISE, VARI, Q*, O1-STYLE, Meta Prompting) and
   platform adapters (OpenAI, Claude, Microsoft/Azure); also available via `POST /opt`
-- **Code index** — automatic codebase indexing with tree-sitter parsing, full-text
-  search via Tantivy, incremental updates via file watcher, and LLM-accessible tools
-  (`codeindex_search`, `codeindex_symbols`, `codeindex_references`, `codeindex_dependencies`,
-  `codeindex_status`); supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
-  Terraform, CMake, Gradle, and Maven;
-  enable/disable via `/codeindex on|off`
+- **Code index** — automatic codebase indexing with tree-sitter parsing (15+ languages),
+  full-text search via Tantivy, incremental updates via file watcher, and LLM-accessible
+  tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
+  Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
+  language filtering via `/codeindex lang <language>`
+- **Memory system** — three-tier system with file blocks, structured SQLite store,
+  and optional embedding-based semantic search; automatic extraction, decay,
+  compaction, and knowledge graph support
+- **Spec management** — `/spec` slash commands for creating, listing, searching,
+  validating, and tracking specification lifecycles
+- **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
+  prompts, and file context into agent sessions
+- **Teams & Swarms** — multi-agent coordination with named teammates, shared task lists,
+  mailbox messaging, and swarm decomposition for parallel work (`/swarm <prompt>`)
+- **Autopilot mode** — autonomous operation with configurable iteration limits and
+  permission auto-approval (`/autopilot on [--max-tokens N] [--max-time N]`)
+- **Config error reporting** — actionable JSON parse diagnostics showing file path,
+  line, column, problematic source line, and caret marker
 
 ## Installation
 
@@ -65,6 +102,8 @@ Requires Rust 1.85+ (edition 2024).
 export ANTHROPIC_API_KEY="sk-..."
 # or
 export OPENAI_API_KEY="sk-..."
+# or (for Azure AI Foundry)
+export AZURE_AI_FOUNDRY_API_KEY="sk-..."
 # or (for Generic OpenAI API provider)
 export GENERIC_OPENAI_API_KEY="sk-..."
 
@@ -107,7 +146,7 @@ Commands:
 
 Options:
       --model <MODEL>          Override model (provider/model format)
-      --agent <AGENT>          Override agent [default: build]
+      --agent <AGENT>          Override agent [default: coder]
       --log-level <LOG_LEVEL>  Log level [default: warn]
       --no-tui                 Disable TUI, use plain stdout
       --yes                    Auto-approve all permissions
@@ -135,9 +174,25 @@ with OpenCode's `opencode.json`.
   "defaultAgent": "coder",
   "permissions": [
     { "permission": "file:write", "pattern": "src/**", "action": "allow" }
-  ]
+  ],
+  "memory": {
+    "enabled": true,
+    "structured": { "enabled": true },
+    "semantic": { "enabled": false, "dimensions": 384 }
+  },
+  "tool_visibility": {
+    "office": true,
+    "github": true,
+    "gitlab": true,
+    "teams": true,
+    "agents": true,
+    "plan": true,
+    "codeindex": true
+  }
 }
 ```
+
+See the full configuration schema in [SPEC.md](SPEC.md).
 
 ## Custom Agents
 
@@ -195,14 +250,16 @@ curl -s -X POST http://localhost:9100/opt \
 
 ## Teams
 
-Teams let one lead session coordinate multiple teammates with shared tasks and mailbox messaging.
+Teams let one lead session coordinate multiple teammates with shared tasks and
+mailbox messaging.
 
 Quick flow:
 
 - Create a team: `/team create <name>` (or `team_create`)
 - Re-open an existing team: `/team open <name>`
 - Spawn teammates: `team_spawn`
-- Add/list/claim/complete tasks: `team_task_create`, `team_task_list`, `team_task_claim`, `team_task_complete`
+- Add/list/claim/complete tasks: `team_task_create`, `team_task_list`,
+  `team_task_claim`, `team_task_complete`
 - Communicate: `/team message ...` or `team_message`, plus `team_read_messages`
 - Reset/close/delete team state: `/team clear`, `/team close`, `/team delete <name>`
 - Cleanup when finished: `/team cleanup` or `team_cleanup`
@@ -215,20 +272,25 @@ Docs and examples:
 
 ## Architecture
 
-The project is a Cargo workspace built from focused crates:
+The project is a Cargo workspace built from 15 focused crates:
 
 | Crate | Purpose |
 |-------|---------|
 | `ragent-agent` | Agent/runtime layer: sessions, orchestration, MCP, memory, tool registry |
-| `ragent-team` | Team coordination runtime and team tools |
-| `ragent-storage` | SQLite-backed storage, snapshots, encrypted credentials |
+| `ragent-bench` | Benchmark runner shared between TUI and CLI |
+| `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-config` | Configuration types, defaults, and parsing |
-| `ragent-types` | Shared IDs, events, messages, and sanitization primitives |
 | `ragent-llm` | Provider clients and model/provider registry |
 | `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
-| `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-server` | Axum HTTP routes and SSE streaming |
+| `ragent-specs` | Spec lifecycle management: discovery, validation, status transitions, review, archival |
+| `ragent-storage` | SQLite-backed storage, snapshots, encrypted credentials |
+| `ragent-team` | Team coordination runtime and team tools |
+| `ragent-tools-core` | Core shell/file/search tools |
+| `ragent-tools-extended` | Extended document/web/memory/codeindex tools |
+| `ragent-tools-vcs` | GitHub and GitLab tool surface |
 | `ragent-tui` | Ratatui terminal interface |
+| `ragent-types` | Shared IDs, events, messages, and sanitization primitives |
 
 The binary entry point (`src/main.rs`) wires these crates together behind a clap CLI.
 
@@ -276,7 +338,22 @@ Key optimisations in the current release:
 
 ## Project Status
 
-**v0.1.0-alpha.82** — Early development with Azure AI Foundry provider support, config display command, and various provider logging improvements. Recent updates include Azure endpoint logging, `/config show` slash command, and the Microsoft Azure AI Foundry provider integration.
+**v0.1.0-alpha.88** — The core architecture, tool system (~111 tools), TUI, HTTP
+server, memory system, teams/swarm coordination, spec management, skills system,
+and multi-layered security are functional and under active development.
+
+Recent highlights:
+- Context compaction bug fixed (`compact_history_with_atomic_tool_calls`)
+- `read` tool instructions clarified (`end_line` is absolute line number)
+- Remote push prohibitions strengthened in `AGENTS.md`
+- SPEC.md reorganized, audited, and brought up to date with actual implementation
+- Azure Resource (File) provider with `azureresources.json` support
+- Azure AI Foundry provider with dynamic model discovery
+- `/config show` slash command for displaying resolved configuration
+- Startup ASCII art banner with compile timestamp
+- Instruction file discovery logging
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
 ## License
 
