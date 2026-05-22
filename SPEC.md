@@ -44,7 +44,7 @@ graph LR
 
 | Capability | Summary |
 |-----------|---------|
-| **Multi-provider LLM** | 7 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
+| **Multi-provider LLM** | 8 providers with automatic model discovery, health monitoring, streaming, vision, and reasoning levels |
 | **Terminal UI** | Full-screen ratatui interface with streaming markdown, syntax highlighting, slash commands, and image support |
 | **HTTP Server** | REST + SSE API (Axum) for headless operation and external integrations |
 | **Tool System** | Broad tool coverage across file ops, shell, search, GitHub, GitLab, code index, memory, teams, sub-agents, office/PDF, web, and MCP |
@@ -80,12 +80,13 @@ sessions and headless CI/CD integration via its HTTP API.
 
 ### Project Status
 
-Ragent is in **alpha** (v0.1.0-alpha.82). The core architecture, tool system,
+Ragent is in **alpha** (v0.1.0-alpha.86). The core architecture, tool system,
 TUI, HTTP server, memory system, teams, and security layer are functional and
 under active development. The specification below documents
 the current state of all subsystems.
 
 **Current Release Highlights:**
+- **Azure Resource (File) provider** — New `azure_resource` provider reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`, supporting multiple Azure endpoints with per-resource API keys, environment-variable auth, capability tags, and thinking configuration
 - **Permission System Milestones Complete:**
   - Milestone 1: Core Permission System (7 tasks, 20 tests passing)
   - Milestone 2: Bash Security — 7 Layers (8 tasks, 27+ tests passing)
@@ -396,6 +397,7 @@ graph LR
 | **Hugging Face** | `huggingface` | `HF_TOKEN` | Streaming, tools, vision, dynamic model discovery |
 | **Generic OpenAI** | `generic_openai` | `GENERIC_OPENAI_API_KEY` | Any OpenAI-compatible endpoint |
 | **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
+| **Azure Resource (File)** | `azure_resource` | File-based (`azureresources.json`) | Multiple Azure endpoints from a JSON catalog, per-resource auth, capability tags |
 | **Azure AI Foundry** | `azure_foundry` | `AZURE_AI_FOUNDRY_API_KEY` | OpenAI-compatible endpoints, dynamic model discovery, streaming, tools, vision, reasoning |
 
 #### Provider Features
@@ -606,6 +608,60 @@ The Azure AI Foundry provider connects to Microsoft Azure AI Foundry models via 
 ```bash
 ragent models --provider azure_foundry
 ```
+
+#### Azure Resource (File) Provider
+
+The `azure_resource` provider reads Azure endpoint definitions from a user-supplied `azureresources.json` file, enabling registration of multiple Azure-hosted LLM endpoints without rebuilding or reconfiguring ragent. Each entry in the file becomes a first-class model in the provider registry.
+
+**File Locations (searched in order):**
+1. `~/.config/ragent/azureresources.json` — user-global
+2. `.ragent/azureresources.json` — project-local
+
+**Authentication:**
+- Per-resource `api_key` (discouraged) or `api_key_env` (preferred) inside each JSON entry
+- `api_key_env` references an environment variable by name (e.g. `"AZURE_AI_FOUNDRY_API_KEY"`)
+
+**Configuration Example (`azureresources.json`):**
+```json
+{
+  "version": "1",
+  "resources": [
+    {
+      "id": "kimi-k2.6",
+      "name": "kimi-k2.6",
+      "endpoint": "https://a1a-52048-dev-ais-shr1-eus2-1.openai.azure.com",
+      "api_key_env": "AZURE_AI_FOUNDRY_API_KEY",
+      "context_window": 128000,
+      "capabilities": ["reasoning", "streaming", "vision", "tool_use"],
+      "thinking": {
+        "enabled": true,
+        "level": "medium",
+        "budget_tokens": 8192
+      }
+    }
+  ]
+}
+```
+
+**Features:**
+- **Multi-Endpoint Support** — Register any number of Azure endpoints in a single file
+- **Per-Resource Auth** — Each endpoint can use a different API key or environment variable
+- **Capability Whitelist** — Explicit `capabilities` array enables only listed features; omitted entries get safe defaults (`streaming: true`, `tool_use: true`)
+- **Thinking Config** — Per-model reasoning configuration with `enabled`, `level`, and `budget_tokens`
+- **Context Window** — Customizable per-resource context window (default: 128,000)
+- **File-Based Discovery** — No code changes needed to add or remove endpoints; edit the JSON and reload
+
+**Model Listing:**
+```bash
+ragent models --provider azure_resource
+```
+
+**Validation:**
+- `version` must be exactly `"1"`
+- Each entry requires non-empty `id`, `name`, and `endpoint`
+- Each entry requires at least one of `api_key` or `api_key_env`
+- Duplicate IDs are deduplicated (first wins)
+- Invalid entries are skipped with a warning
 
 ### 3.2 Tool System
 
@@ -2928,6 +2984,7 @@ graph TD
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| v0.1.0-alpha.86 | 2026-05-21 | Azure Resource (File) provider — file-based endpoint catalog, `azureresources.json` schema, TUI integration, integration tests |
 | v0.1.0-alpha.82 | 2026-05-20 | Azure AI Foundry provider fixes, `/config show` slash command |
 | v0.1.0-alpha.79 | 2026-05-18 | Azure endpoint logging in TUI log panel |
 | v0.1.0-alpha.76 | 2026-05-18 | Azure AI Foundry provider added |
@@ -2972,6 +3029,15 @@ All documentation markdown files are located in `docs/` except for these root fi
 
 ## Appendix D: Changelog (2025-01-16 → 2025-04-21)
 
+### Added (v0.1.0-alpha.82 → v0.1.0-alpha.86)
+- Azure Resource (File) provider — New `azure_resource` provider reads endpoint definitions from `azureresources.json` in `~/.config/ragent/` or `.ragent/`
+- `azureresources.json` file format — JSON schema with version, resources array, per-entry auth (api_key/api_key_env), capabilities whitelist, thinking config, and context window
+- TUI integration for Azure Resource provider — Dedicated picker in provider setup dialog, last-selection persistence, stale-selection cleanup
+- Azure Resource integration tests — Provider listing, persistence round-trip, ModelInfo conversion, backend resolution
+- Azure Resource documentation — `docs/userdocs/azure-resource.md` with schema reference and troubleshooting
+- File format specification — `specs/AzureResource/FILEFORMAT.md` documenting the complete `azureresources.json` format
+- `task_complete` summary display — TUI widget output now shows task completion summaries
+
 ### Added (v0.1.0-alpha.76 → v0.1.0-alpha.82)
 - Azure AI Foundry provider — New `azure_foundry` provider for Microsoft Azure AI Foundry models
 - Azure endpoint logging — Full resolved endpoint URL displayed in TUI log panel
@@ -2980,6 +3046,9 @@ All documentation markdown files are located in `docs/` except for these root fi
 - Startup ASCII art banner — Application name in ASCII art with compile timestamp
 - `/codeindex lang` filtering — Optional language parameter for code index results
 - Instruction file discovery logging — Tracks AGENTS.md-style file discovery with summary
+
+### Changed (v0.1.0-alpha.82 → v0.1.0-alpha.86)
+- Provider count updated from 7 to 8 (added `azure_resource`)
 
 ### Changed (v0.1.0-alpha.68 → v0.1.0-alpha.75)
 - Improved TUI slash-command autocomplete with safe `Esc` handling
