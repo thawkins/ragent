@@ -2735,6 +2735,104 @@ Teammates can submit plans to the team lead for approval before starting impleme
 
 ---
 
+### 14.7 Blueprints
+
+Blueprints are pre-built team templates that define which teammates to spawn and what seed tasks to create. When a team is created with a blueprint, all teammates are spawned automatically with their role-specific prompts.
+
+#### Blueprint Storage Locations
+
+Blueprints are searched in priority order:
+
+1. **Project-local:** `[PROJECT]/.ragent/blueprints/teams/<name>/`
+2. **Global:** `~/.ragent/blueprints/teams/<name>/`
+
+#### Blueprint Directory Structure
+
+```text
+.ragent/blueprints/teams/code-review/
+  README.md              # Team description (copied to team directory)
+  spawn-prompts.json     # Teammate definitions with role-specific prompts
+  task-seed.json         # Initial tasks seeded on team creation
+```
+
+#### spawn-prompts.json Format
+
+Defines teammates to auto-spawn when the team is created:
+
+```json
+[
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "security-reviewer",
+    "agent_type": "general",
+    "prompt": "Perform a focused security review of the codebase..."
+  },
+  {
+    "tool_name": "team_spawn",
+    "teammate_name": "test-reviewer",
+    "agent_type": "general",
+    "prompt": "Review test coverage and identify gaps..."
+  }
+]
+```
+
+Fields:
+- `tool_name` — Must be `"team_spawn"`
+- `teammate_name` — Unique name for the teammate within the team
+- `agent_type` — Agent type to use (`general`, `coder`, `architect`, etc.)
+- `prompt` — Role-specific instructions prepended to the teammate's context
+- `memory` — Optional persistent memory scope (`user`, `project`, or `none`)
+- `model` — Optional model override in `provider/model` format
+
+#### task-seed.json Format
+
+Defines initial tasks created when the team is set up:
+
+```json
+[
+  {
+    "tool": "team_task_create",
+    "input": {
+      "title": "Audit authentication boundaries",
+      "description": "Confirm session/auth checks protect privileged actions."
+    }
+  }
+]
+```
+
+Both `"input"` and `"args"` keys are supported for tool arguments.
+
+#### Blueprint Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/team blueprint` | List all installed blueprints |
+| `/team blueprint <name>` | Show detailed summary of a specific blueprint |
+| `/team create <blueprint> [name]` | Create a new team from a blueprint (blueprint is required) |
+
+The list view shows a table with blueprint name, scope (project/global), teammate count, task count, and description. The detail view shows the full README, teammate table, seed tasks, and usage instructions.
+
+#### Work Context Propagation
+
+When creating a team from a blueprint, the `context` parameter is critical — it tells every auto-spawned teammate exactly what code to target:
+
+```bash
+/team create code-review my-review-team
+Review the crates/ragent-server directory for security issues
+```
+
+The context is prepended to each teammate's spawn prompt from the blueprint. Without it, teammates only receive their generic role prompt.
+
+#### Blueprint Best Practices
+
+- **Always use blueprints** for repeatable team patterns — they save time and reduce errors
+- **Do not re-spawn blueprint teammates** — they are spawned automatically by `team_create`
+- **Provide detailed context** when creating a team so teammates know exactly what to work on
+- **Keep prompts focused** in `spawn-prompts.json` — each teammate should have a clear, scoped responsibility
+- **Seed tasks with concrete goals** in `task-seed.json` so teammates have immediate work to claim
+
+---
+
 
 ## 15. Swarm Mode
 
