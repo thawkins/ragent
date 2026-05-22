@@ -147,7 +147,7 @@ the current state of all subsystems.
 
 ### Part VI: External Integrations
 
-18. [GitLab Integration](#gitlab-integration)
+18. [GitHub & GitLab Integration](#18-github--gitlab-integration)
 19. [MCP Integration (Model Context Protocol)](#mcp-integration-model-context-protocol)
 
 ### Part VII: Operations & Reference
@@ -787,42 +787,9 @@ The following are aliases for commonly requested operations:
 - **Permission rules** — Per-agent access control for file paths and commands
 - **Memory scoping** — Project-level and user-level memory for agents
 
-### 3.3.1 GitHub Integration Tools
+### 3.3.1 Git Platform Integrations
 
-ragent provides native GitHub issue and pull request tools that auto-detect
-the repository owner and name from the local git remote configuration.
-
-#### Issue Tools
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `github_issues_list` | List issues with filtering | `state` (open/closed/all), `labels`, `limit` |
-| `github_issues_get` | Get issue details | `number` |
-| `github_issues_create` | Create a new issue | `title`, `body`, `labels`, `assignees` |
-| `github_issues_comment` | Add comment to an issue | `number`, `body` |
-| `github_issues_close` | Close an issue | `number`, `comment` (optional) |
-
-#### Pull Request Tools
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `github_pr_list` | List pull requests | `state`, `base`, `limit` |
-| `github_pr_get` | Get PR details and diff | `number` |
-| `github_pr_create` | Create a new pull request | `title`, `body`, `base`, `head`, `draft` |
-| `github_pr_merge` | Merge a pull request | `number`, `method` (merge/squash/rebase) |
-| `github_pr_review` | Submit a PR review | `number`, `event` (approve/comment/request_changes), `body` |
-
-#### Auto-Detection
-
-Owner and repository are automatically detected from the git remote:
-
-```text
-git remote get-url origin
-→ https://github.com/owner/repo.git  → owner="owner", repo="repo"
-→ git@github.com:owner/repo.git      → owner="owner", repo="repo"
-```
-
-Falls back to explicit `--owner` and `--repo` parameters if detection fails.
+ragent provides native GitHub and GitLab integration tools for managing issues, pull/merge requests, CI/CD pipelines, and project metadata. Both integrations share a similar tool architecture and support repository auto-detection from git remotes. See [Section 18: GitHub & GitLab Integration](#18-github--gitlab-integration) for full details.
 
 ### 3.5 Session & Tool Execution Flow
 
@@ -3012,11 +2979,58 @@ The orchestrator is at MVP level with in-process coordination. HTTP endpoints ar
 ---
 
 
-## 18. GitLab Integration
+## 18. GitHub & GitLab Integration
 
-Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, enabling agents to manage issues, merge requests, pipelines, and project metadata via the GitLab REST API.
+Ragent provides native GitHub and GitLab integration tools through the `ragent-tools-vcs` crate, enabling agents to manage issues, pull/merge requests, CI/CD pipelines, and project metadata. Both platforms share a similar tool architecture and support repository auto-detection from git remotes, but authenticate and name resources differently.
 
-### 18.1 Authentication
+### 18.1 GitHub Authentication & Slash Commands
+
+**Authentication:**
+- **Token:** Stored securely in the ragent SQLite database
+- **Auto-detected from VS Code:** If the GitHub Copilot extension is installed, ragent can reuse the existing Copilot token
+
+**Slash Commands:**
+| Command | Purpose |
+|---------|---------|
+| `/github login` | Authenticate with GitHub |
+| `/github logout` | Remove GitHub credentials |
+| `/github status` | Show GitHub connection status |
+
+### 18.2 GitHub Issue Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `github_issues_list` | List issues with filtering | `state` (open/closed/all), `labels`, `limit` |
+| `github_issues_get` | Get issue details | `number` |
+| `github_issues_create` | Create a new issue | `title`, `body`, `labels`, `assignees` |
+| `github_issues_comment` | Add comment to an issue | `number`, `body` |
+| `github_issues_close` | Close an issue | `number`, `comment` (optional) |
+
+### 18.3 GitHub Pull Request Tools
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `github_pr_list` | List pull requests | `state`, `base`, `limit` |
+| `github_pr_get` | Get PR details and diff | `number` |
+| `github_pr_create` | Create a new pull request | `title`, `body`, `base`, `head`, `draft` |
+| `github_pr_merge` | Merge a pull request | `number`, `method` (merge/squash/rebase) |
+| `github_pr_review` | Submit a PR review | `number`, `event` (approve/comment/request_changes), `body` |
+
+### 18.4 GitHub Auto-Detection
+
+Owner and repository are automatically detected from the git remote:
+
+```text
+git remote get-url origin
+→ https://github.com/owner/repo.git  → owner="owner", repo="repo"
+→ git@github.com:owner/repo.git      → owner="owner", repo="repo"
+```
+
+Falls back to explicit `--owner` and `--repo` parameters if detection fails.
+
+---
+
+### 18.5 GitLab Authentication & Slash Commands
 
 **Configuration:**
 - **Instance URL:** The GitLab instance URL (e.g., `https://gitlab.com` or a self-hosted instance)
@@ -3029,7 +3043,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `/gitlab logout` | Remove stored GitLab credentials |
 | `/gitlab status` | Show GitLab connection status |
 
-### 18.2 Issue Tools
+### 18.6 GitLab Issue Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -3039,7 +3053,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_issues_comment` | Add comment to an issue | `project_id`, `issue_iid`, `body` |
 | `gitlab_issues_close` | Close an issue | `project_id`, `issue_iid` |
 
-### 18.3 Merge Request Tools
+### 18.7 GitLab Merge Request Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -3048,7 +3062,7 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_mr_create` | Create a new merge request | `project_id`, `title`, `body`, `source_branch`, `target_branch` |
 | `gitlab_mr_merge` | Merge a merge request | `project_id`, `mr_iid`, `squash` |
 
-### 18.4 CI/CD Pipeline Tools
+### 18.8 GitLab CI/CD Pipeline Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
@@ -3057,13 +3071,13 @@ Ragent provides native GitLab integration through the `ragent-tools-vcs` crate, 
 | `gitlab_ci_list` | List CI jobs for a pipeline | `project_id`, `pipeline_id` |
 | `gitlab_ci_get` | Get CI job details and logs | `project_id`, `job_id` |
 
-### 18.5 Project Tools
+### 18.9 GitLab Project Tools
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
 | `gitlab_project_get` | Get project metadata | `project_id` or `path_with_namespace` |
 
-### 18.6 Auto-Detection
+### 18.10 GitLab Auto-Detection
 
 When operating inside a Git repository with a GitLab remote, ragent can auto-detect the `project_id` or `path_with_namespace` from the git remote configuration:
 
@@ -3075,12 +3089,8 @@ git remote get-url origin
 
 Falls back to explicit `project_id` or `path_with_namespace` parameters if detection fails.
 
----
-
-# Part VII: Security & Operations
 
 ---
-
 
 ## 19. MCP Integration (Model Context Protocol)
 
