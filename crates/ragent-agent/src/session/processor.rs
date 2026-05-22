@@ -38,6 +38,11 @@ Do NOT write text describing what you are going to do — just call the tool.\n\
 Do NOT say \'Let me explore...\' or \'I will analyze...\' — instead, call the relevant tool now.\n\n\
 When you need file contents, use the `read` tool with arguments like \
 `{\"path\":\"src/main.rs\",\"start_line\":1,\"end_line\":100}`.\n\
+**CRITICAL — end_line is an absolute line number, NOT a count or offset**:\n\
+- CORRECT: `start_line=200, end_line=300` reads lines 200-300 (end_line = actual last line number)\n\
+- WRONG: `start_line=200, end_line=100` — this fails because end_line is less than start_line.\n\
+  To read 100 lines starting at 200, use end_line=299 (the 299th line), NOT end_line=100.\n\
+- The response always includes `total_lines`. Use it to keep end_line <= total_lines.\n\
 Prefer small line ranges (100 lines max) for large files; iterate with `start_line`/`end_line`.\n\
 Never invent or guess file contents — always read them with the tool.\n\n\
 Rule: every response where you need information or need to act MUST start with a tool call.\n\n";

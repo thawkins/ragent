@@ -96,15 +96,18 @@ impl Tool for ReadTool {
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-    fn description(&self) -> &'static str {
-                "Read file contents. For large files (>100 lines) called without a line range, \
-                   returns the first 100 lines plus a section map of the file's structure. \
-                   Use start_line/end_line to read specific sections. \
-                   CRITICAL: start_line and end_line are ABSOLUTE 1-based line numbers (not offsets or counts). \
-                   To read lines 200-300, use start_line=200, end_line=300 (NOT end_line=100). \
-                   Both must not exceed the file's total line count. \
-                   The response always includes total_lines in metadata."    }
-
+        fn description(&self) -> &'static str {
+                      "Read file contents. For large files (>100 lines) called without a line range, \
+                         returns the first 100 lines plus a section map of the file's structure. \
+                         Use start_line/end_line to read specific sections. \
+                         CRITICAL: start_line and end_line are ABSOLUTE 1-based line numbers (NOT offsets or counts). \
+                         To read lines 200-300, use start_line=200, end_line=300 (NOT end_line=100). \
+                         end_line is the LAST line number to include, NOT the number of lines to read. \
+                         Both must be ≤ total_lines and start_line ≤ end_line. \
+                         The response always includes total_lines in metadata. \
+                         Example: file has 500 lines, to read lines 201-300: start_line=201, end_line=300. \
+                         Anti-pattern: start_line=201, end_line=100 (fails: 100 < 201)."
+        }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -169,14 +172,16 @@ impl Tool for ReadTool {
         {
             anyhow::bail!("Invalid 'end_line': must be >= 1");
         }
-        if let (Some(start), Some(end)) = (start_line, end_line)
-            && start > end
-        {
-            anyhow::bail!(
-                "Invalid line range: start_line ({start}) must be less than or equal to end_line ({end})"
-            );
-        }
-
+                  if let (Some(start), Some(end)) = (start_line, end_line)
+                      && start > end
+                  {
+                      anyhow::bail!(
+                          "Invalid line range: start_line ({start}) must be less than or equal to end_line ({end}). \
+                           HINT: end_line is the absolute last line number to include, NOT a count. \
+                           To read 100 lines starting at line {start}, use end_line={start_end} (not {end}).",
+                          start_end = start + 99
+                      );
+                  }
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();
 

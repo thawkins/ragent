@@ -1677,24 +1677,29 @@ pub fn build_system_prompt_with_storage(
          - Explain what you're doing and why\n\n",
     );
 
-    // Specific guidance on using line ranges for file reads
-    prompt.push_str(
-                  "## File Reading Best Practices\n\n\
-                   When reading files with the `read` tool:\n\
-                   - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
-                     to read the file in focused sections rather than all at once\n\
-                   - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
-                     The tool will return an error if they do. The error message includes the total line count.\n\
-                     When you read a file, the response metadata includes `total_lines` — use that value\n\
-                     to stay within range on subsequent reads of the same file.\n\
-                   - Strategy:\n\
-                     1. Read the file without start_line/end_line first — for large files this returns\n\
-                        the first 100 lines plus a section map with the total line count\n\
-                     2. Use the total_lines from the response to plan your subsequent reads\n\
-                     3. Then read specific sections using valid line ranges\n\
-                     4. Never read an entire file >100 lines in a single call\n",
-              );
-
+          // Specific guidance on using line ranges for file reads
+          prompt.push_str(
+                        "## File Reading Best Practices\n\n\
+                         When reading files with the `read` tool:\n\
+                         - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
+                           to read the file in focused sections rather than all at once\n\
+                         - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
+                           The tool will return an error if they do. The error message includes the total line count.\n\
+                           When you read a file, the response metadata includes `total_lines` — use that value\n\
+                           to stay within range on subsequent reads of the same file.\n\
+                         - **CRITICAL — end_line is an absolute line number, NOT a length or count**:\n\
+                           - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)\n\
+                           - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200\n\
+                           - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100\n\
+                           - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines\n\
+                         - `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).\n\
+                         - Strategy:\n\
+                           1. Read the file without start_line/end_line first — for large files this returns\n\
+                              the first 100 lines plus a section map with the total line count\n\
+                           2. Use the total_lines from the response to plan your subsequent reads\n\
+                           3. Then read specific sections using valid line ranges\n\
+                           4. Never read an entire file >100 lines in a single call\n",
+                    );
     // Guidance on using edit / multiedit tools
     prompt.push_str(
                   "\n## Editing Files\n\n\

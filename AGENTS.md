@@ -75,6 +75,25 @@ There is no `search` or `search_in_repo` tool. Use `grep` for every text search 
 ### Important
 Do NOT use `execute_bash`, `execute_code`, `execute_python`, `run_shell_command`, or `run_terminal_cmd` — these are deprecated aliases. Always use the canonical `bash` tool.
 
+## File Reading Best Practices
+
+When reading files with the `read` tool:
+
+- **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters to read the file in focused sections rather than all at once.
+- **CRITICAL — end_line is an absolute line number, NOT a length or count**:
+  - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)
+  - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200
+  - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100
+  - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines
+- `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).
+- The tool will return an error if they exceed the file's total line count. The error message includes `total_lines`.
+- When you read a file, the response metadata includes `total_lines` — use that value to plan subsequent reads.
+- **Strategy**:
+  1. Read the file without `start_line`/`end_line` first — for large files this returns the first 100 lines plus a section map with the total line count
+  2. Use `total_lines` from the response to plan your subsequent reads
+  3. Then read specific sections using valid line ranges
+  4. Never read an entire file >100 lines in a single call
+
 ## Technology Stack
 - **Language**: Rust edition 2024 or greater
 
@@ -120,7 +139,7 @@ All tests **MUST** be located in the `tests/` directory inside each crate. If a 
 - When asked to "push to remote", update the SPEC.md, README.md, STATS.md, RELEASE.md, QUICKSTART.md and CHANGELOG.md files with all recent activity and spec changes, construct a suitable commit message based on recent activity, commit all changes and push the changes to the remote repository.
 - When asked to "push release to remote", update the release number, and then follow the "push to remote" process. **Commit Message Rule**: Do not use "chore: bump version to ...", instead use "Version: <version_number>".
 - When initializing a new repo, add BUG, FEATURE, TASK and CHANGE issue templates only do this once. 
-- **CRITICAL**: Do not push changes to remote unless specifically told to. This is a strict rule.
+- **CRITICAL — NEVER push without explicit instruction**: Do not push changes to remote unless the user explicitly says words like "push to remote", "push to github", "push these changes", or "commit and push". This is a strict, non-negotiable rule. Even if you have modified files and the user says "looks good" or "that works", you still MUST NOT push until the user gives an explicit push command.
 - Do not tag releases unless specifically told to. 
 - DO NOT use "git checkout" to rewind files, this ALWAYS results in lost work. 
 

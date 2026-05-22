@@ -1,5 +1,14 @@
 # Changelog
 
+## Version: 0.1.0-alpha.87
+
+### Fixed
+- **Read tool instructions** — Clarified in AGENTS.md that `end_line` is an absolute line number, not a count or offset.
+- **Remote push instructions** — Strengthened AGENTS.md guidelines to explicitly prohibit pushing without explicit user instruction.
+
+### Changed
+- **SPEC.md reorganization** — Reorganized sections into logical order (1-20), fixed numbering, added Blueprints subsection (14.7), and merged GitHub/GitLab into a single peer section (18).
+
 ## Version: 0.1.0-alpha.86
 
 ### Added
