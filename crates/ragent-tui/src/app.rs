@@ -538,12 +538,13 @@ impl App {
             memory_browser: None,
             memory_browser_close_area: Rect::default(),
             memory_browser_area: Rect::default(),
-            memory_block_count: 0,
-            memory_entry_count: 0,
-            memory_last_updated: None,
-            theme_mode: crate::theme::ThemeMode::Default,
-            mouse_enabled: true,
-            status_history: StatusHistory::new(),
+                          memory_block_count: 0,
+                          memory_entry_count: 0,
+                          memory_last_updated: None,
+                          memory_stats_last_refresh: std::time::Instant::now(),
+                                                      swarm_unblock_last_poll: std::time::Instant::now(),
+                                                      swarm_completion_last_poll: std::time::Instant::now(),
+                                                      theme_mode: crate::theme::ThemeMode::Default,            mouse_enabled: true,            status_history: StatusHistory::new(),
             needs_redraw: true,
             code_index: None,
             code_index_enabled: app_config.code_index.enabled,
@@ -3158,7 +3159,10 @@ impl App {
     /// Refresh cached memory counts for the status bar.
     /// Debounced to run at most once per 5 seconds to avoid unnecessary I/O.
     pub fn refresh_memory_stats(&mut self) {
-        // Load memory block count
+        if self.memory_stats_last_refresh.elapsed() < std::time::Duration::from_secs(5) {
+            return;
+        }
+        self.memory_stats_last_refresh = std::time::Instant::now();
         let working_dir = std::env::current_dir().unwrap_or_default();
         let block_storage = ragent_core::memory::FileBlockStorage::new();
         let blocks = ragent_core::memory::load_all_blocks(&block_storage, &working_dir);
@@ -10564,22 +10568,21 @@ Type `/swarm help` for more info.\n";
             _ => unreachable!(),
         };
 
-        // Inner area (accounting for borders)
-        let inner_x = if sel.pane == SelectionPane::Messages {
-            area.x + 1 // LEFT border only
-        } else {
-            area.x + 1 // ALL borders
-        };
-        let inner_y = if sel.pane == SelectionPane::Messages {
-            area.y // no top border on messages (LEFT|RIGHT only)
-        } else {
-            area.y + 1 // ALL borders on side panels
-        };
-
-        let text = Self::extract_text_from_lines(
-            lines, inner_x, inner_y, start_col, start_row, end_col, end_row,
-        );
-
+                            // Inner area (accounting for borders)
+                            let inner_x = if sel.pane == SelectionPane::Messages {
+                                area.x + 1 // LEFT border only
+                            } else {
+                                area.x + 1 // ALL borders
+                            };
+                            let inner_y = if sel.pane == SelectionPane::Messages {
+                                area.y + 1 // Messages pane has a top border
+                            } else {
+                                area.y + 1 // ALL borders on side panels
+                            };
+                  
+                            let text = Self::extract_text_from_lines(
+                                lines, inner_x, inner_y, start_col, start_row, end_col, end_row,
+                            );
         if !text.is_empty() {
             Self::set_clipboard(&text);
             self.push_log_no_agent(LogLevel::Info, format!("Copied {} chars", text.len()));
@@ -10963,18 +10966,34 @@ Type `/swarm help` for more info.\n";
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
                     }
                 }
-                InputAction::ToggleLog => {
-                    self.show_log = !self.show_log;
-                    self.status = if self.show_log {
-                        "log panel visible".to_string()
-                    } else {
-                        "log panel hidden".to_string()
-                    };
-                }
-                InputAction::ToggleProfile => {
-                    self.set_profile_panel_enabled(!self.show_profile);
-                }
-                InputAction::OutputViewPageUp => {
+                                  InputAction::ToggleLog => {
+                                      self.show_log = !self.show_log;
+                                      if !self.show_log {
+                                          if self.text_selection.as_ref().is_some_and(|s| s.pane == SelectionPane::Log) {
+                                              self.text_selection = None;
+                                          }
+                                          if self.context_menu.as_ref().is_some_and(|m| m.pane == SelectionPane::Log) {
+                                              self.context_menu = None;
+                                          }
+                                      }
+                                      self.status = if self.show_log {
+                                          "log panel visible".to_string()
+                                      } else {
+                                          "log panel hidden".to_string()
+                                      };
+                                  }
+                                  InputAction::ToggleProfile => {
+                                      let enabled = !self.show_profile;
+                                      self.set_profile_panel_enabled(enabled);
+                                      if !enabled {
+                                          if self.text_selection.as_ref().is_some_and(|s| s.pane == SelectionPane::Profile) {
+                                              self.text_selection = None;
+                                          }
+                                          if self.context_menu.as_ref().is_some_and(|m| m.pane == SelectionPane::Profile) {
+                                              self.context_menu = None;
+                                          }
+                                      }
+                                  }                InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
                 }
                 InputAction::OutputViewPageDown => {
@@ -11693,11 +11712,11 @@ Type `/swarm help` for more info.\n";
                         question: question.clone(),
                         options: options.clone(),
                     });
-                    self.pending_question_input.clear();
-                    self.question_selected_index = 0;
-                    self.status = "awaiting question".to_string();
-                    self.push_log_no_agent(
-                        LogLevel::Warn,
+                                          self.pending_question_input.clear();
+                                          self.question_selected_index = 0;
+                                          self.status = "awaiting question".to_string();
+                                          self.needs_redraw = true;
+                                          self.push_log_no_agent(                        LogLevel::Warn,
                         format!("question requested: {}", question),
                     );
                 }
@@ -12904,6 +12923,10 @@ Type `/swarm help` for more info.\n";
     /// have been completed by their respective teammates (member status Idle/Stopped,
     /// or task status Completed in the TaskStore).
     pub fn poll_swarm_unblock(&mut self) {
+        if self.swarm_unblock_last_poll.elapsed() < std::time::Duration::from_secs(2) {
+            return;
+        }
+        self.swarm_unblock_last_poll = std::time::Instant::now();
         let Some(ref swarm) = self.swarm_state else {
             return;
         };
@@ -13054,6 +13077,10 @@ Type `/swarm help` for more info.\n";
     /// 2. All teammates are idle/failed/stopped — they finished their agent loop but may not have
     ///    called `team_task_complete`. In this case we auto-complete their tasks.
     pub fn poll_swarm_completion(&mut self) {
+        if self.swarm_completion_last_poll.elapsed() < std::time::Duration::from_secs(2) {
+            return;
+        }
+        self.swarm_completion_last_poll = std::time::Instant::now();
         let Some(ref swarm) = self.swarm_state else {
             return;
         };

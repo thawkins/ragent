@@ -1314,14 +1314,18 @@ pub struct App {
     pub memory_browser_area: Rect,
 
     // ── Memory status (M7-T3) ─────────────────────────────────────────────────
-    /// Cached count of memory blocks (global + project).
-    pub memory_block_count: usize,
-    /// Cached count of structured memories (SQLite).
-    pub memory_entry_count: u64,
-    /// Timestamp of the last memory update event (for relative time display).
-    pub memory_last_updated: Option<std::time::Instant>,
-
-    /// Current theme mode (default or high-contrast for accessibility)
+          /// Cached count of memory blocks (global + project).
+        pub memory_block_count: usize,
+        /// Cached count of structured memories (SQLite).
+        pub memory_entry_count: u64,
+        /// Timestamp of the last memory update event (for relative time display).
+        pub memory_last_updated: Option<std::time::Instant>,
+        /// When the cached memory stats were last refreshed.
+        pub memory_stats_last_refresh: std::time::Instant,
+                  /// When swarm unblock was last polled (debounces filesystem I/O).
+                  pub swarm_unblock_last_poll: std::time::Instant,
+                  /// When swarm completion was last polled (debounces filesystem I/O).
+                  pub swarm_completion_last_poll: std::time::Instant,    /// Current theme mode (default or high-contrast for accessibility)
     pub theme_mode: crate::theme::ThemeMode,
     /// Whether mouse input is enabled (default: true). Set to false for
     /// keyboard-only accessibility mode.

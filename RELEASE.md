@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.90
+## Current Version: 0.1.0-alpha.91
+
+### Changed
+- **Agent loop optimization** — Optimize the agent loop to prevent stalls.
+
+## Previous: 0.1.0-alpha.90
 
 ### Added
 - **VCS tool summaries in TUI** — The `message_widget.rs` `tool_input_summary` and `tool_output_summary` functions now provide human-readable summaries for all git (16 tools), GitHub (10 tools), and GitLab (14 tools) VCS tools, replacing the previous stubbed `github_issues`/`github_prs` entries with comprehensive per-tool formatting.
