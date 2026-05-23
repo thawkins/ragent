@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.89
+## Current Version: 0.1.0-alpha.90
+
+### Added
+- **VCS tool summaries in TUI** — The `message_widget.rs` `tool_input_summary` and `tool_output_summary` functions now provide human-readable summaries for all git (16 tools), GitHub (10 tools), and GitLab (14 tools) VCS tools, replacing the previous stubbed `github_issues`/`github_prs` entries with comprehensive per-tool formatting.
+
+## Previous: 0.1.0-alpha.89
 
 ### Changed
 - **README.md rebuilt** — Rewrote from scratch to reflect the current specification. Expanded feature list to ~111 tools across 15 categories, corrected provider list (10 providers), added missing systems (memory, spec management, skills, teams/swarm, autopilot, MCP client, config error reporting), updated architecture table with all 15 crates, and refreshed project status.

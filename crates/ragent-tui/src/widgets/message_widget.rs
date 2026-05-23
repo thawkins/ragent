@@ -142,7 +142,9 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// - 👥 Team Coordination: team_*
 /// - 🔎 LSP/Code Intelligence: lsp_*
 /// - 📄 Document: office_*, pdf_*
-/// - 📋 GitHub: github_issues, github_prs
+/// - 📋 GitHub: github_list_issues, github_get_issue, github_create_issue,
+///            github_comment_issue, github_close_issue, github_list_prs,
+///            github_get_pr, github_create_pr, github_merge_pr, github_review_pr
 /// - ✨ Utility: format, metadata, truncate, read_line_range
 pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
     // Resolve alias tool names to their canonical equivalents so aliases get
@@ -635,31 +637,288 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
         // ═══════════════════════════════════════════════════════════════════
-        "github_issues" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let number = input.get("number").and_then(|v| v.as_u64());
-            match (action, number) {
-                ("list", _) => "📋 list issues".to_string(),
-                ("create", _) => "📋 create issue".to_string(),
-                ("get", Some(n)) => format!("📋 issue #{}", n),
-                ("comment", Some(n)) => format!("📋 comment on #{}", n),
-                ("close", Some(n)) => format!("📋 close #{}", n),
-                _ => format!("📋 {} issue", action),
+                // ═══════════════════════════════════════════════════════════════════
+        // 🌿 GIT
+        // ═══════════════════════════════════════════════════════════════════
+        "git_add" => {
+            let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let update = input.get("update").and_then(|v| v.as_bool()).unwrap_or(false);
+            if all {
+                "��� add -A".to_string()
+            } else if update {
+                "🌿 add -u".to_string()
+            } else {
+                let paths = input
+                    .get("paths")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                format!("🌿 add {} path(s)", paths)
             }
         }
-        "github_prs" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let number = input.get("number").and_then(|v| v.as_u64());
-            match (action, number) {
-                ("list", _) => "📋 list PRs".to_string(),
-                ("create", _) => "📋 create PR".to_string(),
-                ("get", Some(n)) => format!("📋 PR #{}", n),
-                ("review", Some(n)) => format!("📋 review #{}", n),
-                ("merge", Some(n)) => format!("📋 merge #{}", n),
-                _ => format!("📋 {} PR", action),
+        "git_branch" => {
+            let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(true);
+            let _fmt = input.get("format").and_then(|v| v.as_str()).unwrap_or("short");
+            format!("🌿 branch list ({})", if all { "all" } else { "local" })
+        }
+        "git_checkout" => {
+            let branch = input.get("branch").and_then(|v| v.as_str());
+            let paths = input.get("paths").and_then(|v| v.as_array());
+            match (branch, paths) {
+                (Some(b), _) => format!("🌿 checkout {}", b),
+                (_, Some(p)) if !p.is_empty() => format!("🌿 checkout {} path(s)", p.len()),
+                _ => "🌿 checkout".to_string(),
+            }
+        }
+        "git_cherry_pick" => {
+            let commits = input
+                .get("commits")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            format!("🌿 cherry-pick {} commit(s)", commits)
+        }
+        "git_clone" => {
+            let url = input.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("🌿 clone {}", trunc120(url))
+        }
+        "git_commit" => {
+            let msg = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let amend = input.get("amend").and_then(|v| v.as_bool()).unwrap_or(false);
+            if amend {
+                "🌿 commit --amend".to_string()
+            } else {
+                format!("🌿 commit: {}", trunc120(msg))
+            }
+        }
+        "git_diff" => {
+            let target = input.get("target").and_then(|v| v.as_str()).unwrap_or("working");
+            let stat = input.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
+            if stat {
+                format!("🌿 diff --stat {}", target)
+            } else {
+                format!("🌿 diff {}", target)
+            }
+        }
+        "git_fetch" => {
+            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            if all {
+                "🌿 fetch --all".to_string()
+            } else {
+                format!("🌿 fetch {}", remote)
+            }
+        }
+        "git_log" => {
+            let limit = input.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
+            let branch = input.get("branch").and_then(|v| v.as_str());
+            match branch {
+                Some(b) => format!("🌿 log {} ({})", b, limit),
+                None => format!("🌿 log ({})", limit),
+            }
+        }
+        "git_merge" => {
+            let branch = input.get("branch").and_then(|v| v.as_str()).unwrap_or("?");
+            format!("🌿 merge {}", branch)
+        }
+        "git_pull" => {
+            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let rebase = input.get("rebase").and_then(|v| v.as_bool()).unwrap_or(false);
+            if rebase {
+                format!("🌿 pull --rebase {}", remote)
+            } else {
+                format!("🌿 pull {}", remote)
+            }
+        }
+        "git_push" => {
+            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let branch = input.get("branch").and_then(|v| v.as_str());
+            let force = input.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let tags = input.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
+            match (tags, force, branch) {
+                (true, _, _) => format!("🌿 push --tags {}", remote),
+                (_, true, Some(b)) => format!("🌿 push --force-with-lease {}/{}", remote, b),
+                (_, true, None) => format!("🌿 push --force-with-lease {}", remote),
+                (_, _, Some(b)) => format!("🌿 push {}/{}", remote, b),
+                (_, _, None) => format!("🌿 push {}", remote),
+            }
+        }
+        "git_remote" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let name = input.get("name").and_then(|v| v.as_str());
+            match (action, name) {
+                ("list", _) => "🌿 remote -v".to_string(),
+                ("add", Some(n)) => format!("🌿 remote add {}", n),
+                ("remove", Some(n)) => format!("🌿 remote remove {}", n),
+                ("set-url", Some(n)) => format!("🌿 remote set-url {}", n),
+                (a, Some(n)) => format!("🌿 remote {} {}", a, n),
+                (a, None) => format!("🌿 remote {}", a),
+            }
+        }
+        "git_reset" => {
+            let mode = input.get("mode").and_then(|v| v.as_str()).unwrap_or("mixed");
+            let target = input.get("target").and_then(|v| v.as_str());
+            let paths = input.get("paths").and_then(|v| v.as_array());
+            match (target, paths) {
+                (Some(t), _) => format!("🌿 reset --{} {}", mode, t),
+                (_, Some(p)) if !p.is_empty() => format!("🌿 reset {} path(s)", p.len()),
+                _ => format!("🌿 reset --{}", mode),
+            }
+        }
+        "git_show" => {
+            let ref_name = input.get("ref").and_then(|v| v.as_str()).unwrap_or("HEAD");
+            format!("🌿 show {}", ref_name)
+        }
+        "git_stash" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("push");
+            format!("🌿 stash {}", action)
+        }
+        "git_status" => {
+            let short = input.get("short").and_then(|v| v.as_bool()).unwrap_or(false);
+            if short {
+                "🌿 status --short".to_string()
+            } else {
+                "🌿 status".to_string()
+            }
+        }
+        "git_tag" => {
+            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let name = input.get("name").and_then(|v| v.as_str());
+            match (action, name) {
+                ("list", _) => "🌿 tag -l".to_string(),
+                ("create", Some(n)) => format!("🌿 tag {}", n),
+                ("delete", Some(n)) => format!("🌿 tag -d {}", n),
+                (a, Some(n)) => format!("🌿 tag {} {}", a, n),
+                (a, None) => format!("🌿 tag {}", a),
             }
         }
 
+        // ═══════════════════════════════════════════════════════════════════
+        // 🦊 GITLAB
+        // ═══════════════════════════════════════════════════════════════════
+        "gitlab_list_issues" => {
+            let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            format!("🦊 issues ({})", state)
+        }
+        "gitlab_get_issue" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 issue #{}", iid)
+        }
+        "gitlab_create_issue" => {
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            format!("🦊 new issue: {}", trunc120(title))
+        }
+        "gitlab_comment_issue" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 comment on #{}", iid)
+        }
+        "gitlab_close_issue" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 close #{}", iid)
+        }
+        "gitlab_list_mrs" => {
+            let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            format!("🦊 MRs ({})", state)
+        }
+        "gitlab_get_mr" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 MR #{}", iid)
+        }
+        "gitlab_create_mr" => {
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            format!("🦊 new MR: {}", trunc120(title))
+        }
+        "gitlab_merge_mr" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 merge !{}", iid)
+        }
+        "gitlab_approve_mr" => {
+            let iid = input.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 approve !{}", iid)
+        }
+        "gitlab_list_pipelines" => {
+            let status = input.get("status").and_then(|v| v.as_str());
+            match status {
+                Some(s) => format!("🦊 pipelines ({})", s),
+                None => "🦊 pipelines".to_string(),
+            }
+        }
+        "gitlab_get_pipeline" => {
+            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 pipeline #{}", id)
+        }
+        "gitlab_list_jobs" => {
+            let pipeline_id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 jobs for pipeline #{}", pipeline_id)
+        }
+        "gitlab_get_job" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 job #{}", job_id)
+        }
+        "gitlab_get_job_log" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 log for job #{}", job_id)
+        }
+        "gitlab_retry_job" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 retry job #{}", job_id)
+        }
+        "gitlab_cancel_job" => {
+            let job_id = input.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 cancel job #{}", job_id)
+        }
+        "gitlab_retry_pipeline" => {
+            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 retry pipeline #{}", id)
+        }
+        "gitlab_cancel_pipeline" => {
+            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("🦊 cancel pipeline #{}", id)
+        }
+
+          // ═══════════════════════════════════════════════════════════════════
+          // 📋 GITHUB
+          // ═══════════════════════════════════════════════════════════════════
+          "github_list_issues" => {
+              let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+              format!("📋 issues ({})", state)
+          }
+          "github_get_issue" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 issue #{}", number)
+          }
+          "github_create_issue" => {
+              let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+              format!("📋 new issue: {}", trunc120(title))
+          }
+          "github_comment_issue" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 comment on #{}", number)
+          }
+          "github_close_issue" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 close #{}", number)
+          }
+          "github_list_prs" => {
+              let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+              format!("📋 PRs ({})", state)
+          }
+          "github_get_pr" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 PR #{}", number)
+          }
+          "github_create_pr" => {
+              let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+              format!("📋 new PR: {}", trunc120(title))
+          }
+          "github_merge_pr" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 merge #{}", number)
+          }
+          "github_review_pr" => {
+              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              format!("📋 review #{}", number)
+          }
         // ══════════════════════════════════════════════════���════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
@@ -759,10 +1018,10 @@ pub fn tool_result_summary(
         .get("lines")
         .or_else(|| out.get("line_count"))
         .and_then(|v| v.as_u64())
-        .unwrap_or(0) as usize;
-
-    match tool {
-        // ═════════════════════════════════════════════════════════���═════════
+                  .unwrap_or(0) as usize;
+              let trunc120 = |s: &str| truncate_str(s, 120);
+        
+              match tool {        // ═════════════════════════════════════════════════════════���═════════
         // 📄 FILE OPERATIONS
         // ═══════════════════════════════════════════════════════════════════
         "read" => {
@@ -1363,31 +1622,293 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
         // ═════════════════════════════════════════════════════════��═════════
-        "github_issues" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let number = out.get("number").and_then(|v| v.as_u64());
-            match (action, number) {
-                ("list", _) => Some("issues listed".to_string()),
-                ("create", _) => Some("issue created".to_string()),
-                ("get", Some(n)) => Some(format!("issue #{} retrieved", n)),
-                ("comment", Some(n)) => Some(format!("commented on #{}", n)),
-                ("close", Some(n)) => Some(format!("issue #{} closed", n)),
-                _ => Some(format!("{} issue", action)),
-            }
-        }
-        "github_prs" => {
-            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let number = out.get("number").and_then(|v| v.as_u64());
-            match (action, number) {
-                ("list", _) => Some("PRs listed".to_string()),
-                ("create", _) => Some("PR created".to_string()),
-                ("get", Some(n)) => Some(format!("PR #{} retrieved", n)),
-                ("review", Some(n)) => Some(format!("reviewed #{}", n)),
-                ("merge", Some(n)) => Some(format!("PR #{} merged", n)),
-                _ => Some(format!("{} PR", action)),
-            }
-        }
+                // ═══════════════════════════════════════════════════════════════════
+        // 🌿 GIT
         // ═══════════════════════════════════════════════════════════════════
+        "git_add" => {
+            let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            let update = out.get("update").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if all {
+                "🌿 add -A".to_string()
+            } else if update {
+                "🌿 add -u".to_string()
+            } else {
+                let paths = out
+                    .get("paths")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                format!("🌿 add {} path(s)", paths)
+            })
+        }
+        "git_branch" => {
+            let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(true);
+            Some(format!("🌿 branch list ({})", if all { "all" } else { "local" }))
+        }
+        "git_checkout" => {
+            let branch = out.get("branch").and_then(|v| v.as_str());
+            let paths = out.get("paths").and_then(|v| v.as_array());
+            Some(match (branch, paths) {
+                (Some(b), _) => format!("🌿 checkout {}", b),
+                (_, Some(p)) if !p.is_empty() => format!("🌿 checkout {} path(s)", p.len()),
+                _ => "🌿 checkout".to_string(),
+            })
+        }
+        "git_cherry_pick" => {
+            let commits = out
+                .get("commits")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Some(format!("🌿 cherry-pick {} commit(s)", commits))
+        }
+        "git_clone" => {
+            let url = out.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("🌿 clone {}", trunc120(url)))
+        }
+        "git_commit" => {
+            let msg = out.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            let amend = out.get("amend").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if amend {
+                "🌿 commit --amend".to_string()
+            } else {
+                format!("🌿 commit: {}", trunc120(msg))
+            })
+        }
+        "git_diff" => {
+            let target = out.get("target").and_then(|v| v.as_str()).unwrap_or("working");
+            let stat = out.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if stat {
+                format!("🌿 diff --stat {}", target)
+            } else {
+                format!("🌿 diff {}", target)
+            })
+        }
+        "git_fetch" => {
+            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if all {
+                "🌿 fetch --all".to_string()
+            } else {
+                format!("🌿 fetch {}", remote)
+            })
+        }
+        "git_log" => {
+            let limit = out.get("limit").and_then(|v| v.as_u64()).unwrap_or(20);
+            let branch = out.get("branch").and_then(|v| v.as_str());
+            Some(match branch {
+                Some(b) => format!("🌿 log {} ({})", b, limit),
+                None => format!("🌿 log ({})", limit),
+            })
+        }
+        "git_merge" => {
+            let branch = out.get("branch").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("🌿 merge {}", branch))
+        }
+        "git_pull" => {
+            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let rebase = out.get("rebase").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if rebase {
+                format!("🌿 pull --rebase {}", remote)
+            } else {
+                format!("🌿 pull {}", remote)
+            })
+        }
+        "git_push" => {
+            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let branch = out.get("branch").and_then(|v| v.as_str());
+            let force = out.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let tags = out.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(match (tags, force, branch) {
+                (true, _, _) => format!("🌿 push --tags {}", remote),
+                (_, true, Some(b)) => format!("🌿 push --force-with-lease {}/{}", remote, b),
+                (_, true, None) => format!("🌿 push --force-with-lease {}", remote),
+                (_, _, Some(b)) => format!("🌿 push {}/{}", remote, b),
+                (_, _, None) => format!("🌿 push {}", remote),
+            })
+        }
+        "git_remote" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let name = out.get("name").and_then(|v| v.as_str());
+            Some(match (action, name) {
+                ("list", _) => "🌿 remote -v".to_string(),
+                ("add", Some(n)) => format!("🌿 remote add {}", n),
+                ("remove", Some(n)) => format!("🌿 remote remove {}", n),
+                ("set-url", Some(n)) => format!("🌿 remote set-url {}", n),
+                (a, Some(n)) => format!("🌿 remote {} {}", a, n),
+                (a, None) => format!("🌿 remote {}", a),
+            })
+        }
+        "git_reset" => {
+            let mode = out.get("mode").and_then(|v| v.as_str()).unwrap_or("mixed");
+            let target = out.get("target").and_then(|v| v.as_str());
+            let paths = out.get("paths").and_then(|v| v.as_array());
+            Some(match (target, paths) {
+                (Some(t), _) => format!("🌿 reset --{} {}", mode, t),
+                (_, Some(p)) if !p.is_empty() => format!("🌿 reset {} path(s)", p.len()),
+                _ => format!("🌿 reset --{}", mode),
+            })
+        }
+        "git_show" => {
+            let ref_name = out.get("ref").and_then(|v| v.as_str()).unwrap_or("HEAD");
+            Some(format!("🌿 show {}", ref_name))
+        }
+        "git_stash" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("push");
+            Some(format!("🌿 stash {}", action))
+        }
+        "git_status" => {
+            let short = out.get("short").and_then(|v| v.as_bool()).unwrap_or(false);
+            Some(if short {
+                "🌿 status --short".to_string()
+            } else {
+                "🌿 status".to_string()
+            })
+        }
+        "git_tag" => {
+            let action = out.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let name = out.get("name").and_then(|v| v.as_str());
+            Some(match (action, name) {
+                ("list", _) => "🌿 tag -l".to_string(),
+                ("create", Some(n)) => format!("🌿 tag {}", n),
+                ("delete", Some(n)) => format!("🌿 tag -d {}", n),
+                (a, Some(n)) => format!("🌿 tag {} {}", a, n),
+                (a, None) => format!("🌿 tag {}", a),
+            })
+        }
+
+        // ═══════════════════════════════════════════════════════════════════
+        // 🦊 GITLAB
+        // ═══════════════════════════════════════════════════════════════════
+        "gitlab_list_issues" => {
+            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            Some(format!("🦊 issues ({})", state))
+        }
+        "gitlab_get_issue" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 issue #{}", iid))
+        }
+        "gitlab_create_issue" => {
+            let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            Some(format!("🦊 new issue: {}", trunc120(title)))
+        }
+        "gitlab_comment_issue" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 comment on #{}", iid))
+        }
+        "gitlab_close_issue" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 close #{}", iid))
+        }
+        "gitlab_list_mrs" => {
+            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            Some(format!("🦊 MRs ({})", state))
+        }
+        "gitlab_get_mr" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 MR #{}", iid))
+        }
+        "gitlab_create_mr" => {
+            let title = out.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            Some(format!("🦊 new MR: {}", trunc120(title)))
+        }
+        "gitlab_merge_mr" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 merge !{}", iid))
+        }
+        "gitlab_approve_mr" => {
+            let iid = out.get("iid").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 approve !{}", iid))
+        }
+        "gitlab_list_pipelines" => {
+            let status = out.get("status").and_then(|v| v.as_str());
+            Some(match status {
+                Some(s) => format!("🦊 pipelines ({})", s),
+                None => "🦊 pipelines".to_string(),
+            })
+        }
+        "gitlab_get_pipeline" => {
+            let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 pipeline #{}", id))
+        }
+        "gitlab_list_jobs" => {
+            let pipeline_id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 jobs for pipeline #{}", pipeline_id))
+        }
+        "gitlab_get_job" => {
+            let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 job #{}", job_id))
+        }
+        "gitlab_get_job_log" => {
+            let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 log for job #{}", job_id))
+        }
+        "gitlab_retry_job" => {
+            let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 retry job #{}", job_id))
+        }
+        "gitlab_cancel_job" => {
+            let job_id = out.get("job_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 cancel job #{}", job_id))
+        }
+        "gitlab_retry_pipeline" => {
+            let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 retry pipeline #{}", id))
+        }
+        "gitlab_cancel_pipeline" => {
+            let id = out.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("🦊 cancel pipeline #{}", id))
+        }
+
+          // ═══════════════════════════════════════════════════════════════════
+          // 📋 GITHUB
+          // ═══════════════════════════════════════════════════════════════════
+          "github_list_issues" => {
+              let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+              Some(format!("📋 issues listed ({})", state))
+          }
+          "github_get_issue" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 issue #{} retrieved", number))
+          }
+          "github_create_issue" => {
+              let number = out.get("number").and_then(|v| v.as_u64());
+              match number {
+                  Some(n) => Some(format!("📋 issue #{} created", n)),
+                  None => Some("📋 issue created".to_string()),
+              }
+          }
+          "github_comment_issue" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 commented on #{}", number))
+          }
+          "github_close_issue" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 issue #{} closed", number))
+          }
+          "github_list_prs" => {
+              let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+              Some(format!("📋 PRs listed ({})", state))
+          }
+          "github_get_pr" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 PR #{} retrieved", number))
+          }
+          "github_create_pr" => {
+              let number = out.get("number").and_then(|v| v.as_u64());
+              match number {
+                  Some(n) => Some(format!("📋 PR #{} created", n)),
+                  None => Some("📋 PR created".to_string()),
+              }
+          }
+          "github_merge_pr" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 PR #{} merged", number))
+          }
+          "github_review_pr" => {
+              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+              Some(format!("📋 reviewed #{}", number))
+          }        // ═══════════════════════════════════════════════════════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
         "format" => Some("formatted".to_string()),
