@@ -54,6 +54,8 @@ pub struct ToolContext {
     pub session_id: String,
     pub working_dir: PathBuf,
     pub storage: Option<Arc<dyn storage::StorageBackend>>,
+    /// Optional ragent configuration loaded from config files.
+    pub config: Option<Arc<ragent_config::Config>>,
 }
 
 /// A tool that an agent can invoke to perform actions.

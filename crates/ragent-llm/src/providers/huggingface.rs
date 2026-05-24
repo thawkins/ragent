@@ -280,7 +280,7 @@ impl HuggingFaceClient {
             }));
         }
 
-        for msg in &request.messages {
+        for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
                 ChatContent::Parts(parts) => {
@@ -1096,11 +1096,11 @@ mod tests {
 
         let request = ChatRequest {
             model: "meta-llama/Llama-3.1-70B-Instruct".to_string(),
-            messages: vec![crate::llm::ChatMessage {
+            messages: Arc::new(vec![crate::llm::ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text("Hello".to_string()),
-            }],
-            tools: vec![],
+            }]),
+            tools: Arc::new(vec![]),
             temperature: Some(0.7),
             top_p: None,
             max_tokens: Some(4096),
@@ -1140,8 +1140,8 @@ mod tests {
 
         let request = ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![],
-            tools: vec![crate::llm::ToolDefinition {
+            messages: Arc::new(vec![]),
+            tools: Arc::new(vec![crate::llm::ToolDefinition {
                 name: "read".to_string(),
                 description: "Read a file".to_string(),
                 parameters: json!({
@@ -1149,10 +1149,9 @@ mod tests {
                     "properties": {
                         "path": { "type": "string" }
                     }
-                }),
-            }],
-            temperature: None,
-            top_p: None,
+                                  }),
+                              }]),
+                              temperature: None,            top_p: None,
             max_tokens: None,
             system: None,
             options: HashMap::new(),
@@ -1181,15 +1180,14 @@ mod tests {
 
         let request = ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![crate::llm::ChatMessage {
+            messages: Arc::new(vec![crate::llm::ChatMessage {
                 role: "tool".to_string(),
                 content: ChatContent::Parts(vec![ContentPart::ToolResult {
                     tool_use_id: "call_123".to_string(),
-                    content: "file contents here".to_string(),
-                }]),
-            }],
-            tools: vec![],
-            temperature: None,
+                                          content: "file contents here".to_string(),
+                                      }]),
+                                  }]),
+                                  tools: Arc::new(vec![]),            temperature: None,
             top_p: None,
             max_tokens: None,
             system: None,
@@ -1220,16 +1218,15 @@ mod tests {
 
         let request = ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![crate::llm::ChatMessage {
+            messages: Arc::new(vec![crate::llm::ChatMessage {
                 role: "assistant".to_string(),
                 content: ChatContent::Parts(vec![ContentPart::ToolUse {
                     id: "call_456".to_string(),
                     name: "write_file".to_string(),
-                    input: json!({"path": "test.txt", "content": "hello"}),
-                }]),
-            }],
-            tools: vec![],
-            temperature: None,
+                                          input: json!({"path": "test.txt", "content": "hello"}),
+                                      }]),
+                                  }]),
+                                  tools: Arc::new(vec![]),            temperature: None,
             top_p: None,
             max_tokens: None,
             system: None,
@@ -1305,11 +1302,11 @@ mod tests {
 
         let request = ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![crate::llm::ChatMessage {
+            messages: Arc::new(vec![crate::llm::ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text("Hi".to_string()),
-            }],
-            tools: vec![],
+            }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1339,8 +1336,8 @@ mod tests {
 
         let request = ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![],
-            tools: vec![],
+            messages: Arc::new(vec![]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,

@@ -86,6 +86,7 @@ When reading files with the `read` tool:
   - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100
   - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines
 - `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).
+- **ALTERNATIVE — use `num_lines` instead of `end_line`**: When `start_line` is provided, you may pass `num_lines` to specify the COUNT of lines to read from that start. Example: `start_line=201, num_lines=100` reads lines 201–300 (inclusive). This is useful if you naturally think in "start + count" rather than "start + end". If both `end_line` and `num_lines` are provided, `end_line` takes precedence.
 - The tool will return an error if they exceed the file's total line count. The error message includes `total_lines`.
 - When you read a file, the response metadata includes `total_lines` — use that value to plan subsequent reads.
 - **Strategy**:

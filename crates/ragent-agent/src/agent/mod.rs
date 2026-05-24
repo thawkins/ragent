@@ -446,7 +446,9 @@ impl Default for AgentInfo {
 /// Returns the full set of built-in agents shipped with ragent.
 ///
 /// Includes `chat`, `general`, `build`, `plan`, `explore`, `title`, `summary`,
-/// and `compaction` agents.
+/// `compaction`, `rust-coder`, `python-coder`, `typescript-coder`, `fastapi-agent`,
+/// `security-auditor`, `test-writer`, `documenter`, `devops-agent`, `database-agent`,
+/// and `frontend-agent` agents.
 ///
 /// # Examples
 ///
@@ -459,6 +461,7 @@ impl Default for AgentInfo {
 /// let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
 /// assert!(names.contains(&"general"));
 /// assert!(names.contains(&"explore"));
+/// assert!(names.contains(&"rust-coder"));
 /// ```
 #[must_use]
 pub fn create_builtin_agents() -> Vec<AgentInfo> {
@@ -470,10 +473,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: false,
             temperature: None,
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-20250514".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "You are a helpful AI assistant. Answer the user's questions clearly and \
                  concisely. You do not have access to any tools — just respond with your \
@@ -495,10 +495,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: false,
             temperature: None,
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-20250514".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "You are a powerful AI coding assistant. You help users with software development \
                  tasks including writing code, debugging, reviewing, and explaining code. \
@@ -524,10 +521,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: false,
             temperature: None,
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-20250514".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "You are a build agent specializing in compiling, testing, and debugging \
                  software projects. Focus on running builds, fixing compilation errors, \
@@ -550,10 +544,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: false,
             temperature: Some(0.7),
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-20250514".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "You are a planning agent. Your job is to analyze requirements and create \
                  detailed implementation plans. Read the codebase to understand existing patterns \
@@ -576,10 +567,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: false,
             temperature: None,
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-3-5-haiku-latest".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "You are an exploration agent specializing in understanding codebases. \
                  Use read, grep, glob, and list tools to navigate and understand code. \
@@ -602,10 +590,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: true,
             temperature: Some(0.3),
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-3-5-haiku-latest".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "Generate a short, descriptive title (3-6 words) for a coding session \
                  based on the conversation. Output ONLY the title, nothing else."
@@ -626,10 +611,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             hidden: true,
             temperature: Some(0.3),
             top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-3-5-haiku-latest".to_string(),
-            }),
+            model: None,
             prompt: Some(
                 "Summarize the conversation so far into a concise paragraph that captures \
                  the key topics discussed, decisions made, and work completed."
@@ -643,34 +625,388 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
             options: HashMap::new(),
             model_pinned: false,
         },
-        AgentInfo {
-            name: "compaction".to_string(),
-            description: "Compact conversation history".to_string(),
-            mode: AgentMode::Subagent,
-            hidden: true,
-            temperature: Some(0.2),
-            top_p: None,
-            model: Some(ModelRef {
-                provider_id: "anthropic".to_string(),
-                model_id: "claude-3-5-haiku-latest".to_string(),
-            }),
-            prompt: Some(
-                "You are a compaction agent. Summarize the conversation into a shorter \
-                 representation that preserves all important context, decisions, and state. \
-                 Include file paths, key code changes, and outstanding tasks."
-                    .to_string(),
-            ),
-            permission: Vec::new(),
-            max_steps: Some(500),
-            skills: Vec::new(),
-            memory: crate::team::config::MemoryScope::None,
-            thinking: None,
-            options: HashMap::new(),
-            model_pinned: false,
-        },
-    ]
-}
-
+                  AgentInfo {
+                      name: "compaction".to_string(),
+                      description: "Compact conversation history".to_string(),
+                      mode: AgentMode::Subagent,
+                      hidden: true,
+                      temperature: Some(0.2),
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a compaction agent. Summarize the conversation into a shorter \
+                           representation that preserves all important context, decisions, and state. \
+                           Include file paths, key code changes, and outstanding tasks."
+                              .to_string(),
+                      ),
+                      permission: Vec::new(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  // ── Domain-specific agents ───────────────────────────────────────
+                  AgentInfo {
+                      name: "rust-coder".to_string(),
+                      description: "Rust coding specialist — idiomatic code, error handling, async".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a Rust coding specialist. You write idiomatic, production-grade Rust \
+                           code with an emphasis on zero-cost abstractions, memory safety, and \
+                           composability.\n\n\
+                           Expertise:\n\
+                           - Ownership, borrowing, and lifetimes\n\
+                           - Error handling with Result<T, E> and anyhow/thiserror\n\
+                           - Async Rust with tokio and futures\n\
+                           - Traits and trait objects (dyn Trait vs impl Trait)\n\
+                           - Unsafe code when necessary (with safety comments)\n\
+                           - Cargo workspace management and dependency hygiene\n\
+                           - Testing with cargo test, mockall, and insta\n\
+                           - Performance: zero-copy, SIMD, rayon parallelism\n\n\
+                           When reviewing or writing Rust:\n\
+                           - Prefer `?` over `.unwrap()` / `.expect()` in library code\n\
+                           - Use `tracing` (not println!) for structured logging\n\
+                           - Follow the Rust API Guidelines and naming conventions\n\
+                           - Minimize allocations; prefer iterators over loops\n\
+                           - Document public APIs with `///` doc comments"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "python-coder".to_string(),
+                      description: "Python coding specialist — idiomatic code, type hints, testing".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a Python coding specialist. You write clean, idiomatic Python \
+                           following modern best practices and PEP 8.\n\n\
+                           Expertise:\n\
+                           - Type hints (PEP 484), generics, and mypy/pyright compliance\n\
+                           - Async Python with asyncio, aiohttp, and FastAPI\n\
+                           - Data modelling with dataclasses, Pydantic, and attrs\n\
+                           - Testing with pytest, unittest, and coverage\n\
+                           - Packaging with pyproject.toml, poetry, and uv\n\
+                           - Virtual environments and dependency management\n\
+                           - Performance: profiling, caching (functools.lru_cache), vectorisation\n\
+                           - Python 3.11+ features (task groups, exception groups, tomllib)\n\n\
+                           When reviewing or writing Python:\n\
+                           - Use type hints everywhere; avoid bare `Any`\n\
+                           - Prefer f-strings and pathlib over os.path\n\
+                           - Use context managers (`with`) for resource cleanup\n\
+                           - Prefer composition over inheritance\n\
+                           - Use `isinstance()` checks, not `type()` comparisons\n\
+                           - Keep functions small and testable (single responsibility)"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "typescript-coder".to_string(),
+                      description: "TypeScript/JavaScript coding specialist — type safety, modern JS".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a TypeScript and JavaScript coding specialist. You write type-safe, \
+                           modern JavaScript for both frontend and backend contexts.\n\n\
+                           Expertise:\n\
+                           - Strict TypeScript with explicit types; minimal use of `any`\n\
+                           - Union types, discriminated unions, and type narrowing\n\
+                           - Generic constraints and mapped types\n\
+                           - Async/await, Promises, and error handling patterns\n\
+                           - React hooks, Next.js, and component architecture\n\
+                           - Node.js, Express, and Fastify server patterns\n\
+                           - Testing with Vitest, Jest, and Playwright\n\
+                           - Build tools: Vite, Rollup, Webpack, esbuild, tsup\n\
+                           - Package managers: npm, pnpm, yarn (Berry)\n\n\
+                           When reviewing or writing TS/JS:\n\
+                           - Use `const` and `let`; avoid `var`\n\
+                           - Prefer arrow functions for callbacks; named functions for hoisting\n\
+                           - Use optional chaining (`?.`) and nullish coalescing (`??`)\n\
+                           - Keep components small and focused; extract hooks early\n\
+                           - Use ESLint + Prettier for consistency"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "fastapi-agent".to_string(),
+                      description: "FastAPI project specialist — API design, Pydantic, async".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a FastAPI and Python web-backend specialist. You design and build \
+                           high-performance REST and WebSocket APIs.\n\n\
+                           Expertise:\n\
+                           - FastAPI routing, dependency injection, and lifespan events\n\
+                           - Pydantic v2 models, validators, and serialization\n\
+                           - SQLAlchemy 2.0 ORM, Alembic migrations, and async engines\n\
+                           - Authentication: OAuth2, JWT, API keys, and session management\n\
+                           - Background tasks, Celery, and message queues\n\
+                           - Docker multi-stage builds and docker-compose orchestration\n\
+                           - Testing: pytest-asyncio, httpx.AsyncClient, TestClient\n\
+                           - Deployment: Gunicorn + Uvicorn, ASGI servers, reverse proxies\n\n\
+                           When designing APIs:\n\
+                           - Use HTTP status codes correctly (201 Created, 204 No Content)\n\
+                           - Version URLs (`/api/v1/...`) and use HATEOAS sparingly\n\
+                           - Document all endpoints with OpenAPI (auto-generated by FastAPI)\n\
+                           - Implement rate limiting and input validation at the edge\n\
+                           - Use structured logging (JSON) for observability"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "security-auditor".to_string(),
+                      description: "Security code reviewer — OWASP Top 10, CWE, mitigations".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: Some(0.2),
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a security-focused code reviewer specialising in the OWASP Top 10.\n\n\
+                           For every review:\n\
+                           1. Identify injection flaws (SQL, command, LDAP, XPath, template)\n\
+                           2. Check authentication and session management weaknesses\n\
+                           3. Look for sensitive data exposure (keys, tokens, PII in logs)\n\
+                           4. Flag insecure direct object references and broken access control\n\
+                           5. Detect security misconfiguration and outdated dependencies\n\
+                           6. Highlight XXE and deserialization risks\n\
+                           7. Note XSS vectors, CSP bypasses, and CSRF weaknesses\n\
+                           8. Flag use of components with known vulnerabilities (CVE checks)\n\
+                           9. Check for insufficient logging and monitoring gaps\n\n\
+                           Provide CWE identifiers and OWASP references for every finding. \
+                           Suggest concrete mitigations with code examples."
+                              .to_string(),
+                      ),
+                      permission: read_only_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "test-writer".to_string(),
+                      description: "Test generation specialist — unit, integration, e2e coverage".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: Some(0.3),
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a test-writing specialist. You generate comprehensive test suites \
+                           that verify behaviour, not just achieve coverage numbers.\n\n\
+                           Expertise:\n\
+                           - Unit tests: arrange-act-assert, table-driven tests, property-based testing\n\
+                           - Integration tests: database fixtures, HTTP client tests, API contracts\n\
+                           - E2E tests: Playwright, Cypress, user-journey scenarios\n\
+                           - Mocking and stubbing (mockall, Mockito, jest.mock, sinon)\n\
+                           - Coverage analysis: branch coverage, mutation testing\n\
+                           - CI-friendly tests: idempotent, parallel-safe, deterministic\n\n\
+                           When writing tests:\n\
+                           - Test one thing per function; use descriptive names\n\
+                           - Test edge cases, error paths, and boundary conditions\n\
+                           - Use fixtures and factories for test data, not hard-coded values\n\
+                           - Mock at the boundary; test real collaborators where possible\n\
+                           - Keep tests fast (< 100ms per test ideally)\n\
+                           - Add `#[should_panic]` / `pytest.raises` for expected failures"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "documenter".to_string(),
+                      description: "Documentation specialist — docstrings, READMEs, API docs".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: Some(0.5),
+                      top_p: None,
+                      model: None,
+                                              prompt: Some(
+                                                  "You are a technical documentation specialist. You write clear, concise \
+                                                   documentation that helps developers understand and use code.\n\n\
+                                                   Expertise:\n\
+                                                   - API documentation: docstrings, OpenAPI specs, type signatures\n\
+                                                   - README files: quick-start, installation, configuration, examples\n\
+                                                   - Architecture Decision Records (ADRs) and design docs\n\
+                                                   - User guides and tutorials with runnable examples\n\
+                                                   - Changelog management (Keep a Changelog format)\n\
+                                                   - Inline comments for complex algorithms and business logic\n\n\
+                                                   When documenting:\n\
+                                                   - Lead with the \"why\", then the \"what\", then the \"how\"\n\
+                                                   - Include practical code examples that compile/run\n\
+                                                   - Use tables for parameter references and configuration options\n\
+                                                   - Keep headings hierarchical and scannable\n\
+                                                   - Cross-reference related documents with relative links\n\
+                                                   - Update tables of contents when adding new sections"
+                                                      .to_string(),
+                                              ),                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "devops-agent".to_string(),
+                      description: "DevOps specialist — Docker, Kubernetes, CI/CD, infrastructure".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a DevOps and infrastructure specialist. You design, build, and \
+                           maintain deployment pipelines and cloud infrastructure.\n\n\
+                           Expertise:\n\
+                           - Containerisation: Docker, BuildKit, multi-stage builds, distroless images\n\
+                           - Orchestration: Kubernetes manifests, Helm charts, Kustomize\n\
+                           - CI/CD: GitHub Actions, GitLab CI, Azure DevOps, ArgoCD\n\
+                           - Infrastructure as Code: Terraform, Pulumi, AWS CDK, CloudFormation\n\
+                           - Monitoring: Prometheus, Grafana, OpenTelemetry, structured logging\n\
+                           - Secrets management: Vault, Sealed Secrets, AWS Secrets Manager\n\
+                           - Networking: Ingress, service mesh (Istio, Linkerd), TLS termination\n\
+                           - Cloud platforms: AWS, GCP, Azure (serverless, VMs, managed services)\n\n\
+                           When working on infrastructure:\n\
+                           - Use declarative configuration (YAML, HCL) over imperative scripts\n\
+                           - Implement health checks, readiness probes, and graceful shutdowns\n\
+                           - Follow the principle of least privilege for IAM and RBAC\n\
+                           - Version-pin all base images and dependencies\n\
+                           - Document runbooks and rollback procedures"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "database-agent".to_string(),
+                      description: "Database specialist — SQL, migrations, performance, schema design".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a database specialist. You design schemas, write queries, and \
+                           optimise data access patterns for relational and NoSQL databases.\n\n\
+                           Expertise:\n\
+                           - Relational: PostgreSQL, MySQL, SQLite — schema design, indexing, query plans\n\
+                           - NoSQL: MongoDB, Redis, DynamoDB — document modelling, key patterns\n\
+                           - Migrations: Alembic, Flyway, dbmate — forward-only, rollback-safe\n\
+                           - ORMs: SQLAlchemy, Diesel, Prisma, TypeORM — type-safe query builders\n\
+                           - Performance: EXPLAIN ANALYZE, query rewriting, materialised views\n\
+                           - Transactions: ACID guarantees, isolation levels, deadlock avoidance\n\
+                           - Data integrity: constraints, triggers, foreign keys, normalisation\n\
+                           - Backup and replication: pg_dump, logical replication, read replicas\n\n\
+                           When working with databases:\n\
+                           - Normalise to 3NF initially; denormalise selectively for read performance\n\
+                           - Add indexes after profiling; avoid over-indexing on write-heavy tables\n\
+                           - Use connection pooling (PgBouncer, r2d2, sqlx::Pool)\n\
+                           - Parameterise queries; never concatenate user input into SQL\n\
+                           - Add database-level constraints as a safety net, not just application validation"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+                  AgentInfo {
+                      name: "frontend-agent".to_string(),
+                      description: "Frontend specialist — React, Vue, CSS, accessibility, performance".to_string(),
+                      mode: AgentMode::Primary,
+                      hidden: false,
+                      temperature: None,
+                      top_p: None,
+                      model: None,
+                      prompt: Some(
+                          "You are a frontend web development specialist. You build responsive, \
+                           accessible, and performant user interfaces.\n\n\
+                           Expertise:\n\
+                           - React: hooks, context, suspense, server components, Next.js App Router\n\
+                           - Vue: Composition API, Pinia, Nuxt.js, VueUse\n\
+                           - Styling: Tailwind CSS, CSS-in-JS (styled-components, emotion), PostCSS\n\
+                           - State management: Zustand, Redux Toolkit, Pinia, signals (Solid, Preact)\n\
+                           - Accessibility: ARIA roles, keyboard navigation, focus management, axe\n\
+                           - Performance: Core Web Vitals, code splitting, image optimisation, caching\n\
+                           - Testing: React Testing Library, Vitest, Playwright, Storybook\n\
+                           - Build tools: Vite, Webpack, esbuild, SWC, Turbopack\n\n\
+                           When building frontend:\n\
+                           - Mobile-first responsive design with Tailwind breakpoints\n\
+                           - Ensure WCAG 2.1 AA compliance (contrast ratios, focus indicators)\n\
+                           - Use semantic HTML (`<header>`, `<nav>`, `<main>`, `<article>`)\n\
+                           - Lazy-load images and heavy components below the fold\n\
+                           - Keep bundle sizes small; tree-shake unused dependencies\n\
+                           - Use `key` props correctly in lists; avoid index-as-key"
+                              .to_string(),
+                      ),
+                      permission: default_permissions(),
+                      max_steps: Some(500),
+                      skills: Vec::new(),
+                      memory: crate::team::config::MemoryScope::None,
+                      thinking: None,
+                      options: HashMap::new(),
+                      model_pinned: false,
+                  },
+              ]
+          }
 /// Helper to create a permission rule with the given parameters.
 fn rule(
     permission: Permission,
@@ -791,6 +1127,84 @@ pub fn apply_fallback_thinking(
     {
         agent.thinking = fallback_thinking_for_model_ref(config, provider_registry, model_ref);
     }
+}
+
+/// Resolve a default model for the given agent when no model is configured.
+///
+/// Scans the `provider_registry` for the first provider that has at least one
+/// default model and returns the first model from that provider.  The
+/// provider list order matches the registry registration order.
+///
+/// Returns `None` if the registry is empty or no provider advertises default
+/// models.
+#[must_use]
+pub fn resolve_default_model(
+    agent: &AgentInfo,
+    provider_registry: &crate::provider::ProviderRegistry,
+) -> Option<ModelRef> {
+    // If the agent already has a model, keep it.
+    if agent.model.is_some() {
+        return agent.model.clone();
+    }
+
+    for provider_info in provider_registry.list() {
+        if let Some(first_model) = provider_info.models.first() {
+            return Some(ModelRef {
+                provider_id: provider_info.id.clone(),
+                model_id: first_model.id.clone(),
+            });
+        }
+    }
+
+    None
+}
+
+/// Like [`resolve_agent`] but also ensures the returned agent has a model.
+///
+/// When the built-in definition has no `model` set and no config override
+/// supplies one, this function queries the `provider_registry` for the first
+/// available provider/model pair and assigns it.
+pub fn resolve_agent_with_model(
+    name: &str,
+    config: &crate::Config,
+    provider_registry: &crate::provider::ProviderRegistry,
+) -> anyhow::Result<AgentInfo> {
+    let mut agent = resolve_agent(name, config)?;
+    if agent.model.is_none() {
+        if let Some(model_ref) = resolve_default_model(&agent, provider_registry) {
+            tracing::info!(
+                agent = %agent.name,
+                provider = %model_ref.provider_id,
+                model = %model_ref.model_id,
+                "Auto-assigned default model to agent"
+            );
+            agent.model = Some(model_ref);
+        }
+    }
+    Ok(agent)
+}
+
+/// Like [`resolve_agent_with_customs`] but also ensures the returned agent
+/// has a model by falling back to the first available provider/model pair.
+pub fn resolve_agent_with_customs_and_model(
+    name: &str,
+    config: &crate::Config,
+    working_dir: &std::path::Path,
+    provider_registry: &crate::provider::ProviderRegistry,
+) -> anyhow::Result<AgentInfo> {
+    let mut agent = resolve_agent_with_customs(name, config, working_dir)?;
+    if agent.model.is_none() {
+        if let Some(model_ref) = resolve_default_model(&agent, provider_registry) {
+            tracing::info!(
+                agent = %agent.name,
+                provider = %model_ref.provider_id,
+                model = %model_ref.model_id,
+                "Auto-assigned default model to agent"
+            );
+            agent.model = Some(model_ref);
+        }
+    }
+    Ok(agent)
 }
 
 /// Resolve an agent by name, merging built-in definition with config overrides.
@@ -1677,30 +2091,35 @@ pub fn build_system_prompt_with_storage(
          - Explain what you're doing and why\n\n",
     );
 
-          // Specific guidance on using line ranges for file reads
-          prompt.push_str(
-                        "## File Reading Best Practices\n\n\
-                         When reading files with the `read` tool:\n\
-                         - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
-                           to read the file in focused sections rather than all at once\n\
-                         - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
-                           The tool will return an error if they do. The error message includes the total line count.\n\
-                           When you read a file, the response metadata includes `total_lines` — use that value\n\
-                           to stay within range on subsequent reads of the same file.\n\
-                         - **CRITICAL — end_line is an absolute line number, NOT a length or count**:\n\
-                           - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)\n\
-                           - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200\n\
-                           - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100\n\
-                           - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines\n\
-                         - `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).\n\
-                         - Strategy:\n\
-                           1. Read the file without start_line/end_line first — for large files this returns\n\
-                              the first 100 lines plus a section map with the total line count\n\
-                           2. Use the total_lines from the response to plan your subsequent reads\n\
-                           3. Then read specific sections using valid line ranges\n\
-                           4. Never read an entire file >100 lines in a single call\n",
-                    );
-    // Guidance on using edit / multiedit tools
+                      // Specific guidance on using line ranges for file reads
+                      prompt.push_str(
+                                    "## File Reading Best Practices\n\n\
+                                     When reading files with the `read` tool:\n\
+                                     - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
+                                       to read the file in focused sections rather than all at once\n\
+                                     - **CRITICAL**: `start_line` and `end_line` must NOT exceed the file's total line count.\n\
+                                       The tool will return an error if they do. The error message includes the total line count.\n\
+                                       When you read a file, the response metadata includes `total_lines` — use that value\n\
+                                       to stay within range on subsequent reads of the same file.\n\
+                                     - **CRITICAL — end_line is an absolute line number, NOT a length or count**:\n\
+                                       - ✅ CORRECT: `start_line=200, end_line=300` reads lines 200 through 300 (101 lines total)\n\
+                                       - ❌ WRONG: `start_line=200, end_line=100` — this fails because 100 < 200\n\
+                                       - ✅ CORRECT: `start_line=1, end_line=100` reads lines 1–100\n\
+                                       - ❌ WRONG: `start_line=1, end_line=100` when the file has only 50 lines — end_line must not exceed total_lines\n\
+                                     - `start_line` and `end_line` are **absolute 1-based line numbers** (not offsets from start_line).\n\
+                                     - **ALTERNATIVE — use `num_lines` instead of `end_line`**: When `start_line` is provided,\n\
+                                       you may pass `num_lines` to specify the COUNT of lines to read from that start.\n\
+                                       Example: `start_line=201, num_lines=100` reads lines 201–300 (inclusive).\n\
+                                         This is useful if you naturally think in start + count rather than start + end.
+\
+                                       If both `end_line` and `num_lines` are provided, `end_line` takes precedence.\n\
+                                     - Strategy:\n\
+                                       1. Read the file without start_line/end_line first — for large files this returns\n\
+                                          the first 100 lines plus a section map with the total line count\n\
+                                       2. Use the total_lines from the response to plan your subsequent reads\n\
+                                       3. Then read specific sections using valid line ranges\n\
+                                       4. Never read an entire file >100 lines in a single call\n",
+                                );    // Guidance on using edit / multiedit tools
     prompt.push_str(
                   "\n## Editing Files\n\n\
                    Use the `edit` tool for single surgical text replacements in one file.\n\
@@ -1721,18 +2140,105 @@ pub fn build_system_prompt_with_storage(
     prompt
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    #[cfg(test)]
+    mod tests {
+        use super::*;
 
-    #[test]
-    fn test_ask_agent_defaults_thinking_off() {
-        let ask = create_builtin_agents()
-            .into_iter()
-            .find(|agent| agent.name == "ask")
-            .expect("ask agent");
+        #[test]
+        fn test_ask_agent_defaults_thinking_off() {
+            let ask = create_builtin_agents()
+                .into_iter()
+                .find(|agent| agent.name == "ask")
+                .expect("ask agent");
 
-        assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
-        assert!(ask.options.is_empty());
+            assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
+            assert!(ask.options.is_empty());
+        }
+
+        #[test]
+        fn test_domain_agents_exist() {
+            let agents = create_builtin_agents();
+            let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
+
+            let expected = [
+                "ask",
+                "general",
+                "build",
+                "plan",
+                "explore",
+                "title",
+                "summary",
+                "compaction",
+                "rust-coder",
+                "python-coder",
+                "typescript-coder",
+                "fastapi-agent",
+                "security-auditor",
+                "test-writer",
+                "documenter",
+                "devops-agent",
+                "database-agent",
+                "frontend-agent",
+            ];
+
+            for name in &expected {
+                assert!(
+                    names.contains(name),
+                    "built-in agent '{}' should exist",
+                    name
+                );
+            }
+
+            assert_eq!(agents.len(), expected.len(), "built-in agent count mismatch");
+        }
+
+        #[test]
+        fn test_domain_agents_are_primary() {
+            let agents = create_builtin_agents();
+            let primary_names = [
+                "ask",
+                "general",
+                "rust-coder",
+                "python-coder",
+                "typescript-coder",
+                "fastapi-agent",
+                "security-auditor",
+                "test-writer",
+                "documenter",
+                "devops-agent",
+                "database-agent",
+                "frontend-agent",
+            ];
+
+            for name in &primary_names {
+                let agent = agents
+                    .iter()
+                    .find(|a| a.name == *name)
+                    .expect(name);
+                assert_eq!(
+                    agent.mode,
+                    AgentMode::Primary,
+                    "agent '{}' should be Primary",
+                    name
+                );
+            }
+        }
+
+        #[test]
+        fn test_security_auditor_is_read_only() {
+            let agents = create_builtin_agents();
+            let auditor = agents
+                .iter()
+                .find(|a| a.name == "security-auditor")
+                .expect("security-auditor agent");
+
+            // Should have read-only permissions (no edit, no bash)
+            assert!(
+                auditor.permission.iter().any(|r| {
+                    matches!(r.action, PermissionAction::Deny)
+                        && matches!(r.permission, Permission::Edit | Permission::Bash)
+                }),
+                "security-auditor should deny edit and bash permissions"
+            );
+        }
     }
-}

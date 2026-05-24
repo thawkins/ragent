@@ -323,16 +323,17 @@ pub(crate) fn should_warn_unsupported_thinking(request: &ChatRequest) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::llm::{ChatContent, ChatMessage};
 
     fn make_request() -> ChatRequest {
         ChatRequest {
             model: "test-model".to_string(),
-            messages: vec![ChatMessage {
+            messages: Arc::new(vec![ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,

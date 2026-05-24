@@ -311,6 +311,9 @@ pub struct ToolContext {
     pub spec_manager: Option<Arc<ragent_specs::SpecManager>>,
     /// Currently active spec ID for automatic task status updates.
     pub active_spec_id: Option<String>,
+    /// Optional ragent configuration loaded from config files.
+    /// Provides tools access to settings like API keys, permissions, etc.
+    pub config: Option<Arc<ragent_config::Config>>,
 }
 
 /// A tool that an agent can invoke to perform actions.
@@ -813,15 +816,14 @@ impl Tool for ExtractedExtendedToolAdapter {
             },
         );
 
-                  let tool_ctx = ragent_tools_extended::ToolContext {
-                      session_id: ctx.session_id.clone(),
-                      working_dir: ctx.working_dir.clone(),
-                      event_bus: tool_bus,
-                      storage: storage_adapter,
-                      code_index: ctx.code_index.clone(),
-                      config: None, // config is not available in the adapter layer
-                  };        let result = self
-            .inner
+                                      let tool_ctx = ragent_tools_extended::ToolContext {
+                                          session_id: ctx.session_id.clone(),
+                                          working_dir: ctx.working_dir.clone(),
+                                          event_bus: tool_bus,
+                                          storage: storage_adapter,
+                                          code_index: ctx.code_index.clone(),
+                                          config: ctx.config.clone(),
+                                      };        let result = self            .inner
             .execute(input, &tool_ctx)
             .await
             .map(|output| ToolOutput {
@@ -946,6 +948,7 @@ impl Tool for ExtractedVcsToolAdapter {
             session_id: ctx.session_id.clone(),
             working_dir: ctx.working_dir.clone(),
             storage: storage_adapter,
+            config: ctx.config.clone(),
         };
 
         self.inner

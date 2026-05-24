@@ -1330,10 +1330,11 @@ pub struct App {
     /// Whether mouse input is enabled (default: true). Set to false for
     /// keyboard-only accessibility mode.
     pub mouse_enabled: bool,
-    /// Status message history for tracking recent status messages
-    pub status_history: StatusHistory,
-}
-/// State held while waiting for the user to approve or reject a plan.
+          /// Status message history for tracking recent status messages
+          pub status_history: StatusHistory,
+          /// Paths of configuration files that were loaded at startup (displayed in message window).
+          pub config_paths: Vec<std::path::PathBuf>,
+      }/// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {
     /// The plan text produced by the plan agent.

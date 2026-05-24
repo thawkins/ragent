@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.91"
+version = "0.1.0-alpha.92"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -132,7 +132,7 @@ pin-project-lite = "0.2"
 bytes = "1"
 
 # ── Serialization ────────────────────────────────────────────────────────
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 serde_yaml = "0.9"
 

@@ -88,6 +88,9 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub hidden_tools: Vec<String>,
+    /// Paths of configuration files that were loaded during [`Config::load`].
+    #[serde(skip)]
+    pub config_paths: Vec<PathBuf>,
 }
 
 /// Tool-family visibility configuration.
@@ -714,6 +717,7 @@ impl Config {
     /// ```
     pub fn load() -> anyhow::Result<Self> {
         let mut config = Self::default();
+        let mut loaded = false;
 
         // Global config: ~/.config/ragent/ragent.json
         if let Some(config_dir) = dirs::config_dir() {
@@ -721,6 +725,8 @@ impl Config {
             if global_path.exists() {
                 let overlay = Self::load_file(&global_path)?;
                 config = Self::merge(config, overlay);
+                config.config_paths.push(global_path);
+                loaded = true;
             }
         }
 
@@ -729,6 +735,30 @@ impl Config {
         if project_path.exists() {
             let overlay = Self::load_file(&project_path)?;
             config = Self::merge(config, overlay);
+            config.config_paths.push(project_path.clone());
+            loaded = true;
+        }
+        // If neither global nor project config exists, create a default
+        // project-level config so the user has a starting point.
+        if !loaded {
+            let ragent_dir = PathBuf::from(".ragent");
+            std::fs::create_dir_all(&ragent_dir).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create project config directory '{}': {}",
+                    ragent_dir.display(),
+                    e
+                )
+            })?;
+            let default_json = serde_json::to_string_pretty(&config)
+                .map_err(|e| anyhow::anyhow!("Failed to serialise default config: {}", e))?;
+            std::fs::write(&project_path, &default_json).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to write default config file '{}': {}",
+                    project_path.display(),
+                    e
+                )
+            })?;
+            config.config_paths.push(project_path);
         }
 
         // Environment variable pointing to config file
@@ -737,6 +767,7 @@ impl Config {
             if path.exists() {
                 let overlay = Self::load_file(&path)?;
                 config = Self::merge(config, overlay);
+                config.config_paths.push(path);
             }
         }
 
@@ -837,6 +868,41 @@ impl Config {
                     .map(|d| d.join("ragent").join("ragent.json"))
                     .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
             }
+        } else {
+            dirs::config_dir()
+                .map(|d| d.join("ragent").join("ragent.json"))
+                .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
+        };
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let json = serde_json::to_string_pretty(self)
+            .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
+
+        std::fs::write(&path, json)
+            .map_err(|e| anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e))
+    }
+
+    /// Save the config back to its original source file.
+    ///
+    /// If a project-local config (`.ragent/ragent.json`) was loaded during
+    /// [`Config::load`], this writes back to that path. Otherwise it writes
+    /// to the global config file (`~/.config/ragent/ragent.json`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written.
+    pub fn save_to_source(&self) -> anyhow::Result<()> {
+        let project_path = PathBuf::from(".ragent/ragent.json");
+        let was_loaded_from_project = self.config_paths.iter().any(|p| {
+            p.file_name().is_some_and(|f| f == "ragent.json")
+                && p.parent()
+                    .is_some_and(|parent| parent.file_name().is_some_and(|f| f == ".ragent"))
+        });
+        let path = if was_loaded_from_project {
+            project_path
         } else {
             dirs::config_dir()
                 .map(|d| d.join("ragent").join("ragent.json"))
@@ -955,6 +1021,11 @@ impl Config {
         }
         if overlay.gitlab.username.is_some() {
             base.gitlab.username = overlay.gitlab.username;
+        }
+
+        // tavily_api_key: overlay overrides base
+        if overlay.tavily_api_key.is_some() {
+            base.tavily_api_key = overlay.tavily_api_key;
         }
 
         // hidden_tools: union of base and overlay (both lists are honoured)

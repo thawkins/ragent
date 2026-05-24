@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::event::FinishReason;
 
@@ -88,10 +89,10 @@ pub struct ChatRequest {
     /// Model identifier (e.g. `"claude-sonnet-4-20250514"`).
     pub model: String,
     /// Ordered conversation history.
-    pub messages: Vec<ChatMessage>,
+    pub messages: Arc<Vec<ChatMessage>>,
     /// Tools the model is allowed to invoke.
     #[serde(default)]
-    pub tools: Vec<ToolDefinition>,
+    pub tools: Arc<Vec<ToolDefinition>>,
     /// Sampling temperature (higher = more random).
     pub temperature: Option<f32>,
     /// Nucleus-sampling probability mass cutoff.

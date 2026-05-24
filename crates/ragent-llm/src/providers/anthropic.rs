@@ -317,7 +317,7 @@ impl AnthropicClient {
     fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
-        for msg in &request.messages {
+        for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
                 ChatContent::Parts(parts) => {

@@ -167,6 +167,7 @@ pub async fn run_tui(
     resume_session_id: Option<String>,
     log_rx: TuiLogReceiver,
     db_path: std::path::PathBuf,
+    config_paths: Vec<std::path::PathBuf>,
 ) -> Result<()> {
     // Set up panic handler to ensure terminal state is restored on crashes
     // This handles panics, OOM, and segfaults by restoring the terminal before
@@ -200,6 +201,9 @@ pub async fn run_tui(
         show_log,
         db_path,
     );
+    // Pass through the config file paths loaded at startup so the TUI
+    // can display them in the message window.
+    app.config_paths = config_paths;
 
     // -- Render the very first frame so the user sees the TUI immediately --
     app.status = "starting up…".to_string();
@@ -259,9 +263,31 @@ pub async fn run_tui(
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
                 app.force_new_message = true;
-                app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
-                app.status = "session created".to_string();
-                terminal.draw(|frame| layout::render(frame, &mut app))?;
+                                  app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
+                                  // Display the loaded configuration file(s)
+                                  if app.config_paths.is_empty() {
+                                      app.append_assistant_text("\nℹ No config file found; using defaults");
+                                  } else {
+                                      let mut paths_text = app.config_paths
+                                          .iter()
+                                          .map(|p| {
+                                              let s = p.display().to_string();
+                                              if let Some(home) = std::env::var_os("HOME") {
+                                                  let home = home.to_string_lossy();
+                                                  if let Some(rest) = s.strip_prefix(home.as_ref()) {
+                                                      return format!("~{}", rest);
+                                                  }
+                                              }
+                                              s
+                                          })
+                                          .collect::<Vec<_>>()
+                                          .join("`\n  ");
+                                      // Prepend indentation for multi-line alignment
+                                      if app.config_paths.len() > 1 {
+                                          paths_text = format!("\n  {paths_text}");
+                                      }
+                                                                              app.append_assistant_text(&format!("\n✓ Loaded config file: `{paths_text}`"));                                  }
+                                  app.status = "session created".to_string();                terminal.draw(|frame| layout::render(frame, &mut app))?;
 
                 // Kick off the AGENTS.md acknowledgement exchange in the background
                 let proc = Arc::clone(&app.session_processor);

@@ -143,7 +143,7 @@ impl OpenAiClient {
             }));
         }
 
-        for msg in &request.messages {
+        for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
                 ChatContent::Parts(parts) => {

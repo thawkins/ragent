@@ -81,11 +81,11 @@ impl Completer for RagentCompleter {
 
         let request = ChatRequest {
             model: self.model_id.clone(),
-            messages: vec![ChatMessage {
+            messages: Arc::new(vec![ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text(user.to_string()),
-            }],
-            tools: vec![],
+            }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -307,7 +307,7 @@ impl App {
         storage: Arc<Storage>,
         provider_registry: Arc<ProviderRegistry>,
         session_processor: Arc<SessionProcessor>,
-        agent_info: AgentInfo,
+        mut agent_info: AgentInfo,
         show_log: bool,
         db_path: std::path::PathBuf,
     ) -> Self {
@@ -328,6 +328,22 @@ impl App {
 
         let configured_provider = Self::detect_provider(&storage);
         let _ = storage.delete_discovered_models("huggingface");
+
+        // Ensure the initial agent_info has a model if none was provided.
+        if agent_info.model.is_none() {
+            if let Some(model_ref) =
+                ragent_core::agent::resolve_default_model(&agent_info, &provider_registry)
+            {
+                tracing::info!(
+                    agent = %agent_info.name,
+                    provider = %model_ref.provider_id,
+                    model = %model_ref.model_id,
+                    "Auto-assigned default model to initial agent in TUI"
+                );
+                agent_info.model = Some(model_ref);
+            }
+        }
+
         let agent_name = agent_info.name.clone();
 
         let cwd_path = std::env::current_dir().unwrap_or_default();
@@ -551,11 +567,11 @@ impl App {
             code_index_stats_cache: None,
             code_index_stats_last_refresh: std::time::Instant::now(),
             code_index_busy: false,
-            code_index_watch_session: None,
-            spec_manager: None,
-            active_spec: None,
-        }; // end Self { ... }
-        // Log any warnings from custom agent loading into the log panel
+                          code_index_watch_session: None,
+                          spec_manager: None,
+                          active_spec: None,
+                          config_paths: app_config.config_paths.clone(),
+                      }; // end Self { ... }        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -1778,6 +1794,15 @@ impl App {
                 provider_id: provider.to_string(),
                 model_id: model.to_string(),
             });
+        }
+
+        // If still no model, fall back to the first available provider/model.
+        if agent.model.is_none() {
+            if let Some(model_ref) =
+                ragent_core::agent::resolve_default_model(agent, &self.provider_registry)
+            {
+                agent.model = Some(model_ref);
+            }
         }
 
         if let Some(thinking) = self.effective_thinking_config_for_agent(agent) {
@@ -5048,71 +5073,70 @@ impl App {
                     }
                 }
             }
-            "agents" => {
-                let mut output = String::from("From: /agents\n\nBuilt-in Agents:\n\n");
-
-                let custom_names: std::collections::HashSet<String> = self
-                    .custom_agent_defs
-                    .iter()
-                    .map(|d| d.agent_info.name.clone())
-                    .collect();
-
-                for agent in &self.cycleable_agents {
-                    let is_custom =
-                        custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
-                    if !is_custom {
-                        let active = if agent.name == self.agent_name {
-                            " ●"
-                        } else {
-                            ""
-                        };
-                        output.push_str(&format!(
-                            "  {:<18} {}{}\n",
-                            agent.name, agent.description, active
-                        ));
-                    }
-                }
-
-                if self.custom_agent_defs.is_empty() {
-                    output.push_str(
-                        "\nCustom Agents:\n\n  (none — place .json or .md files in .ragent/agents/ or ~/.ragent/agents/)\n",
-                    );
-                } else {
-                    output.push_str("\nCustom Agents:\n\n");
-                    for def in &self.custom_agent_defs {
-                        let scope = if def.is_project_local {
-                            "project"
-                        } else {
-                            "global"
-                        };
-                        let name = &def.agent_info.name;
-                        let desc = &def.agent_info.description;
-                        let active = if *name == self.agent_name { " ●" } else { "" };
-                        let fmt =
-                            if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
-                                "profile"
-                            } else {
-                                "oasf"
-                            };
-                        output.push_str(&format!(
-                            "  {:<18} {} [{}/{}]{}\n",
-                            name, desc, scope, fmt, active
-                        ));
-                    }
-                }
-
-                if !self.custom_agent_diagnostics.is_empty() {
-                    output.push_str("\nDiagnostics:\n\n");
-                    for diag in &self.custom_agent_diagnostics {
-                        output.push_str(&format!("  ⚠ {}\n", diag));
-                    }
-                }
-
-                self.append_assistant_text(&output);
-
-                self.status = "agents".to_string();
-            }
-                                        "context" => match args.trim() {
+                          "agents" => {
+                              let mut output = String::from("From: /agents\n\n**Built-in Agents**\n\n");
+            
+                              let custom_names: std::collections::HashSet<String> = self
+                                  .custom_agent_defs
+                                  .iter()
+                                  .map(|d| d.agent_info.name.clone())
+                                  .collect();
+            
+                              for agent in &self.cycleable_agents {
+                                  let is_custom =
+                                      custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
+                                  if !is_custom {
+                                      let active = if agent.name == self.agent_name {
+                                          " ●"
+                                      } else {
+                                          ""
+                                      };
+                                      output.push_str(&format!(
+                                          "- `{}` — {}{}\n",
+                                          agent.name, agent.description, active
+                                      ));
+                                  }
+                              }
+            
+                              if self.custom_agent_defs.is_empty() {
+                                  output.push_str(
+                                      "\n**Custom Agents**\n\n*(none — place .json or .md files in .ragent/agents/ or ~/.ragent/agents/)*\n",
+                                  );
+                              } else {
+                                  output.push_str("\n**Custom Agents**\n\n");
+                                  for def in &self.custom_agent_defs {
+                                      let scope = if def.is_project_local {
+                                          "project"
+                                      } else {
+                                          "global"
+                                      };
+                                      let name = &def.agent_info.name;
+                                      let desc = &def.agent_info.description;
+                                      let active = if *name == self.agent_name { " ●" } else { "" };
+                                      let fmt =
+                                          if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                              "profile"
+                                          } else {
+                                              "oasf"
+                                          };
+                                      output.push_str(&format!(
+                                          "- `{}` — {} [{}/{}]{}\n",
+                                          name, desc, scope, fmt, active
+                                      ));
+                                  }
+                              }
+            
+                              if !self.custom_agent_diagnostics.is_empty() {
+                                  output.push_str("\n**Diagnostics**\n\n");
+                                  for diag in &self.custom_agent_diagnostics {
+                                      output.push_str(&format!("- ⚠ {}\n", diag));
+                                  }
+                              }
+            
+                              self.append_assistant_text(&output);
+            
+                              self.status = "agents".to_string();
+                          }                                        "context" => match args.trim() {
                                             "refresh" => {
                                                 ragent_core::agent::clear_prompt_context_cache();
                                                 self.append_assistant_text(
@@ -6135,13 +6159,12 @@ Usage: /provider [show]
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
 
-                        match cfg.save(true) {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /tools\n✅ `{switch}` visibility is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status = format!(
+                                                  match cfg.save_to_source() {
+                                                      Ok(()) => {
+                                                          self.append_assistant_text(&format!(
+                                                              "From: /tools\n✅ `{switch}` visibility is now **{}**.",
+                                                              if enabled { "on" } else { "off" }
+                                                          ));                                self.status = format!(
                                     "tools: {switch} {}",
                                     if enabled { "on" } else { "off" }
                                 );
@@ -6213,13 +6236,12 @@ Usage: /provider [show]
                         let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
                         cfg.internal_llm.enabled = enabled;
                         self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save(true) {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n✅ Internal LLM is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status =
+                                                  match cfg.save_to_source() {
+                                                      Ok(()) => {
+                                                          self.append_assistant_text(&format!(
+                                                              "From: /internal-llm\n✅ Internal LLM is now **{}**.",
+                                                              if enabled { "on" } else { "off" }
+                                                          ));                                self.status =
                                     format!("internal-llm: {}", if enabled { "on" } else { "off" });
                             }
                             Err(error) => {
@@ -6292,13 +6314,12 @@ Usage: /provider [show]
                             }
                         };
                         self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save(true) {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n✅ `{switch_label}` is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status = format!(
+                                                  match cfg.save_to_source() {
+                                                      Ok(()) => {
+                                                          self.append_assistant_text(&format!(
+                                                              "From: /internal-llm\n✅ `{switch_label}` is now **{}**.",
+                                                              if enabled { "on" } else { "off" }
+                                                          ));                                self.status = format!(
                                     "internal-llm: {} {}",
                                     switch,
                                     if enabled { "on" } else { "off" }
@@ -6701,20 +6722,20 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                         "project_local": true,
                                                         "blueprint": bp,
                                                     });
-                                                                                                          let ctx = ragent_core::tool::ToolContext {
-                                                                                                              session_id: sid_clone.clone(),
-                                                                                                              working_dir: working_dir_clone.clone(),
-                                                                                                              event_bus: event_bus.clone(),
-                                                                                                              storage: Some(storage.clone()),
-                                                                                                              task_manager: None,
-                                                                                                              active_model: active_model_clone,
-                                                                                                              team_context: None,
-                                                                                                              team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
-                                                                                                              code_index: None,
-                                                                                                              spec_manager: session_processor.spec_manager.get().cloned(),
-                                                                                                              active_spec_id: session_processor.active_spec.lock().unwrap().clone(),
-                                                                                                          };                                                    let _ = tool.execute(input, &ctx).await;
-                                                }
+                                                                                                                                                                                                                      let ctx = ragent_core::tool::ToolContext {
+                                                                                                                                                                                                                          session_id: sid_clone.clone(),
+                                                                                                                                                                                                                          working_dir: working_dir_clone.clone(),
+                                                                                                                                                                                                                          event_bus: event_bus.clone(),
+                                                                                                                                                                                                                          storage: Some(storage.clone()),
+                                                                                                                                                                                                                          task_manager: None,
+                                                                                                                                                                                                                          active_model: active_model_clone,
+                                                                                                                                                                                                                          team_context: None,
+                                                                                                                                                                                                                          team_manager: session_processor.team_manager.get().cloned().map(|tm| tm as Arc<dyn ragent_core::tool::TeamManagerInterface>),
+                                                                                                                                                                                                                          code_index: None,
+                                                                                                                                                                                                                          spec_manager: session_processor.spec_manager.get().cloned(),
+                                                                                                                                                                                                                          active_spec_id: session_processor.active_spec.read().await.clone(),
+                                                                                                                                                                                                                          config: Some(Arc::new(ragent_core::config::Config::load().unwrap_or_default())),
+                                                                                                                                                                                                                      };                                                    let _ = tool.execute(input, &ctx).await;                                                }
                                             });
                                     });
                                 }
@@ -8803,21 +8824,16 @@ Type `/swarm help` for more info.\n";
                         });
                         match result {
                             Ok(spec) => {
-                                self.active_spec = Some(spec_id.clone());
-                                self.spec_manager = Some(Arc::new(mgr));
-                                // Also set on the session processor so auto-updates work
-                                let _ = self
-                                    .session_processor
-                                    .active_spec
-                                    .lock()
-                                    .unwrap()
-                                    .replace(spec_id.clone());
-                                let _ = self
-                                    .session_processor
-                                    .spec_manager
-                                    .set(Arc::new(SpecManager::new(&specs_root)));
-                                self.append_assistant_text(&format!(
-                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
+                                                                  self.active_spec = Some(spec_id.clone());
+                                                                  self.spec_manager = Some(Arc::new(mgr));
+                                                                                                                                      // Also set on the session processor so auto-updates work
+                                                                                                                                      let _ = rt.block_on(async {
+                                                                                                                                          self.session_processor.active_spec.write().await.replace(spec_id.clone())
+                                                                                                                                      });
+                                                                                                                                      let _ = self
+                                                                                                                                          .session_processor
+                                                                                                                                          .spec_manager
+                                                                                                                                          .set(Arc::new(SpecManager::new(&specs_root)));                                                                  self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
                                                                                                                                                                                                                                                                                                                                                                                        Status: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Title: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Requirements: {}\n\
@@ -8836,13 +8852,15 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                    SpecCommand::Deactivate => {
-                        if self.active_spec.is_some() {
-                            let prev = self.active_spec.take().unwrap();
-                            self.spec_manager = None;
-                            let _ = self.session_processor.active_spec.lock().unwrap().take();
-                            self.append_assistant_text(&format!(
-                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
+                                          SpecCommand::Deactivate => {
+                                              if self.active_spec.is_some() {
+                                                  let prev = self.active_spec.take().unwrap();
+                                                  self.spec_manager = None;
+                                                  let rt = tokio::runtime::Handle::current();
+                                                  let _ = rt.block_on(async {
+                                                      self.session_processor.active_spec.write().await.take()
+                                                  });
+                                                  self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
                                                                                                                                                                                                                                                                                                                                                                                   prev
                                                                                                                                                                                                                                                                                                                                                                               ));
                             self.status = "spec: deactivated".to_string();
@@ -9678,11 +9696,10 @@ Type `/swarm help` for more info.\n";
                                 }
                             }
                         }
-                        match cfg.save(true) {
-                            Ok(()) => {
-                                self.status = "codeindex: on".to_string();
-                            }
-                            Err(e) => {
+                                                  match cfg.save_to_source() {
+                                                      Ok(()) => {
+                                                          self.status = "codeindex: on".to_string();
+                                                      }                            Err(e) => {
                                 self.append_assistant_text(&format!(
                                     "⚠️ **Code index:** enabled in memory, but saving config failed: {e}",
                                 ));
@@ -9719,11 +9736,10 @@ Type `/swarm help` for more info.\n";
                                 "ℹ️ **Code index:** disabled. It was not currently active.",
                             );
                         }
-                        match cfg.save(true) {
-                            Ok(()) => {
-                                self.status = "codeindex: off".to_string();
-                            }
-                            Err(e) => {
+                                                  match cfg.save_to_source() {
+                                                      Ok(()) => {
+                                                          self.status = "codeindex: off".to_string();
+                                                      }                            Err(e) => {
                                 self.append_assistant_text(&format!(
                                     "⚠️ **Code index:** disabled in memory, but saving config failed: {e}",
                                 ));

@@ -107,23 +107,23 @@ async fn test_process_message_forwards_agent_thinking_to_chat_request() {
     let session_manager = Arc::new(SessionManager::new(storage.clone(), event_bus.clone()));
     let tool_registry = Arc::new(tool::create_default_registry());
     let permission_checker = Arc::new(parking_lot::RwLock::new(PermissionChecker::new(vec![])));
-    let processor = SessionProcessor {
-        session_manager: session_manager.clone(),
-        provider_registry: Arc::new(provider_registry),
-        tool_registry,
-        permission_checker,
-        event_bus,
-        task_manager: std::sync::OnceLock::new(),
-        team_manager: std::sync::OnceLock::new(),
-        mcp_client: std::sync::OnceLock::new(),
-        code_index: std::sync::OnceLock::new(),
-        active_spec: std::sync::Mutex::new(None),
-        spec_manager: std::sync::OnceLock::new(),
-        extraction_engine: std::sync::OnceLock::new(),
-        stream_config: ragent_agent::config::StreamConfig::default(),
-        auto_approve: false,
-    };
-
+          let processor = SessionProcessor {
+              session_manager: session_manager.clone(),
+              provider_registry: Arc::new(provider_registry),
+              tool_registry,
+              permission_checker,
+              event_bus,
+              task_manager: std::sync::OnceLock::new(),
+              team_manager: std::sync::OnceLock::new(),
+              mcp_client: std::sync::OnceLock::new(),
+              code_index: std::sync::OnceLock::new(),
+              active_spec: tokio::sync::RwLock::new(None),
+              spec_manager: std::sync::OnceLock::new(),
+              cached_tool_definitions: parking_lot::RwLock::new(None),
+              extraction_engine: std::sync::OnceLock::new(),
+              stream_config: ragent_agent::config::StreamConfig::default(),
+              auto_approve: false,
+          };
     let working_dir = tempfile::tempdir().expect("tempdir");
     let session = session_manager
         .create_session(working_dir.path().to_path_buf())

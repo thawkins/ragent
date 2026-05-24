@@ -15,6 +15,7 @@
 //! The permission system checks these lists before prompting the user.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::{OnceLock, RwLock};
 
 use anyhow::{Context, Result};
@@ -222,21 +223,35 @@ pub fn get_denylist() -> Vec<String> {
 }
 
 /// Returns the compiled allowlist for efficient matching.
+///
+/// The returned `Arc<GlobSet>` is cheap to clone and avoids recompiling
+/// patterns on every permission check.
 #[must_use]
-pub fn get_compiled_allowlist() -> GlobSet {
+pub fn get_compiled_allowlist() -> Arc<GlobSet> {
     compiled_allowlist()
         .read()
-        .map(|g| g.clone())
-        .unwrap_or_else(|_| GlobSet::empty())
+        .map(|g| Arc::new(g.clone()))
+        .unwrap_or_else(|_| Arc::new(GlobSet::empty()))
 }
 
 /// Returns the compiled denylist for efficient matching.
+///
+/// The returned `Arc<GlobSet>` is cheap to clone and avoids recompiling
+/// patterns on every permission check.
 #[must_use]
-pub fn get_compiled_denylist() -> GlobSet {
+pub fn get_compiled_denylist() -> Arc<GlobSet> {
     compiled_denylist()
         .read()
-        .map(|g| g.clone())
-        .unwrap_or_else(|_| GlobSet::empty())
+        .map(|g| Arc::new(g.clone()))
+        .unwrap_or_else(|_| Arc::new(GlobSet::empty()))
+}
+
+/// Invalidate both compiled caches so the next call re-reads the in-memory
+/// source patterns.  Call this after mutating the allowlist or denylist.
+pub fn invalidate_compiled_caches() {
+    // Recompile from the current in-memory pattern lists.
+    let _ = recompile_allowlist();
+    let _ = recompile_denylist();
 }
 
 // ── Write accessors ───────────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ fn make_ctx(dir: &Path) -> ToolContext {
         session_id: "test".to_string(),
         working_dir: dir.to_path_buf(),
         storage: None,
+        config: None,
     }
 }
 

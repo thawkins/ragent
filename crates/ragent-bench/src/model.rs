@@ -458,11 +458,11 @@ fn benchmark_chat_request(
     let deterministic = options.deterministic;
     ChatRequest {
         model: selection.model_id.clone(),
-        messages: vec![ChatMessage {
+        messages: Arc::new(vec![ChatMessage {
             role: "user".to_string(),
             content: ChatContent::Text(prompt.to_string()),
-        }],
-        tools: vec![],
+        }]),
+        tools: Arc::new(vec![]),
         temperature: if deterministic {
             Some(0.0)
         } else {

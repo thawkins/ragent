@@ -1,6 +1,18 @@
 # Release
 
-## Current Version: 0.1.0-alpha.91
+## Current Version: 0.1.0-alpha.92
+
+### Changed
+- **Built-in agents no longer hardcode Anthropic Claude** — All 18 built-in agent definitions now default to `model: None` and auto-resolve the first available model from the provider registry at runtime, instead of always falling back to Claude.
+- **`resolve_default_model()` helper** — Scans the provider registry and returns the first model from the first provider, used when an agent has no explicit model binding.
+- **`resolve_agent_with_model()` / `resolve_agent_with_customs_and_model()`** — Wrappers around `resolve_agent()` / `resolve_agent_with_customs()` that ensure the returned agent always has a model by falling back to `resolve_default_model()` when needed.
+
+### Fixed
+- **TUI initial agent setup** — `App::new()` now calls `resolve_default_model()` on the initial agent so startup works even when no model was previously persisted in storage.
+- **TUI agent switching** — `apply_selected_model_and_thinking()` now falls back to `resolve_default_model()` when both `selected_model` and `agent.model` are `None`.
+- **Server message handler** — `POST /sessions/{id}/messages` now uses `resolve_agent_with_model()` instead of `resolve_agent()` so server requests also auto-resolve the default model.
+
+## Previous: 0.1.0-alpha.91
 
 ### Changed
 - **Agent loop optimization** — Optimize the agent loop to prevent stalls.

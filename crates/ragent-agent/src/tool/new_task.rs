@@ -207,6 +207,7 @@ mod tests {
             code_index: None,
             spec_manager: None,
             active_spec_id: None,
+            config: None,
         }
     }
 

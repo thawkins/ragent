@@ -290,9 +290,8 @@ impl OllamaCloudClient {
         // `tool_call_id` (OpenAI format) and `tool_name` (native Ollama format)
         // in tool result messages, satisfying whichever format the model expects.
         let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
-        for msg in &request.messages {
-            if let ChatContent::Parts(parts) = &msg.content {
-                for part in parts {
+                  for msg in request.messages.iter() {
+                      if let ChatContent::Parts(parts) = &msg.content {                for part in parts {
                     if let ContentPart::ToolUse { id, name, .. } = part {
                         tool_id_to_name.insert(id.clone(), name.clone());
                     }
@@ -307,8 +306,7 @@ impl OllamaCloudClient {
             }));
         }
 
-        for msg in &request.messages {
-            // Ollama Cloud requires content to always be a plain string.
+                  for msg in request.messages.iter() {            // Ollama Cloud requires content to always be a plain string.
             // Images must go in a separate "images" array as raw base64 (no data-URL prefix).
             let (content_str, images): (String, Vec<String>) = match &msg.content {
                 ChatContent::Text(text) => (text.clone(), vec![]),

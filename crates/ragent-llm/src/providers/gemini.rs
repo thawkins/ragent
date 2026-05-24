@@ -366,7 +366,7 @@ impl GeminiClient {
             }));
         }
 
-        for msg in &request.messages {
+        for msg in request.messages.iter() {
             let role = match msg.role.as_str() {
                 "assistant" => "model",
                 _ => "user",

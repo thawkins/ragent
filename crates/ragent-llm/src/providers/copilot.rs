@@ -363,7 +363,7 @@ impl CopilotClient {
             }));
         }
 
-        for msg in &request.messages {
+        for msg in request.messages.iter() {
             let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
                 ChatContent::Parts(parts) => {
@@ -1713,11 +1713,11 @@ mod tests {
         let mk = |v: &str| {
             let mut request = ChatRequest {
                 model: "o3-mini".to_string(),
-                messages: vec![ChatMessage {
+                messages: Arc::new(vec![ChatMessage {
                     role: "user".to_string(),
                     content: ChatContent::Text("hello".to_string()),
-                }],
-                tools: vec![],
+                }]),
+                tools: Arc::new(vec![]),
                 temperature: None,
                 top_p: None,
                 max_tokens: None,
@@ -1744,11 +1744,11 @@ mod tests {
         alias.insert("reasoning_level".to_string(), json!("HIGH"));
         let alias_request = ChatRequest {
             model: "o3-mini".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1765,11 +1765,11 @@ mod tests {
         invalid_options.insert("reasoning_effort".to_string(), json!("turbo"));
         let invalid_request = ChatRequest {
             model: "o3-mini".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1787,11 +1787,11 @@ mod tests {
     fn test_reasoning_effort_prefers_typed_thinking() {
         let mut request = ChatRequest {
             model: "o3-mini".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1822,11 +1822,11 @@ mod tests {
         options.insert("reasoning_effort".to_string(), json!("medium"));
         let req = ChatRequest {
             model: "o3-mini".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1853,11 +1853,11 @@ mod tests {
         options.insert("thinking".to_string(), json!("disabled"));
         let req = ChatRequest {
             model: "gpt-4o".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,
@@ -1885,11 +1885,11 @@ mod tests {
         options.insert("thinking".to_string(), json!("disabled"));
         let req = ChatRequest {
             model: "o3-mini".to_string(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: vec![],
+            messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+            tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
             max_tokens: None,

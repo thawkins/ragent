@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use anyhow::Result;
 use ragent_llm::llm::{ChatContent, ChatMessage, ChatRequest, LlmClient};
@@ -24,11 +25,11 @@ struct CapturedRequest {
 fn make_request(model: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
-        messages: vec![ChatMessage {
-            role: "user".to_string(),
-            content: ChatContent::Text("hello".to_string()),
-        }],
-        tools: vec![],
+        messages: Arc::new(vec![ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hello".to_string()),
+                }]),
+        tools: Arc::new(vec![]),
         temperature: None,
         top_p: None,
         max_tokens: Some(128),

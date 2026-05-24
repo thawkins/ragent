@@ -260,9 +260,8 @@ impl OllamaClient {
         // `tool_call_id` (OpenAI-compat) and `tool_name` (native Ollama format).
         let mut tool_id_to_name: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
-        for msg in &request.messages {
-            if let ChatContent::Parts(parts) = &msg.content {
-                for part in parts {
+                  for msg in request.messages.iter() {
+                      if let ChatContent::Parts(parts) = &msg.content {                for part in parts {
                     if let ContentPart::ToolUse { id, name, .. } = part {
                         tool_id_to_name.insert(id.clone(), name.clone());
                     }
@@ -277,8 +276,7 @@ impl OllamaClient {
             }));
         }
 
-        for msg in &request.messages {
-            let content = match &msg.content {
+                  for msg in request.messages.iter() {            let content = match &msg.content {
                 ChatContent::Text(text) => json!(text),
                 ChatContent::Parts(parts) => {
                     let content_parts: Vec<Value> = parts

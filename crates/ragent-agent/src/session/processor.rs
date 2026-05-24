@@ -13,6 +13,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use ragent_types::ThinkingConfig;
 use serde_json::{Value, json};
+use tokio::time::Duration;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
@@ -26,10 +27,115 @@ use crate::sanitize::redact_secrets;
 use crate::session::SessionManager;
 use crate::tool::{McpToolWrapper, TeamContext, ToolContext, ToolRegistry};
 use base64::Engine as _;
+use regex::RegexSet;
 
 const MAX_TOOL_RESULT_CHARS_FOR_LLM: usize = 12_000;
 const TOOL_RESULT_HEAD_CHARS_FOR_LLM: usize = 8_000;
 const TOOL_RESULT_TAIL_CHARS_FOR_LLM: usize = 4_000;
+
+/// Byte-length threshold for the fast-path check in `tool_result_content_for_llm`.
+/// Using `content.len()` (bytes) avoids an expensive UTF-8 decode when the
+/// payload is well under the limit.  For ASCII text (the common case for tool
+/// results) `len()` equals `chars().count()` exactly, so behaviour is identical.
+/// For multi-byte UTF-8 we may truncate slightly earlier — conservative and safe.
+const MAX_TOOL_RESULT_BYTES_FOR_LLM: usize = MAX_TOOL_RESULT_CHARS_FOR_LLM;
+
+/// Maximum accumulated text/reasoning delta characters before forcing a flush.
+const STREAM_BUFFER_SIZE_THRESHOLD: usize = 256;
+/// Maximum milliseconds between stream event flushes.
+const STREAM_BUFFER_FLUSH_MS: u64 = 50;
+
+/// Pre-compiled regex set for Ollama stall detection (planning phrases).
+/// Built once on first use to avoid re-scanning with 12 literal `.contains()`
+/// calls every step.
+static STALL_PATTERN_SET: std::sync::OnceLock<RegexSet> = std::sync::OnceLock::new();
+
+/// Returns a reference to the lazily-initialised stall-detection [`RegexSet`].
+fn stall_pattern_set() -> &'static RegexSet {
+    STALL_PATTERN_SET.get_or_init(|| {
+        RegexSet::new([
+            r"Let me",
+            r"I'll",
+            r"I will",
+            r"I'm going to",
+            r"let me",
+            r"start by",
+            r"begin by",
+            r"First,",
+            r"First I",
+            r"exploring",
+            r"examine",
+            r"analyze",
+        ])
+        .expect("stall patterns are valid regex")
+    })
+}
+
+/// Buffers incoming text and reasoning deltas from the LLM stream and
+/// flushes them to the event bus in batches. This reduces per-token
+/// allocation and channel-send overhead by coalescing small deltas.
+///
+/// Tool-call events (`ToolCallStart`, `ToolCallEnd`) are forwarded
+/// immediately so that sequencing is preserved.
+struct StreamBuffer {
+    text: String,
+    reasoning: String,
+    flush_size: usize,
+    flush_interval: Duration,
+    last_flush: Instant,
+}
+
+impl StreamBuffer {
+    fn new() -> Self {
+        Self {
+            text: String::new(),
+            reasoning: String::new(),
+            flush_size: STREAM_BUFFER_SIZE_THRESHOLD,
+            flush_interval: Duration::from_millis(STREAM_BUFFER_FLUSH_MS),
+            last_flush: Instant::now(),
+        }
+    }
+
+    /// Append a text delta. Returns `Some(text)` if a flush is needed.
+    fn push_text(&mut self, text: &str) -> Option<String> {
+        self.text.push_str(text);
+        if self.should_flush() {
+            Some(self.drain_text())
+        } else {
+            None
+        }
+    }
+
+    /// Append a reasoning delta. Returns `Some(reasoning)` if a flush is needed.
+    fn push_reasoning(&mut self, text: &str) -> Option<String> {
+        self.reasoning.push_str(text);
+        if self.should_flush() {
+            Some(self.drain_reasoning())
+        } else {
+            None
+        }
+    }
+
+    /// Drain any remaining buffered text.
+    fn drain_text(&mut self) -> String {
+        std::mem::take(&mut self.text)
+    }
+
+    /// Drain any remaining buffered reasoning text.
+    fn drain_reasoning(&mut self) -> String {
+        std::mem::take(&mut self.reasoning)
+    }
+
+    fn should_flush(&self) -> bool {
+        self.text.len() >= self.flush_size
+            || self.reasoning.len() >= self.flush_size
+            || self.last_flush.elapsed() >= self.flush_interval
+    }
+
+    fn reset_timer(&mut self) {
+        self.last_flush = Instant::now();
+    }
+}
 
 /// Additional system-prompt guidance injected for Ollama sessions.
 pub const OLLAMA_TOOL_GUIDANCE: &str = "\n## Tool Use — Critical Instructions\n\n\
@@ -324,21 +430,20 @@ pub(crate) async fn check_permission_with_prompt(
         || permission == "edit"
         || permission == "write"
     {
-        use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
-
-        let denylist = get_compiled_denylist();
-        let allowlist = get_compiled_allowlist();
-
-        // Denylist takes precedence - immediately reject
-        if denylist.is_match(resource) {
-            return Ok(PermissionAction::Deny);
-        }
-
-        // Allowlist - immediately approve
-        if allowlist.is_match(resource) {
-            return Ok(PermissionAction::Allow);
-        }
-    }
+              use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
+        
+                  let denylist = get_compiled_denylist();
+                  let allowlist = get_compiled_allowlist();
+        
+                  // Denylist takes precedence - immediately reject
+                  if denylist.is_match(resource) {
+                      return Ok(PermissionAction::Deny);
+                  }
+        
+                  // Allowlist - immediately approve
+                  if allowlist.is_match(resource) {
+                      return Ok(PermissionAction::Allow);
+                  }    }
 
     // 1. Check PermissionChecker first
     let action = {
@@ -441,10 +546,13 @@ pub struct SessionProcessor {
     pub code_index: std::sync::OnceLock<Arc<ragent_codeindex::CodeIndex>>,
     /// Active spec ID for context injection into agent prompts.
     /// Set via `/spec activate` in the TUI or via programmatic API.
-    pub active_spec: std::sync::Mutex<Option<String>>,
+    pub active_spec: tokio::sync::RwLock<Option<String>>,
     /// Optional spec manager for reading and updating specifications.
     /// Uses `OnceLock` so it can be set after the processor is constructed.
     pub spec_manager: std::sync::OnceLock<Arc<ragent_specs::SpecManager>>,
+    /// Cached tool definitions for the agent loop. Populated after MCP client
+    /// registration via [`set_mcp_client`] and invalidated when tools change.
+    pub cached_tool_definitions: parking_lot::RwLock<Option<Arc<Vec<ToolDefinition>>>>,
     /// LLM stream configuration (timeouts, retries, backoff).
     pub stream_config: crate::StreamConfig,
     /// Memory extraction engine for automatic memory candidate generation.
@@ -502,6 +610,27 @@ impl SessionProcessor {
         }
 
         let _ = self.mcp_client.set(client);
+        self.invalidate_tool_cache();
+    }
+
+    /// Invalidate the cached tool definitions so they are rebuilt on the next loop step.
+    pub fn invalidate_tool_cache(&self) {
+        let mut guard = self.cached_tool_definitions.write();
+        *guard = None;
+    }
+
+    /// Return cached tool definitions, populating the cache if necessary.
+    fn get_cached_tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
+        {
+            let guard = self.cached_tool_definitions.read();
+            if let Some(ref defs) = *guard {
+                return defs.clone();
+            }
+        }
+        let defs = Arc::new(self.tool_registry.definitions());
+        let mut guard = self.cached_tool_definitions.write();
+        *guard = Some(defs.clone());
+        defs
     }
 
     /// Run a blocking storage operation on a dedicated thread to avoid
@@ -878,7 +1007,7 @@ impl SessionProcessor {
         }
 
         // Inject active spec context into the system prompt.
-        let active_spec_opt = self.active_spec.lock().unwrap().clone();
+        let active_spec_opt = self.active_spec.read().await.clone();
         if let Some(ref active_spec_id) = active_spec_opt {
             if let Some(ref spec_mgr) = self.spec_manager.get() {
                 if let Some(spec_id) = ragent_specs::spec::SpecId::new(active_spec_id) {
@@ -931,28 +1060,46 @@ impl SessionProcessor {
             self.session_manager.get_messages(session_id)?
         };
 
-        // Get model's context window size for potential compaction
-        let context_window = self
-            .provider_registry
-            .get(&model_ref.provider_id)
-            .and_then(|p| {
-                p.default_models()
-                    .into_iter()
-                    .find(|m| m.id == model_ref.model_id)
-            })
-            .map(|m| m.context_window)
-            .unwrap_or(128_000); // Default fallback                            
-        // Compact history if needed to prevent context window overflow
-        // This ensures tool calls are atomic and not split across boundaries
-        let compacted_history = {
-            let _scope = profiler.scope("history.compact");
-            compact_history_with_atomic_tool_calls(
-                &history,
-                context_window,
-                8192, // Default max output tokens
-            )
-        };
-
+                  // Get model's context window size for potential compaction
+                  let context_window = self
+                      .provider_registry
+                      .get(&model_ref.provider_id)
+                      .and_then(|p| {
+                          p.default_models()
+                              .into_iter()
+                              .find(|m| m.id == model_ref.model_id)
+                      })
+                      .map(|m| m.context_window)
+                      .unwrap_or(128_000); // Default fallback                            
+                  // Compact history if needed to prevent context window overflow.
+                  // For small histories that fit within the window we skip the expensive
+                  // atomic-pair compaction entirely.
+                  let compacted_history = {
+                      let _scope = profiler.scope("history.compact");
+                      let max_tokens = context_window.saturating_sub(1000);
+                      let quick_total_tokens: usize = history.iter().map(|m| {
+                          let text_len: usize = m.parts.iter().map(|p| match p {
+                              MessagePart::Text { text } => text.len(),
+                              MessagePart::ToolCall { tool, state, .. } => {
+                                  tool.len()
+                                      + state.output.as_ref().and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0)
+                                      + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                              }
+                              MessagePart::Image { .. } => 1000,
+                              MessagePart::Reasoning { text } => text.len(),
+                          }).sum();
+                          text_len / 4 + 10
+                      }).sum();
+                      if quick_total_tokens <= max_tokens {
+                          history.to_vec()
+                      } else {
+                          compact_history_with_atomic_tool_calls(
+                              &history,
+                              context_window,
+                              8192, // Default max output tokens
+                          )
+                      }
+                  };
         let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.
         // Note: history already contains the user message we just stored,
@@ -980,8 +1127,8 @@ impl SessionProcessor {
 
                 let init_request = ChatRequest {
                     model: model_ref.model_id.clone(),
-                    messages: init_messages,
-                    tools: Vec::new(),
+                    messages: Arc::new(init_messages),
+                    tools: Arc::new(Vec::new()),
                     temperature: agent.temperature,
                     top_p: agent.top_p,
                     max_tokens: Some(200),
@@ -1050,19 +1197,18 @@ impl SessionProcessor {
         let max_steps = agent.max_steps.unwrap_or(500) as usize;
         // Reset step counter for this session so warnings are relative to this run.
         self.event_bus.set_step(session_id, 0);
-        // Single-step agents (e.g. "chat") don't use tools — omit definitions
-        // so providers aren't confused by unused tool schemas.
-        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> =
-            std::sync::Arc::new(if max_steps <= 1 {
-                Vec::new()
-            } else {
-                self.tool_registry.definitions()
-            });
-        let mut assistant_parts: Vec<MessagePart> = Vec::new();
-        let mut agent_switch_requested = false;
-        let mut task_complete_requested = false;
-        let mut task_completeness_nudged = false;
-
+                  // Single-step agents (e.g. "chat") don't use tools — omit definitions
+                  // so providers aren't confused by unused tool schemas.
+                  let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> =
+                      if max_steps <= 1 {
+                          std::sync::Arc::new(Vec::new())
+                      } else {
+                          self.get_cached_tool_definitions()
+                      };        let mut assistant_parts: Vec<MessagePart> = Vec::new();
+                  let mut agent_switch_requested = false;
+                  let mut task_complete_requested = false;
+                  let mut task_completeness_nudged = false;
+                  let mut last_interim_hash: Option<u64> = None;
         // Timing tracking for the agent loop
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
@@ -1179,14 +1325,13 @@ impl SessionProcessor {
                         }
                     }
 
-                    // Build request (fresh for each attempt)
-                    let attempt_request = ChatRequest {
-                        model: model_ref.model_id.clone(),
-                        messages: chat_messages.clone(),
-                        tools: (*tool_definitions).clone(),
-                        temperature: agent.temperature,
-                        top_p: agent.top_p,
-                        max_tokens: None,
+                                                                // Build request (fresh for each attempt)
+                                                                let attempt_request = ChatRequest {
+                                                                    model: model_ref.model_id.clone(),
+                                                                    messages: Arc::new(chat_messages.clone()),
+                                                                    tools: tool_definitions.clone(),
+                                                                    temperature: agent.temperature,
+                                                                    top_p: agent.top_p,                        max_tokens: None,
                         system: Some(system_prompt.clone()),
                         options: agent.options.clone(),
                         session_id: Some(session_id.to_string()),
@@ -1237,94 +1382,128 @@ impl SessionProcessor {
                         }
                     };
 
-                    let mut had_retryable_error = false;
-                    let mut first_stream_event_pending = true;
-                    {
-                        let _scope = profiler.scope("loop.llm.stream");
-                        loop {
-                            let wait_started = Instant::now();
-                            let next_event = {
-                                let _scope = profiler.scope("loop.llm.wait_next_event");
-                                stream.next().await
-                            };
-                            if first_stream_event_pending {
-                                if next_event.is_some() {
-                                    profiler.record_duration(
-                                        "loop.llm.first_event_wait",
-                                        wait_started.elapsed(),
-                                    );
-                                }
-                                first_stream_event_pending = false;
-                            }
-                            let Some(event) = next_event else {
-                                break;
-                            };
-
-                            match event {
-                                StreamEvent::TextDelta { text } => {
-                                    let _scope = profiler.scope("loop.llm.handle.text_delta");
-                                    self.event_bus.publish(Event::TextDelta {
-                                        session_id: session_id.to_string(),
-                                        text: text.clone(),
-                                    });
-                                    text_buffer.push_str(&text);
-                                }
-                                StreamEvent::ReasoningStart => {
-                                    let _scope = profiler.scope("loop.llm.handle.reasoning_start");
-                                }
-                                StreamEvent::ReasoningDelta { text } => {
-                                    let _scope = profiler.scope("loop.llm.handle.reasoning_delta");
-                                    self.event_bus.publish(Event::ReasoningDelta {
-                                        session_id: session_id.to_string(),
-                                        text: text.clone(),
-                                    });
-                                    reasoning_buffer.push_str(&text);
-                                }
-                                StreamEvent::ReasoningEnd => {
-                                    let _scope = profiler.scope("loop.llm.handle.reasoning_end");
-                                }
-                                StreamEvent::ToolCallStart { id, name } => {
-                                    let _scope = profiler.scope("loop.llm.handle.tool_call_start");
-                                    tool_calls.push(PendingToolCall {
-                                        id,
-                                        name,
-                                        args_json: String::new(),
-                                    });
-                                }
-                                StreamEvent::ToolCallDelta { id, args_json } => {
-                                    let _scope = profiler.scope("loop.llm.handle.tool_call_delta");
-                                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
-                                        tc.args_json.push_str(&args_json);
-                                    }
-                                }
-                                StreamEvent::ToolCallEnd { id } => {
-                                    let _scope = profiler.scope("loop.llm.handle.tool_call_end");
-                                    if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
-                                        saw_completed_tool_call = true;
-                                        self.event_bus.publish(Event::ToolCallArgs {
-                                            session_id: session_id.to_string(),
-                                            call_id: tc.id.clone(),
-                                            tool: tc.name.clone(),
-                                            args: tc.args_json.clone(),
-                                        });
-                                    }
-                                }
-                                StreamEvent::Usage {
-                                    input_tokens,
-                                    output_tokens,
-                                } => {
-                                    let _scope = profiler.scope("loop.llm.handle.usage");
-                                    last_input_tokens = input_tokens;
-                                    last_output_tokens = output_tokens;
-                                    self.event_bus.publish(Event::TokenUsage {
-                                        session_id: session_id.to_string(),
-                                        input_tokens,
-                                        output_tokens,
-                                    });
-                                }
-                                StreamEvent::Error { message } => {
-                                    let _scope = profiler.scope("loop.llm.handle.error");
-                                    debug!(
+                                                                let mut had_retryable_error = false;
+                                                                let mut first_stream_event_pending = true;
+                                                                let mut stream_buffer = StreamBuffer::new();                                          {
+                                              let _scope = profiler.scope("loop.llm.stream");
+                                              loop {
+                                                  let wait_started = Instant::now();
+                                                  let next_event = {
+                                                      let _scope = profiler.scope("loop.llm.wait_next_event");
+                                                      stream.next().await
+                                                  };
+                                                  if first_stream_event_pending {
+                                                      if next_event.is_some() {
+                                                          profiler.record_duration(
+                                                              "loop.llm.first_event_wait",
+                                                              wait_started.elapsed(),
+                                                          );
+                                                      }
+                                                      first_stream_event_pending = false;
+                                                  }
+                                                                                let Some(event) = next_event else {
+                                                                                    // Stream ended — flush any remaining buffered text.
+                                                                                    let text = stream_buffer.drain_text();
+                                                                                    if !text.is_empty() {
+                                                                                        self.event_bus.publish(Event::TextDelta {
+                                                                                            session_id: session_id.to_string(),
+                                                                                            text,
+                                                                                        });
+                                                                                    }
+                                                                                    let reasoning = stream_buffer.drain_reasoning();
+                                                                                    if !reasoning.is_empty() {
+                                                                                        self.event_bus.publish(Event::ReasoningDelta {
+                                                                                            session_id: session_id.to_string(),
+                                                                                            text: reasoning,
+                                                                                        });
+                                                                                    }
+                                                                                    break;
+                                                                                };                    
+                                                  match event {
+                                                      StreamEvent::TextDelta { text } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.text_delta");
+                                                          if let Some(flushed) = stream_buffer.push_text(&text) {
+                                                              self.event_bus.publish(Event::TextDelta {
+                                                                  session_id: session_id.to_string(),
+                                                                  text: flushed,
+                                                              });
+                                                              stream_buffer.reset_timer();
+                                                          }
+                                                          text_buffer.push_str(&text);
+                                                      }
+                                                      StreamEvent::ReasoningStart => {
+                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_start");
+                                                      }
+                                                      StreamEvent::ReasoningDelta { text } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_delta");
+                                                          if let Some(flushed) = stream_buffer.push_reasoning(&text) {
+                                                              self.event_bus.publish(Event::ReasoningDelta {
+                                                                  session_id: session_id.to_string(),
+                                                                  text: flushed,
+                                                              });
+                                                              stream_buffer.reset_timer();
+                                                          }
+                                                          reasoning_buffer.push_str(&text);
+                                                      }
+                                                      StreamEvent::ReasoningEnd => {
+                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_end");
+                                                      }
+                                                                                        StreamEvent::ToolCallStart { id, name } => {
+                                                                                            let _scope = profiler.scope("loop.llm.handle.tool_call_start");
+                                                                                            // Flush text before tool call starts for correct sequencing.
+                                                                                            let text = stream_buffer.drain_text();
+                                                                                            if !text.is_empty() {
+                                                                                                self.event_bus.publish(Event::TextDelta {
+                                                                                                    session_id: session_id.to_string(),
+                                                                                                    text,
+                                                                                                });
+                                                                                            }
+                                                                                            let reasoning = stream_buffer.drain_reasoning();
+                                                                                            if !reasoning.is_empty() {
+                                                                                                self.event_bus.publish(Event::ReasoningDelta {
+                                                                                                    session_id: session_id.to_string(),
+                                                                                                    text: reasoning,
+                                                                                                });
+                                                                                            }
+                                                                                            stream_buffer.reset_timer();                                                          tool_calls.push(PendingToolCall {
+                                                              id,
+                                                              name,
+                                                              args_json: String::new(),
+                                                          });
+                                                      }
+                                                      StreamEvent::ToolCallDelta { id, args_json } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.tool_call_delta");
+                                                          if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
+                                                              tc.args_json.push_str(&args_json);
+                                                          }
+                                                      }
+                                                      StreamEvent::ToolCallEnd { id } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.tool_call_end");
+                                                          if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                                                              saw_completed_tool_call = true;
+                                                              self.event_bus.publish(Event::ToolCallArgs {
+                                                                  session_id: session_id.to_string(),
+                                                                  call_id: tc.id.clone(),
+                                                                  tool: tc.name.clone(),
+                                                                  args: tc.args_json.clone(),
+                                                              });
+                                                          }
+                                                      }
+                                                      StreamEvent::Usage {
+                                                          input_tokens,
+                                                          output_tokens,
+                                                      } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.usage");
+                                                          last_input_tokens = input_tokens;
+                                                          last_output_tokens = output_tokens;
+                                                          self.event_bus.publish(Event::TokenUsage {
+                                                              session_id: session_id.to_string(),
+                                                              input_tokens,
+                                                              output_tokens,
+                                                          });
+                                                      }
+                                                      StreamEvent::Error { message } => {
+                                                          let _scope = profiler.scope("loop.llm.handle.error");                                    debug!(
                                         "Stream error (attempt {}): {}",
                                         attempt + 1,
                                         redact_secrets(&message)
@@ -1450,21 +1629,9 @@ impl SessionProcessor {
                         && trimmed_text
                             .chars()
                             .all(|c| c == '.' || c == ' ' || c == '\n');
-                    let looks_like_planning = !text_buffer.is_empty()
-                        && !tool_definitions.is_empty()
-                        && (text_buffer.contains("Let me")
-                            || text_buffer.contains("I'll")
-                            || text_buffer.contains("I will")
-                            || text_buffer.contains("I'm going to")
-                            || text_buffer.contains("let me")
-                            || text_buffer.contains("start by")
-                            || text_buffer.contains("begin by")
-                            || text_buffer.contains("First,")
-                            || text_buffer.contains("First I")
-                            || text_buffer.contains("exploring")
-                            || text_buffer.contains("examine")
-                            || text_buffer.contains("analyze"));
-                    // Only nudge on early steps to avoid infinite loops.
+                                          let looks_like_planning = !text_buffer.is_empty()
+                                              && !tool_definitions.is_empty()
+                                              && stall_pattern_set().is_match(&text_buffer);                    // Only nudge on early steps to avoid infinite loops.
                     // Stall responses (dots-only) are nudged for any provider; planning
                     // text nudges are limited to Ollama which commonly narrates before acting.
                     let should_nudge_stall = looks_like_stall && step <= 8;
@@ -1639,10 +1806,10 @@ impl SessionProcessor {
                             .cloned()
                             .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
                         code_index: self.code_index.get().cloned(),
-                        spec_manager: self.spec_manager.get().cloned(),
-                        active_spec_id: self.active_spec.lock().unwrap().clone(),
-                    };
-                    let tc_clone = tc.clone();
+                                                  spec_manager: self.spec_manager.get().cloned(),
+                                                  active_spec_id: self.active_spec.read().await.clone(),
+                                                  config: Some(Arc::new(session_config.clone())),
+                                              };                    let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
                     let event_bus = self.event_bus.clone();
@@ -2060,7 +2227,7 @@ impl SessionProcessor {
                 // After successful file write tools, automatically mark linked
                 // in_progress tasks as completed on the active spec.
                 {
-                    let active_spec_id = self.active_spec.lock().unwrap().clone();
+                    let active_spec_id = self.active_spec.read().await.clone();
                     if let Some(ref spec_id_str) = active_spec_id {
                         if let Some(ref spec_mgr) = self.spec_manager.get() {
                                                           if tool_calls.iter().any(|tc| {
@@ -2162,17 +2329,48 @@ impl SessionProcessor {
                 }
             }
 
-            // Persist intermediate progress so that output inspectors (e.g.
-            // the teammate output overlay) can show steps while the agent is
-            // still running.  Fire-and-forget on a blocking thread.
-            {
-                let _scope = profiler.scope("storage.assistant_interim.update");
-                let mut interim =
-                    Message::new(session_id, Role::Assistant, assistant_parts.clone());
-                interim.id = assistant_msg_id.clone();
-                let _ = self.storage_op(move |s| s.update_message(&interim)).await;
-            }
-        }
+                          // Persist intermediate progress so that output inspectors (e.g.
+                          // the teammate output overlay) can show steps while the agent is
+                          // still running.  Fire-and-forget on a blocking thread.
+                          {
+                              let _scope = profiler.scope("storage.assistant_interim.update");
+                              // Compute a cheap content hash so we skip the blocking storage
+                              // write when the assistant_parts haven't changed since the last
+                              // interim update (e.g. while waiting for the LLM).
+                              let current_hash = {
+                                  use std::hash::{Hash, Hasher};
+                                  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                                  for part in &assistant_parts {
+                                      std::mem::discriminant(part).hash(&mut hasher);
+                                      match part {
+                                          MessagePart::Text { text } => text.hash(&mut hasher),
+                                          MessagePart::ToolCall { tool, call_id, state } => {
+                                              tool.hash(&mut hasher);
+                                              call_id.hash(&mut hasher);
+                                              state.input.to_string().hash(&mut hasher);
+                                              if let Some(out) = &state.output {
+                                                  out.to_string().hash(&mut hasher);
+                                              }
+                                              if let Some(err) = &state.error {
+                                                  err.hash(&mut hasher);
+                                              }
+                                          }
+                                          MessagePart::Reasoning { text } => text.hash(&mut hasher),
+                                                                                      MessagePart::Image(img) => {
+                                                                                          img.mime_type.hash(&mut hasher);
+                                                                                          img.path.hash(&mut hasher);
+                                                                                      }                                      }
+                                  }
+                                  hasher.finish()
+                              };
+                              if last_interim_hash != Some(current_hash) {
+                                  let mut interim =
+                                      Message::new(session_id, Role::Assistant, assistant_parts.clone());
+                                  interim.id = assistant_msg_id.clone();
+                                  let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+                                  last_interim_hash = Some(current_hash);
+                              }
+                          }        }
 
         // 6. Final save of assistant message (update the pre-created placeholder).
         let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
@@ -2340,8 +2538,8 @@ impl SessionProcessor {
         }];
         let init_request = ChatRequest {
             model: model_ref.model_id.clone(),
-            messages: init_messages,
-            tools: Vec::new(),
+            messages: Arc::new(init_messages),
+            tools: Arc::new(Vec::new()),
             temperature: agent.temperature,
             top_p: agent.top_p,
             max_tokens: Some(64),
@@ -2793,16 +2991,23 @@ fn trailing_at_char_boundary(text: &str, max_chars: usize) -> &str {
     &text[byte_idx..]
 }
 
-fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&Value>) -> String {
-    if content.chars().count() <= MAX_TOOL_RESULT_CHARS_FOR_LLM {
+/// Truncate tool-result content so it fits within the LLM context window.
+///
+/// Uses a fast byte-length threshold (`content.len()`) for the common
+/// no-truncation path, avoiding an expensive UTF-8 decode.  When truncation
+/// is required the text is decoded once and the char count is reused.
+pub fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&Value>) -> String {
+    // Fast-path: use byte length for the threshold check (safe because we
+    // truncate anyway — a few bytes off is fine). Only decode UTF-8 once
+    // when we actually need to truncate.
+    if content.len() <= MAX_TOOL_RESULT_BYTES_FOR_LLM {
         return content.to_string();
     }
 
     let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
     let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
-    let omitted_chars = content
-        .chars()
-        .count()
+    let total_chars = content.chars().count();
+    let omitted_chars = total_chars
         .saturating_sub(head.chars().count() + tail.chars().count());
 
     let line_info = metadata
@@ -2816,17 +3021,58 @@ fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&Valu
         .unwrap_or_default();
 
     format!(
-        "[tool result truncated for context: tool={tool}, {} chars{line_info}. \
+        "[tool result truncated for context: tool={tool}, {total_chars} chars{line_info}. \
          Showing start and end segments; request narrower output if more detail is needed.]\n\n\
-         {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}",
-        content.chars().count()
+         {head}\n\n[... {omitted_chars} chars omitted ...]\n\n{tail}"
     )
 }
 
+/// Approximate the serialized JSON size of a [`ChatRequest`] without
+/// actually serialising it.
+///
+/// Sums:
+/// - a fixed per-request overhead (~80 bytes for JSON braces / field names)
+/// - each message (role + content string lengths, ~40 bytes overhead)
+/// - each tool definition (name + description + parameters string lengths, ~60 bytes overhead)
+/// - the system prompt string length
+pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
+    let mut total: u64 = 80; // fixed JSON wrapper overhead
+    total += request.model.len() as u64;
+    total += request
+        .messages
+        .iter()
+        .map(|m| {
+            let content_len: usize = match &m.content {
+                ChatContent::Text(t) => t.len(),
+                ChatContent::Parts(parts) => parts.iter().map(|p| match p {
+                    ContentPart::Text { text } => text.len(),
+                    ContentPart::ToolUse { id, name, input } => {
+                        id.len() + name.len() + input.to_string().len()
+                    }
+                    ContentPart::ToolResult {
+                        tool_use_id,
+                        content,
+                    } => tool_use_id.len() + content.len(),
+                    ContentPart::ImageUrl { url } => url.len(),
+                }).sum(),
+            };
+            content_len + m.role.len() + 40
+        })
+        .sum::<usize>() as u64;
+    total += request
+        .tools
+        .iter()
+        .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len() + 60)
+        .sum::<usize>() as u64;
+    if let Some(sys) = &request.system {
+        total += sys.len() as u64;
+    }
+    total
+}
+
 fn chat_request_payload_bytes(request: &ChatRequest) -> u64 {
-    serde_json::to_vec(request)
-        .map(|payload| payload.len() as u64)
-        .unwrap_or(0)
+    // Kept for backward compatibility — now delegates to the cheap estimator.
+    estimate_request_bytes(request)
 }
 
 pub(crate) fn is_token_overflow_error_message(error_msg: &str) -> bool {
@@ -3211,11 +3457,11 @@ mod tests {
     fn test_chat_request_payload_bytes_counts_serialized_request() {
         let request = ChatRequest {
             model: "demo".to_string(),
-            messages: vec![ChatMessage {
+            messages: Arc::new(vec![ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: Vec::new(),
+            }]),
+            tools: Arc::new(Vec::new()),
             temperature: Some(0.2),
             top_p: None,
             max_tokens: Some(64),
@@ -3314,11 +3560,11 @@ mod tests {
 
         let request = ChatRequest {
             model: "demo".to_string(),
-            messages: vec![ChatMessage {
+            messages: Arc::new(vec![ChatMessage {
                 role: "user".to_string(),
                 content: ChatContent::Text("hello".to_string()),
-            }],
-            tools: tool_definitions,
+            }]),
+            tools: Arc::new(tool_definitions),
             temperature: Some(0.2),
             top_p: None,
             max_tokens: None,
