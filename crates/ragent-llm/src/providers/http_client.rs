@@ -80,10 +80,12 @@ pub fn create_streaming_http_client() -> Client {
 ///
 /// Retries on:
 /// - 5xx server errors
+/// - 429 Too Many Requests (rate limited) — respects `Retry-After` header
 /// - Connection errors
 /// - Timeout errors
 ///
 /// Uses exponential backoff: 1s, 2s, 4s, 8s (max 4 retries)
+/// For 429 responses, uses the `Retry-After` header value when present.
 ///
 /// # Errors
 ///
@@ -117,17 +119,6 @@ where
     let mut last_error = None;
 
     for attempt in 0..=max_retries {
-        if attempt > 0 {
-            let delay = Duration::from_millis(500 * (1 << (attempt - 1).min(4)));
-            tracing::debug!(
-                attempt = attempt,
-                max_retries = max_retries,
-                delay_ms = delay.as_millis() as u64,
-                "Retrying HTTP request after transient failure"
-            );
-            tokio::time::sleep(delay).await;
-        }
-
         match request_fn().await {
             Ok(response) => {
                 let status = response.status();
@@ -141,28 +132,102 @@ where
                         attempt + 1,
                         body
                     ));
+                    // Exponential backoff for 5xx
+                    let delay = Duration::from_millis(500 * (1 << (attempt).min(4)));
+                    tracing::debug!(
+                        attempt = attempt + 1,
+                        max_retries = max_retries,
+                        delay_ms = delay.as_millis() as u64,
+                        status = %status,
+                        "Retrying HTTP request after server error"
+                    );
+                    tokio::time::sleep(delay).await;
                     continue;
                 }
 
-                // For client errors, don't retry
+                // Special-case 429 Too Many Requests as retryable
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < max_retries {
+                    let retry_after = parse_retry_after(response.headers());
+                    let body = response.text().await.unwrap_or_default();
+                    last_error = Some(anyhow::anyhow!(
+                        "HTTP 429 Rate limited (attempt {}): {}",
+                        attempt + 1,
+                        body
+                    ));
+                    let delay = retry_after
+                        .unwrap_or_else(|| Duration::from_secs(2_u64.pow(attempt.min(4))));
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_retries = max_retries,
+                        delay_secs = delay.as_secs(),
+                        retry_after_header = ?retry_after,
+                        "Retrying HTTP request after rate limit (429)"
+                    );
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+
+                // For other client errors, don't retry
                 if status.is_client_error() {
                     let body = response.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!("HTTP {} (not retryable): {}", status, body));
+                    return Err(anyhow::anyhow!(
+                        "HTTP {} (not retryable): {}",
+                        status,
+                        body
+                    ));
                 }
 
                 return Ok(response);
             }
             Err(e) if is_retryable_error(&e) && attempt < max_retries => {
                 last_error = Some(anyhow::anyhow!("Request failed: {}", e));
+                let delay = Duration::from_millis(500 * (1 << (attempt).min(4)));
+                tracing::debug!(
+                    attempt = attempt + 1,
+                    max_retries = max_retries,
+                    delay_ms = delay.as_millis() as u64,
+                    error = %e,
+                    "Retrying HTTP request after transient failure"
+                );
+                tokio::time::sleep(delay).await;
                 continue;
             }
             Err(e) => {
-                return Err(anyhow::anyhow!("Request failed (not retryable): {}", e));
+                return Err(anyhow::anyhow!(
+                    "Request failed (not retryable): {}",
+                    e
+                ));
             }
         }
     }
 
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("All retries exhausted")))
+}
+
+/// Parse the `Retry-After` header from an HTTP response.
+///
+/// Supports both:
+/// - `Retry-After: <seconds>` (integer delay in seconds)
+/// - `Retry-After: <http-date>` (RFC 7231 date, ignored and falls back to default)
+///
+/// Returns `None` if the header is missing or cannot be parsed as seconds.
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers.get("retry-after")?;
+    let value_str = value.to_str().ok()?;
+
+    // Try parsing as integer seconds first
+    if let Ok(seconds) = value_str.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+
+    // Try parsing as HTTP date (e.g. "Wed, 21 Oct 2025 07:28:00 GMT")
+    // For simplicity, we skip full date parsing and fall back to a default
+    // TODO: If needed, add chrono-based parsing here
+    tracing::debug!(
+        retry_after = %value_str,
+        "Retry-After header is HTTP-date, using default backoff"
+    );
+    None
 }
 
 /// Determines if an error is retryable.

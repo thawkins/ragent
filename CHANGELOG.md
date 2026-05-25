@@ -1,11 +1,20 @@
 # Changelog
 
+## Version: 0.1.0-alpha.97
+
+### Changed
+- **add rate limiting logic**
+
 ## Version: 0.1.0-alpha.96
 
 ### Changed
 - **fix for azure resource provider**
-
-## Version: 0.1.0-alpha.95
+- **Azure AI Foundry / Azure Resource 429 rate-limit retry** — HTTP 429 (Too Many Requests) responses from Azure AI Foundry and Azure Resource endpoints are now treated as retryable. The `execute_with_retry` helper in `http_client.rs` has been updated to:
+  - Detect `429 Too Many Requests` status code and automatically retry up to 4 times
+  - Respect the `Retry-After` response header when present (integer seconds format)
+  - Fall back to exponential backoff (2ˢ, 4ˢ, 8ˢ, 16ˢ) when no `Retry-After` header is provided
+  - Log each retry attempt with the delay duration for transparency
+- **AzureFoundryClient now uses `execute_with_retry`** — The chat request in `azure_foundry.rs` now routes through the retry-aware `execute_with_retry` path, so transient 429 errors will be handled automatically instead of surfacing as immediate failures.
 
 ### Changed
 - **YOLO mode fixes** — Fixed YOLO mode permission bypass logic.

@@ -238,38 +238,33 @@ impl LlmClient for AzureFoundryClient {
             model = %request.model,
             "[azure_foundry/{}] Sending chat request", request.model
         );
-        let response = crate::provider::http_client::create_streaming_http_client()
-            .post(&url)
-            .header("api-key", &self.api_key)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .inspect_err(|e| {
-                tracing::warn!(url = %url, error = %e, "Azure AI Foundry chat request failed");
-            })
-            .with_context(|| format!("Failed to send request to Azure AI Foundry at {url}"))?;
-        if !response.status().is_success() {
-            let status = response.status();
-            let body_text = response.text().await.unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "Failed to read Azure AI Foundry response body");
-                String::new()
-            });
-            tracing::warn!(
-                url = %url,
-                model = %request.model,
-                status = %status,
-                error = %body_text,
-                "Azure AI Foundry API error"
-            );
 
-            let msg = match status.as_u16() {
-                401 => "Azure AI Foundry API error (401): Invalid credentials. Check your AZURE_AI_FOUNDRY_API_KEY.".to_string(),
-                429 => "Azure AI Foundry API error (429): Rate limited. Please wait and retry.".to_string(),
-                _ => format!("Azure AI Foundry API error ({status}): {body_text}"),
-            };
-            bail!(msg);
-        }
+        let client = crate::provider::http_client::create_streaming_http_client();
+        let api_key = self.api_key.clone();
+        let url_for_error = url.clone();
+        let response = crate::provider::http_client::execute_with_retry(
+            move || {
+                let client = client.clone();
+                let api_key = api_key.clone();
+                let url = url.clone();
+                let body = body.clone();
+                async move {
+                    client
+                        .post(&url)
+                        .header("api-key", api_key)
+                        .header("content-type", "application/json")
+                        .json(&body)
+                        .send()
+                        .await
+                }
+            },
+            4,
+        )
+        .await
+        .inspect_err(|e| {
+            tracing::warn!(url = %url_for_error, error = %e, "Azure AI Foundry chat request failed after retries");
+        })
+        .with_context(|| format!("Failed to send request to Azure AI Foundry at {url_for_error}"))?;
 
         // Reuse the OpenAI SSE stream parser since the response format is identical
         self.inner.parse_sse_stream(response).await
