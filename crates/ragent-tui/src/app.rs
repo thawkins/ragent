@@ -523,12 +523,13 @@ impl App {
             active_bench_cancel: None,
             active_bench_progress: None,
             bench_last_summary: None,
-                          bench_last_workbooks: Vec::new(),
-                          bench_last_finished_at: None,
-                          bench_mock_outputs: None,
-                          opt_result: Arc::new(std::sync::Mutex::new(None)),
-                          db_path,
-                          internal_llm_config: app_config.internal_llm.clone(),            internal_llm_service,
+            bench_last_workbooks: Vec::new(),
+            bench_last_finished_at: None,
+            bench_mock_outputs: None,
+            opt_result: Arc::new(std::sync::Mutex::new(None)),
+            db_path,
+            internal_llm_config: app_config.internal_llm.clone(),
+            internal_llm_service,
             internal_llm_init_error,
             internal_llm_results: Arc::new(std::sync::Mutex::new(Vec::new())),
             internal_llm_chat_panel: None,
@@ -554,24 +555,26 @@ impl App {
             memory_browser: None,
             memory_browser_close_area: Rect::default(),
             memory_browser_area: Rect::default(),
-                          memory_block_count: 0,
-                          memory_entry_count: 0,
-                          memory_last_updated: None,
-                          memory_stats_last_refresh: std::time::Instant::now(),
-                                                      swarm_unblock_last_poll: std::time::Instant::now(),
-                                                      swarm_completion_last_poll: std::time::Instant::now(),
-                                                      theme_mode: crate::theme::ThemeMode::Default,            mouse_enabled: true,            status_history: StatusHistory::new(),
+            memory_block_count: 0,
+            memory_entry_count: 0,
+            memory_last_updated: None,
+            memory_stats_last_refresh: std::time::Instant::now(),
+            swarm_unblock_last_poll: std::time::Instant::now(),
+            swarm_completion_last_poll: std::time::Instant::now(),
+            theme_mode: crate::theme::ThemeMode::Default,
+            mouse_enabled: true,
+            status_history: StatusHistory::new(),
             needs_redraw: true,
             code_index: None,
             code_index_enabled: app_config.code_index.enabled,
             code_index_stats_cache: None,
             code_index_stats_last_refresh: std::time::Instant::now(),
             code_index_busy: false,
-                          code_index_watch_session: None,
-                          spec_manager: None,
-                          active_spec: None,
-                          config_paths: app_config.config_paths.clone(),
-                      }; // end Self { ... }        // Log any warnings from custom agent loading into the log panel
+            code_index_watch_session: None,
+            spec_manager: None,
+            active_spec: None,
+            config_paths: app_config.config_paths.clone(),
+        }; // end Self { ... }        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -2446,21 +2449,22 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
-                                  "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
-                                      .ok()
-                                      .filter(|k| !k.is_empty())
-                                      .map(|_| ProviderSource::EnvVar),
-                                  "azure_resource" => {
-                                      // Azure Resource is "configured" when azureresources.json exists
-                                      let config_path = dirs::home_dir()
-                                          .map(|h| h.join(".config").join("ragent").join("azureresources.json"))
-                                          .filter(|p| p.exists())
-                                          .or_else(|| {
-                                              let p = std::path::PathBuf::from(".ragent").join("azureresources.json");
-                                              if p.exists() { Some(p) } else { None }
-                                          });
-                                      config_path.map(|_| ProviderSource::Database)
-                                  }                _ => None,
+                "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
+                    .ok()
+                    .filter(|k| !k.is_empty())
+                    .map(|_| ProviderSource::EnvVar),
+                "azure_resource" => {
+                    // Azure Resource is "configured" when azureresources.json exists
+                    let config_path = dirs::home_dir()
+                        .map(|h| h.join(".config").join("ragent").join("azureresources.json"))
+                        .filter(|p| p.exists())
+                        .or_else(|| {
+                            let p = std::path::PathBuf::from(".ragent").join("azureresources.json");
+                            if p.exists() { Some(p) } else { None }
+                        });
+                    config_path.map(|_| ProviderSource::Database)
+                }
+                _ => None,
             };
             if let Some(source) = found {
                 push(pid, pname, source);
@@ -2698,21 +2702,22 @@ impl App {
                     "accessibility".to_string(),
                 ]
             }
-                          "spec" => {
-                              vec![
-                                  "help".to_string(),
-                                  "create".to_string(),
-                                  "list".to_string(),
-                                  "search".to_string(),
-                                  "validate".to_string(),
-                                  "status".to_string(),
-                                  "task".to_string(),
-                              ]
-                          }
-                          "config" => {
-                              vec!["show".to_string()]
-                          }
-                          _ => Vec::new(),        }
+            "spec" => {
+                vec![
+                    "help".to_string(),
+                    "create".to_string(),
+                    "list".to_string(),
+                    "search".to_string(),
+                    "validate".to_string(),
+                    "status".to_string(),
+                    "task".to_string(),
+                ]
+            }
+            "config" => {
+                vec!["show".to_string()]
+            }
+            _ => Vec::new(),
+        }
     }
     /// Get parameter hint for a command trigger.
     fn get_parameter_hint(&self, trigger: &str) -> Option<String> {
@@ -2728,10 +2733,11 @@ impl App {
                 "[show|help|on|off|chat|sessiontitle|promptcontext|memoryextraction] [on|off]"
                     .to_string(),
             ),
-                          "model" => Some("[show]".to_string()),
-                          "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),
-                          "config" => Some("[show]".to_string()),
-                          "thinking" => Some("[auto|off|low|medium|high]".to_string()),            "theme" => Some("[toggle|light|dark]".to_string()),
+            "model" => Some("[show]".to_string()),
+            "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),
+            "config" => Some("[show]".to_string()),
+            "thinking" => Some("[auto|off|low|medium|high]".to_string()),
+            "theme" => Some("[toggle|light|dark]".to_string()),
             "mouse" => Some("[on|off]".to_string()),
             "status" => Some("[clear]".to_string()),
             "help" => Some("[<command>]".to_string()),
@@ -3049,20 +3055,21 @@ impl App {
         let Some(step) = self.provider_setup.as_mut() else {
             return;
         };
-                  if let ProviderSetupStep::EnterKey {
-                      key_field,
-                      endpoint_field,
-                      active_field,
-                      ..
-                  } = step
-                  {
-                      let target = if *active_field == 1 {
-                          endpoint_field
-                      } else {
-                          key_field
-                      };
-                      target.insert_str(&clean);
-                  } else if let ProviderSetupStep::GitLabSetup {            url_input,
+        if let ProviderSetupStep::EnterKey {
+            key_field,
+            endpoint_field,
+            active_field,
+            ..
+        } = step
+        {
+            let target = if *active_field == 1 {
+                endpoint_field
+            } else {
+                key_field
+            };
+            target.insert_str(&clean);
+        } else if let ProviderSetupStep::GitLabSetup {
+            url_input,
             url_cursor,
             token_input,
             token_cursor,
@@ -3801,31 +3808,32 @@ impl App {
                 let cached = self.cached_model_entries("azure_foundry");
                 if let Some(api_key) = self.provider_api_key("azure_foundry") {
                     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                                                  let result = tokio::task::block_in_place(|| {
-                                                      handle.block_on(async {
-                                                          let cfg = ragent_core::config::Config::load().ok();
-                                                          let base_url = cfg
-                                                              .and_then(|c| c.provider.get("azure_foundry").cloned())
-                                                              .and_then(|p| p.api.and_then(|a| a.base_url))
-                                                              .or_else(|| {
-                                                                  self.storage
-                                                                      .get_setting("azure_foundry_api_base")
-                                                                      .ok()
-                                                                      .flatten()
-                                                                      .filter(|s| !s.is_empty())
-                                                              })
-                                                              .or_else(|| {
-                                                                  std::env::var("AZURE_AI_FOUNDRY_BASE")
-                                                                      .ok()
-                                                                      .filter(|s| !s.is_empty())
-                                                              })
-                                                              .unwrap_or_else(|| "https://services.ai.azure.com".to_string());
-                                                          ragent_core::provider::azure_foundry::discover_azure_foundry_models(
-                                                              &api_key, &base_url,
-                                                          )
-                                                          .await
-                                                      })
-                                                  });                        if let Ok(fetched) = result
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(async {
+                                let cfg = ragent_core::config::Config::load().ok();
+                                let base_url = cfg
+                                    .and_then(|c| c.provider.get("azure_foundry").cloned())
+                                    .and_then(|p| p.api.and_then(|a| a.base_url))
+                                    .or_else(|| {
+                                        self.storage
+                                            .get_setting("azure_foundry_api_base")
+                                            .ok()
+                                            .flatten()
+                                            .filter(|s| !s.is_empty())
+                                    })
+                                    .or_else(|| {
+                                        std::env::var("AZURE_AI_FOUNDRY_BASE")
+                                            .ok()
+                                            .filter(|s| !s.is_empty())
+                                    })
+                                    .unwrap_or_else(|| "https://services.ai.azure.com".to_string());
+                                ragent_core::provider::azure_foundry::discover_azure_foundry_models(
+                                    &api_key, &base_url,
+                                )
+                                .await
+                            })
+                        });
+                        if let Ok(fetched) = result
                             && !fetched.is_empty()
                         {
                             self.cache_discovered_models("azure_foundry", &fetched);
@@ -4098,60 +4106,65 @@ impl App {
             }
         );
 
-                  let config = self.current_config();
-                  let mut has_config_section = false;
-                  if let Some(provider_config) = config.provider.get(&prov.id) {
-                      has_config_section = true;
-                      report.push_str("\n## Configuration (ragent.json)\n\n");
-                      if !provider_config.env.is_empty() {
-                          report.push_str(&format!("- **Env vars:** {}\n", provider_config.env.join(", ")));
-                      }
-                      if let Some(ref api) = provider_config.api {
-                          if let Some(ref url) = api.base_url {
-                              report.push_str(&format!("- **API base URL:** {}\n", url));
-                          }
-                          if !api.headers.is_empty() {
-                              report.push_str("- **Headers:**\n");
-                              for (k, v) in &api.headers {
-                                  report.push_str(&format!("  - `{}`: `{}`\n", k, v));
-                              }
-                          }
-                      }
-                      if let Some(ref thinking) = provider_config.thinking {
-                          report.push_str(&format!("- **Thinking:** {:?}\n", thinking));
-                      }
-                      if !provider_config.models.is_empty() {
-                          report.push_str("\n**Models:**\n\n");
-                          for (id, cfg) in &provider_config.models {
-                              report.push_str(&format!("- `{}`", id));
-                              if let Some(ref n) = cfg.name {
-                                  report.push_str(&format!(" ({})", n));
-                              }
-                              report.push_str("\n");
-                          }
-                      }
-                      if !provider_config.options.is_empty() {
-                          report.push_str("\n**Options:**\n\n");
-                          for (k, v) in &provider_config.options {
-                              report.push_str(&format!("- `{}`: {}\n", k, v));
-                          }
-                      }
-                  }
-                  // Also show stored endpoint from settings (for generic_openai / azure_foundry)
-                  if prov.id == "generic_openai" || prov.id == "azure_foundry" {
-                      if let Ok(Some(stored_endpoint)) = self.storage.get_setting(&format!("{}_api_base", prov.id)) {
-                          if !stored_endpoint.is_empty() {
-                              if !has_config_section {
-                                  report.push_str("\n## Configuration\n\n");
-                                  has_config_section = true;
-                              }
-                              report.push_str(&format!("- **Stored endpoint:** {}\n", stored_endpoint));
-                          }
-                      }
-                  }
-                  if !has_config_section {
-                      report.push_str("\n_No custom configuration in ragent.json_\n");
-                  }
+        let config = self.current_config();
+        let mut has_config_section = false;
+        if let Some(provider_config) = config.provider.get(&prov.id) {
+            has_config_section = true;
+            report.push_str("\n## Configuration (ragent.json)\n\n");
+            if !provider_config.env.is_empty() {
+                report.push_str(&format!(
+                    "- **Env vars:** {}\n",
+                    provider_config.env.join(", ")
+                ));
+            }
+            if let Some(ref api) = provider_config.api {
+                if let Some(ref url) = api.base_url {
+                    report.push_str(&format!("- **API base URL:** {}\n", url));
+                }
+                if !api.headers.is_empty() {
+                    report.push_str("- **Headers:**\n");
+                    for (k, v) in &api.headers {
+                        report.push_str(&format!("  - `{}`: `{}`\n", k, v));
+                    }
+                }
+            }
+            if let Some(ref thinking) = provider_config.thinking {
+                report.push_str(&format!("- **Thinking:** {:?}\n", thinking));
+            }
+            if !provider_config.models.is_empty() {
+                report.push_str("\n**Models:**\n\n");
+                for (id, cfg) in &provider_config.models {
+                    report.push_str(&format!("- `{}`", id));
+                    if let Some(ref n) = cfg.name {
+                        report.push_str(&format!(" ({})", n));
+                    }
+                    report.push_str("\n");
+                }
+            }
+            if !provider_config.options.is_empty() {
+                report.push_str("\n**Options:**\n\n");
+                for (k, v) in &provider_config.options {
+                    report.push_str(&format!("- `{}`: {}\n", k, v));
+                }
+            }
+        }
+        // Also show stored endpoint from settings (for generic_openai / azure_foundry)
+        if prov.id == "generic_openai" || prov.id == "azure_foundry" {
+            if let Ok(Some(stored_endpoint)) =
+                self.storage.get_setting(&format!("{}_api_base", prov.id))
+            {
+                if !stored_endpoint.is_empty() {
+                    if !has_config_section {
+                        report.push_str("\n## Configuration\n\n");
+                        has_config_section = true;
+                    }
+                    report.push_str(&format!("- **Stored endpoint:** {}\n", stored_endpoint));
+                }
+            }
+        }
+        if !has_config_section {
+            report.push_str("\n_No custom configuration in ragent.json_\n");
+        }
         let models = self.models_for_provider(&prov.id);
         if !models.is_empty() {
             report.push_str("\n## Available Models\n\n");
@@ -5073,211 +5086,220 @@ impl App {
                     }
                 }
             }
-                          "agents" => {
-                              let mut output = String::from("From: /agents\n\n**Built-in Agents**\n\n");
-            
-                              let custom_names: std::collections::HashSet<String> = self
-                                  .custom_agent_defs
-                                  .iter()
-                                  .map(|d| d.agent_info.name.clone())
-                                  .collect();
-            
-                              for agent in &self.cycleable_agents {
-                                  let is_custom =
-                                      custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
-                                  if !is_custom {
-                                      let active = if agent.name == self.agent_name {
-                                          " ●"
-                                      } else {
-                                          ""
-                                      };
-                                      output.push_str(&format!(
-                                          "- `{}` — {}{}\n",
-                                          agent.name, agent.description, active
-                                      ));
-                                  }
-                              }
-            
-                              if self.custom_agent_defs.is_empty() {
-                                  output.push_str(
+            "agents" => {
+                let mut output = String::from("From: /agents\n\n**Built-in Agents**\n\n");
+
+                let custom_names: std::collections::HashSet<String> = self
+                    .custom_agent_defs
+                    .iter()
+                    .map(|d| d.agent_info.name.clone())
+                    .collect();
+
+                for agent in &self.cycleable_agents {
+                    let is_custom =
+                        custom_names.contains(&agent.name) || agent.name.starts_with("custom:");
+                    if !is_custom {
+                        let active = if agent.name == self.agent_name {
+                            " ●"
+                        } else {
+                            ""
+                        };
+                        output.push_str(&format!(
+                            "- `{}` — {}{}\n",
+                            agent.name, agent.description, active
+                        ));
+                    }
+                }
+
+                if self.custom_agent_defs.is_empty() {
+                    output.push_str(
                                       "\n**Custom Agents**\n\n*(none — place .json or .md files in .ragent/agents/ or ~/.ragent/agents/)*\n",
                                   );
-                              } else {
-                                  output.push_str("\n**Custom Agents**\n\n");
-                                  for def in &self.custom_agent_defs {
-                                      let scope = if def.is_project_local {
-                                          "project"
-                                      } else {
-                                          "global"
-                                      };
-                                      let name = &def.agent_info.name;
-                                      let desc = &def.agent_info.description;
-                                      let active = if *name == self.agent_name { " ●" } else { "" };
-                                      let fmt =
-                                          if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
-                                              "profile"
-                                          } else {
-                                              "oasf"
-                                          };
-                                      output.push_str(&format!(
-                                          "- `{}` — {} [{}/{}]{}\n",
-                                          name, desc, scope, fmt, active
-                                      ));
-                                  }
-                              }
-            
-                              if !self.custom_agent_diagnostics.is_empty() {
-                                  output.push_str("\n**Diagnostics**\n\n");
-                                  for diag in &self.custom_agent_diagnostics {
-                                      output.push_str(&format!("- ⚠ {}\n", diag));
-                                  }
-                              }
-            
-                              self.append_assistant_text(&output);
-            
-                              self.status = "agents".to_string();
-                          }                                        "context" => match args.trim() {
-                                            "refresh" => {
-                                                ragent_core::agent::clear_prompt_context_cache();
-                                                self.append_assistant_text(
+                } else {
+                    output.push_str("\n**Custom Agents**\n\n");
+                    for def in &self.custom_agent_defs {
+                        let scope = if def.is_project_local {
+                            "project"
+                        } else {
+                            "global"
+                        };
+                        let name = &def.agent_info.name;
+                        let desc = &def.agent_info.description;
+                        let active = if *name == self.agent_name { " ●" } else { "" };
+                        let fmt =
+                            if def.source_path.extension().and_then(|e| e.to_str()) == Some("md") {
+                                "profile"
+                            } else {
+                                "oasf"
+                            };
+                        output.push_str(&format!(
+                            "- `{}` — {} [{}/{}]{}\n",
+                            name, desc, scope, fmt, active
+                        ));
+                    }
+                }
+
+                if !self.custom_agent_diagnostics.is_empty() {
+                    output.push_str("\n**Diagnostics**\n\n");
+                    for diag in &self.custom_agent_diagnostics {
+                        output.push_str(&format!("- ⚠ {}\n", diag));
+                    }
+                }
+
+                self.append_assistant_text(&output);
+
+                self.status = "agents".to_string();
+            }
+            "context" => match args.trim() {
+                "refresh" => {
+                    ragent_core::agent::clear_prompt_context_cache();
+                    self.append_assistant_text(
                                                         "From: /context\n🔄 Context cache cleared — next message will recompute file tree, git status, and README."
                                                     );
-                                                self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
-                                                self.status = "context refreshed".to_string();
-                                            }
-                                            _ => {
-                                                self.append_assistant_text(
+                    self.push_log_no_agent(LogLevel::Info, "context cache cleared".to_string());
+                    self.status = "context refreshed".to_string();
+                }
+                _ => {
+                    self.append_assistant_text(
                                                         "From: /context\nUsage: `/context refresh` — clears cached file tree, git status, and README context"
                                                     );
-                                            }
-                                        },
-                          
-                                        // ── /config ──────────────────────────────────────────────────────
-                                        "config" => match args.trim() {
-                                            "show" => {
-                                                let cwd = std::env::current_dir().unwrap_or_default();
-                                                let home = dirs::home_dir().unwrap_or_default();
-                                                let data_dir = dirs::data_dir().unwrap_or_default().join("ragent");
-                                                let config_dir = dirs::config_dir().unwrap_or_default().join("ragent");
-                          
-                                                // Determine active config file paths
-                                                let project_config = cwd.join(".ragent").join("ragent.json");
-                                                let global_config = config_dir.join("ragent.json");
-                                                let env_config = std::env::var("RAGENT_CONFIG").ok();
-                          
-                                                let mut output = String::from("From: /config show\n\n📂 **Application Paths**\n\n");
-                          
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {}\n",
-                                                    "Working directory", cwd.display()
-                                                ));
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {}\n",
-                                                    "Data directory", data_dir.display()
-                                                ));
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {}\n",
-                                                    "Config directory", config_dir.display()
-                                                ));
-                          
-                                                output.push_str("\n📄 **Config Files**\n\n");
-                          
-                                                let project_exists = project_config.exists();
-                                                let global_exists = global_config.exists();
-                          
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Project config",
-                                                    project_config.display(),
-                                                    if project_exists { "✓" } else { "✗" }
-                                                ));
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Global config",
-                                                    global_config.display(),
-                                                    if global_exists { "✓" } else { "✗" }
-                                                ));
-                                                if let Some(ref env_path) = env_config {
-                                                    let env_exists = std::path::PathBuf::from(env_path).exists();
-                                                    output.push_str(&format!(
-                                                        "| {:<24} | {} {}\n",
-                                                        "Env (RAGENT_CONFIG)",
-                                                        env_path,
-                                                        if env_exists { "✓" } else { "✗" }
-                                                    ));
-                                                } else {
-                                                    output.push_str(&format!(
-                                                        "| {:<24} | {}\n",
-                                                        "Env (RAGENT_CONFIG)", "(not set)"
-                                                    ));
-                                                }
-                          
-                                                // Storage database
-                                                output.push_str(&format!(
-                                                    "\n💾 **Storage**\n\n| {:<24} | {}\n",
-                                                    "Database",
-                                                    self.db_path.display()
-                                                ));
-                          
-                                                // Code index
-                                                let codeindex_dir = cwd.join(".ragent").join("codeindex");
-                                                output.push_str("\n🔍 **Code Index**\n\n");
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Index directory",
-                                                    codeindex_dir.display(),
-                                                    if codeindex_dir.exists() { "✓" } else { "✗" }
-                                                ));
-                          
-                                                // Memory
-                                                let memory_dir = cwd.join(".ragent").join("memory");
-                                                let global_memory = home.join(".ragent").join("memory");
-                                                output.push_str("\n🧠 **Memory**\n\n");
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Project memory",
-                                                    memory_dir.display(),
-                                                    if memory_dir.exists() { "✓" } else { "✗" }
-                                                ));
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Global memory",
-                                                    global_memory.display(),
-                                                    if global_memory.exists() { "✓" } else { "✗" }
-                                                ));
-                          
-                                                // Agents
-                                                let project_agents = cwd.join(".ragent").join("agents");
-                                                let global_agents = home.join(".ragent").join("agents");
-                                                output.push_str("\n🤖 **Custom Agents**\n\n");
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Project agents",
-                                                    project_agents.display(),
-                                                    if project_agents.exists() { "✓" } else { "✗" }
-                                                ));
-                                                output.push_str(&format!(
-                                                    "| {:<24} | {} {}\n",
-                                                    "Global agents",
-                                                    global_agents.display(),
-                                                    if global_agents.exists() { "✓" } else { "✗" }
-                                                ));
-                          
-                                                self.append_assistant_text(&output);
-                                                self.status = "config: show".to_string();
-                                            }
-                                            _ => {
-                                                self.append_assistant_text(
-                                                    "From: /config\nUsage: `/config show` — display all application paths"
-                                                );
-                                                self.status = "config: usage".to_string();
-                                            }
-                                                                                  },
-                                        
-                                                      // ── /init ────────────────────────────────────────────────────────
-                                                      "init" => {
-                  let sid = self.session_id.clone().unwrap_or_default();
-                  self.append_assistant_text(
+                }
+            },
+
+            // ── /config ──────────────────────────────────────────────────────
+            "config" => match args.trim() {
+                "show" => {
+                    let cwd = std::env::current_dir().unwrap_or_default();
+                    let home = dirs::home_dir().unwrap_or_default();
+                    let data_dir = dirs::data_dir().unwrap_or_default().join("ragent");
+                    let config_dir = dirs::config_dir().unwrap_or_default().join("ragent");
+
+                    // Determine active config file paths
+                    let project_config = cwd.join(".ragent").join("ragent.json");
+                    let global_config = config_dir.join("ragent.json");
+                    let env_config = std::env::var("RAGENT_CONFIG").ok();
+
+                    let mut output =
+                        String::from("From: /config show\n\n📂 **Application Paths**\n\n");
+
+                    output.push_str(&format!(
+                        "| {:<24} | {}\n",
+                        "Working directory",
+                        cwd.display()
+                    ));
+                    output.push_str(&format!(
+                        "| {:<24} | {}\n",
+                        "Data directory",
+                        data_dir.display()
+                    ));
+                    output.push_str(&format!(
+                        "| {:<24} | {}\n",
+                        "Config directory",
+                        config_dir.display()
+                    ));
+
+                    output.push_str("\n📄 **Config Files**\n\n");
+
+                    let project_exists = project_config.exists();
+                    let global_exists = global_config.exists();
+
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Project config",
+                        project_config.display(),
+                        if project_exists { "✓" } else { "✗" }
+                    ));
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Global config",
+                        global_config.display(),
+                        if global_exists { "✓" } else { "✗" }
+                    ));
+                    if let Some(ref env_path) = env_config {
+                        let env_exists = std::path::PathBuf::from(env_path).exists();
+                        output.push_str(&format!(
+                            "| {:<24} | {} {}\n",
+                            "Env (RAGENT_CONFIG)",
+                            env_path,
+                            if env_exists { "✓" } else { "✗" }
+                        ));
+                    } else {
+                        output.push_str(&format!(
+                            "| {:<24} | {}\n",
+                            "Env (RAGENT_CONFIG)", "(not set)"
+                        ));
+                    }
+
+                    // Storage database
+                    output.push_str(&format!(
+                        "\n💾 **Storage**\n\n| {:<24} | {}\n",
+                        "Database",
+                        self.db_path.display()
+                    ));
+
+                    // Code index
+                    let codeindex_dir = cwd.join(".ragent").join("codeindex");
+                    output.push_str("\n🔍 **Code Index**\n\n");
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Index directory",
+                        codeindex_dir.display(),
+                        if codeindex_dir.exists() { "✓" } else { "✗" }
+                    ));
+
+                    // Memory
+                    let memory_dir = cwd.join(".ragent").join("memory");
+                    let global_memory = home.join(".ragent").join("memory");
+                    output.push_str("\n🧠 **Memory**\n\n");
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Project memory",
+                        memory_dir.display(),
+                        if memory_dir.exists() { "✓" } else { "✗" }
+                    ));
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Global memory",
+                        global_memory.display(),
+                        if global_memory.exists() { "✓" } else { "✗" }
+                    ));
+
+                    // Agents
+                    let project_agents = cwd.join(".ragent").join("agents");
+                    let global_agents = home.join(".ragent").join("agents");
+                    output.push_str("\n🤖 **Custom Agents**\n\n");
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Project agents",
+                        project_agents.display(),
+                        if project_agents.exists() {
+                            "✓"
+                        } else {
+                            "✗"
+                        }
+                    ));
+                    output.push_str(&format!(
+                        "| {:<24} | {} {}\n",
+                        "Global agents",
+                        global_agents.display(),
+                        if global_agents.exists() { "✓" } else { "✗" }
+                    ));
+
+                    self.append_assistant_text(&output);
+                    self.status = "config: show".to_string();
+                }
+                _ => {
+                    self.append_assistant_text(
+                        "From: /config\nUsage: `/config show` — display all application paths",
+                    );
+                    self.status = "config: usage".to_string();
+                }
+            },
+
+            // ── /init ────────────────────────────────────────────────────────
+            "init" => {
+                let sid = self.session_id.clone().unwrap_or_default();
+                self.append_assistant_text(
                     "From: /init\n🔍 **Analysing project…**\n\n\
                      The explore agent will examine the project structure, README, build files, \
                      and test layout, then write a summary to `.ragent/memory/PROJECT_ANALYSIS.md`. \
@@ -5841,28 +5863,34 @@ Be concise but comprehensive. This will be injected into future agent sessions a
                 self.persist_selected_thinking_level(level);
                 self.status = format!("thinking: {}", Self::thinking_level_display(level));
             }
-            "provider" => {
-                match args.trim() {
-                    "show" => {
-                        let providers = Self::get_configured_providers(&self.storage);
-                        if providers.is_empty() {
-                            self.status = "⚠ No configured providers".to_string();
-                            self.push_log_no_agent(LogLevel::Warn, "provider show: no configured providers".to_string());
-                        } else {
-                            self.provider_setup = Some(ProviderSetupStep::ShowProviderConfig { providers, selected: 0 });
-                        }
-                    }
-                    "" => {
-                        self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
-                    }
-                    _ => {
-                        self.append_assistant_text("From: /provider
-Usage: /provider [show]
-");
-                        self.status = "provider: usage".to_string();
+            "provider" => match args.trim() {
+                "show" => {
+                    let providers = Self::get_configured_providers(&self.storage);
+                    if providers.is_empty() {
+                        self.status = "⚠ No configured providers".to_string();
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            "provider show: no configured providers".to_string(),
+                        );
+                    } else {
+                        self.provider_setup = Some(ProviderSetupStep::ShowProviderConfig {
+                            providers,
+                            selected: 0,
+                        });
                     }
                 }
-            }
+                "" => {
+                    self.provider_setup = Some(ProviderSetupStep::SelectProvider { selected: 0 });
+                }
+                _ => {
+                    self.append_assistant_text(
+                        "From: /provider
+Usage: /provider [show]
+",
+                    );
+                    self.status = "provider: usage".to_string();
+                }
+            },
             "provider_reset" => {
                 self.provider_setup = Some(ProviderSetupStep::ResetProvider { selected: 0 });
             }
@@ -6159,12 +6187,13 @@ Usage: /provider [show]
                         cfg.tool_visibility = self.tool_visibility.clone();
                         self.sync_tool_visibility_from_config(&cfg);
 
-                                                  match cfg.save_to_source() {
-                                                      Ok(()) => {
-                                                          self.append_assistant_text(&format!(
-                                                              "From: /tools\n✅ `{switch}` visibility is now **{}**.",
-                                                              if enabled { "on" } else { "off" }
-                                                          ));                                self.status = format!(
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /tools\n✅ `{switch}` visibility is now **{}**.",
+                                    if enabled { "on" } else { "off" }
+                                ));
+                                self.status = format!(
                                     "tools: {switch} {}",
                                     if enabled { "on" } else { "off" }
                                 );
@@ -6236,12 +6265,13 @@ Usage: /provider [show]
                         let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
                         cfg.internal_llm.enabled = enabled;
                         self.sync_internal_llm_from_config(&cfg);
-                                                  match cfg.save_to_source() {
-                                                      Ok(()) => {
-                                                          self.append_assistant_text(&format!(
-                                                              "From: /internal-llm\n✅ Internal LLM is now **{}**.",
-                                                              if enabled { "on" } else { "off" }
-                                                          ));                                self.status =
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /internal-llm\n✅ Internal LLM is now **{}**.",
+                                    if enabled { "on" } else { "off" }
+                                ));
+                                self.status =
                                     format!("internal-llm: {}", if enabled { "on" } else { "off" });
                             }
                             Err(error) => {
@@ -6314,12 +6344,13 @@ Usage: /provider [show]
                             }
                         };
                         self.sync_internal_llm_from_config(&cfg);
-                                                  match cfg.save_to_source() {
-                                                      Ok(()) => {
-                                                          self.append_assistant_text(&format!(
-                                                              "From: /internal-llm\n✅ `{switch_label}` is now **{}**.",
-                                                              if enabled { "on" } else { "off" }
-                                                          ));                                self.status = format!(
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /internal-llm\n✅ `{switch_label}` is now **{}**.",
+                                    if enabled { "on" } else { "off" }
+                                ));
+                                self.status = format!(
                                     "internal-llm: {} {}",
                                     switch,
                                     if enabled { "on" } else { "off" }
@@ -8194,7 +8225,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "yolo" => {
-                let new_state = ragent_core::yolo::toggle();
+                let new_state = ragent_config::yolo::toggle();
                 let label = if new_state {
                     "ENABLED ⚠️"
                 } else {
@@ -8824,16 +8855,21 @@ Type `/swarm help` for more info.\n";
                         });
                         match result {
                             Ok(spec) => {
-                                                                  self.active_spec = Some(spec_id.clone());
-                                                                  self.spec_manager = Some(Arc::new(mgr));
-                                                                                                                                      // Also set on the session processor so auto-updates work
-                                                                                                                                      let _ = rt.block_on(async {
-                                                                                                                                          self.session_processor.active_spec.write().await.replace(spec_id.clone())
-                                                                                                                                      });
-                                                                                                                                      let _ = self
-                                                                                                                                          .session_processor
-                                                                                                                                          .spec_manager
-                                                                                                                                          .set(Arc::new(SpecManager::new(&specs_root)));                                                                  self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
+                                self.active_spec = Some(spec_id.clone());
+                                self.spec_manager = Some(Arc::new(mgr));
+                                // Also set on the session processor so auto-updates work
+                                let _ = rt.block_on(async {
+                                    self.session_processor
+                                        .active_spec
+                                        .write()
+                                        .await
+                                        .replace(spec_id.clone())
+                                });
+                                let _ = self
+                                    .session_processor
+                                    .spec_manager
+                                    .set(Arc::new(SpecManager::new(&specs_root)));
+                                self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                      "From: /spec activate\n\n✅ **{}** is now the active spec.\n\n\
                                                                                                                                                                                                                                                                                                                                                                                        Status: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Title: {}\n\
                                                                                                                                                                                                                                                                                                                                                                                        Requirements: {}\n\
@@ -8852,15 +8888,15 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                                          SpecCommand::Deactivate => {
-                                              if self.active_spec.is_some() {
-                                                  let prev = self.active_spec.take().unwrap();
-                                                  self.spec_manager = None;
-                                                  let rt = tokio::runtime::Handle::current();
-                                                  let _ = rt.block_on(async {
-                                                      self.session_processor.active_spec.write().await.take()
-                                                  });
-                                                  self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
+                    SpecCommand::Deactivate => {
+                        if self.active_spec.is_some() {
+                            let prev = self.active_spec.take().unwrap();
+                            self.spec_manager = None;
+                            let rt = tokio::runtime::Handle::current();
+                            let _ = rt.block_on(async {
+                                self.session_processor.active_spec.write().await.take()
+                            });
+                            self.append_assistant_text(&format!(                                                                                                                                                                                                                                                                                                                                                                                  "From: /spec deactivate\n\n✅ Spec **{}** deactivated. Agent prompts will no longer include spec context.",
                                                                                                                                                                                                                                                                                                                                                                                   prev
                                                                                                                                                                                                                                                                                                                                                                               ));
                             self.status = "spec: deactivated".to_string();
@@ -9696,10 +9732,11 @@ Type `/swarm help` for more info.\n";
                                 }
                             }
                         }
-                                                  match cfg.save_to_source() {
-                                                      Ok(()) => {
-                                                          self.status = "codeindex: on".to_string();
-                                                      }                            Err(e) => {
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.status = "codeindex: on".to_string();
+                            }
+                            Err(e) => {
                                 self.append_assistant_text(&format!(
                                     "⚠️ **Code index:** enabled in memory, but saving config failed: {e}",
                                 ));
@@ -9736,10 +9773,11 @@ Type `/swarm help` for more info.\n";
                                 "ℹ️ **Code index:** disabled. It was not currently active.",
                             );
                         }
-                                                  match cfg.save_to_source() {
-                                                      Ok(()) => {
-                                                          self.status = "codeindex: off".to_string();
-                                                      }                            Err(e) => {
+                        match cfg.save_to_source() {
+                            Ok(()) => {
+                                self.status = "codeindex: off".to_string();
+                            }
+                            Err(e) => {
                                 self.append_assistant_text(&format!(
                                     "⚠️ **Code index:** disabled in memory, but saving config failed: {e}",
                                 ));
@@ -10112,17 +10150,15 @@ Type `/swarm help` for more info.\n";
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.history_picker = None;
             }
-            KeyCode::Up | KeyCode::Char('k')
-                if picker.selected > 0 => {
-                    picker.selected -= 1;
-                    if picker.selected < picker.scroll_offset {
-                        picker.scroll_offset = picker.selected;
-                    }
+            KeyCode::Up | KeyCode::Char('k') if picker.selected > 0 => {
+                picker.selected -= 1;
+                if picker.selected < picker.scroll_offset {
+                    picker.scroll_offset = picker.selected;
                 }
-            KeyCode::Down | KeyCode::Char('j')
-                if picker.selected + 1 < picker.entries.len() => {
-                    picker.selected += 1;
-                }
+            }
+            KeyCode::Down | KeyCode::Char('j') if picker.selected + 1 < picker.entries.len() => {
+                picker.selected += 1;
+            }
             KeyCode::Enter => {
                 let chosen = picker.entries[picker.selected].clone();
                 self.history_picker = None;
@@ -10584,21 +10620,21 @@ Type `/swarm help` for more info.\n";
             _ => unreachable!(),
         };
 
-                            // Inner area (accounting for borders)
-                            let inner_x = if sel.pane == SelectionPane::Messages {
-                                area.x + 1 // LEFT border only
-                            } else {
-                                area.x + 1 // ALL borders
-                            };
-                            let inner_y = if sel.pane == SelectionPane::Messages {
-                                area.y + 1 // Messages pane has a top border
-                            } else {
-                                area.y + 1 // ALL borders on side panels
-                            };
-                  
-                            let text = Self::extract_text_from_lines(
-                                lines, inner_x, inner_y, start_col, start_row, end_col, end_row,
-                            );
+        // Inner area (accounting for borders)
+        let inner_x = if sel.pane == SelectionPane::Messages {
+            area.x + 1 // LEFT border only
+        } else {
+            area.x + 1 // ALL borders
+        };
+        let inner_y = if sel.pane == SelectionPane::Messages {
+            area.y + 1 // Messages pane has a top border
+        } else {
+            area.y + 1 // ALL borders on side panels
+        };
+
+        let text = Self::extract_text_from_lines(
+            lines, inner_x, inner_y, start_col, start_row, end_col, end_row,
+        );
         if !text.is_empty() {
             Self::set_clipboard(&text);
             self.push_log_no_agent(LogLevel::Info, format!("Copied {} chars", text.len()));
@@ -10982,34 +11018,59 @@ Type `/swarm help` for more info.\n";
                         self.profile_scroll_offset = self.profile_scroll_offset.saturating_sub(3);
                     }
                 }
-                                  InputAction::ToggleLog => {
-                                      self.show_log = !self.show_log;
-                                      if !self.show_log {
-                                          if self.text_selection.as_ref().is_some_and(|s| s.pane == SelectionPane::Log) {
-                                              self.text_selection = None;
-                                          }
-                                          if self.context_menu.as_ref().is_some_and(|m| m.pane == SelectionPane::Log) {
-                                              self.context_menu = None;
-                                          }
-                                      }
-                                      self.status = if self.show_log {
-                                          "log panel visible".to_string()
-                                      } else {
-                                          "log panel hidden".to_string()
-                                      };
-                                  }
-                                  InputAction::ToggleProfile => {
-                                      let enabled = !self.show_profile;
-                                      self.set_profile_panel_enabled(enabled);
-                                      if !enabled {
-                                          if self.text_selection.as_ref().is_some_and(|s| s.pane == SelectionPane::Profile) {
-                                              self.text_selection = None;
-                                          }
-                                          if self.context_menu.as_ref().is_some_and(|m| m.pane == SelectionPane::Profile) {
-                                              self.context_menu = None;
-                                          }
-                                      }
-                                  }                InputAction::OutputViewPageUp => {
+                InputAction::ToggleLog => {
+                    self.show_log = !self.show_log;
+                    if !self.show_log {
+                        if self
+                            .text_selection
+                            .as_ref()
+                            .is_some_and(|s| s.pane == SelectionPane::Log)
+                        {
+                            self.text_selection = None;
+                        }
+                        if self
+                            .context_menu
+                            .as_ref()
+                            .is_some_and(|m| m.pane == SelectionPane::Log)
+                        {
+                            self.context_menu = None;
+                        }
+                    }
+                    self.status = if self.show_log {
+                        "log panel visible".to_string()
+                    } else {
+                        "log panel hidden".to_string()
+                    };
+                }
+                InputAction::ToggleProfile => {
+                    let enabled = !self.show_profile;
+                    self.set_profile_panel_enabled(enabled);
+                    if !enabled {
+                        if self
+                            .text_selection
+                            .as_ref()
+                            .is_some_and(|s| s.pane == SelectionPane::Profile)
+                        {
+                            self.text_selection = None;
+                        }
+                        if self
+                            .context_menu
+                            .as_ref()
+                            .is_some_and(|m| m.pane == SelectionPane::Profile)
+                        {
+                            self.context_menu = None;
+                        }
+                    }
+                }
+                InputAction::ToggleYolo => {
+                    let enabled = ragent_config::yolo::toggle();
+                    self.status = if enabled {
+                        "YOLO mode enabled".to_string()
+                    } else {
+                        "YOLO mode disabled".to_string()
+                    };
+                }
+                InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
                 }
                 InputAction::OutputViewPageDown => {
@@ -11398,258 +11459,244 @@ Type `/swarm help` for more info.\n";
         // Mark UI dirty for any event handling
         self.needs_redraw = true;
         match event {
-            Event::SessionCreated { ref session_id }
-                if self.session_id.is_none() => {
-                    self.session_id = Some(session_id.clone());
-                    // Map the primary session's short_sid to the current agent name
-                    let short_sid = short_session_id(session_id);
-                    self.sid_to_display_name
-                        .insert(short_sid, self.agent_name.clone());
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!(
-                            "session created: {}",
-                            &session_id[..8.min(session_id.len())]
-                        ),
-                    );
-                }
+            Event::SessionCreated { ref session_id } if self.session_id.is_none() => {
+                self.session_id = Some(session_id.clone());
+                // Map the primary session's short_sid to the current agent name
+                let short_sid = short_session_id(session_id);
+                self.sid_to_display_name
+                    .insert(short_sid, self.agent_name.clone());
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "session created: {}",
+                        &session_id[..8.min(session_id.len())]
+                    ),
+                );
+            }
             Event::TextDelta {
                 ref session_id,
                 ref text,
+            } if self.is_current_session(session_id) => {
+                self.stream_in_bytes += text.len() as u64;
+                self.append_assistant_text(text);
             }
-                if self.is_current_session(session_id) => {
-                    self.stream_in_bytes += text.len() as u64;
-                    self.append_assistant_text(text);
-                }
             Event::ReasoningDelta {
                 ref session_id,
                 ref text,
+            } if self.is_current_session(session_id) => {
+                self.stream_in_bytes += text.len() as u64;
+                self.append_reasoning_text(text);
             }
-                if self.is_current_session(session_id) => {
-                    self.stream_in_bytes += text.len() as u64;
-                    self.append_reasoning_text(text);
-                }
             Event::RequestStarted {
                 ref session_id,
                 outbound_bytes,
+            } if self.is_current_session(session_id) => {
+                self.stream_in_bytes = 0;
+                self.stream_out_bytes = outbound_bytes;
             }
-                if self.is_current_session(session_id) => {
-                    self.stream_in_bytes = 0;
-                    self.stream_out_bytes = outbound_bytes;
-                }
             Event::ToolCallStart {
                 ref session_id,
                 ref call_id,
                 ref tool,
-            }
-                if self.is_current_session(session_id) => {
-                    self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
-                    // Get the current step count from the event bus (single source of truth)
-                    let step = self.event_bus.current_step(session_id) as u32;
-                    let short_sid = short_session_id(session_id);
-                    // Check if step changed - if so, reset substep counter to 0
-                    let last_step = self
-                        .last_step_per_session
-                        .get(session_id)
-                        .copied()
-                        .unwrap_or(0);
-                    if step != last_step {
-                        self.substep_counter_per_session
-                            .insert(session_id.clone(), 0);
-                        self.last_step_per_session.insert(session_id.clone(), step);
-                    }
-                    // Increment sub-step counter for this session
-                    let substep = self
-                        .substep_counter_per_session
-                        .entry(session_id.clone())
-                        .or_insert(0);
-                    *substep += 1;
-                    let current_substep = *substep;
-                    self.tool_step_map
-                        .insert(call_id.clone(), (short_sid.clone(), step, current_substep));
-                    self.add_tool_call_part(tool, call_id);
-
-                    // If args were received before the start event, apply them now.
-                    if let Some(args_json) = self.pending_tool_args.remove(call_id) {
-                        let _ = self.update_tool_call_input(call_id, &args_json);
-                    }
-
-                    self.status = format!("running: {}", tool);
-                    let display_name = self
-                        .sid_to_display_name
-                        .get(&short_sid)
-                        .cloned()
-                        .unwrap_or(short_sid);
-                    self.push_log_no_agent(
-                        LogLevel::Tool,
-                        format!(
-                            "[{display_name}:{step}.{current_substep}] tool call: {}",
-                            tool
-                        ),
-                    );
+            } if self.is_current_session(session_id) => {
+                self.stream_in_bytes += (call_id.len() + tool.len()) as u64;
+                // Get the current step count from the event bus (single source of truth)
+                let step = self.event_bus.current_step(session_id) as u32;
+                let short_sid = short_session_id(session_id);
+                // Check if step changed - if so, reset substep counter to 0
+                let last_step = self
+                    .last_step_per_session
+                    .get(session_id)
+                    .copied()
+                    .unwrap_or(0);
+                if step != last_step {
+                    self.substep_counter_per_session
+                        .insert(session_id.clone(), 0);
+                    self.last_step_per_session.insert(session_id.clone(), step);
                 }
+                // Increment sub-step counter for this session
+                let substep = self
+                    .substep_counter_per_session
+                    .entry(session_id.clone())
+                    .or_insert(0);
+                *substep += 1;
+                let current_substep = *substep;
+                self.tool_step_map
+                    .insert(call_id.clone(), (short_sid.clone(), step, current_substep));
+                self.add_tool_call_part(tool, call_id);
+
+                // If args were received before the start event, apply them now.
+                if let Some(args_json) = self.pending_tool_args.remove(call_id) {
+                    let _ = self.update_tool_call_input(call_id, &args_json);
+                }
+
+                self.status = format!("running: {}", tool);
+                let display_name = self
+                    .sid_to_display_name
+                    .get(&short_sid)
+                    .cloned()
+                    .unwrap_or(short_sid);
+                self.push_log_no_agent(
+                    LogLevel::Tool,
+                    format!(
+                        "[{display_name}:{step}.{current_substep}] tool call: {}",
+                        tool
+                    ),
+                );
+            }
             Event::ToolCallEnd {
                 ref session_id,
                 ref call_id,
                 ref tool,
                 ref error,
                 duration_ms,
-            }
-                if self.is_current_session(session_id) => {
-                    self.update_tool_call_status(
-                        call_id,
-                        error.is_none(),
-                        error.as_deref(),
-                        duration_ms,
+            } if self.is_current_session(session_id) => {
+                self.update_tool_call_status(
+                    call_id,
+                    error.is_none(),
+                    error.as_deref(),
+                    duration_ms,
+                );
+                self.set_status_working("processing");
+                let step_tag = self
+                    .tool_step_map
+                    .get(call_id)
+                    .map(|(sid, step, substep)| {
+                        let name = self
+                            .sid_to_display_name
+                            .get(sid)
+                            .cloned()
+                            .unwrap_or_else(|| sid.clone());
+                        format!("[{name}:{step}.{substep}] ")
+                    })
+                    .unwrap_or_default();
+                if let Some(err) = error {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!(
+                            "{}tool {} failed: {} ({}ms)",
+                            step_tag, tool, err, duration_ms
+                        ),
                     );
-                    self.set_status_working("processing");
-                    let step_tag = self
-                        .tool_step_map
-                        .get(call_id)
-                        .map(|(sid, step, substep)| {
-                            let name = self
-                                .sid_to_display_name
-                                .get(sid)
-                                .cloned()
-                                .unwrap_or_else(|| sid.clone());
-                            format!("[{name}:{step}.{substep}] ")
-                        })
-                        .unwrap_or_default();
-                    if let Some(err) = error {
-                        self.push_log_no_agent(
-                            LogLevel::Error,
-                            format!(
-                                "{}tool {} failed: {} ({}ms)",
-                                step_tag, tool, err, duration_ms
-                            ),
-                        );
-                    } else {
-                        self.push_log_no_agent(
-                            LogLevel::Tool,
-                            format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
-                        );
-                    }
+                } else {
+                    self.push_log_no_agent(
+                        LogLevel::Tool,
+                        format!("{}tool {} completed ({}ms)", step_tag, tool, duration_ms),
+                    );
                 }
+            }
             Event::MessageStart {
                 ref session_id,
                 ref message_id,
+            } if self.is_current_session(session_id) => {
+                self.is_processing = true;
+                self.agent_halted = false;
+                self.set_status_working("processing");
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "response started ({})",
+                        &message_id[..8.min(message_id.len())]
+                    ),
+                );
             }
-                if self.is_current_session(session_id) => {
-                    self.is_processing = true;
-                    self.agent_halted = false;
-                    self.set_status_working("processing");
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!(
-                            "response started ({})",
-                            &message_id[..8.min(message_id.len())]
-                        ),
-                    );
-                }
             Event::MessageEnd {
                 ref session_id,
                 ref message_id,
                 ref reason,
-            }
-                if self.is_current_session(session_id) => {
-                    // The "init" message_id is used exclusively by the AGENTS.md
-                    // acknowledgment exchange that runs before the main agent loop.
-                    // It must NOT reset processing state — the main loop hasn't
-                    // started yet.  Only set force_new_message so the real response
-                    // starts in a fresh message block.
-                    if message_id == "init" {
-                        self.force_new_message = true;
-                        return;
-                    }
-                    let was_auto_compaction = self.auto_compact_in_progress;
-                    self.is_processing = false;
-                    self.cancel_flag = None;
-                    if *reason == FinishReason::Cancelled {
-                        self.agent_halted = true;
-                        self.status = "halted — /resume to continue".to_string();
-                        self.push_log_no_agent(LogLevel::Warn, "Agent halted by user".to_string());
-                    } else {
-                        self.agent_halted = false;
-                        self.status = "ready".to_string();
-                    }
+            } if self.is_current_session(session_id) => {
+                // The "init" message_id is used exclusively by the AGENTS.md
+                // acknowledgment exchange that runs before the main agent loop.
+                // It must NOT reset processing state — the main loop hasn't
+                // started yet.  Only set force_new_message so the real response
+                // starts in a fresh message block.
+                if message_id == "init" {
                     self.force_new_message = true;
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("response finished ({reason:?})"),
-                    );
+                    return;
+                }
+                let was_auto_compaction = self.auto_compact_in_progress;
+                self.is_processing = false;
+                self.cancel_flag = None;
+                if *reason == FinishReason::Cancelled {
+                    self.agent_halted = true;
+                    self.status = "halted — /resume to continue".to_string();
+                    self.push_log_no_agent(LogLevel::Warn, "Agent halted by user".to_string());
+                } else {
+                    self.agent_halted = false;
+                    self.status = "ready".to_string();
+                }
+                self.force_new_message = true;
+                self.push_log_no_agent(LogLevel::Info, format!("response finished ({reason:?})"));
 
-                    // After compaction: replace session message history with just the summary.
-                    // The summary is the last assistant message in self.messages.
-                    if self.compact_in_progress && *reason != FinishReason::Cancelled {
-                        self.compact_in_progress = false;
-                        let summary_text = self
-                            .messages
-                            .iter()
-                            .rev()
-                            .find(|m| m.role == Role::Assistant)
-                            .map(|m| m.text_content());
-                        if let Some(summary) = summary_text {
-                            self.apply_compaction_summary(session_id, &summary);
-                        }
+                // After compaction: replace session message history with just the summary.
+                // The summary is the last assistant message in self.messages.
+                if self.compact_in_progress && *reason != FinishReason::Cancelled {
+                    self.compact_in_progress = false;
+                    let summary_text = self
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|m| m.role == Role::Assistant)
+                        .map(|m| m.text_content());
+                    if let Some(summary) = summary_text {
+                        self.apply_compaction_summary(session_id, &summary);
+                    }
+                } else {
+                    self.compact_in_progress = false;
+                }
+
+                if *reason != FinishReason::Cancelled {
+                    self.maybe_request_internal_session_title(session_id);
+                }
+
+                // Handle pending plan delegation: switch agent and auto-send task
+                if let Some((task, context)) = self.pending_plan_task.take() {
+                    self.execute_plan_delegation(session_id, task, context);
+                }
+
+                // Autopilot auto-continue: after agent completes a turn without calling
+                // task_complete, automatically send a continuation prompt so the agent
+                // keeps working towards its goal.
+                if self.autopilot_enabled && *reason != FinishReason::Cancelled {
+                    // Check time limit
+                    let time_exceeded = self
+                        .autopilot_time_limit_secs
+                        .and_then(|limit| {
+                            self.autopilot_started_at
+                                .map(|s| s.elapsed().as_secs() >= limit)
+                        })
+                        .unwrap_or(false);
+                    if time_exceeded {
+                        self.autopilot_enabled = false;
+                        self.autopilot_started_at = None;
+                        self.autopilot_pending_continue = None;
+                        self.status = "autopilot: time limit reached".to_string();
+                        self.append_assistant_text(
+                            "⚡ **Autopilot stopped** — time limit reached.",
+                        );
+                        self.push_log_no_agent(
+                            LogLevel::Warn,
+                            "autopilot stopped: time limit".to_string(),
+                        );
                     } else {
-                        self.compact_in_progress = false;
-                    }
-
-                    if *reason != FinishReason::Cancelled {
-                        self.maybe_request_internal_session_title(session_id);
-                    }
-
-                    // Handle pending plan delegation: switch agent and auto-send task
-                    if let Some((task, context)) = self.pending_plan_task.take() {
-                        self.execute_plan_delegation(session_id, task, context);
-                    }
-
-                    // Autopilot auto-continue: after agent completes a turn without calling
-                    // task_complete, automatically send a continuation prompt so the agent
-                    // keeps working towards its goal.
-                    if self.autopilot_enabled && *reason != FinishReason::Cancelled {
-                        // Check time limit
-                        let time_exceeded = self
-                            .autopilot_time_limit_secs
-                            .and_then(|limit| {
-                                self.autopilot_started_at
-                                    .map(|s| s.elapsed().as_secs() >= limit)
-                            })
-                            .unwrap_or(false);
-                        if time_exceeded {
-                            self.autopilot_enabled = false;
-                            self.autopilot_started_at = None;
-                            self.autopilot_pending_continue = None;
-                            self.status = "autopilot: time limit reached".to_string();
-                            self.append_assistant_text(
-                                "⚡ **Autopilot stopped** — time limit reached.",
-                            );
-                            self.push_log_no_agent(
-                                LogLevel::Warn,
-                                "autopilot stopped: time limit".to_string(),
-                            );
-                        } else {
-                            // Schedule a continuation on the next render tick
-                            self.autopilot_pending_continue = Some(
+                        // Schedule a continuation on the next render tick
+                        self.autopilot_pending_continue = Some(
                                 "Continue working on the task. When fully done, call task_complete with a summary.".to_string()
                             );
-                            self.status = "⚡ autopilot".to_string();
-                        }
-                    }
-
-                    if was_auto_compaction {
-                        self.auto_compact_in_progress = false;
-                        self.push_log_no_agent(
-                            LogLevel::Info,
-                            "Auto-compaction completed".to_string(),
-                        );
-                        if let Some((queued_text, queued_images)) =
-                            self.pending_send_after_compact.take()
-                        {
-                            self.dispatch_user_message(queued_text, queued_images);
-                        }
+                        self.status = "⚡ autopilot".to_string();
                     }
                 }
+
+                if was_auto_compaction {
+                    self.auto_compact_in_progress = false;
+                    self.push_log_no_agent(LogLevel::Info, "Auto-compaction completed".to_string());
+                    if let Some((queued_text, queued_images)) =
+                        self.pending_send_after_compact.take()
+                    {
+                        self.dispatch_user_message(queued_text, queued_images);
+                    }
+                }
+            }
             Event::PermissionRequested {
                 ref session_id,
                 ref request_id,
@@ -11728,11 +11775,12 @@ Type `/swarm help` for more info.\n";
                         question: question.clone(),
                         options: options.clone(),
                     });
-                                          self.pending_question_input.clear();
-                                          self.question_selected_index = 0;
-                                          self.status = "awaiting question".to_string();
-                                          self.needs_redraw = true;
-                                          self.push_log_no_agent(                        LogLevel::Warn,
+                    self.pending_question_input.clear();
+                    self.question_selected_index = 0;
+                    self.status = "awaiting question".to_string();
+                    self.needs_redraw = true;
+                    self.push_log_no_agent(
+                        LogLevel::Warn,
                         format!("question requested: {}", question),
                     );
                 }
@@ -11742,245 +11790,233 @@ Type `/swarm help` for more info.\n";
                 ref request_id,
                 allowed,
                 ..
-            }
-                if self.is_current_session(session_id) => {
-                    // Remove the specific answered request from the queue.
-                    self.permission_queue.retain(|r| r.id != *request_id);
-                    self.pending_question_input.clear();
-                    self.question_selected_index = 0;
-                    if self.permission_queue.is_empty() {
-                        self.set_status_working("processing");
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("permission {}", if allowed { "granted" } else { "denied" }),
-                    );
+            } if self.is_current_session(session_id) => {
+                // Remove the specific answered request from the queue.
+                self.permission_queue.retain(|r| r.id != *request_id);
+                self.pending_question_input.clear();
+                self.question_selected_index = 0;
+                if self.permission_queue.is_empty() {
+                    self.set_status_working("processing");
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("permission {}", if allowed { "granted" } else { "denied" }),
+                );
+            }
             Event::QuestionAnswered {
                 ref session_id,
                 ref request_id,
                 ..
-            }
-                if self.is_current_session(session_id) => {
-                    self.question_queue.retain(|r| r.id != *request_id);
-                    self.pending_question_input.clear();
-                    self.question_selected_index = 0;
-                    if self.question_queue.is_empty() {
-                        self.set_status_working("processing");
-                    }
+            } if self.is_current_session(session_id) => {
+                self.question_queue.retain(|r| r.id != *request_id);
+                self.pending_question_input.clear();
+                self.question_selected_index = 0;
+                if self.question_queue.is_empty() {
+                    self.set_status_working("processing");
                 }
+            }
             Event::AgentSwitched {
                 ref session_id,
                 ref from,
                 ref to,
-            }
-                if self.is_current_session(session_id) => {
-                    self.agent_name = to.clone();
-                    // Update the display name mapping for the current session
-                    if let Some(ref sid) = self.session_id {
-                        let short_sid = short_session_id(sid);
-                        self.sid_to_display_name.insert(short_sid, to.clone());
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("agent switched: {} → {}", from, to),
-                    );
+            } if self.is_current_session(session_id) => {
+                self.agent_name = to.clone();
+                // Update the display name mapping for the current session
+                if let Some(ref sid) = self.session_id {
+                    let short_sid = short_session_id(sid);
+                    self.sid_to_display_name.insert(short_sid, to.clone());
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("agent switched: {} → {}", from, to),
+                );
+            }
             Event::AgentSwitchRequested {
                 ref session_id,
                 ref to,
                 ref task,
                 ref context,
+            } if self.is_current_session(session_id) => {
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("agent switch requested → {} ({})", to, task),
+                );
+                self.pending_plan_task = Some((task.clone(), context.clone()));
             }
-                if self.is_current_session(session_id) => {
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("agent switch requested → {} ({})", to, task),
-                    );
-                    self.pending_plan_task = Some((task.clone(), context.clone()));
-                }
             Event::AgentRestoreRequested {
                 ref session_id,
                 ref summary,
+            } if self.is_current_session(session_id) => {
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("agent restore requested ({} chars)", summary.len()),
+                );
+                // Show plan approval dialog instead of immediately restoring.
+                // The user presses Approve/Reject (Enter/r) to proceed.
+                self.plan_approval_pending = Some(PlanApprovalState {
+                    plan_text: summary.clone(),
+                    cursor_approve: true,
+                });
             }
-                if self.is_current_session(session_id) => {
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("agent restore requested ({} chars)", summary.len()),
-                    );
-                    // Show plan approval dialog instead of immediately restoring.
-                    // The user presses Approve/Reject (Enter/r) to proceed.
-                    self.plan_approval_pending = Some(PlanApprovalState {
-                        plan_text: summary.clone(),
-                        cursor_approve: true,
-                    });
-                }
             Event::TaskCompleted {
                 ref session_id,
                 ref summary,
-            }
-                if self.is_current_session(session_id) => {
-                    self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
-                    // Exit autopilot mode on task completion
-                    if self.autopilot_enabled {
-                        self.autopilot_enabled = false;
-                        self.autopilot_started_at = None;
-                        self.autopilot_pending_continue = None;
-                        self.status = "task complete".to_string();
-                        self.push_log_no_agent(
-                            LogLevel::Info,
-                            "autopilot stopped: task complete".to_string(),
-                        );
-                    }
-                    self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
+            } if self.is_current_session(session_id) => {
+                self.push_log_no_agent(LogLevel::Info, "task_complete signalled".to_string());
+                // Exit autopilot mode on task completion
+                if self.autopilot_enabled {
+                    self.autopilot_enabled = false;
+                    self.autopilot_started_at = None;
+                    self.autopilot_pending_continue = None;
+                    self.status = "task complete".to_string();
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        "autopilot stopped: task complete".to_string(),
+                    );
                 }
+                self.append_assistant_text(&format!("✅ **Task Complete**\n\n{}", summary));
+            }
             Event::AgentNotice {
                 ref session_id,
                 ref message,
+            } if self.is_current_session(session_id) => {
+                let summary = summarise_error(message);
+                self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
+                self.status = summary.clone();
+                // Also display in the message window for visibility
+                self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
             }
-                if self.is_current_session(session_id) => {
-                    let summary = summarise_error(message);
-                    self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
-                    self.status = summary.clone();
-                    // Also display in the message window for visibility
-                    self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
-                }
             Event::AgentError {
                 ref session_id,
                 ref error,
-            }
-                if self.is_current_session(session_id) => {
-                    self.is_processing = false;
-                    self.cancel_flag = None;
-                    self.agent_halted = false;
-                    if self.auto_compact_in_progress {
-                        self.auto_compact_in_progress = false;
-                        self.auto_compact_failed = true;
-                        self.pending_send_after_compact = None;
-                        self.push_log_no_agent(
-                            LogLevel::Warn,
-                            "Auto-compaction failed; send blocked for this turn".to_string(),
-                        );
-                    }
-                    self.compact_in_progress = false;
-                    // Full details go to the log panel only
-                    self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error));
-                    // Clean summary for the status bar and chat panel
-                    let summary = summarise_error(error);
-                    self.status = format!("error: {}", summary);
-                    self.append_assistant_text(&format!("⚠ {}", summary));
+            } if self.is_current_session(session_id) => {
+                self.is_processing = false;
+                self.cancel_flag = None;
+                self.agent_halted = false;
+                if self.auto_compact_in_progress {
+                    self.auto_compact_in_progress = false;
+                    self.auto_compact_failed = true;
+                    self.pending_send_after_compact = None;
+                    self.push_log_no_agent(
+                        LogLevel::Warn,
+                        "Auto-compaction failed; send blocked for this turn".to_string(),
+                    );
                 }
+                self.compact_in_progress = false;
+                // Full details go to the log panel only
+                self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error));
+                // Clean summary for the status bar and chat panel
+                let summary = summarise_error(error);
+                self.status = format!("error: {}", summary);
+                self.append_assistant_text(&format!("⚠ {}", summary));
+            }
             Event::TokenUsage {
                 ref session_id,
                 input_tokens,
                 output_tokens,
+            } if self.is_current_session(session_id) => {
+                self.last_input_tokens = input_tokens;
+                self.token_usage.0 += input_tokens;
+                self.token_usage.1 += output_tokens;
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "tokens: +{}in +{}out (total {}in {}out)",
+                        input_tokens, output_tokens, self.token_usage.0, self.token_usage.1
+                    ),
+                );
             }
-                if self.is_current_session(session_id) => {
-                    self.last_input_tokens = input_tokens;
-                    self.token_usage.0 += input_tokens;
-                    self.token_usage.1 += output_tokens;
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!(
-                            "tokens: +{}in +{}out (total {}in {}out)",
-                            input_tokens, output_tokens, self.token_usage.0, self.token_usage.1
-                        ),
-                    );
-                }
             Event::QuotaUpdate {
                 ref session_id,
                 percent,
+            } if self.is_current_session(session_id) => {
+                self.quota_percent = Some(percent);
+                self.push_log_no_agent(LogLevel::Info, format!("quota: {:.1}% used", percent));
             }
-                if self.is_current_session(session_id) => {
-                    self.quota_percent = Some(percent);
-                    self.push_log_no_agent(LogLevel::Info, format!("quota: {:.1}% used", percent));
-                }
-                          Event::ToolsSent {
-                              ref session_id,
-                              ref tools,
-                          }
-                              if self.is_current_session(session_id)
-                                  && self.event_bus.current_step(session_id) <= 1 =>
-                          {
-                              // Only log the list of tools during system initialisation (first step).
-                              // The SessionProcessor increments the EventBus step at the start of
-                              // each loop iteration; the first LLM request corresponds to step 1.
-                              self.push_log_no_agent(
-                                  LogLevel::Info,
-                                  format!("tools sent: [{}]", tools.join(", ")),
-                              );
-                          }            Event::ModelResponse {
+            Event::ToolsSent {
+                ref session_id,
+                ref tools,
+            } if self.is_current_session(session_id)
+                && self.event_bus.current_step(session_id) <= 1 =>
+            {
+                // Only log the list of tools during system initialisation (first step).
+                // The SessionProcessor increments the EventBus step at the start of
+                // each loop iteration; the first LLM request corresponds to step 1.
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("tools sent: [{}]", tools.join(", ")),
+                );
+            }
+            Event::ModelResponse {
                 ref session_id,
                 ref text,
                 elapsed_ms,
                 input_tokens,
                 output_tokens,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(model_ref) = self.active_model_ref_string() {
-                        self.llm_request_stats.push(LlmRequestStat {
-                            model_ref,
-                            elapsed_ms,
-                            input_tokens,
-                            output_tokens,
-                        });
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("model response ({elapsed_ms}ms): {text}"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(model_ref) = self.active_model_ref_string() {
+                    self.llm_request_stats.push(LlmRequestStat {
+                        model_ref,
+                        elapsed_ms,
+                        input_tokens,
+                        output_tokens,
+                    });
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("model response ({elapsed_ms}ms): {text}"),
+                );
+            }
             Event::ToolCallArgs {
                 ref session_id,
                 ref call_id,
                 ref tool,
                 ref args,
-            }
-                if self.is_current_session(session_id) => {
-                    self.stream_in_bytes += (call_id.len() + tool.len() + args.len()) as u64;
-                    // Try to apply args to an existing ToolCall part; if not found,
-                    // store them pending until the ToolCallStart event arrives.
-                    let applied = self.update_tool_call_input(call_id, args);
-                    if !applied {
-                        self.pending_tool_args.insert(call_id.clone(), args.clone());
-                    }
-
-                    let step_tag = self
-                        .tool_step_map
-                        .get(call_id)
-                        .map(|(sid, step, substep)| {
-                            let display = self
-                                .sid_to_display_name
-                                .get(sid)
-                                .cloned()
-                                .unwrap_or_else(|| sid.clone());
-                            format!("[{display}:{step}.{substep}] ")
-                        })
-                        .unwrap_or_default();
-                    // Pretty-print JSON args across multiple log lines
-                    let pretty = serde_json::from_str::<serde_json::Value>(args)
-                        .ok()
-                        .and_then(|v| serde_json::to_string_pretty(&v).ok());
-                    if let Some(formatted) = pretty {
-                        let mut first = true;
-                        for line in formatted.lines() {
-                            if first {
-                                self.push_log_no_agent(
-                                    LogLevel::Tool,
-                                    format!("{}→ {} {}", step_tag, tool, line),
-                                );
-                                first = false;
-                            } else {
-                                self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
-                            }
-                        }
-                    } else {
-                        self.push_log_no_agent(
-                            LogLevel::Tool,
-                            format!("{}→ {}({})", step_tag, tool, args),
-                        );
-                    }
+            } if self.is_current_session(session_id) => {
+                self.stream_in_bytes += (call_id.len() + tool.len() + args.len()) as u64;
+                // Try to apply args to an existing ToolCall part; if not found,
+                // store them pending until the ToolCallStart event arrives.
+                let applied = self.update_tool_call_input(call_id, args);
+                if !applied {
+                    self.pending_tool_args.insert(call_id.clone(), args.clone());
                 }
+
+                let step_tag = self
+                    .tool_step_map
+                    .get(call_id)
+                    .map(|(sid, step, substep)| {
+                        let display = self
+                            .sid_to_display_name
+                            .get(sid)
+                            .cloned()
+                            .unwrap_or_else(|| sid.clone());
+                        format!("[{display}:{step}.{substep}] ")
+                    })
+                    .unwrap_or_default();
+                // Pretty-print JSON args across multiple log lines
+                let pretty = serde_json::from_str::<serde_json::Value>(args)
+                    .ok()
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok());
+                if let Some(formatted) = pretty {
+                    let mut first = true;
+                    for line in formatted.lines() {
+                        if first {
+                            self.push_log_no_agent(
+                                LogLevel::Tool,
+                                format!("{}→ {} {}", step_tag, tool, line),
+                            );
+                            first = false;
+                        } else {
+                            self.push_log_no_agent(LogLevel::Tool, format!("  {}", line));
+                        }
+                    }
+                } else {
+                    self.push_log_no_agent(
+                        LogLevel::Tool,
+                        format!("{}→ {}({})", step_tag, tool, args),
+                    );
+                }
+            }
             Event::ToolResult {
                 ref session_id,
                 ref call_id,
@@ -11990,45 +12026,44 @@ Type `/swarm help` for more info.\n";
                 ref metadata,
                 success,
                 ..
-            }
-                if self.is_current_session(session_id) => {
-                    self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
-                    if *tool == "team_create"
-                        && success
-                        && let Some(meta) = metadata
-                        && let Some(team_name) = meta.get("team_name").and_then(|v| v.as_str())
-                    {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
-                        if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir) {
-                            let name = store.config.name.clone();
-                            let team_dir = store.dir.clone();
-                            self.team_members = store.config.members.clone();
-                            self.active_team = Some(store.config);
-                            self.show_teams = true;
-                            // Reconcile is needed here: team was created via LLM tool path,
-                            // so the TeamManager didn't exist during blueprint seeding and
-                            // members may have been queued in Spawning state.
-                            self.ensure_team_manager_for_team_inner(&name, Some(team_dir), true);
-                        }
+            } if self.is_current_session(session_id) => {
+                self.update_tool_call_output(call_id, content_line_count, metadata.as_ref());
+                if *tool == "team_create"
+                    && success
+                    && let Some(meta) = metadata
+                    && let Some(team_name) = meta.get("team_name").and_then(|v| v.as_str())
+                {
+                    let working_dir = std::env::current_dir().unwrap_or_default();
+                    if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir) {
+                        let name = store.config.name.clone();
+                        let team_dir = store.dir.clone();
+                        self.team_members = store.config.members.clone();
+                        self.active_team = Some(store.config);
+                        self.show_teams = true;
+                        // Reconcile is needed here: team was created via LLM tool path,
+                        // so the TeamManager didn't exist during blueprint seeding and
+                        // members may have been queued in Spawning state.
+                        self.ensure_team_manager_for_team_inner(&name, Some(team_dir), true);
                     }
-                    let step_tag = self
-                        .tool_step_map
-                        .get(call_id)
-                        .map(|(sid, step, substep)| {
-                            let display = self
-                                .sid_to_display_name
-                                .get(sid)
-                                .cloned()
-                                .unwrap_or_else(|| sid.clone());
-                            format!("[{display}:{step}.{substep}] ")
-                        })
-                        .unwrap_or_default();
-                    let icon = if success { "✓" } else { "✗" };
-                    self.push_log_no_agent(
-                        LogLevel::Tool,
-                        format!("{}← {} {} {}", step_tag, tool, icon, content),
-                    );
                 }
+                let step_tag = self
+                    .tool_step_map
+                    .get(call_id)
+                    .map(|(sid, step, substep)| {
+                        let display = self
+                            .sid_to_display_name
+                            .get(sid)
+                            .cloned()
+                            .unwrap_or_else(|| sid.clone());
+                        format!("[{display}:{step}.{substep}] ")
+                    })
+                    .unwrap_or_default();
+                let icon = if success { "✓" } else { "✗" };
+                self.push_log_no_agent(
+                    LogLevel::Tool,
+                    format!("{}← {} {} {}", step_tag, tool, icon, content),
+                );
+            }
             Event::SubagentStart {
                 ref session_id,
                 ref task_id,
@@ -12037,294 +12072,281 @@ Type `/swarm help` for more info.\n";
                 ref task,
                 background,
                 ..
-            }
-                if self.is_current_session(session_id) => {
-                    // Map the child session's short_sid to the agent name for display
-                    let short_sid = short_session_id(child_session_id);
-                    self.sid_to_display_name.insert(short_sid, agent.clone());
+            } if self.is_current_session(session_id) => {
+                // Map the child session's short_sid to the agent name for display
+                let short_sid = short_session_id(child_session_id);
+                self.sid_to_display_name.insert(short_sid, agent.clone());
 
-                    // Add to active_tasks so the agent panel shows it immediately.
-                    let entry = ragent_core::task::TaskEntry {
-                        id: task_id.clone(),
-                        parent_session_id: session_id.clone(),
-                        child_session_id: child_session_id.clone(),
-                        agent_name: agent.clone(),
-                        task_prompt: task.clone(),
-                        background,
-                        status: ragent_core::task::TaskStatus::Running,
-                        result: None,
-                        error: None,
-                        created_at: chrono::Utc::now(),
-                        completed_at: None,
-                        reported: false,
-                        waiter_count: 0,
-                    };
-                    self.active_tasks.push(entry);
-                    let (icon, kind) = if background {
-                        ("⚙️", "Background")
-                    } else {
-                        ("🔄", "Foreground")
-                    };
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!(
-                            "{} {} task started: {} ({})",
-                            icon,
-                            kind,
-                            &task_id[..8.min(task_id.len())],
-                            agent
-                        ),
-                    );
-                }
+                // Add to active_tasks so the agent panel shows it immediately.
+                let entry = ragent_core::task::TaskEntry {
+                    id: task_id.clone(),
+                    parent_session_id: session_id.clone(),
+                    child_session_id: child_session_id.clone(),
+                    agent_name: agent.clone(),
+                    task_prompt: task.clone(),
+                    background,
+                    status: ragent_core::task::TaskStatus::Running,
+                    result: None,
+                    error: None,
+                    created_at: chrono::Utc::now(),
+                    completed_at: None,
+                    reported: false,
+                    waiter_count: 0,
+                };
+                self.active_tasks.push(entry);
+                let (icon, kind) = if background {
+                    ("⚙️", "Background")
+                } else {
+                    ("🔄", "Foreground")
+                };
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "{} {} task started: {} ({})",
+                        icon,
+                        kind,
+                        &task_id[..8.min(task_id.len())],
+                        agent
+                    ),
+                );
+            }
             Event::SubagentComplete {
                 ref session_id,
                 ref task_id,
                 ref summary,
                 success,
                 ..
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
-                        self.active_tasks.remove(idx);
-                    }
-                    let icon = if success { "✅" } else { "❌" };
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!(
-                            "{} Task completed ({}): {}",
-                            icon,
-                            &task_id[..8.min(task_id.len())],
-                            summary
-                        ),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                    self.active_tasks.remove(idx);
                 }
+                let icon = if success { "✅" } else { "❌" };
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!(
+                        "{} Task completed ({}): {}",
+                        icon,
+                        &task_id[..8.min(task_id.len())],
+                        summary
+                    ),
+                );
+            }
             Event::SubagentCancelled {
                 ref session_id,
                 ref task_id,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
-                        self.active_tasks.remove(idx);
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(idx) = self.active_tasks.iter().position(|t| t.id == *task_id) {
+                    self.active_tasks.remove(idx);
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("🚫 Task cancelled ({})", &task_id[..8.min(task_id.len())]),
+                );
+            }
             Event::TeammateSpawned {
                 ref session_id,
                 ref team_name,
                 ref teammate_name,
                 ref agent_id,
-            }
-                if self.is_current_session(session_id) => {
-                    // Add new member to team_members if not already present.
-                    if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
-                        let member =
-                            TeamMember::new(teammate_name.as_str(), agent_id.as_str(), "teammate");
-                        self.team_members.push(member);
-                        self.team_message_counts
-                            .entry(agent_id.clone())
-                            .or_insert((0, 0));
-                    }
-                    // Always refresh the stored values (session id, status, current task)
-                    // from disk so races between UI hydration and spawn events don't
-                    // leave the UI showing an outdated state.
-                    if let Some(m) = self
-                        .team_members
-                        .iter_mut()
-                        .find(|m| m.agent_id == *agent_id)
+            } if self.is_current_session(session_id) => {
+                // Add new member to team_members if not already present.
+                if !self.team_members.iter().any(|m| m.agent_id == *agent_id) {
+                    let member =
+                        TeamMember::new(teammate_name.as_str(), agent_id.as_str(), "teammate");
+                    self.team_members.push(member);
+                    self.team_message_counts
+                        .entry(agent_id.clone())
+                        .or_insert((0, 0));
+                }
+                // Always refresh the stored values (session id, status, current task)
+                // from disk so races between UI hydration and spawn events don't
+                // leave the UI showing an outdated state.
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    let working_dir = std::env::current_dir().unwrap_or_default();
+                    if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
+                        && let Some(stored) = store
+                            .config
+                            .members
+                            .iter()
+                            .find(|x| x.agent_id == *agent_id)
                     {
-                        let working_dir = std::env::current_dir().unwrap_or_default();
-                        if let Ok(store) = TeamStore::load_by_name(team_name, &working_dir)
-                            && let Some(stored) = store
-                                .config
-                                .members
-                                .iter()
-                                .find(|x| x.agent_id == *agent_id)
-                        {
-                            m.session_id = stored.session_id.clone();
-                            m.status = stored.status.clone();
-                            m.current_task_id = stored.current_task_id.clone();
-                            // Map this teammate's session short_sid → name for log display
-                            if let Some(ref sid) = stored.session_id {
-                                let short_sid = short_session_id(sid);
-                                self.sid_to_display_name
-                                    .insert(short_sid, teammate_name.clone());
-                            }
+                        m.session_id = stored.session_id.clone();
+                        m.status = stored.status.clone();
+                        m.current_task_id = stored.current_task_id.clone();
+                        // Map this teammate's session short_sid → name for log display
+                        if let Some(ref sid) = stored.session_id {
+                            let short_sid = short_session_id(sid);
+                            self.sid_to_display_name
+                                .insert(short_sid, teammate_name.clone());
                         }
                     }
-                    self.show_teams = true;
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
-                    );
                 }
+                self.show_teams = true;
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("🤝 [{team_name}] Spawned teammate '{teammate_name}' ({agent_id})"),
+                );
+            }
             Event::TeammateMessage {
                 ref session_id,
                 ref team_name,
                 ref from,
                 ref to,
                 ref preview,
-            }
-                if self.is_current_session(session_id) => {
-                    if from.as_str() != "lead" {
-                        let counts = self
-                            .team_message_counts
-                            .entry(from.clone())
-                            .or_insert((0, 0));
-                        counts.0 = counts.0.saturating_add(1);
-                    }
-                    if to.as_str() != "lead" {
-                        let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
-                        counts.1 = counts.1.saturating_add(1);
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("📨 [{team_name}] {from} → {to}: {preview}"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if from.as_str() != "lead" {
+                    let counts = self
+                        .team_message_counts
+                        .entry(from.clone())
+                        .or_insert((0, 0));
+                    counts.0 = counts.0.saturating_add(1);
                 }
+                if to.as_str() != "lead" {
+                    let counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
+                    counts.1 = counts.1.saturating_add(1);
+                }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("📨 [{team_name}] {from} → {to}: {preview}"),
+                );
+            }
             Event::TeammateP2PMessage {
                 ref session_id,
                 ref team_name,
                 ref from,
                 ref to,
                 ref preview,
+            } if self.is_current_session(session_id) => {
+                // Track sent count for sender.
+                let from_counts = self
+                    .team_message_counts
+                    .entry(from.clone())
+                    .or_insert((0, 0));
+                from_counts.0 = from_counts.0.saturating_add(1);
+                // Track received count for recipient.
+                let to_counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
+                to_counts.1 = to_counts.1.saturating_add(1);
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
+                );
             }
-                if self.is_current_session(session_id) => {
-                    // Track sent count for sender.
-                    let from_counts = self
-                        .team_message_counts
-                        .entry(from.clone())
-                        .or_insert((0, 0));
-                    from_counts.0 = from_counts.0.saturating_add(1);
-                    // Track received count for recipient.
-                    let to_counts = self.team_message_counts.entry(to.clone()).or_insert((0, 0));
-                    to_counts.1 = to_counts.1.saturating_add(1);
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("🔀 [{team_name}] P2P {from} → {to}: {preview}"),
-                    );
-                }
             Event::TeammateIdle {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(m) = self
-                        .team_members
-                        .iter_mut()
-                        .find(|m| m.agent_id == *agent_id)
-                    {
-                        m.status = MemberStatus::Idle;
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("💤 [{team_name}] Teammate {agent_id} is idle"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Idle;
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("💤 [{team_name}] Teammate {agent_id} is idle"),
+                );
+            }
             Event::TeammateFailed {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref error,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(m) = self
-                        .team_members
-                        .iter_mut()
-                        .find(|m| m.agent_id == *agent_id)
-                    {
-                        m.status = MemberStatus::Failed;
-                        m.last_spawn_error = Some(error.clone());
-                    }
-                    let short_err = if error.len() > 200 {
-                        let mut end = 200;
-                        while end > 0 && !error.is_char_boundary(end) {
-                            end -= 1;
-                        }
-                        format!("{}…", &error[..end])
-                    } else {
-                        error.to_string()
-                    };
-                    self.push_log_no_agent(
-                        LogLevel::Error,
-                        format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Failed;
+                    m.last_spawn_error = Some(error.clone());
                 }
+                let short_err = if error.len() > 200 {
+                    let mut end = 200;
+                    while end > 0 && !error.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &error[..end])
+                } else {
+                    error.to_string()
+                };
+                self.push_log_no_agent(
+                    LogLevel::Error,
+                    format!("❌ [{team_name}] Teammate {agent_id} failed: {short_err}"),
+                );
+            }
             Event::TeamTaskClaimed {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref task_id,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(m) = self
-                        .team_members
-                        .iter_mut()
-                        .find(|m| m.agent_id == *agent_id)
-                    {
-                        m.status = MemberStatus::Working;
-                        m.current_task_id = Some(task_id.clone());
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.status = MemberStatus::Working;
+                    m.current_task_id = Some(task_id.clone());
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("📋 [{team_name}] {agent_id} claimed task {task_id}"),
+                );
+            }
             Event::TeamTaskCompleted {
                 ref session_id,
                 ref team_name,
                 ref agent_id,
                 ref task_id,
-            }
-                if self.is_current_session(session_id) => {
-                    if let Some(m) = self
-                        .team_members
-                        .iter_mut()
-                        .find(|m| m.agent_id == *agent_id)
-                    {
-                        m.current_task_id = None;
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
-                    );
+            } if self.is_current_session(session_id) => {
+                if let Some(m) = self
+                    .team_members
+                    .iter_mut()
+                    .find(|m| m.agent_id == *agent_id)
+                {
+                    m.current_task_id = None;
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("✅ [{team_name}] {agent_id} completed task {task_id}"),
+                );
+            }
             Event::TeamCleanedUp {
                 ref session_id,
                 ref team_name,
-            }
-                if self.is_current_session(session_id) => {
-                    self.active_team = None;
-                    self.team_members.clear();
-                    self.team_message_counts.clear();
-                    self.show_teams = false;
-                    self.focused_teammate = None;
-                    if self
-                        .swarm_state
-                        .as_ref()
-                        .is_some_and(|s| &s.team_name == team_name)
-                    {
-                        self.swarm_state = None;
-                    }
-                    self.push_log_no_agent(
-                        LogLevel::Info,
-                        format!("🗑️  Team '{team_name}' cleaned up"),
-                    );
+            } if self.is_current_session(session_id) => {
+                self.active_team = None;
+                self.team_members.clear();
+                self.team_message_counts.clear();
+                self.show_teams = false;
+                self.focused_teammate = None;
+                if self
+                    .swarm_state
+                    .as_ref()
+                    .is_some_and(|s| &s.team_name == team_name)
+                {
+                    self.swarm_state = None;
                 }
+                self.push_log_no_agent(
+                    LogLevel::Info,
+                    format!("🗑️  Team '{team_name}' cleaned up"),
+                );
+            }
             Event::ShellCwdChanged {
                 ref session_id,
                 ref cwd,
+            } if self.is_current_session(session_id) => {
+                self.shell_cwd = Some(cwd.clone());
             }
-                if self.is_current_session(session_id) => {
-                    self.shell_cwd = Some(cwd.clone());
-                }
-            Event::UserInput { ref session_id, .. }
-                if self.is_current_session(session_id) => {
-                    self.set_status_working("processing");
-                }
+            Event::UserInput { ref session_id, .. } if self.is_current_session(session_id) => {
+                self.set_status_working("processing");
+            }
             _ => {}
         }
 
@@ -12850,7 +12872,10 @@ Type `/swarm help` for more info.\n";
 
         // Progress bar
         let bar_width = 30;
-        let filled = total.saturating_mul(bar_width).checked_div(total).unwrap_or(0);
+        let filled = total
+            .saturating_mul(bar_width)
+            .checked_div(total)
+            .unwrap_or(0);
         let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
         output.push_str(&format!(
             "**Progress:** [{bar}] {completed}/{total} ({} in progress, {} pending)\n\n",

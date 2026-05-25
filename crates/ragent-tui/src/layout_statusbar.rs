@@ -17,13 +17,11 @@ use ratatui::{
 use crate::app::App;
 
 /// Configuration for status bar rendering.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StatusBarConfig {
     /// Enable verbose output (show full paths, complete labels)
     pub verbose: bool,
 }
-
 
 /// Responsive mode based on terminal width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -567,7 +565,7 @@ fn build_line2_right(
         };
 
         spans.push(Span::styled(
-            format!("CodeIdx:{icon}  "),
+            format!("CodeIdx:{icon} "),
             Style::default().fg(color),
         ));
     }
@@ -577,25 +575,39 @@ fn build_line2_right(
         let (icon, color, label) = if app.internal_llm_config.enabled {
             if app.internal_llm_init_error.is_some() {
                 // Enabled but failed to initialize
-                (indicators::ERROR, colors::ERROR, "InternalLLM:err")
+                (indicators::ERROR, colors::ERROR, "InternalLLM")
             } else if app.internal_llm_service.is_none() {
                 // Enabled but still loading
-                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM:...")
+                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM")
             } else if app.internal_llm_title_pending {
                 // Enabled, loaded, but has pending work
-                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM:busy")
+                (indicators::BUSY, colors::IN_PROGRESS, "InternalLLM")
             } else {
                 // Enabled and ready
-                (indicators::SUCCESS, colors::HEALTHY, "InternalLLM:on")
+                (indicators::SUCCESS, colors::HEALTHY, "InternalLLM")
             }
         } else {
             // Disabled
-            (indicators::ERROR, colors::ERROR, "InternalLLM:off")
+            (indicators::ERROR, colors::ERROR, "InternalLLM")
         };
 
         spans.push(Span::styled(
-            format!(" {label}:{icon}"),
+            format!("{label}:{icon} "),
             Style::default().fg(color),
+        ));
+    }
+
+    // YOLO mode status
+    {
+        let enabled = ragent_config::yolo::is_enabled();
+        let (icon, color) = if enabled {
+            (indicators::SUCCESS, colors::HEALTHY)
+        } else {
+            (indicators::ERROR, colors::ERROR)
+        };
+        spans.push(Span::styled(
+            format!("YOLO:{icon}"),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -604,8 +616,7 @@ fn build_line2_right(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styling Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
+// ────────────────��────────────────────────────────────────────────────────────
 /// Create a healthy (green) style.
 #[allow(dead_code)]
 fn style_healthy() -> Style {

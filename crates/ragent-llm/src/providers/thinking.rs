@@ -323,8 +323,8 @@ pub(crate) fn should_warn_unsupported_thinking(request: &ChatRequest) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::llm::{ChatContent, ChatMessage};
+    use std::sync::Arc;
 
     fn make_request() -> ChatRequest {
         ChatRequest {

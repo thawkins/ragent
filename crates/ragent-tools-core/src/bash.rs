@@ -432,9 +432,12 @@ fn contains_denied_command(cmd: &str) -> bool {
             }
             if let Some(rest) = cmd_lower.strip_prefix(denied)
                 && let Some(first_char) = rest.chars().next()
-                    && !first_char.is_alphanumeric() && first_char != '_' && first_char != '-' {
-                        return true;
-                    }
+                && !first_char.is_alphanumeric()
+                && first_char != '_'
+                && first_char != '-'
+            {
+                return true;
+            }
         }
 
         // Check denied command patterns (commands with specific args like "sudo ", "su -")

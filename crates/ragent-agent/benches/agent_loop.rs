@@ -68,19 +68,25 @@ fn bench_chat_request_payload_bytes(c: &mut Criterion) {
 
     c.bench_function("serde_bytes_small", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&small)).map(|v| v.len() as u64).unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&small))
+                .map(|v| v.len() as u64)
+                .unwrap_or(0);
             black_box(bytes);
         })
     });
     c.bench_function("serde_bytes_medium", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&medium)).map(|v| v.len() as u64).unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&medium))
+                .map(|v| v.len() as u64)
+                .unwrap_or(0);
             black_box(bytes);
         })
     });
     c.bench_function("serde_bytes_large", |b| {
         b.iter(|| {
-            let bytes = serde_json::to_vec(black_box(&large)).map(|v| v.len() as u64).unwrap_or(0);
+            let bytes = serde_json::to_vec(black_box(&large))
+                .map(|v| v.len() as u64)
+                .unwrap_or(0);
             black_box(bytes);
         })
     });
@@ -98,19 +104,34 @@ fn bench_compact_history(c: &mut Criterion) {
             } else {
                 format!("Assistant response {i}")
             };
-            Message::new("bench", if i % 2 == 0 { Role::User } else { Role::Assistant }, vec![
-                MessagePart::Text { text },
-            ])
+            Message::new(
+                "bench",
+                if i % 2 == 0 {
+                    Role::User
+                } else {
+                    Role::Assistant
+                },
+                vec![MessagePart::Text { text }],
+            )
         })
         .collect();
 
     // Large history that exceeds context window
     let large: Vec<Message> = (0..100)
         .map(|i| {
-            let text = format!("Message content that is reasonably long to simulate real chat history. Index: {}", i);
-            Message::new("bench", if i % 2 == 0 { Role::User } else { Role::Assistant }, vec![
-                MessagePart::Text { text },
-            ])
+            let text = format!(
+                "Message content that is reasonably long to simulate real chat history. Index: {}",
+                i
+            );
+            Message::new(
+                "bench",
+                if i % 2 == 0 {
+                    Role::User
+                } else {
+                    Role::Assistant
+                },
+                vec![MessagePart::Text { text }],
+            )
         })
         .collect();
 

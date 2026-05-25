@@ -183,9 +183,10 @@ impl InferenceControls {
             return Err(EmbeddedInferenceError::Cancelled);
         }
         if let Some(deadline) = self.deadline
-            && Instant::now() >= deadline {
-                return Err(EmbeddedInferenceError::DeadlineExceeded);
-            }
+            && Instant::now() >= deadline
+        {
+            return Err(EmbeddedInferenceError::DeadlineExceeded);
+        }
         Ok(())
     }
 }
@@ -1059,25 +1060,26 @@ pub fn known_model_manifest(model_id: &str) -> Option<EmbeddedModelManifest> {
 pub fn discover_manifest_in_dir(model_id: &str, model_dir: &Path) -> Result<EmbeddedModelManifest> {
     let mut artifacts = Vec::new();
     if model_dir.exists()
-        && let Ok(entries) = fs::read_dir(model_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("gguf") {
-                    let size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                    let file_name = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    artifacts.push(EmbeddedModelArtifact {
-                        file_name,
-                        size_bytes,
-                        sha256: None,
-                        source_url: None,
-                    });
-                }
+        && let Ok(entries) = fs::read_dir(model_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("gguf") {
+                let size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                artifacts.push(EmbeddedModelArtifact {
+                    file_name,
+                    size_bytes,
+                    sha256: None,
+                    source_url: None,
+                });
             }
         }
+    }
 
     if artifacts.is_empty() {
         bail!(

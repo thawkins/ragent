@@ -266,10 +266,9 @@ fn extract_page_text(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> Result<
                     }
                 }
             }
-            "Td" | "TD" | "T*" | "'" | "\""
-                if !text.is_empty() && !text.ends_with('\n') => {
-                    text.push('\n');
-                }
+            "Td" | "TD" | "T*" | "'" | "\"" if !text.is_empty() && !text.ends_with('\n') => {
+                text.push('\n');
+            }
             _ => {}
         }
     }

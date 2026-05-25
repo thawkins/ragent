@@ -4,8 +4,8 @@ use serde_json::json;
 use std::io::Write;
 use std::sync::Arc;
 
-use ragent_tools_core::{Tool, ToolContext, ToolOutput};
 use ragent_tools_core::read::ReadTool;
+use ragent_tools_core::{Tool, ToolContext, ToolOutput};
 use ragent_types::event::EventBus;
 
 fn make_ctx() -> ToolContext {
@@ -148,10 +148,7 @@ async fn test_read_num_lines_without_start_line_is_ignored() {
         }
     }
 
-    let input = read_input(
-        tmp.path().to_str().unwrap(),
-        json!({ "num_lines": 5 }),
-    );
+    let input = read_input(tmp.path().to_str().unwrap(), json!({ "num_lines": 5 }));
     let out = read_file_with(input).await;
 
     // Without start_line, num_lines is ignored; full file returned (≤100 lines)

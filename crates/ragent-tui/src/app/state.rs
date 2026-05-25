@@ -1150,20 +1150,20 @@ pub struct App {
     pub is_processing: bool,
     /// Cancellation flag shared with the processor task; set to `true` on ESC.
     pub cancel_flag: Option<Arc<AtomicBool>>,
-          /// True while an automatic pre-send compaction run is active.
-          pub auto_compact_in_progress: bool,
-          /// True while any compaction run (manual or auto) is active.
-          /// Used to trigger message-history replacement when the LLM finishes.
-          pub compact_in_progress: bool,
-          /// Set when an auto-compaction run returns an error.
-          pub auto_compact_failed: bool,
-          /// Path to the SQLite storage database.
-          pub db_path: std::path::PathBuf,
-          /// User message queued while auto-compaction runs: `(text, image_paths)`.
-          pub pending_send_after_compact: Option<(String, Vec<std::path::PathBuf>)>,
-                /// Whether the last agent run was halted by the user (ESC).
-                pub agent_halted: bool,
-                /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.    /// Step number comes from EventBus; sub_step is per-tool-call within a step.
+    /// True while an automatic pre-send compaction run is active.
+    pub auto_compact_in_progress: bool,
+    /// True while any compaction run (manual or auto) is active.
+    /// Used to trigger message-history replacement when the LLM finishes.
+    pub compact_in_progress: bool,
+    /// Set when an auto-compaction run returns an error.
+    pub auto_compact_failed: bool,
+    /// Path to the SQLite storage database.
+    pub db_path: std::path::PathBuf,
+    /// User message queued while auto-compaction runs: `(text, image_paths)`.
+    pub pending_send_after_compact: Option<(String, Vec<std::path::PathBuf>)>,
+    /// Whether the last agent run was halted by the user (ESC).
+    pub agent_halted: bool,
+    /// Maps tool call IDs to their `(short_session_id, step_number, sub_step)` for log/message correlation.    /// Step number comes from EventBus; sub_step is per-tool-call within a step.
     pub tool_step_map: HashMap<String, (String, u32, u32)>,
     /// Pending tool call args received before the ToolCallStart event. Some providers
     /// may emit args/result events before the start event; store them here and apply
@@ -1314,27 +1314,29 @@ pub struct App {
     pub memory_browser_area: Rect,
 
     // ── Memory status (M7-T3) ─────────────────────────────────────────────────
-          /// Cached count of memory blocks (global + project).
-        pub memory_block_count: usize,
-        /// Cached count of structured memories (SQLite).
-        pub memory_entry_count: u64,
-        /// Timestamp of the last memory update event (for relative time display).
-        pub memory_last_updated: Option<std::time::Instant>,
-        /// When the cached memory stats were last refreshed.
-        pub memory_stats_last_refresh: std::time::Instant,
-                  /// When swarm unblock was last polled (debounces filesystem I/O).
-                  pub swarm_unblock_last_poll: std::time::Instant,
-                  /// When swarm completion was last polled (debounces filesystem I/O).
-                  pub swarm_completion_last_poll: std::time::Instant,    /// Current theme mode (default or high-contrast for accessibility)
+    /// Cached count of memory blocks (global + project).
+    pub memory_block_count: usize,
+    /// Cached count of structured memories (SQLite).
+    pub memory_entry_count: u64,
+    /// Timestamp of the last memory update event (for relative time display).
+    pub memory_last_updated: Option<std::time::Instant>,
+    /// When the cached memory stats were last refreshed.
+    pub memory_stats_last_refresh: std::time::Instant,
+    /// When swarm unblock was last polled (debounces filesystem I/O).
+    pub swarm_unblock_last_poll: std::time::Instant,
+    /// When swarm completion was last polled (debounces filesystem I/O).
+    pub swarm_completion_last_poll: std::time::Instant,
+    /// Current theme mode (default or high-contrast for accessibility)
     pub theme_mode: crate::theme::ThemeMode,
     /// Whether mouse input is enabled (default: true). Set to false for
     /// keyboard-only accessibility mode.
     pub mouse_enabled: bool,
-          /// Status message history for tracking recent status messages
-          pub status_history: StatusHistory,
-          /// Paths of configuration files that were loaded at startup (displayed in message window).
-          pub config_paths: Vec<std::path::PathBuf>,
-      }/// State held while waiting for the user to approve or reject a plan.
+    /// Status message history for tracking recent status messages
+    pub status_history: StatusHistory,
+    /// Paths of configuration files that were loaded at startup (displayed in message window).
+    pub config_paths: Vec<std::path::PathBuf>,
+}
+/// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {
     /// The plan text produced by the plan agent.

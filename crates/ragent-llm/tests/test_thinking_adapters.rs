@@ -26,9 +26,9 @@ fn make_request(model: &str) -> ChatRequest {
     ChatRequest {
         model: model.to_string(),
         messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+            role: "user".to_string(),
+            content: ChatContent::Text("hello".to_string()),
+        }]),
         tools: Arc::new(vec![]),
         temperature: None,
         top_p: None,

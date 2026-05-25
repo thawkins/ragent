@@ -367,22 +367,19 @@ async fn send_message(
         }
     }
 
-          let session_id = id.clone();
-          let rx = state.event_bus.subscribe();
-          let processor = state.session_processor.clone();
-          let content = body.content;
-          let config = state.config;
-          let provider_registry = state.session_processor.provider_registry.clone();
-    
-          tokio::spawn(async move {
-              let cfg = config.read().await;
-              let agent = agent::resolve_agent_with_model(
-                  &cfg.default_agent,
-                  &cfg,
-                  &provider_registry,
-              )
-              .unwrap_or_else(|_| AgentInfo::new("general", "General-purpose agent"));
-              drop(cfg);        if let Err(e) = processor
+    let session_id = id.clone();
+    let rx = state.event_bus.subscribe();
+    let processor = state.session_processor.clone();
+    let content = body.content;
+    let config = state.config;
+    let provider_registry = state.session_processor.provider_registry.clone();
+
+    tokio::spawn(async move {
+        let cfg = config.read().await;
+        let agent = agent::resolve_agent_with_model(&cfg.default_agent, &cfg, &provider_registry)
+            .unwrap_or_else(|_| AgentInfo::new("general", "General-purpose agent"));
+        drop(cfg);
+        if let Err(e) = processor
             .process_message(
                 &session_id,
                 &content,

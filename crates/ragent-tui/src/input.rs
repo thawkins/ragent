@@ -6,8 +6,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ragent_types::ThinkingLevel;
 
+use crate::app::{
+    App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource,
+};
 use ragent_core::provider::Provider;
-use crate::app::{App, ConfiguredProvider, ContextAction, PROVIDER_LIST, ProviderSetupStep, ProviderSource};
 
 fn cursor_byte_pos(s: &str, char_index: usize) -> usize {
     if char_index == 0 {
@@ -114,6 +116,8 @@ pub enum InputAction {
     ToggleLog,
     /// Toggle the profiler panel visibility and profiler state (Alt+P).
     ToggleProfile,
+    /// Toggle YOLO mode (Alt+Y).
+    ToggleYolo,
 }
 
 /// Translate a [`KeyEvent`] into an optional [`InputAction`].
@@ -718,6 +722,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Option<InputAction> {
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(InputAction::ToggleProfile)
         }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(InputAction::ToggleYolo)
+        }
         KeyCode::Char(c) => {
             if app.is_input_blocked() {
                 app.status = "busy - wait for the current turn to finish".to_string();
@@ -834,68 +841,85 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 let already_configured = App::get_configured_providers(&app.storage)
                     .iter()
                     .any(|p| p.id == pid);
-                                  if already_configured {
-                                      if pid == "azure_resource" {
-                                          app.refresh_provider();
-                                          let provider = ragent_core::provider::azure_resource::AzureResourceProvider::new();
-                                          let models = provider.default_models();
-                                          if models.is_empty() {
-                                              app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                  entries: Vec::new(),
-                                                  selected: 0,
-                                                  error: Some("No Azure resources found. Check azureresources.json.".to_string()),
-                                              });
-                                          } else {
-                                              // Try to restore last selection
-                                              let mut selected = 0usize;
-                                              if let Ok(Some(last)) = app.storage.get_setting("azure_resource_last_selection") {
-                                                  if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
-                                                      if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str()) {
-                                                          if let Some(idx) = models.iter().position(|e| e.id == last_id) {
-                                                              selected = idx;
-                                                          } else {
-                                                              let _ = app.storage.delete_setting("azure_resource_last_selection");
-                                                          }
-                                                      }
-                                                  }
-                                              }
-                                              let azure_entries: Vec<ragent_core::provider::azure_resource::AzureResourceEntry> = models
-                                                  .into_iter()
-                                                  .map(|m| ragent_core::provider::azure_resource::AzureResourceEntry {
-                                                      id: m.id,
-                                                      name: m.name,
-                                                      endpoint: "https://default.endpoint".to_string(),
-                                                      api_key: None,
-                                                      api_key_env: None,
-                                                      context_window: Some(m.context_window),
-                                                      capabilities: None,
-                                                      thinking: m.thinking_config,
-                                                  })
-                                                  .collect();
-                                              app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                  entries: azure_entries,
-                                                  selected,
-                                                  error: None,
-                                              });
-                                          }
-                                          return;
-                                      }
-                                      app.refresh_provider();
-                                      let models = app.models_for_provider(pid);
-                                      if models.is_empty() {
-                                          app.provider_setup = None;
-                                          app.status = format!(
-                                              "⚠ No models available for {} — check provider setup and model discovery",
-                                              pname
-                                          );
-                                      } else {
-                                          app.provider_setup = Some(ProviderSetupStep::SelectModel {
-                                              provider_id: pid.to_string(),
-                                              provider_name: pname.to_string(),
-                                              models,
-                                              selected: 0,
-                                          });
-                                      }                } else if pid == "ollama" {
+                if already_configured {
+                    if pid == "azure_resource" {
+                        app.refresh_provider();
+                        let provider =
+                            ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                        let models = provider.default_models();
+                        if models.is_empty() {
+                            app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                                entries: Vec::new(),
+                                selected: 0,
+                                error: Some(
+                                    "No Azure resources found. Check azureresources.json."
+                                        .to_string(),
+                                ),
+                            });
+                        } else {
+                            // Try to restore last selection
+                            let mut selected = 0usize;
+                            if let Ok(Some(last)) =
+                                app.storage.get_setting("azure_resource_last_selection")
+                            {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last)
+                                {
+                                    if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str())
+                                    {
+                                        if let Some(idx) =
+                                            models.iter().position(|e| e.id == last_id)
+                                        {
+                                            selected = idx;
+                                        } else {
+                                            let _ = app
+                                                .storage
+                                                .delete_setting("azure_resource_last_selection");
+                                        }
+                                    }
+                                }
+                            }
+                            let azure_entries: Vec<
+                                ragent_core::provider::azure_resource::AzureResourceEntry,
+                            > = models
+                                .into_iter()
+                                .map(|m| {
+                                    ragent_core::provider::azure_resource::AzureResourceEntry {
+                                        id: m.id,
+                                        name: m.name,
+                                        endpoint: "https://default.endpoint".to_string(),
+                                        api_key: None,
+                                        api_key_env: None,
+                                        context_window: Some(m.context_window),
+                                        capabilities: None,
+                                        thinking: m.thinking_config,
+                                    }
+                                })
+                                .collect();
+                            app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                                entries: azure_entries,
+                                selected,
+                                error: None,
+                            });
+                        }
+                        return;
+                    }
+                    app.refresh_provider();
+                    let models = app.models_for_provider(pid);
+                    if models.is_empty() {
+                        app.provider_setup = None;
+                        app.status = format!(
+                            "⚠ No models available for {} — check provider setup and model discovery",
+                            pname
+                        );
+                    } else {
+                        app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                            provider_id: pid.to_string(),
+                            provider_name: pname.to_string(),
+                            models,
+                            selected: 0,
+                        });
+                    }
+                } else if pid == "ollama" {
                     // Ollama doesn't require a key — store empty and mark configured
                     let _ = app.storage.set_provider_auth(pid, "");
                     let _ = app
@@ -953,104 +977,118 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     }
                     // Token exchange failed or no token — start device flow
                     start_copilot_device_flow_setup(app);
-                                                                      } else if pid == "azure_resource" {
-                                                                          // Azure Resource: load entries from azureresources.json
-                                                                          let provider = ragent_core::provider::azure_resource::AzureResourceProvider::new();
-                                                                          let entries = provider.default_models();
-                                                                          if entries.is_empty() {
-                                                                              app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                                                  entries: Vec::new(),
-                                                                                  selected: 0,
-                                                                                  error: Some("No Azure resources found. Check azureresources.json.".to_string()),
-                                                                              });
-                                                                          } else {
-                                                                              // Try to restore last selection
-                                                                              let mut selected = 0usize;
-                                                                              if let Ok(Some(last)) = app.storage.get_setting("azure_resource_last_selection") {
-                                                                                  if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
-                                                                                      if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str()) {
-                                                                                          if let Some(idx) = entries.iter().position(|e| e.id == last_id) {
-                                                                                              selected = idx;
-                                                                                          } else {
-                                                                                              let _ = app.storage.delete_setting("azure_resource_last_selection");
-                                                                                          }
-                                                                                      }
-                                                                                  }
-                                                                              }
-                                                                              // Convert ModelInfo back to AzureResourceEntry for the dialog
-                                                                              let azure_entries: Vec<ragent_core::provider::azure_resource::AzureResourceEntry> = entries
-                                                                                  .into_iter()
-                                                                                  .map(|m| ragent_core::provider::azure_resource::AzureResourceEntry {
-                                                                                      id: m.id,
-                                                                                      name: m.name,
-                                                                                      endpoint: "https://default.endpoint".to_string(),
-                                                                                      api_key: None,
-                                                                                      api_key_env: None,
-                                                                                      context_window: Some(m.context_window),
-                                                                                      capabilities: None,
-                                                                                      thinking: m.thinking_config,
-                                                                                  })
-                                                                                  .collect();
-                                                                              app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                                                  entries: azure_entries,
-                                                                                  selected,
-                                                                                  error: None,
-                                                                              });
-                                                                          }
-                                                                      } else {
-                                                                          app.provider_setup = Some(ProviderSetupStep::EnterKey {                                          provider_id: pid.to_string(),
-                                          provider_name: pname.to_string(),
-                                          key_field: crate::input_field::InputField::new(),
-                                          endpoint_field: if pid == "generic_openai" {
-                                              crate::input_field::InputField::with_text(
-                                                  app.storage
-                                                      .get_setting("generic_openai_api_base")
-                                                      .ok()
-                                                      .flatten()
-                                                      .unwrap_or_default(),
-                                              )
-                                          } else if pid == "azure_foundry" {
-                                              crate::input_field::InputField::with_text(
-                                                  app.storage
-                                                      .get_setting("azure_foundry_api_base")
-                                                      .ok()
-                                                      .flatten()
-                                                      .unwrap_or_default(),
-                                              )
-                                          } else {
-                                              crate::input_field::InputField::new()
-                                          },
-                                          active_field: 0,
-                                          error: None,
-                                      });
-                                  }            }
+                } else if pid == "azure_resource" {
+                    // Azure Resource: load entries from azureresources.json
+                    let provider =
+                        ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                    let entries = provider.default_models();
+                    if entries.is_empty() {
+                        app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                            entries: Vec::new(),
+                            selected: 0,
+                            error: Some(
+                                "No Azure resources found. Check azureresources.json.".to_string(),
+                            ),
+                        });
+                    } else {
+                        // Try to restore last selection
+                        let mut selected = 0usize;
+                        if let Ok(Some(last)) =
+                            app.storage.get_setting("azure_resource_last_selection")
+                        {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
+                                if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str()) {
+                                    if let Some(idx) = entries.iter().position(|e| e.id == last_id)
+                                    {
+                                        selected = idx;
+                                    } else {
+                                        let _ = app
+                                            .storage
+                                            .delete_setting("azure_resource_last_selection");
+                                    }
+                                }
+                            }
+                        }
+                        // Convert ModelInfo back to AzureResourceEntry for the dialog
+                        let azure_entries: Vec<
+                            ragent_core::provider::azure_resource::AzureResourceEntry,
+                        > = entries
+                            .into_iter()
+                            .map(
+                                |m| ragent_core::provider::azure_resource::AzureResourceEntry {
+                                    id: m.id,
+                                    name: m.name,
+                                    endpoint: "https://default.endpoint".to_string(),
+                                    api_key: None,
+                                    api_key_env: None,
+                                    context_window: Some(m.context_window),
+                                    capabilities: None,
+                                    thinking: m.thinking_config,
+                                },
+                            )
+                            .collect();
+                        app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                            entries: azure_entries,
+                            selected,
+                            error: None,
+                        });
+                    }
+                } else {
+                    app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                        provider_id: pid.to_string(),
+                        provider_name: pname.to_string(),
+                        key_field: crate::input_field::InputField::new(),
+                        endpoint_field: if pid == "generic_openai" {
+                            crate::input_field::InputField::with_text(
+                                app.storage
+                                    .get_setting("generic_openai_api_base")
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or_default(),
+                            )
+                        } else if pid == "azure_foundry" {
+                            crate::input_field::InputField::with_text(
+                                app.storage
+                                    .get_setting("azure_foundry_api_base")
+                                    .ok()
+                                    .flatten()
+                                    .unwrap_or_default(),
+                            )
+                        } else {
+                            crate::input_field::InputField::new()
+                        },
+                        active_field: 0,
+                        error: None,
+                    });
+                }
+            }
             _ => {
                 app.provider_setup = Some(ProviderSetupStep::SelectProvider { selected });
             }
         },
-          ProviderSetupStep::EnterKey {
-              provider_id,
-              provider_name,
-              mut key_field,
-              mut endpoint_field,
-              mut active_field,
-              ..
-          } => match key.code {
-              KeyCode::Enter => {
-                  let trimmed = key_field.text().trim().to_string();
-                  if trimmed.is_empty() {
-                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                          provider_id,
-                          provider_name,
-                          key_field,
-                          endpoint_field,
-                          active_field,
-                          error: Some("API key cannot be empty.".to_string()),
-                      });
-                  } else if provider_id == "copilot"
-                      && ragent_core::provider::copilot::is_pat_token(&trimmed)
-                  {
-                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
+        ProviderSetupStep::EnterKey {
+            provider_id,
+            provider_name,
+            mut key_field,
+            mut endpoint_field,
+            mut active_field,
+            ..
+        } => match key.code {
+            KeyCode::Enter => {
+                let trimmed = key_field.text().trim().to_string();
+                if trimmed.is_empty() {
+                    app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                        provider_id,
+                        provider_name,
+                        key_field,
+                        endpoint_field,
+                        active_field,
+                        error: Some("API key cannot be empty.".to_string()),
+                    });
+                } else if provider_id == "copilot"
+                    && ragent_core::provider::copilot::is_pat_token(&trimmed)
+                {
+                    app.provider_setup = Some(ProviderSetupStep::EnterKey {
                           provider_id,
                           provider_name,
                           key_field,
@@ -1061,64 +1099,71 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                   .to_string(),
                           ),
                       });
-                  } else {
-                      let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
-                      if provider_id == "generic_openai" || provider_id == "azure_foundry" {
-                          let endpoint = endpoint_field.text().trim();
-                          if endpoint.is_empty() {
-                              let _ = app.storage.delete_setting(&format!("{provider_id}_api_base"));
-                          } else {
-                              let _ = app.storage.set_setting(&format!("{provider_id}_api_base"), endpoint);
-                          }
-                      }
-                      let _ = app
-                          .storage
-                          .delete_setting(&format!("provider_{provider_id}_disabled"));
-                      app.refresh_provider();
-                      let models = app.models_for_provider(&provider_id);
-                      app.provider_setup = Some(ProviderSetupStep::SelectModel {
-                          provider_id,
-                          provider_name,
-                          models,
-                          selected: 0,
-                      });
-                  }
-              }
-              KeyCode::Tab if provider_id == "generic_openai" || provider_id == "azure_foundry" => {
-                  active_field = if active_field == 0 { 1 } else { 0 };
-                  app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                      provider_id,
-                      provider_name,
-                      key_field,
-                      endpoint_field,
-                      active_field,
-                      error: None,
-                  });
-              }
-              _ => {
-                  let is_endpoint = provider_id == "generic_openai" || provider_id == "azure_foundry";
-                  let target = if is_endpoint && active_field == 1 {
-                      &mut endpoint_field
-                  } else {
-                      &mut key_field
-                  };
-                  let consumed = target.handle_key(key);
-                  if !consumed && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
-                      && key.modifiers.contains(KeyModifiers::CONTROL)
-                      && !key.modifiers.contains(KeyModifiers::ALT) {
-                      target.paste_clipboard();
-                  }
-                                      app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                                          provider_id,
-                                          provider_name,
-                                          key_field,
-                                          endpoint_field,
-                                          active_field,
-                                          error: None,
-                                      });
-                                  }
-                              },
-                            ProviderSetupStep::DeviceFlowPending {            user_code,
+                } else {
+                    let _ = app.storage.set_provider_auth(&provider_id, &trimmed);
+                    if provider_id == "generic_openai" || provider_id == "azure_foundry" {
+                        let endpoint = endpoint_field.text().trim();
+                        if endpoint.is_empty() {
+                            let _ = app
+                                .storage
+                                .delete_setting(&format!("{provider_id}_api_base"));
+                        } else {
+                            let _ = app
+                                .storage
+                                .set_setting(&format!("{provider_id}_api_base"), endpoint);
+                        }
+                    }
+                    let _ = app
+                        .storage
+                        .delete_setting(&format!("provider_{provider_id}_disabled"));
+                    app.refresh_provider();
+                    let models = app.models_for_provider(&provider_id);
+                    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                        provider_id,
+                        provider_name,
+                        models,
+                        selected: 0,
+                    });
+                }
+            }
+            KeyCode::Tab if provider_id == "generic_openai" || provider_id == "azure_foundry" => {
+                active_field = if active_field == 0 { 1 } else { 0 };
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_field,
+                    endpoint_field,
+                    active_field,
+                    error: None,
+                });
+            }
+            _ => {
+                let is_endpoint = provider_id == "generic_openai" || provider_id == "azure_foundry";
+                let target = if is_endpoint && active_field == 1 {
+                    &mut endpoint_field
+                } else {
+                    &mut key_field
+                };
+                let consumed = target.handle_key(key);
+                if !consumed
+                    && matches!(key.code, KeyCode::Char('v') | KeyCode::Char('V'))
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT)
+                {
+                    target.paste_clipboard();
+                }
+                app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                    provider_id,
+                    provider_name,
+                    key_field,
+                    endpoint_field,
+                    active_field,
+                    error: None,
+                });
+            }
+        },
+        ProviderSetupStep::DeviceFlowPending {
+            user_code,
             verification_uri,
         } => match key.code {
             KeyCode::Esc => {
@@ -1271,13 +1316,16 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         "api_key": entry.api_key,
                         "api_key_env": entry.api_key_env,
                     });
-                    let _ = app.storage.set_setting(
-                        "azure_resource_last_selection",
-                        &payload.to_string(),
-                    );
+                    let _ = app
+                        .storage
+                        .set_setting("azure_resource_last_selection", &payload.to_string());
                     // Set active provider to azure_foundry with the entry's endpoint and model id
-                    let _ = app.storage.set_setting("preferred_provider", "azure_foundry");
-                    let _ = app.storage.set_setting("azure_foundry_api_base", &entry.endpoint);
+                    let _ = app
+                        .storage
+                        .set_setting("preferred_provider", "azure_foundry");
+                    let _ = app
+                        .storage
+                        .set_setting("azure_foundry_api_base", &entry.endpoint);
                     let model_value = format!("azure_foundry/{}", entry.id);
                     let _ = app.storage.set_setting("selected_model", &model_value);
                     let _ = app.storage.set_setting(
@@ -1541,13 +1589,14 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 let _ = app
                     .storage
                     .delete_setting(&format!("provider_{pid}_last_model"));
-                                  if pid == "copilot" {
-                                      let _ = app.storage.delete_setting("copilot_api_base");
-                                  } else if pid == "generic_openai" {
-                                      let _ = app.storage.delete_setting("generic_openai_api_base");
-                                  } else if pid == "azure_foundry" {
-                                      let _ = app.storage.delete_setting("azure_foundry_api_base");
-                                  }                let is_active = app
+                if pid == "copilot" {
+                    let _ = app.storage.delete_setting("copilot_api_base");
+                } else if pid == "generic_openai" {
+                    let _ = app.storage.delete_setting("generic_openai_api_base");
+                } else if pid == "azure_foundry" {
+                    let _ = app.storage.delete_setting("azure_foundry_api_base");
+                }
+                let is_active = app
                     .configured_provider
                     .as_ref()
                     .map_or(false, |p| p.id == pid);
@@ -1754,14 +1803,15 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     let handle = match tokio::runtime::Handle::try_current() {
         Ok(h) => h,
         Err(_) => {
-                          app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                              provider_id: "copilot".to_string(),
-                              provider_name: "GitHub Copilot".to_string(),
-                              key_field: crate::input_field::InputField::new(),
-                              endpoint_field: crate::input_field::InputField::new(),
-                              active_field: 0,
-                              error: Some("Async runtime not available for device flow.".to_string()),
-                          });            return;
+            app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                provider_id: "copilot".to_string(),
+                provider_name: "GitHub Copilot".to_string(),
+                key_field: crate::input_field::InputField::new(),
+                endpoint_field: crate::input_field::InputField::new(),
+                active_field: 0,
+                error: Some("Async runtime not available for device flow.".to_string()),
+            });
+            return;
         }
     };
 
@@ -1773,14 +1823,15 @@ fn start_copilot_device_flow_setup(app: &mut App) {
     let flow = match start {
         Ok(f) => f,
         Err(e) => {
-                          app.provider_setup = Some(ProviderSetupStep::EnterKey {
-                              provider_id: "copilot".to_string(),
-                              provider_name: "GitHub Copilot".to_string(),
-                              key_field: crate::input_field::InputField::new(),
-                              endpoint_field: crate::input_field::InputField::new(),
-                              active_field: 0,
-                              error: Some(format!("Device flow failed: {e}")),
-                          });            return;
+            app.provider_setup = Some(ProviderSetupStep::EnterKey {
+                provider_id: "copilot".to_string(),
+                provider_name: "GitHub Copilot".to_string(),
+                key_field: crate::input_field::InputField::new(),
+                endpoint_field: crate::input_field::InputField::new(),
+                active_field: 0,
+                error: Some(format!("Device flow failed: {e}")),
+            });
+            return;
         }
     };
 

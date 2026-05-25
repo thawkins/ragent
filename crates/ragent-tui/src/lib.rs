@@ -263,31 +263,34 @@ pub async fn run_tui(
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
                 app.force_new_message = true;
-                                  app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
-                                  // Display the loaded configuration file(s)
-                                  if app.config_paths.is_empty() {
-                                      app.append_assistant_text("\nℹ No config file found; using defaults");
-                                  } else {
-                                      let mut paths_text = app.config_paths
-                                          .iter()
-                                          .map(|p| {
-                                              let s = p.display().to_string();
-                                              if let Some(home) = std::env::var_os("HOME") {
-                                                  let home = home.to_string_lossy();
-                                                  if let Some(rest) = s.strip_prefix(home.as_ref()) {
-                                                      return format!("~{}", rest);
-                                                  }
-                                              }
-                                              s
-                                          })
-                                          .collect::<Vec<_>>()
-                                          .join("`\n  ");
-                                      // Prepend indentation for multi-line alignment
-                                      if app.config_paths.len() > 1 {
-                                          paths_text = format!("\n  {paths_text}");
-                                      }
-                                                                              app.append_assistant_text(&format!("\n✓ Loaded config file: `{paths_text}`"));                                  }
-                                  app.status = "session created".to_string();                terminal.draw(|frame| layout::render(frame, &mut app))?;
+                app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
+                // Display the loaded configuration file(s)
+                if app.config_paths.is_empty() {
+                    app.append_assistant_text("\nℹ No config file found; using defaults");
+                } else {
+                    let mut paths_text = app
+                        .config_paths
+                        .iter()
+                        .map(|p| {
+                            let s = p.display().to_string();
+                            if let Some(home) = std::env::var_os("HOME") {
+                                let home = home.to_string_lossy();
+                                if let Some(rest) = s.strip_prefix(home.as_ref()) {
+                                    return format!("~{}", rest);
+                                }
+                            }
+                            s
+                        })
+                        .collect::<Vec<_>>()
+                        .join("`\n  ");
+                    // Prepend indentation for multi-line alignment
+                    if app.config_paths.len() > 1 {
+                        paths_text = format!("\n  {paths_text}");
+                    }
+                    app.append_assistant_text(&format!("\n✓ Loaded config file: `{paths_text}`"));
+                }
+                app.status = "session created".to_string();
+                terminal.draw(|frame| layout::render(frame, &mut app))?;
 
                 // Kick off the AGENTS.md acknowledgement exchange in the background
                 let proc = Arc::clone(&app.session_processor);

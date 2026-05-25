@@ -205,14 +205,15 @@ pub fn search_blocks_cross_project(
 
     for label in &project_labels {
         if let Ok(Some(block)) = storage.load(label, &BlockScope::Project, working_dir)
-            && block.content.to_lowercase().contains(&query_lower) {
-                project_matched.insert(label.clone());
-                results.push(ResolvedBlock {
-                    block,
-                    winning_scope: BlockScope::Project,
-                    shadowed: false,
-                });
-            }
+            && block.content.to_lowercase().contains(&query_lower)
+        {
+            project_matched.insert(label.clone());
+            results.push(ResolvedBlock {
+                block,
+                winning_scope: BlockScope::Project,
+                shadowed: false,
+            });
+        }
     }
 
     // Search global blocks if cross-project is enabled.
@@ -226,14 +227,15 @@ pub fn search_blocks_cross_project(
                 continue;
             }
             if let Ok(Some(block)) = storage.load(label, &BlockScope::Global, working_dir)
-                && block.content.to_lowercase().contains(&query_lower) {
-                    let shadowed = project_matched.contains(label);
-                    results.push(ResolvedBlock {
-                        block,
-                        winning_scope: BlockScope::Global,
-                        shadowed,
-                    });
-                }
+                && block.content.to_lowercase().contains(&query_lower)
+            {
+                let shadowed = project_matched.contains(label);
+                results.push(ResolvedBlock {
+                    block,
+                    winning_scope: BlockScope::Global,
+                    shadowed,
+                });
+            }
         }
     }
 

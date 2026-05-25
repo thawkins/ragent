@@ -83,14 +83,16 @@ fn test_azure_resource_stale_selection_cleanup() {
             .expect("delete");
     }
 
-    let after = storage.get_setting("azure_resource_last_selection").expect("read");
+    let after = storage
+        .get_setting("azure_resource_last_selection")
+        .expect("read");
     assert!(after.is_none(), "stale selection should be cleaned up");
 }
 
 #[test]
 fn test_azure_resource_entry_conversion_to_model_info() {
-use ragent_core::provider::Provider;
-use ragent_core::provider::azure_resource::AzureResourceProvider;
+    use ragent_core::provider::Provider;
+    use ragent_core::provider::azure_resource::AzureResourceProvider;
 
     let json = r#"{
         "version": "1",

@@ -88,8 +88,9 @@ impl Tool for GitStatusTool {
                     }
                     _ => {}
                 }
-                          } else if let Some(stripped) = line.strip_prefix("? ") {
-                            untracked.push(stripped.to_string());            } else if line.starts_with("2 ") && line.len() >= 4 {
+            } else if let Some(stripped) = line.strip_prefix("? ") {
+                untracked.push(stripped.to_string());
+            } else if line.starts_with("2 ") && line.len() >= 4 {
                 // renamed entry
                 let xy = &line[2..4];
                 let rest = &line[4..];

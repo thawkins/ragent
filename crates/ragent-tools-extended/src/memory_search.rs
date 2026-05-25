@@ -171,10 +171,11 @@ impl MemorySearchTool {
         for mem in &memories {
             if !embedded_ids.contains(&mem.id)
                 && let Ok(embedding) = provider.embed(&mem.content)
-                    && !embedding.is_empty() {
-                        let blob = serialise_embedding(&embedding);
-                        let _ = storage.store_memory_embedding(mem.id, &blob);
-                    }
+                && !embedding.is_empty()
+            {
+                let blob = serialise_embedding(&embedding);
+                let _ = storage.store_memory_embedding(mem.id, &blob);
+            }
         }
 
         // Search by similarity.

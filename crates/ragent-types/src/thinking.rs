@@ -39,7 +39,6 @@ impl ThinkingLevel {
     }
 }
 
-
 /// Configuration for model thinking/reasoning behaviour.
 ///
 /// Carries the user's chosen thinking level along with optional

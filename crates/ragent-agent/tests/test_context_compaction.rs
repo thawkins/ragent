@@ -8,7 +8,9 @@ fn make_text_message(role: Role, text: &str) -> Message {
     Message::new(
         "test-session",
         role,
-        vec![MessagePart::Text { text: text.to_string() }],
+        vec![MessagePart::Text {
+            text: text.to_string(),
+        }],
     )
 }
 
@@ -66,7 +68,11 @@ fn test_compact_trims_oldest() {
     let mut messages = Vec::new();
     for i in 0..10 {
         messages.push(make_text_message(
-            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            },
             &large_text,
         ));
     }
@@ -91,7 +97,11 @@ fn test_compact_keeps_tool_call_pairs() {
     let mut messages = Vec::new();
     for i in 0..5 {
         messages.push(make_text_message(Role::User, &large_text));
-        messages.push(make_tool_call_message("read", &format!("call-{i}"), &large_text));
+        messages.push(make_tool_call_message(
+            "read",
+            &format!("call-{i}"),
+            &large_text,
+        ));
         messages.push(make_tool_result_message(&format!("call-{i}"), &large_text));
     }
 
@@ -142,7 +152,11 @@ fn test_compact_keeps_last_two_messages() {
     let mut messages = Vec::new();
     for i in 0..20 {
         messages.push(make_text_message(
-            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            },
             &large_text,
         ));
     }

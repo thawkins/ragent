@@ -463,17 +463,18 @@ impl LlmClient for HuggingFaceClient {
 
             // Parse HF-specific error responses
             if status.as_u16() == 503
-                && let Ok(err_json) = serde_json::from_str::<HfErrorResponse>(&body_text) {
-                    let wait_msg = err_json
-                        .estimated_time
-                        .map(|t| format!(" (estimated wait: {t:.0}s)"))
-                        .unwrap_or_default();
-                    bail!(
-                        "HuggingFace: model is currently loading{wait_msg}. \
+                && let Ok(err_json) = serde_json::from_str::<HfErrorResponse>(&body_text)
+            {
+                let wait_msg = err_json
+                    .estimated_time
+                    .map(|t| format!(" (estimated wait: {t:.0}s)"))
+                    .unwrap_or_default();
+                bail!(
+                    "HuggingFace: model is currently loading{wait_msg}. \
                          The model needs to be loaded into memory before it can serve requests. \
                          Please try again in a moment."
-                    );
-                }
+                );
+            }
 
             if status.as_u16() == 403 {
                 bail!(
@@ -1145,13 +1146,14 @@ mod tests {
                 name: "read".to_string(),
                 description: "Read a file".to_string(),
                 parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string" }
-                    }
-                                  }),
-                              }]),
-                              temperature: None,            top_p: None,
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" }
+                }
+                              }),
+            }]),
+            temperature: None,
+            top_p: None,
             max_tokens: None,
             system: None,
             options: HashMap::new(),
@@ -1184,10 +1186,11 @@ mod tests {
                 role: "tool".to_string(),
                 content: ChatContent::Parts(vec![ContentPart::ToolResult {
                     tool_use_id: "call_123".to_string(),
-                                          content: "file contents here".to_string(),
-                                      }]),
-                                  }]),
-                                  tools: Arc::new(vec![]),            temperature: None,
+                    content: "file contents here".to_string(),
+                }]),
+            }]),
+            tools: Arc::new(vec![]),
+            temperature: None,
             top_p: None,
             max_tokens: None,
             system: None,
@@ -1223,10 +1226,11 @@ mod tests {
                 content: ChatContent::Parts(vec![ContentPart::ToolUse {
                     id: "call_456".to_string(),
                     name: "write_file".to_string(),
-                                          input: json!({"path": "test.txt", "content": "hello"}),
-                                      }]),
-                                  }]),
-                                  tools: Arc::new(vec![]),            temperature: None,
+                    input: json!({"path": "test.txt", "content": "hello"}),
+                }]),
+            }]),
+            tools: Arc::new(vec![]),
+            temperature: None,
             top_p: None,
             max_tokens: None,
             system: None,

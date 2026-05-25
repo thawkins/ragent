@@ -388,7 +388,8 @@ pub fn compact_blocks(
         for label in &labels {
             result.blocks_checked += 1;
 
-                          let block = match block_storage.load(label, scope, working_dir) {                Ok(Some(b)) => b,
+            let block = match block_storage.load(label, scope, working_dir) {
+                Ok(Some(b)) => b,
                 Ok(None) => continue,
                 Err(e) => {
                     warn!(label, error = %e, "Failed to load block for compaction");
@@ -412,7 +413,8 @@ pub fn compact_blocks(
                 let mut compacted_block = block.clone();
                 compacted_block.content = compacted;
 
-                                  if let Err(e) = block_storage.save(&compacted_block, working_dir) {                    warn!(label, error = %e, "Failed to save compacted block");
+                if let Err(e) = block_storage.save(&compacted_block, working_dir) {
+                    warn!(label, error = %e, "Failed to save compacted block");
                     continue;
                 }
 

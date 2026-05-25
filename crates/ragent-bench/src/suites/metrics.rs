@@ -18,10 +18,7 @@ pub fn exact_match_count(generation: &BenchGenerationResult, reference: &str) ->
 
 /// Return whether the first sample matches exactly after normalization.
 #[must_use]
-pub fn first_sample_exact_match(
-    generation: &BenchGenerationResult,
-    reference: &str,
-) -> bool {
+pub fn first_sample_exact_match(generation: &BenchGenerationResult, reference: &str) -> bool {
     let normalized_reference = normalized_code(reference);
     generation
         .samples
@@ -114,7 +111,11 @@ pub fn codebleu_score(actual: &str, expected: &str) -> f64 {
         overlap_precision(&ngrams(&actual_tokens, 2), &ngrams(&expected_tokens, 2));
     let syntax_overlap = syntax_keyword_overlap(&actual_tokens, &expected_tokens);
     let textual_similarity = edit_similarity(actual, expected);
-    textual_similarity.mul_add(0.3, syntax_overlap.mul_add(0.2, unigram_precision.mul_add(0.3, bigram_precision * 0.2)))
+    textual_similarity
+        .mul_add(
+            0.3,
+            syntax_overlap.mul_add(0.2, unigram_precision.mul_add(0.3, bigram_precision * 0.2)),
+        )
         .clamp(0.0, 1.0)
 }
 

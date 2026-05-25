@@ -89,9 +89,10 @@ impl Tool for GitBranchTool {
             if verbose {
                 // Parse tracking info from verbose output: "  main                1234abcd [origin/main: ahead 1] ..."
                 if let Some(open) = trimmed.find('[')
-                    && let Some(close) = trimmed.find(']') {
-                        tracking = Some(trimmed[open + 1..close].to_string());
-                    }
+                    && let Some(close) = trimmed.find(']')
+                {
+                    tracking = Some(trimmed[open + 1..close].to_string());
+                }
             }
 
             branches.push(json!({

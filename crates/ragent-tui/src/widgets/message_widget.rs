@@ -617,10 +617,55 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             let symbol = get_str(&["symbol"]).unwrap_or_default();
             format!("📇 refs: {}", trunc120(&symbol))
         }
+        "codeindex_status" => {
+            let enabled = input
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let label = if enabled { "on" } else { "off" };
+            format!("📇 status: {}", label)
+        }
+        "codeindex_reindex" => "📇 reindex".to_string(),
+        "codeindex_dependencies" => {
+            let path = get_relative_path(&["path"]);
+            let direction = input
+                .get("direction")
+                .and_then(|v| v.as_str())
+                .unwrap_or("imports");
+            format!("📇 {}: {}", direction, path)
+        }
+
+        // ══════════════════════════════════════════════════════════════════���
+        // 📋 SPEC MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════════
+        "spec_list" => {
+            let status = input.get("status").and_then(|v| v.as_str());
+            match status {
+                Some(s) => format!("📋 list ({s})"),
+                None => "📋 list all".to_string(),
+            }
+        }
+        "spec_read" => {
+            let id = get_str(&["spec_id"]).unwrap_or_default();
+            format!("📋 read {}", trunc120(&id))
+        }
+        "spec_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("📋 search \"{}\"", trunc120(&query))
+        }
+        "spec_task_update" => {
+            let id = get_str(&["spec_id"]).unwrap_or_default();
+            let task = get_str(&["task_id"]).unwrap_or_default();
+            let status = get_str(&["status"]).unwrap_or_default();
+            format!("📋 {} {} → {}", id, task, status)
+        }
+        "spec_coverage" => {
+            let id = get_str(&["spec_id"]).unwrap_or_default();
+            format!("📋 coverage {}", trunc120(&id))
+        }
 
         // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (Office/PDF)
-        // ═══════���═══════════════════════════════════════════════════════════
+        // 📄 DOCUMENT (Office/PDF)        // ═══════���═══════════════════════════════════════════════════════════
         "office_read" | "pdf_read" | "libreoffice_read" => {
             let path = get_relative_path(&["path"]);
             format!("📄 {}", path)
@@ -637,12 +682,15 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
         // ═══════════════════════════════════════════════════════════════════
-                // ═══════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         // 🌿 GIT
         // ═══════════════════════════════════════════════════════════════════
         "git_add" => {
             let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
-            let update = input.get("update").and_then(|v| v.as_bool()).unwrap_or(false);
+            let update = input
+                .get("update")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if all {
                 "��� add -A".to_string()
             } else if update {
@@ -658,7 +706,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "git_branch" => {
             let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(true);
-            let _fmt = input.get("format").and_then(|v| v.as_str()).unwrap_or("short");
+            let _fmt = input
+                .get("format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("short");
             format!("🌿 branch list ({})", if all { "all" } else { "local" })
         }
         "git_checkout" => {
@@ -684,7 +735,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         }
         "git_commit" => {
             let msg = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            let amend = input.get("amend").and_then(|v| v.as_bool()).unwrap_or(false);
+            let amend = input
+                .get("amend")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if amend {
                 "🌿 commit --amend".to_string()
             } else {
@@ -692,7 +746,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_diff" => {
-            let target = input.get("target").and_then(|v| v.as_str()).unwrap_or("working");
+            let target = input
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("working");
             let stat = input.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
             if stat {
                 format!("🌿 diff --stat {}", target)
@@ -701,7 +758,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_fetch" => {
-            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let remote = input
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
             let all = input.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             if all {
                 "🌿 fetch --all".to_string()
@@ -722,8 +782,14 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("🌿 merge {}", branch)
         }
         "git_pull" => {
-            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
-            let rebase = input.get("rebase").and_then(|v| v.as_bool()).unwrap_or(false);
+            let remote = input
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
+            let rebase = input
+                .get("rebase")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if rebase {
                 format!("🌿 pull --rebase {}", remote)
             } else {
@@ -731,9 +797,15 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_push" => {
-            let remote = input.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let remote = input
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
             let branch = input.get("branch").and_then(|v| v.as_str());
-            let force = input.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+            let force = input
+                .get("force")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let tags = input.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
             match (tags, force, branch) {
                 (true, _, _) => format!("🌿 push --tags {}", remote),
@@ -744,7 +816,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_remote" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let action = input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list");
             let name = input.get("name").and_then(|v| v.as_str());
             match (action, name) {
                 ("list", _) => "🌿 remote -v".to_string(),
@@ -756,7 +831,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_reset" => {
-            let mode = input.get("mode").and_then(|v| v.as_str()).unwrap_or("mixed");
+            let mode = input
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("mixed");
             let target = input.get("target").and_then(|v| v.as_str());
             let paths = input.get("paths").and_then(|v| v.as_array());
             match (target, paths) {
@@ -770,11 +848,17 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("🌿 show {}", ref_name)
         }
         "git_stash" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("push");
+            let action = input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("push");
             format!("🌿 stash {}", action)
         }
         "git_status" => {
-            let short = input.get("short").and_then(|v| v.as_bool()).unwrap_or(false);
+            let short = input
+                .get("short")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if short {
                 "🌿 status --short".to_string()
             } else {
@@ -782,7 +866,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "git_tag" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+            let action = input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list");
             let name = input.get("name").and_then(|v| v.as_str());
             match (action, name) {
                 ("list", _) => "🌿 tag -l".to_string(),
@@ -797,7 +884,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         // 🦊 GITLAB
         // ═══════════════════════════════════════════════════════════════════
         "gitlab_list_issues" => {
-            let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            let state = input
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("opened");
             format!("🦊 issues ({})", state)
         }
         "gitlab_get_issue" => {
@@ -817,7 +907,10 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("🦊 close #{}", iid)
         }
         "gitlab_list_mrs" => {
-            let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            let state = input
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("opened");
             format!("🦊 MRs ({})", state)
         }
         "gitlab_get_mr" => {
@@ -844,11 +937,17 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             }
         }
         "gitlab_get_pipeline" => {
-            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let id = input
+                .get("pipeline_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("🦊 pipeline #{}", id)
         }
         "gitlab_list_jobs" => {
-            let pipeline_id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let pipeline_id = input
+                .get("pipeline_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("🦊 jobs for pipeline #{}", pipeline_id)
         }
         "gitlab_get_job" => {
@@ -868,57 +967,69 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
             format!("🦊 cancel job #{}", job_id)
         }
         "gitlab_retry_pipeline" => {
-            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let id = input
+                .get("pipeline_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("🦊 retry pipeline #{}", id)
         }
         "gitlab_cancel_pipeline" => {
-            let id = input.get("pipeline_id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let id = input
+                .get("pipeline_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             format!("🦊 cancel pipeline #{}", id)
         }
 
-          // ═══════════════════════════════════════════════════════════════════
-          // 📋 GITHUB
-          // ═══════════════════════════════════════════════════════════════════
-          "github_list_issues" => {
-              let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-              format!("📋 issues ({})", state)
-          }
-          "github_get_issue" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 issue #{}", number)
-          }
-          "github_create_issue" => {
-              let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-              format!("📋 new issue: {}", trunc120(title))
-          }
-          "github_comment_issue" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 comment on #{}", number)
-          }
-          "github_close_issue" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 close #{}", number)
-          }
-          "github_list_prs" => {
-              let state = input.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-              format!("📋 PRs ({})", state)
-          }
-          "github_get_pr" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 PR #{}", number)
-          }
-          "github_create_pr" => {
-              let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
-              format!("📋 new PR: {}", trunc120(title))
-          }
-          "github_merge_pr" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 merge #{}", number)
-          }
-          "github_review_pr" => {
-              let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              format!("📋 review #{}", number)
-          }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 GITHUB
+        // ═══════════════════════════════════════════════════════════════════
+        "github_list_issues" => {
+            let state = input
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("open");
+            format!("📋 issues ({})", state)
+        }
+        "github_get_issue" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 issue #{}", number)
+        }
+        "github_create_issue" => {
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            format!("📋 new issue: {}", trunc120(title))
+        }
+        "github_comment_issue" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 comment on #{}", number)
+        }
+        "github_close_issue" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 close #{}", number)
+        }
+        "github_list_prs" => {
+            let state = input
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("open");
+            format!("📋 PRs ({})", state)
+        }
+        "github_get_pr" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 PR #{}", number)
+        }
+        "github_create_pr" => {
+            let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            format!("📋 new PR: {}", trunc120(title))
+        }
+        "github_merge_pr" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 merge #{}", number)
+        }
+        "github_review_pr" => {
+            let number = input.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            format!("📋 review #{}", number)
+        }
         // ══════════════════════════════════════════════════���════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
@@ -928,10 +1039,37 @@ pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> S
         "read_line_range" => "✨ line range".to_string(),
         "memory_read" => "✨ read memory".to_string(),
         "memory_write" => "✨ write memory".to_string(),
+        "memory_replace" => {
+            let label = get_str(&["label"]).unwrap_or_default();
+            format!("✨ replace {}", trunc120(&label))
+        }
+        "memory_store" => {
+            let category = get_str(&["category"]).unwrap_or_default();
+            format!("✨ store {}", trunc120(&category))
+        }
+        "memory_recall" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("✨ recall \"{}\"", trunc120(&query))
+        }
+        "memory_forget" => {
+            let id = get_str(&["id"]).unwrap_or_default();
+            if id.is_empty() {
+                "✨ forget".to_string()
+            } else {
+                format!("✨ forget {}", trunc120(&id))
+            }
+        }
+        "memory_search" => {
+            let query = get_str(&["query"]).unwrap_or_default();
+            format!("✨ search \"{}\"", trunc120(&query))
+        }
+        "memory_migrate" => {
+            let scope = get_str(&["scope"]).unwrap_or_else(|| "project".to_string());
+            format!("✨ migrate {}", scope)
+        }
 
         // ═══════════════════════════════════════════════════════════════════
-        // DEFAULT: Unknown tools
-        // ═══════════════════════════════════════════════════════════════════
+        // DEFAULT: Unknown tools        // ═══════════════════════════════════════════════════════════════════
         _ => {
             if tool.starts_with("team_") {
                 format!("👥 {}", summarize_tool_args(input, 40))
@@ -1018,10 +1156,11 @@ pub fn tool_result_summary(
         .get("lines")
         .or_else(|| out.get("line_count"))
         .and_then(|v| v.as_u64())
-                  .unwrap_or(0) as usize;
-              let trunc120 = |s: &str| truncate_str(s, 120);
-        
-              match tool {        // ═════════════════════════════════════════════════════════���═════════
+        .unwrap_or(0) as usize;
+    let trunc120 = |s: &str| truncate_str(s, 120);
+
+    match tool {
+        // ═════════════════════════════════════════════════════════���═════════
         // 📄 FILE OPERATIONS
         // ═══════════════════════════════════════════════════════════════════
         "read" => {
@@ -1299,10 +1438,7 @@ pub fn tool_result_summary(
             }
         }
         "task_complete" => {
-            let summary = out
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let summary = out.get("summary").and_then(|v| v.as_str()).unwrap_or("");
             if summary.is_empty() {
                 Some("Task complete".to_string())
             } else {
@@ -1598,9 +1734,78 @@ pub fn tool_result_summary(
                 pluralize(total, "reference", "references")
             ))
         }
+        "codeindex_status" => {
+            let files = out
+                .get("files_indexed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let symbols = out
+                .get("total_symbols")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} files, {} symbols", files, symbols))
+        }
+        "codeindex_reindex" => {
+            let added = out.get("files_added").and_then(|v| v.as_u64()).unwrap_or(0);
+            let updated = out
+                .get("files_updated")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let removed = out
+                .get("files_removed")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("+{} ~{} -{} files", added, updated, removed))
+        }
+        "codeindex_dependencies" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "{} found",
+                pluralize(count, "dependency", "dependencies")
+            ))
+        }
         // ═══════════════════════════════════════════════════════════════════
-        // 📄 DOCUMENT (Office/PDF)
-        // ═════════════════════��═════════════════════════════════════════════
+        // 📋 SPEC MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════════
+        "spec_list" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} listed", pluralize(count, "spec", "specs")))
+        }
+        "spec_read" => {
+            let req_count = out
+                .get("requirement_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let task_count = out.get("task_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("{} req, {} tasks", req_count, task_count))
+        }
+        "spec_search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "result", "results")))
+        }
+        "spec_task_update" => {
+            let spec_id = out.get("spec_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let task_id = out.get("task_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("{} {} → {}", spec_id, task_id, status))
+        }
+        "spec_coverage" => {
+            let pct = out
+                .get("coverage_pct")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let req_count = out
+                .get("requirement_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let task_count = out.get("task_count").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!(
+                "{:.1}% ({} req, {} tasks)",
+                pct, req_count, task_count
+            ))
+        }
+        // ═══════════════════════════════════════════════════════════════════
+        // 📄 DOCUMENT (Office/PDF)        // ═════════════════════��═════════════════════════════════════════════
         "office_read" | "pdf_read" | "libreoffice_read" => {
             Some(format!("{} read", pluralize(line_count, "line", "lines")))
         }
@@ -1622,7 +1827,7 @@ pub fn tool_result_summary(
         // ═══════════════════════════════════════════════════════════════════
         // 📋 GITHUB
         // ═════════════════════════════════════════════════════════��═════════
-                // ═══════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
         // 🌿 GIT
         // ═══════════════════════════════════════════════════════════════════
         "git_add" => {
@@ -1643,7 +1848,10 @@ pub fn tool_result_summary(
         }
         "git_branch" => {
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(true);
-            Some(format!("🌿 branch list ({})", if all { "all" } else { "local" }))
+            Some(format!(
+                "🌿 branch list ({})",
+                if all { "all" } else { "local" }
+            ))
         }
         "git_checkout" => {
             let branch = out.get("branch").and_then(|v| v.as_str());
@@ -1676,7 +1884,10 @@ pub fn tool_result_summary(
             })
         }
         "git_diff" => {
-            let target = out.get("target").and_then(|v| v.as_str()).unwrap_or("working");
+            let target = out
+                .get("target")
+                .and_then(|v| v.as_str())
+                .unwrap_or("working");
             let stat = out.get("stat").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if stat {
                 format!("🌿 diff --stat {}", target)
@@ -1685,7 +1896,10 @@ pub fn tool_result_summary(
             })
         }
         "git_fetch" => {
-            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let remote = out
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
             let all = out.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if all {
                 "🌿 fetch --all".to_string()
@@ -1706,7 +1920,10 @@ pub fn tool_result_summary(
             Some(format!("🌿 merge {}", branch))
         }
         "git_pull" => {
-            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let remote = out
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
             let rebase = out.get("rebase").and_then(|v| v.as_bool()).unwrap_or(false);
             Some(if rebase {
                 format!("🌿 pull --rebase {}", remote)
@@ -1715,7 +1932,10 @@ pub fn tool_result_summary(
             })
         }
         "git_push" => {
-            let remote = out.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+            let remote = out
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .unwrap_or("origin");
             let branch = out.get("branch").and_then(|v| v.as_str());
             let force = out.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
             let tags = out.get("tags").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1781,7 +2001,10 @@ pub fn tool_result_summary(
         // 🦊 GITLAB
         // ═══════════════════════════════════════════════════════════════════
         "gitlab_list_issues" => {
-            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            let state = out
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("opened");
             Some(format!("🦊 issues ({})", state))
         }
         "gitlab_get_issue" => {
@@ -1801,7 +2024,10 @@ pub fn tool_result_summary(
             Some(format!("🦊 close #{}", iid))
         }
         "gitlab_list_mrs" => {
-            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("opened");
+            let state = out
+                .get("state")
+                .and_then(|v| v.as_str())
+                .unwrap_or("opened");
             Some(format!("🦊 MRs ({})", state))
         }
         "gitlab_get_mr" => {
@@ -1860,55 +2086,55 @@ pub fn tool_result_summary(
             Some(format!("🦊 cancel pipeline #{}", id))
         }
 
-          // ═══════════════════════════════════════════════════════════════════
-          // 📋 GITHUB
-          // ═══════════════════════════════════════════════════════════════════
-          "github_list_issues" => {
-              let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-              Some(format!("📋 issues listed ({})", state))
-          }
-          "github_get_issue" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 issue #{} retrieved", number))
-          }
-          "github_create_issue" => {
-              let number = out.get("number").and_then(|v| v.as_u64());
-              match number {
-                  Some(n) => Some(format!("📋 issue #{} created", n)),
-                  None => Some("📋 issue created".to_string()),
-              }
-          }
-          "github_comment_issue" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 commented on #{}", number))
-          }
-          "github_close_issue" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 issue #{} closed", number))
-          }
-          "github_list_prs" => {
-              let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
-              Some(format!("📋 PRs listed ({})", state))
-          }
-          "github_get_pr" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 PR #{} retrieved", number))
-          }
-          "github_create_pr" => {
-              let number = out.get("number").and_then(|v| v.as_u64());
-              match number {
-                  Some(n) => Some(format!("📋 PR #{} created", n)),
-                  None => Some("📋 PR created".to_string()),
-              }
-          }
-          "github_merge_pr" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 PR #{} merged", number))
-          }
-          "github_review_pr" => {
-              let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
-              Some(format!("📋 reviewed #{}", number))
-          }        // ═══════════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════════
+        // 📋 GITHUB
+        // ═══════════════════════════════════════════════════════════════════
+        "github_list_issues" => {
+            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+            Some(format!("📋 issues listed ({})", state))
+        }
+        "github_get_issue" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 issue #{} retrieved", number))
+        }
+        "github_create_issue" => {
+            let number = out.get("number").and_then(|v| v.as_u64());
+            match number {
+                Some(n) => Some(format!("📋 issue #{} created", n)),
+                None => Some("📋 issue created".to_string()),
+            }
+        }
+        "github_comment_issue" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 commented on #{}", number))
+        }
+        "github_close_issue" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 issue #{} closed", number))
+        }
+        "github_list_prs" => {
+            let state = out.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+            Some(format!("📋 PRs listed ({})", state))
+        }
+        "github_get_pr" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 PR #{} retrieved", number))
+        }
+        "github_create_pr" => {
+            let number = out.get("number").and_then(|v| v.as_u64());
+            match number {
+                Some(n) => Some(format!("📋 PR #{} created", n)),
+                None => Some("📋 PR created".to_string()),
+            }
+        }
+        "github_merge_pr" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 PR #{} merged", number))
+        }
+        "github_review_pr" => {
+            let number = out.get("number").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some(format!("📋 reviewed #{}", number))
+        } // ═══════════════════════════════════════════════════════════════════
         // ✨ UTILITY
         // ═══════════════════════════════════════════════════════════════════
         "format" => Some("formatted".to_string()),
@@ -1936,9 +2162,46 @@ pub fn tool_result_summary(
             }
         }
         "memory_write" => Some("memory written".to_string()),
-        // ═══════════════════════════════════════════════════════════════════
-        // DEFAULT: Unknown tools
-        // ═══════════════════════════════════════════════════════════════════
+        "memory_replace" => Some("memory replaced".to_string()),
+        "memory_store" => {
+            let stored = out.get("stored").and_then(|v| v.as_bool()).unwrap_or(false);
+            if stored {
+                Some("memory stored".to_string())
+            } else {
+                Some("memory not stored".to_string())
+            }
+        }
+        "memory_recall" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!(
+                "{} recalled",
+                pluralize(count, "memory", "memories")
+            ))
+        }
+        "memory_forget" => {
+            let deleted = out.get("deleted").and_then(|v| v.as_u64()).unwrap_or(0);
+            if deleted > 0 {
+                Some(format!(
+                    "{} forgotten",
+                    pluralize(deleted as usize, "memory", "memories")
+                ))
+            } else {
+                Some("nothing to forget".to_string())
+            }
+        }
+        "memory_search" => {
+            let count = out.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            Some(format!("{} found", pluralize(count, "result", "results")))
+        }
+        "memory_migrate" => {
+            let blocks = out
+                .get("blocks_created")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            Some(format!("{} blocks created", blocks))
+        }
+        // ═════════════════════════════════��═════════════════════════════════
+        // DEFAULT: Unknown tools        // ═══════════════════════════════════════════════════════════════════
         _ => {
             if tool.starts_with("team_") {
                 Some(format!(
@@ -2228,21 +2491,21 @@ impl<'a> MessageWidget<'a> {
                                     )));
                                 }
                             }
-                          } else if tool == "task_complete" {
-                              // Render the full task completion summary
-                              if let Some(summary) = state
-                                  .output
-                                  .as_ref()
-                                  .and_then(|out| out.get("summary"))
-                                  .and_then(|v| v.as_str())
-                              {
-                                  for line in summary.lines() {
-                                      lines.push(Line::from(Span::styled(
-                                          format!("  ✅ {}", line),
-                                          Style::default().fg(Color::Green),
-                                      )));
-                                  }
-                              }
+                        } else if tool == "task_complete" {
+                            // Render the full task completion summary
+                            if let Some(summary) = state
+                                .output
+                                .as_ref()
+                                .and_then(|out| out.get("summary"))
+                                .and_then(|v| v.as_str())
+                            {
+                                for line in summary.lines() {
+                                    lines.push(Line::from(Span::styled(
+                                        format!("  ✅ {}", line),
+                                        Style::default().fg(Color::Green),
+                                    )));
+                                }
+                            }
                         } else if tool == "multiedit" {
                             // Render per-file edit stats as a tabular list
                             if let Some(file_stats) = state

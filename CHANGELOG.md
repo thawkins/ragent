@@ -1,5 +1,11 @@
 # Changelog
 
+## Version: 0.1.0-alpha.95
+
+### Changed
+- **YOLO mode fixes** — Fixed YOLO mode permission bypass logic.
+- **AGENTS.md search and inclusion order** — Updated AGENTS.md discovery and inclusion order handling.
+
 ## Version: 0.1.0-alpha.93
 
 ### Changed

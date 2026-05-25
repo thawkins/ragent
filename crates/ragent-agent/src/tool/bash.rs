@@ -633,7 +633,7 @@ impl Tool for BashTool {
         // CC1-T4: Check for banned commands (curl, wget, nc, etc.)
         // A user-defined allowlist entry (via /bash add allow <cmd>) exempts the command.
         if contains_banned_command(command) {
-            if crate::yolo::is_enabled() {
+            if ragent_config::yolo::is_enabled() {
                 tracing::warn!("YOLO mode: allowing banned command tool");
             } else if ragent_config::bash_lists::is_allowlisted(command) {
                 tracing::info!("Banned command allowed by user allowlist");
@@ -659,7 +659,7 @@ impl Tool for BashTool {
 
         // Check for denied command names (word-boundary matched, e.g. mkfs, insmod, useradd)
         if contains_denied_command(command) {
-            if crate::yolo::is_enabled() {
+            if ragent_config::yolo::is_enabled() {
                 tracing::warn!("YOLO mode: allowing denied command name");
             } else {
                 bail!(
@@ -672,7 +672,7 @@ impl Tool for BashTool {
         // Check for denied patterns (substring-matched, e.g. "rm -rf /", "sudo ", "/dev/tcp/")
         for pattern in DENIED_PATTERNS {
             if command.contains(pattern) {
-                if crate::yolo::is_enabled() {
+                if ragent_config::yolo::is_enabled() {
                     tracing::warn!(pattern, "YOLO mode: allowing denied pattern");
                 } else {
                     bail!(
@@ -683,7 +683,7 @@ impl Tool for BashTool {
         }
 
         // Check user-defined denylist (from ragent.json `bash.denylist`)
-        if !crate::yolo::is_enabled()
+        if !ragent_config::yolo::is_enabled()
             && let Some(pattern) = ragent_config::bash_lists::matches_denylist(command)
         {
             bail!(
@@ -693,7 +693,7 @@ impl Tool for BashTool {
         }
 
         // Reject commands that use encoding/eval tricks to bypass the denylist.
-        if !crate::yolo::is_enabled() {
+        if !ragent_config::yolo::is_enabled() {
             validate_no_obfuscation(command)?;
         }
 

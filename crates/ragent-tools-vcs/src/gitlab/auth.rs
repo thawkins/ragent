@@ -39,16 +39,18 @@ pub struct GitLabConfig {
 pub fn load_token(storage: &Storage) -> Option<String> {
     // 1. Environment variable
     if let Ok(token) = std::env::var("GITLAB_TOKEN")
-        && !token.is_empty() {
-            return Some(token);
-        }
+        && !token.is_empty()
+    {
+        return Some(token);
+    }
 
     // 2. ragent.json
     if let Ok(cfg) = Config::load()
         && let Some(ref t) = cfg.gitlab.token
-            && !t.is_empty() {
-                return Some(t.clone());
-            }
+        && !t.is_empty()
+    {
+        return Some(t.clone());
+    }
 
     // 3. Encrypted database
     storage.get_provider_auth(DB_PROVIDER_ID).ok().flatten()
@@ -78,21 +80,23 @@ pub fn load_config(storage: &Storage) -> Option<GitLabConfig> {
     // Overlay ragent.json values
     if let Ok(file_cfg) = Config::load() {
         if let Some(ref url) = file_cfg.gitlab.instance_url
-            && !url.is_empty() {
-                let cfg = config.get_or_insert_with(|| GitLabConfig {
-                    instance_url: String::new(),
-                    username: String::new(),
-                });
-                cfg.instance_url = url.clone();
-            }
+            && !url.is_empty()
+        {
+            let cfg = config.get_or_insert_with(|| GitLabConfig {
+                instance_url: String::new(),
+                username: String::new(),
+            });
+            cfg.instance_url = url.clone();
+        }
         if let Some(ref user) = file_cfg.gitlab.username
-            && !user.is_empty() {
-                let cfg = config.get_or_insert_with(|| GitLabConfig {
-                    instance_url: String::new(),
-                    username: String::new(),
-                });
-                cfg.username = user.clone();
-            }
+            && !user.is_empty()
+        {
+            let cfg = config.get_or_insert_with(|| GitLabConfig {
+                instance_url: String::new(),
+                username: String::new(),
+            });
+            cfg.username = user.clone();
+        }
     }
 
     // Overlay env vars (highest priority)
@@ -196,29 +200,31 @@ pub fn migrate_legacy_files(storage: &Storage) {
     // Token migration
     if let Some(path) = legacy_token_file_path()
         && path.exists()
-            && let Ok(token) = std::fs::read_to_string(&path) {
-                let token = token.trim().to_string();
-                if !token.is_empty()
-                    && storage
-                        .get_provider_auth(DB_PROVIDER_ID)
-                        .ok()
-                        .flatten()
-                        .is_none()
-                    && storage.set_provider_auth(DB_PROVIDER_ID, &token).is_ok() {
-                        let _ = std::fs::remove_file(&path);
-                    }
-            }
+        && let Ok(token) = std::fs::read_to_string(&path)
+    {
+        let token = token.trim().to_string();
+        if !token.is_empty()
+            && storage
+                .get_provider_auth(DB_PROVIDER_ID)
+                .ok()
+                .flatten()
+                .is_none()
+            && storage.set_provider_auth(DB_PROVIDER_ID, &token).is_ok()
+        {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 
     // Config migration
     if let Some(path) = legacy_config_file_path()
         && path.exists()
-            && let Ok(data) = std::fs::read_to_string(&path)
-                && let Ok(config) = serde_json::from_str::<GitLabConfig>(&data)
-                    && load_config_from_db(storage).is_none()
-                        && save_config(storage, &config).is_ok()
-                    {
-                        let _ = std::fs::remove_file(&path);
-                    }
+        && let Ok(data) = std::fs::read_to_string(&path)
+        && let Ok(config) = serde_json::from_str::<GitLabConfig>(&data)
+        && load_config_from_db(storage).is_none()
+        && save_config(storage, &config).is_ok()
+    {
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 fn legacy_token_file_path() -> Option<std::path::PathBuf> {

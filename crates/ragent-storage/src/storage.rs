@@ -1420,19 +1420,21 @@ impl Storage {
         // Build parameter list.
         let mut params_vec: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
         if let Some(cats) = categories
-            && !cats.is_empty() {
-                for cat in cats {
-                    params_vec.push(Box::new(cat.clone()));
-                }
+            && !cats.is_empty()
+        {
+            for cat in cats {
+                params_vec.push(Box::new(cat.clone()));
             }
+        }
         params_vec.push(Box::new(safe_query));
         params_vec.push(Box::new(min_confidence));
         if let Some(tags) = tags
-            && !tags.is_empty() {
-                for tag in tags {
-                    params_vec.push(Box::new(tag.clone()));
-                }
+            && !tags.is_empty()
+        {
+            for tag in tags {
+                params_vec.push(Box::new(tag.clone()));
             }
+        }
         params_vec.push(Box::new(limit as i64));
 
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
@@ -1571,18 +1573,19 @@ impl Storage {
             param_idx += 1;
         }
         if let Some(tags) = tags
-            && !tags.is_empty() {
-                let placeholders: Vec<String> = (0..tags.len())
-                    .map(|i| format!("?{}", param_idx + i))
-                    .collect();
-                conditions.push(format!(
-                    "id IN (SELECT memory_id FROM memory_tags WHERE tag IN ({}) GROUP BY memory_id)",
-                    placeholders.join(", ")
-                ));
-                for tag in tags {
-                    params_vec.push(Box::new(tag.clone()));
-                }
+            && !tags.is_empty()
+        {
+            let placeholders: Vec<String> = (0..tags.len())
+                .map(|i| format!("?{}", param_idx + i))
+                .collect();
+            conditions.push(format!(
+                "id IN (SELECT memory_id FROM memory_tags WHERE tag IN ({}) GROUP BY memory_id)",
+                placeholders.join(", ")
+            ));
+            for tag in tags {
+                params_vec.push(Box::new(tag.clone()));
             }
+        }
 
         let where_clause = conditions.join(" AND ");
         let sql = format!("SELECT id FROM memories WHERE {where_clause}");

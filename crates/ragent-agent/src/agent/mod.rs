@@ -1006,7 +1006,7 @@ pub fn create_builtin_agents() -> Vec<AgentInfo> {
                       model_pinned: false,
                   },
               ]
-          }
+}
 /// Helper to create a permission rule with the given parameters.
 fn rule(
     permission: Permission,
@@ -1450,55 +1450,104 @@ pub struct InstructionFileDiscovery {
     pub working_dir: std::path::PathBuf,
     /// The global directory searched (if applicable)
     pub global_dir: Option<std::path::PathBuf>,
-    /// Files that were found
-    pub found_files: Vec<std::path::PathBuf>,
+    /// Whether global fallback was used (no local files found)
+    pub used_global_fallback: bool,
+    /// All instruction files discovered (for display)
+    pub all_discovered_files: Vec<std::path::PathBuf>,
+    /// The single file actually loaded for instructions
+    pub loaded_file: Option<std::path::PathBuf>,
 }
 
 impl InstructionFileDiscovery {
-    /// Format a human-readable summary of the discovery
+    /// Format a human-readable summary of the discovery, showing which files
+    /// were actually loaded for instructions versus merely found.
     pub fn format_summary(&self) -> String {
         let mut lines = Vec::new();
+        lines.push("📋 Instruction File Discovery".to_string());
         lines.push(format!(
-            "Searching for instruction files: {}",
+            "  Searched for: {}",
             self.searched_names.join(", ")
         ));
         lines.push(format!(
             "  Working directory: {}",
             self.working_dir.display()
         ));
-        if let Some(ref global) = self.global_dir {
-            lines.push(format!("  Global directory: {}", global.display()));
-        }
-        if self.found_files.is_empty() {
-            lines.push("  No instruction files found".to_string());
+
+        if self.all_discovered_files.is_empty() {
+            lines.push("".to_string());
+            lines.push("⚠️  No instruction files found".to_string());
+            lines.push("  No instructions were loaded for this session.".to_string());
         } else {
-            lines.push(format!("  Found {} file(s):", self.found_files.len()));
-            for file in &self.found_files {
+            if self.used_global_fallback {
+                lines.push(format!(
+                    "  Global directory: {}",
+                    self.global_dir.as_ref().unwrap().display()
+                ));
+                lines.push("".to_string());
+                lines.push(
+                    "ℹ️  No local instruction files found; used global fallback.".to_string(),
+                );
+            }
+            lines.push("".to_string());
+            lines.push(format!(
+                "📁 Discovered {} file(s):",
+                self.all_discovered_files.len()
+            ));
+            for file in &self.all_discovered_files {
                 let rel = file
                     .strip_prefix(&self.working_dir)
                     .unwrap_or(file)
                     .display()
                     .to_string();
-                lines.push(format!("    - {}", rel));
+                let source = if self.used_global_fallback {
+                    "global"
+                } else {
+                    "local"
+                };
+                let is_loaded = self.loaded_file.as_ref() == Some(file);
+                let marker = if is_loaded { " ✅ LOADED" } else { "" };
+                lines.push(format!("   • {} ({}){}", rel, source, marker));
+            }
+            lines.push("".to_string());
+            if let Some(ref loaded) = self.loaded_file {
+                let rel = loaded
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(loaded)
+                    .display()
+                    .to_string();
+                lines.push(format!(
+                    "✅ Instructions loaded from: {} (project root takes priority)",
+                    rel
+                ));
+            }
+            if !self.used_global_fallback && self.all_discovered_files.len() > 1 {
+                lines.push("".to_string());
+                lines.push(
+                    "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session (project root takes priority)."
+                        .to_string(),
+                );
             }
         }
-        lines.push(String::new());
-        lines.push(String::new());
         lines.join("\n")
     }
 }
 
-/// Discover and load all AGENTS.md-style instruction files from the project tree
-/// or the global directory.
+/// Discover all AGENTS.md-style instruction files from the project tree
+/// or the global directory, but load instructions from ONLY ONE file.
 ///
 /// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
-/// `INSTRUCTIONS.md` in the working directory. If any local files are found,
-/// they are used exclusively (sorted by directory depth, root first). If no
-/// local files exist, falls back to the global directory at
-/// `~/.local/share/ragent/`.
+/// `INSTRUCTIONS.md` in the working directory. ALL discovered files are
+/// reported in the discovery info, but only ONE file's content is loaded:
 ///
-/// Returns a combined string listing the discovered file paths and their
-/// concatenated content, along with discovery information for logging/display.
+/// Priority order (local first):
+/// 1. `AGENTS.md` in the project root (working directory itself)
+/// 2. Any other instruction file in the project root
+/// 3. The shallowest instruction file found in subdirectories
+/// 4. If no local files exist, fall back to the global directory at
+///    `~/.local/share/ragent/` and pick the first file found there
+///
+/// Returns a string containing the loaded file's content, along with
+/// discovery information showing all found files and which one was loaded.
 pub fn collect_agents_md_content_with_discovery(
     working_dir: &Path,
 ) -> (String, InstructionFileDiscovery) {
@@ -1511,7 +1560,7 @@ pub fn collect_agents_md_content_with_discovery(
         .map(|d| d.join("ragent"))
         .filter(|d| d.is_dir());
 
-    // First, collect local project files
+    // First, collect ALL local project files (for discovery display)
     let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
 
     let walk = WalkBuilder::new(working_dir)
@@ -1538,62 +1587,99 @@ pub fn collect_agents_md_content_with_discovery(
         }
     }
 
-    let mut found: Vec<(usize, std::path::PathBuf)> = Vec::new();
-
-    // If no local files exist, fall back to global directory (~/.local/share/ragent/)
-    let used_global = local_files.is_empty();
-    if used_global {
-        if let Some(ref global_path) = global_dir {
-            for name in AGENT_FILE_NAMES {
-                let file_path = global_path.join(name);
-                if file_path.is_file() {
-                    // Use depth 0 for global files
-                    found.push((0, file_path));
-                }
+    // Collect global files for discovery (even if local files exist)
+    let mut global_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
+    if let Some(ref global_path) = global_dir {
+        for name in AGENT_FILE_NAMES {
+            let file_path = global_path.join(name);
+            if file_path.is_file() {
+                global_files.push((0, file_path));
             }
         }
+    }
+
+    // Determine which ONE file to load
+    let used_global = local_files.is_empty();
+    let loaded_file: Option<std::path::PathBuf>;
+
+    if !used_global {
+        // Local files exist: pick the root-most file
+        // Sort by depth (root first), then prioritize AGENTS.md
+        local_files.sort_by(|a, b| {
+            let depth_cmp = a.0.cmp(&b.0);
+            if depth_cmp != std::cmp::Ordering::Equal {
+                return depth_cmp;
+            }
+            // At same depth, prioritize AGENTS.md, then CLAUDE.md, etc.
+            let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let a_idx = AGENT_FILE_NAMES.iter().position(|n| *n == a_name).unwrap_or(usize::MAX);
+            let b_idx = AGENT_FILE_NAMES.iter().position(|n| *n == b_name).unwrap_or(usize::MAX);
+            a_idx.cmp(&b_idx)
+        });
+        loaded_file = local_files.first().map(|(_, p)| p.clone());
     } else {
-        // Use local files, sorted by depth (root first)
-        found = local_files;
+        // No local files: fall back to global
+        loaded_file = global_files.first().map(|(_, p)| p.clone());
+    }
+
+    // Build the full discovery list (all found files for display)
+    let mut all_discovered: Vec<std::path::PathBuf> = Vec::new();
+    if !used_global {
+        for (_, path) in &local_files {
+            all_discovered.push(path.clone());
+        }
+        // Also show global files as "discovered but ignored"
+        for (_, path) in &global_files {
+            all_discovered.push(path.clone());
+        }
+    } else {
+        for (_, path) in &global_files {
+            all_discovered.push(path.clone());
+        }
     }
 
     let discovery = InstructionFileDiscovery {
         searched_names: AGENT_FILE_NAMES.iter().map(|s| s.to_string()).collect(),
         working_dir: working_dir.to_path_buf(),
-        global_dir: if used_global {
-            global_dir.clone()
-        } else {
-            None
-        },
-        found_files: found.iter().map(|(_, p)| p.clone()).collect(),
+        global_dir: if used_global { global_dir.clone() } else { None },
+        all_discovered_files: all_discovered,
+        loaded_file,
+        used_global_fallback: used_global,
     };
 
-    if found.is_empty() {
+    // If no files found at all, return empty
+    if discovery.loaded_file.is_none() {
         return (String::new(), discovery);
     }
 
-    // Sort: root files first (depth=1 for local, depth=0 for global), then deeper subdirectories
-    found.sort_by_key(|(depth, path)| (*depth, path.clone()));
-
+    // Build result content from the SINGLE loaded file only
     let mut result = String::new();
 
-    result.push_str("### Discovered Instruction Files\n");
-    for (_, path) in &found {
+    if let Some(ref path) = discovery.loaded_file {
         let rel = path
             .strip_prefix(working_dir)
             .unwrap_or(path)
             .display()
             .to_string();
-        result.push_str(&format!("- {rel}\n"));
-    }
-    result.push('\n');
+        result.push_str("### Discovered Instruction Files\n");
+        // Show all discovered files, marking the loaded one
+        for file in &discovery.all_discovered_files {
+            let file_rel = file
+                .strip_prefix(working_dir)
+                .unwrap_or(file)
+                .display()
+                .to_string();
+            let marker = if Some(file) == discovery.loaded_file.as_ref() {
+                " ✅ LOADED"
+            } else {
+                ""
+            };
+            result.push_str(&format!("- {file_rel}{marker}\n"));
+        }
+        result.push('\n');
 
-    for (_, path) in &found {
-        let rel = path
-            .strip_prefix(working_dir)
-            .unwrap_or(path)
-            .display()
-            .to_string();
+        // Only load content from the single selected file
         if let Ok(content) = std::fs::read_to_string(path) {
             let content = content.trim();
             if !content.is_empty() {
@@ -2091,8 +2177,8 @@ pub fn build_system_prompt_with_storage(
          - Explain what you're doing and why\n\n",
     );
 
-                      // Specific guidance on using line ranges for file reads
-                      prompt.push_str(
+    // Specific guidance on using line ranges for file reads
+    prompt.push_str(
                                     "## File Reading Best Practices\n\n\
                                      When reading files with the `read` tool:\n\
                                      - **REQUIRED for files larger than 100 lines**: Always use `start_line` and `end_line` parameters\n\
@@ -2119,7 +2205,7 @@ pub fn build_system_prompt_with_storage(
                                        2. Use the total_lines from the response to plan your subsequent reads\n\
                                        3. Then read specific sections using valid line ranges\n\
                                        4. Never read an entire file >100 lines in a single call\n",
-                                );    // Guidance on using edit / multiedit tools
+                                ); // Guidance on using edit / multiedit tools
     prompt.push_str(
                   "\n## Editing Files\n\n\
                    Use the `edit` tool for single surgical text replacements in one file.\n\
@@ -2140,105 +2226,106 @@ pub fn build_system_prompt_with_storage(
     prompt
 }
 
-    #[cfg(test)]
-    mod tests {
-        use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        #[test]
-        fn test_ask_agent_defaults_thinking_off() {
-            let ask = create_builtin_agents()
-                .into_iter()
-                .find(|agent| agent.name == "ask")
-                .expect("ask agent");
+    #[test]
+    fn test_ask_agent_defaults_thinking_off() {
+        let ask = create_builtin_agents()
+            .into_iter()
+            .find(|agent| agent.name == "ask")
+            .expect("ask agent");
 
-            assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
-            assert!(ask.options.is_empty());
-        }
+        assert_eq!(ask.thinking, Some(ThinkingConfig::off()));
+        assert!(ask.options.is_empty());
+    }
 
-        #[test]
-        fn test_domain_agents_exist() {
-            let agents = create_builtin_agents();
-            let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
+    #[test]
+    fn test_domain_agents_exist() {
+        let agents = create_builtin_agents();
+        let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
 
-            let expected = [
-                "ask",
-                "general",
-                "build",
-                "plan",
-                "explore",
-                "title",
-                "summary",
-                "compaction",
-                "rust-coder",
-                "python-coder",
-                "typescript-coder",
-                "fastapi-agent",
-                "security-auditor",
-                "test-writer",
-                "documenter",
-                "devops-agent",
-                "database-agent",
-                "frontend-agent",
-            ];
+        let expected = [
+            "ask",
+            "general",
+            "build",
+            "plan",
+            "explore",
+            "title",
+            "summary",
+            "compaction",
+            "rust-coder",
+            "python-coder",
+            "typescript-coder",
+            "fastapi-agent",
+            "security-auditor",
+            "test-writer",
+            "documenter",
+            "devops-agent",
+            "database-agent",
+            "frontend-agent",
+        ];
 
-            for name in &expected {
-                assert!(
-                    names.contains(name),
-                    "built-in agent '{}' should exist",
-                    name
-                );
-            }
-
-            assert_eq!(agents.len(), expected.len(), "built-in agent count mismatch");
-        }
-
-        #[test]
-        fn test_domain_agents_are_primary() {
-            let agents = create_builtin_agents();
-            let primary_names = [
-                "ask",
-                "general",
-                "rust-coder",
-                "python-coder",
-                "typescript-coder",
-                "fastapi-agent",
-                "security-auditor",
-                "test-writer",
-                "documenter",
-                "devops-agent",
-                "database-agent",
-                "frontend-agent",
-            ];
-
-            for name in &primary_names {
-                let agent = agents
-                    .iter()
-                    .find(|a| a.name == *name)
-                    .expect(name);
-                assert_eq!(
-                    agent.mode,
-                    AgentMode::Primary,
-                    "agent '{}' should be Primary",
-                    name
-                );
-            }
-        }
-
-        #[test]
-        fn test_security_auditor_is_read_only() {
-            let agents = create_builtin_agents();
-            let auditor = agents
-                .iter()
-                .find(|a| a.name == "security-auditor")
-                .expect("security-auditor agent");
-
-            // Should have read-only permissions (no edit, no bash)
+        for name in &expected {
             assert!(
-                auditor.permission.iter().any(|r| {
-                    matches!(r.action, PermissionAction::Deny)
-                        && matches!(r.permission, Permission::Edit | Permission::Bash)
-                }),
-                "security-auditor should deny edit and bash permissions"
+                names.contains(name),
+                "built-in agent '{}' should exist",
+                name
+            );
+        }
+
+        assert_eq!(
+            agents.len(),
+            expected.len(),
+            "built-in agent count mismatch"
+        );
+    }
+
+    #[test]
+    fn test_domain_agents_are_primary() {
+        let agents = create_builtin_agents();
+        let primary_names = [
+            "ask",
+            "general",
+            "rust-coder",
+            "python-coder",
+            "typescript-coder",
+            "fastapi-agent",
+            "security-auditor",
+            "test-writer",
+            "documenter",
+            "devops-agent",
+            "database-agent",
+            "frontend-agent",
+        ];
+
+        for name in &primary_names {
+            let agent = agents.iter().find(|a| a.name == *name).expect(name);
+            assert_eq!(
+                agent.mode,
+                AgentMode::Primary,
+                "agent '{}' should be Primary",
+                name
             );
         }
     }
+
+    #[test]
+    fn test_security_auditor_is_read_only() {
+        let agents = create_builtin_agents();
+        let auditor = agents
+            .iter()
+            .find(|a| a.name == "security-auditor")
+            .expect("security-auditor agent");
+
+        // Should have read-only permissions (no edit, no bash)
+        assert!(
+            auditor.permission.iter().any(|r| {
+                matches!(r.action, PermissionAction::Deny)
+                    && matches!(r.permission, Permission::Edit | Permission::Bash)
+            }),
+            "security-auditor should deny edit and bash permissions"
+        );
+    }
+}

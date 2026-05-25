@@ -428,13 +428,14 @@ struct OdpSlide {
 fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
     // If content is a JSON string, try parsing it first
     if let Some(s) = content.as_str()
-        && let Ok(parsed) = serde_json::from_str::<Value>(s) {
-            let result = resolve_odp_slides(&parsed);
-            if !result.is_empty() {
-                return result;
-            }
+        && let Ok(parsed) = serde_json::from_str::<Value>(s)
+    {
+        let result = resolve_odp_slides(&parsed);
+        if !result.is_empty() {
+            return result;
         }
-        // Fall through to plain-text handling below
+    }
+    // Fall through to plain-text handling below
 
     // Helper to flatten structured content elements into plain text lines.
     // Handles: {"type":"heading","text":"..."}, {"type":"paragraph","text":"..."},
@@ -503,9 +504,10 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
 
     // Bare array of slide objects
     if let Some(arr) = content.as_array()
-        && arr.first().is_some_and(serde_json::Value::is_object) {
-            return arr.iter().map(&slide_from_obj).collect();
-        }
+        && arr.first().is_some_and(serde_json::Value::is_object)
+    {
+        return arr.iter().map(&slide_from_obj).collect();
+    }
 
     // Object with "slides" key
     if let Some(arr) = content["slides"].as_array() {
@@ -524,9 +526,11 @@ fn resolve_odp_slides(content: &Value) -> Vec<OdpSlide> {
         // Heuristic: find first value that is an array of objects
         for v in obj.values() {
             if let Some(arr) = v.as_array()
-                && !arr.is_empty() && arr[0].is_object() {
-                    return arr.iter().map(&slide_from_obj).collect();
-                }
+                && !arr.is_empty()
+                && arr[0].is_object()
+            {
+                return arr.iter().map(&slide_from_obj).collect();
+            }
         }
     }
 

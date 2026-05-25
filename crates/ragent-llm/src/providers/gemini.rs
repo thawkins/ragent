@@ -376,58 +376,59 @@ impl GeminiClient {
                 ChatContent::Text(text) => {
                     vec![json!({ "text": text })]
                 }
-                                  ChatContent::Parts(content_parts) => {
-                                    content_parts
-                                        .iter()
-                                        .map(|part| match part {
-                                            ContentPart::Text { text } => json!({ "text": text }),
-                                            ContentPart::ImageUrl { url } => {
-                                                // Handle data URIs for images
-                                                if url.starts_with("data:") {
-                                                    let mime = url
-                                                        .strip_prefix("data:")
-                                                        .and_then(|s| s.split(';').next())
-                                                        .unwrap_or("image/jpeg");
-                                                    let base64_data =
-                                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
-                                                    json!({
-                                                        "inlineData": {
-                                                            "mimeType": mime,
-                                                            "data": base64_data
-                                                        }
-                                                    })
-                                                } else {
-                                                    // For non-data URLs, we can't directly use them in Gemini
-                                                    // Gemini requires inline data or Google Cloud Storage URIs
-                                                    json!({ "text": format!("[Image: {}]", url) })
-                                                }
-                                            }
-                                            ContentPart::ToolResult {
-                                                tool_use_id,
-                                                content,
-                                            } => {
-                                                // Gemini uses functionResponse for tool results
-                                                json!({
-                                                    "functionResponse": {
-                                                        "name": tool_use_id.split('_').next().unwrap_or("tool"),
-                                                        "response": {
-                                                            "result": content
-                                                        }
-                                                    }
-                                                })
-                                            }
-                                            ContentPart::ToolUse { id: _, name, input } => {
-                                                // Gemini uses functionCall for tool invocations
-                                                json!({
-                                                    "functionCall": {
-                                                        "name": name,
-                                                        "args": input
-                                                    }
-                                                })
-                                            }
-                                        })
-                                        .collect()
-                                }            };
+                ChatContent::Parts(content_parts) => {
+                    content_parts
+                        .iter()
+                        .map(|part| match part {
+                            ContentPart::Text { text } => json!({ "text": text }),
+                            ContentPart::ImageUrl { url } => {
+                                // Handle data URIs for images
+                                if url.starts_with("data:") {
+                                    let mime = url
+                                        .strip_prefix("data:")
+                                        .and_then(|s| s.split(';').next())
+                                        .unwrap_or("image/jpeg");
+                                    let base64_data =
+                                        url.find(",").map(|i| &url[i + 1..]).unwrap_or(url);
+                                    json!({
+                                        "inlineData": {
+                                            "mimeType": mime,
+                                            "data": base64_data
+                                        }
+                                    })
+                                } else {
+                                    // For non-data URLs, we can't directly use them in Gemini
+                                    // Gemini requires inline data or Google Cloud Storage URIs
+                                    json!({ "text": format!("[Image: {}]", url) })
+                                }
+                            }
+                            ContentPart::ToolResult {
+                                tool_use_id,
+                                content,
+                            } => {
+                                // Gemini uses functionResponse for tool results
+                                json!({
+                                    "functionResponse": {
+                                        "name": tool_use_id.split('_').next().unwrap_or("tool"),
+                                        "response": {
+                                            "result": content
+                                        }
+                                    }
+                                })
+                            }
+                            ContentPart::ToolUse { id: _, name, input } => {
+                                // Gemini uses functionCall for tool invocations
+                                json!({
+                                    "functionCall": {
+                                        "name": name,
+                                        "args": input
+                                    }
+                                })
+                            }
+                        })
+                        .collect()
+                }
+            };
 
             contents.push(json!({
                 "role": role,

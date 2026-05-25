@@ -29,7 +29,11 @@ impl InputField {
     pub fn with_text(text: impl Into<String>) -> Self {
         let text = text.into();
         let cursor = text.chars().count();
-        Self { text, cursor, anchor: None }
+        Self {
+            text,
+            cursor,
+            anchor: None,
+        }
     }
 
     /// Current text content.
@@ -303,8 +307,7 @@ impl InputField {
     #[cfg(target_os = "linux")]
     fn set_clipboard(text: &str) {
         use arboard::SetExtLinux;
-        let _ = arboard::Clipboard::new()
-            .and_then(|mut cb| cb.set().wait().text(text.to_string()));
+        let _ = arboard::Clipboard::new().and_then(|mut cb| cb.set().wait().text(text.to_string()));
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -331,7 +334,7 @@ impl InputField {
     /// - Ctrl+K (delete to end)
     /// - Ctrl+U (clear)
     pub fn handle_key(&mut self, key: KeyEvent) -> bool {
-        use KeyCode::{Char, Backspace, Delete, Left, Right, Home, End};
+        use KeyCode::{Backspace, Char, Delete, End, Home, Left, Right};
 
         match key.code {
             Char('a') if key.modifiers == KeyModifiers::CONTROL => {
@@ -348,8 +351,7 @@ impl InputField {
             }
             Char('v')
                 if key.modifiers == KeyModifiers::CONTROL
-                    || key.modifiers
-                        == (KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
+                    || key.modifiers == (KeyModifiers::CONTROL | KeyModifiers::SHIFT) =>
             {
                 self.paste_clipboard();
                 true
@@ -368,10 +370,7 @@ impl InputField {
                 self.anchor = None;
                 true
             }
-            Char(c)
-                if key.modifiers.is_empty()
-                    || key.modifiers == KeyModifiers::SHIFT =>
-            {
+            Char(c) if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT => {
                 self.insert_char(c);
                 true
             }

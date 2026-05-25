@@ -34,7 +34,6 @@ pub mod task;
 pub mod team;
 pub mod tool;
 pub mod updater;
-pub mod yolo;
 
 pub use ragent_config::config::StreamConfig;
 pub use ragent_config::{

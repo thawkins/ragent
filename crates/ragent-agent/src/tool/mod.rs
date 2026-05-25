@@ -604,13 +604,7 @@ impl ragent_tools_extended::storage::StorageBackend for CoreStorageAdapter {
     ) -> anyhow::Result<Vec<ragent_tools_extended::storage::MemoryRow>> {
         let categories = category.map(|value| vec![value.to_string()]);
         self.inner
-            .search_memories(
-                query,
-                categories.as_deref(),
-                None,
-                limit,
-                min_confidence,
-            )
+            .search_memories(query, categories.as_deref(), None, limit, min_confidence)
             .map(|rows| {
                 rows.into_iter()
                     .map(|row| ragent_tools_extended::storage::MemoryRow {
@@ -816,14 +810,16 @@ impl Tool for ExtractedExtendedToolAdapter {
             },
         );
 
-                                      let tool_ctx = ragent_tools_extended::ToolContext {
-                                          session_id: ctx.session_id.clone(),
-                                          working_dir: ctx.working_dir.clone(),
-                                          event_bus: tool_bus,
-                                          storage: storage_adapter,
-                                          code_index: ctx.code_index.clone(),
-                                          config: ctx.config.clone(),
-                                      };        let result = self            .inner
+        let tool_ctx = ragent_tools_extended::ToolContext {
+            session_id: ctx.session_id.clone(),
+            working_dir: ctx.working_dir.clone(),
+            event_bus: tool_bus,
+            storage: storage_adapter,
+            code_index: ctx.code_index.clone(),
+            config: ctx.config.clone(),
+        };
+        let result = self
+            .inner
             .execute(input, &tool_ctx)
             .await
             .map(|output| ToolOutput {

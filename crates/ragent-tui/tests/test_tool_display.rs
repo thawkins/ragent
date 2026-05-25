@@ -469,8 +469,16 @@ fn test_result_summary_task_complete_with_summary() {
     let result = tool_result_summary("task_complete", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert!(summary.contains("✅"), "Should have checkmark emoji: {}", summary);
-    assert!(summary.contains("Fixed formatting bug in parser"), "Should contain summary text: {}", summary);
+    assert!(
+        summary.contains("✅"),
+        "Should have checkmark emoji: {}",
+        summary
+    );
+    assert!(
+        summary.contains("Fixed formatting bug in parser"),
+        "Should contain summary text: {}",
+        summary
+    );
 }
 
 #[test]
@@ -480,5 +488,9 @@ fn test_result_summary_task_complete_empty_summary() {
     let result = tool_result_summary("task_complete", &output, &input, "/project");
     assert!(result.is_some(), "Should produce summary");
     let summary = result.unwrap();
-    assert_eq!(summary, "Task complete", "Should show default message: {}", summary);
+    assert_eq!(
+        summary, "Task complete",
+        "Should show default message: {}",
+        summary
+    );
 }

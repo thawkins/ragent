@@ -145,7 +145,10 @@ pub fn parse_azure_resources(path: &Path) -> Result<Vec<AzureResourceEntry>> {
 fn resolve_config_path() -> Option<PathBuf> {
     // 1. User config directory
     if let Some(home) = dirs::home_dir() {
-        let p = home.join(".config").join("ragent").join("azureresources.json");
+        let p = home
+            .join(".config")
+            .join("ragent")
+            .join("azureresources.json");
         if p.exists() {
             return Some(p);
         }
@@ -173,9 +176,8 @@ impl AzureResourceProvider {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            config_path: resolve_config_path().unwrap_or_else(|| {
-                PathBuf::from(".ragent").join("azureresources.json")
-            }),
+            config_path: resolve_config_path()
+                .unwrap_or_else(|| PathBuf::from(".ragent").join("azureresources.json")),
         }
     }
 
@@ -222,7 +224,10 @@ impl Provider for AzureResourceProvider {
         base_url: Option<&str>,
         _options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
-        let resolved = base_url.unwrap_or_default().trim_end_matches('/').to_string();
+        let resolved = base_url
+            .unwrap_or_default()
+            .trim_end_matches('/')
+            .to_string();
         let client = AzureFoundryClient::new(api_key, &resolved);
         tracing::info!(
             chat_endpoint = %format!("{}/openai/v1/chat/completions", resolved),

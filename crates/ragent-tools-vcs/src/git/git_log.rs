@@ -102,23 +102,22 @@ impl Tool for GitLogTool {
         // Parse structured data
         let mut commits = Vec::new();
         for line in stdout.lines() {
-            if oneline
-                && let Some(hash_end) = line.find(' ') {
-                    let hash = &line[..hash_end];
-                    let rest = &line[hash_end + 1..];
-                    // Extract subject and author from format: "%h %s (%an, %ar)"
-                    if let Some(paren_start) = rest.rfind(" (") {
-                        let subject = &rest[..paren_start];
-                        let meta = &rest[paren_start + 2..rest.len() - 1]; // strip ()
-                        let parts: Vec<&str> = meta.split(", ").collect();
-                        commits.push(json!({
-                            "hash": hash,
-                            "subject": subject,
-                            "author": parts.first().unwrap_or(&"?"),
-                            "date": parts.get(1).unwrap_or(&"?"),
-                        }));
-                    }
+            if oneline && let Some(hash_end) = line.find(' ') {
+                let hash = &line[..hash_end];
+                let rest = &line[hash_end + 1..];
+                // Extract subject and author from format: "%h %s (%an, %ar)"
+                if let Some(paren_start) = rest.rfind(" (") {
+                    let subject = &rest[..paren_start];
+                    let meta = &rest[paren_start + 2..rest.len() - 1]; // strip ()
+                    let parts: Vec<&str> = meta.split(", ").collect();
+                    commits.push(json!({
+                        "hash": hash,
+                        "subject": subject,
+                        "author": parts.first().unwrap_or(&"?"),
+                        "date": parts.get(1).unwrap_or(&"?"),
+                    }));
                 }
+            }
         }
 
         Ok(ToolOutput {

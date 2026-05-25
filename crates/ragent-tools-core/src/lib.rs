@@ -86,15 +86,13 @@ pub mod resource {
 }
 
 /// The result of a tool execution, including optional structured metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolOutput {
     /// Human-readable output text returned to the caller.
     pub content: String,
     /// Optional structured metadata for machine-readable follow-up handling.
     pub metadata: Option<Value>,
 }
-
 
 /// Execution context passed to each tool invocation.
 #[derive(Clone)]

@@ -3,10 +3,8 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use ragent_llm::provider::azure_resource::{
-    parse_azure_resources, AzureResourceProvider,
-};
 use ragent_llm::Provider;
+use ragent_llm::provider::azure_resource::{AzureResourceProvider, parse_azure_resources};
 use tempfile::NamedTempFile;
 
 /// Helper: write `content` to a temporary file and return the path.
@@ -44,7 +42,11 @@ fn test_parse_valid_file() {
     assert_eq!(entry.context_window, Some(128_000));
     assert_eq!(
         entry.capabilities.as_ref().unwrap(),
-        &vec!["streaming".to_string(), "vision".to_string(), "tool_use".to_string()]
+        &vec![
+            "streaming".to_string(),
+            "vision".to_string(),
+            "tool_use".to_string()
+        ]
     );
     assert!(entry.thinking.is_none());
 }
@@ -91,7 +93,10 @@ fn test_parse_wrong_version() {
     let result = parse_azure_resources(file.path());
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("version"), "Error should mention version: {err}");
+    assert!(
+        err.contains("version"),
+        "Error should mention version: {err}"
+    );
 }
 
 #[test]

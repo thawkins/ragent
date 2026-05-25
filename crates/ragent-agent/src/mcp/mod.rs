@@ -57,7 +57,7 @@ static MCP_SPAWN_SEMAPHORE: std::sync::LazyLock<Semaphore> =
 ///
 /// Returns a descriptive error if validation fails.
 pub fn validate_mcp_config(id: &str, config: &McpServerConfig) -> anyhow::Result<()> {
-    if crate::yolo::is_enabled() {
+    if ragent_config::yolo::is_enabled() {
         tracing::warn!(id, "YOLO mode: skipping MCP config validation");
         return Ok(());
     }

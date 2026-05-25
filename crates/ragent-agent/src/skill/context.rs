@@ -218,7 +218,7 @@ async fn execute_command(command: &str, working_dir: &Path) -> String {
     let safe_cmd = redact_secrets(command);
 
     // Validate against allowlist before execution (skipped in YOLO mode).
-    if !crate::yolo::is_enabled()
+    if !ragent_config::yolo::is_enabled()
         && let Err(reason) = validate_command(command)
     {
         tracing::warn!(

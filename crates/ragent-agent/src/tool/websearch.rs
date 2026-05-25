@@ -28,11 +28,11 @@ impl Tool for WebSearchTool {
     /// # Errors
     ///
     /// Returns an error if the description string cannot be converted or returned.
-          fn description(&self) -> &'static str {
-              "Search the web and return results with titles, URLs, and snippets. \
+    fn description(&self) -> &'static str {
+        "Search the web and return results with titles, URLs, and snippets. \
                Requires a TAVILY_API_KEY environment variable or 'tavily_api_key' \
                in ragent.json config to be set."
-          }
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -76,21 +76,21 @@ impl Tool for WebSearchTool {
             .unwrap_or(DEFAULT_NUM_RESULTS)
             .min(MAX_NUM_RESULTS);
 
-                  // Try environment variable first, then fall back to config
-                  let api_key = std::env::var("TAVILY_API_KEY")
-                      .ok()
-                      .or_else(|| {
-                          crate::Config::load()
-                              .ok()
-                              .and_then(|cfg| cfg.tavily_api_key)
-                      })
-                      .ok_or_else(|| {
-                          anyhow::anyhow!(
-                              "No search API key configured. Set the TAVILY_API_KEY environment \
+        // Try environment variable first, then fall back to config
+        let api_key = std::env::var("TAVILY_API_KEY")
+            .ok()
+            .or_else(|| {
+                crate::Config::load()
+                    .ok()
+                    .and_then(|cfg| cfg.tavily_api_key)
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No search API key configured. Set the TAVILY_API_KEY environment \
                                variable or add 'tavily_api_key' to your ragent.json config file. \
                                Get a free key at https://tavily.com"
-                          )
-                      })?;
+                )
+            })?;
         let results = tavily_search(&api_key, query, num_results).await?;
 
         // Format results as readable text

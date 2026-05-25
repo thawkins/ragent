@@ -399,51 +399,56 @@ pub(crate) async fn check_permission_with_prompt(
     use crate::permission::PermissionAction;
     use tokio::sync::broadcast::error::RecvError;
 
-    // Short-circuit if --yes / --no-prompt flag is set
-    if auto_approve {
-        return Ok(PermissionAction::Allow);
-    }
-
-    // Codeindex tools, team tools, and *_task tools are hardwired helpers and
-    // must never trigger interactive permission prompts.
-    if is_hardwired_auto_approved_tool(tool_name) {
-        return Ok(PermissionAction::Allow);
-    }
-
-    // Auto-grant file:read for paths within the working directory
-    if permission == "file:read" || permission == "read" {
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Ok(resource_path) = std::path::Path::new(resource).canonicalize() {
-                if resource_path.starts_with(&cwd) {
+                // Short-circuit if --yes / --no-prompt flag is set
+                if auto_approve {
                     return Ok(PermissionAction::Allow);
                 }
-            } else if !resource.starts_with('/') && !resource.starts_with("..") {
-                // Relative path within project, not yet created
-                return Ok(PermissionAction::Allow);
-            }
-        }
-    }
-
+          
+                // YOLO mode bypasses interactive permission prompts for all tools
+                if ragent_config::yolo::is_enabled() {
+                    return Ok(PermissionAction::Allow);
+                }
+          
+                // Codeindex tools, team tools, and *_task tools are hardwired helpers and
+                // must never trigger interactive permission prompts.
+                if is_hardwired_auto_approved_tool(tool_name) {
+                    return Ok(PermissionAction::Allow);
+                }
+          
+                // Auto-grant file:read for paths within the working directory
+                if permission == "file:read" || permission == "read" {
+                    if let Ok(cwd) = std::env::current_dir() {
+                        if let Ok(resource_path) = std::path::Path::new(resource).canonicalize() {
+                            if resource_path.starts_with(&cwd) {
+                                return Ok(PermissionAction::Allow);
+                            }
+                        } else if !resource.starts_with('/') && !resource.starts_with("..") {
+                            // Relative path within project, not yet created
+                            return Ok(PermissionAction::Allow);
+                        }
+                    }
+                }
     // Check dir_lists allowlist/denylist for file operations (file:read, file:write, edit)
     if permission.starts_with("file:")
         || permission == "read"
         || permission == "edit"
         || permission == "write"
     {
-              use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
-        
-                  let denylist = get_compiled_denylist();
-                  let allowlist = get_compiled_allowlist();
-        
-                  // Denylist takes precedence - immediately reject
-                  if denylist.is_match(resource) {
-                      return Ok(PermissionAction::Deny);
-                  }
-        
-                  // Allowlist - immediately approve
-                  if allowlist.is_match(resource) {
-                      return Ok(PermissionAction::Allow);
-                  }    }
+        use ragent_config::dir_lists::{get_compiled_allowlist, get_compiled_denylist};
+
+        let denylist = get_compiled_denylist();
+        let allowlist = get_compiled_allowlist();
+
+        // Denylist takes precedence - immediately reject
+        if denylist.is_match(resource) {
+            return Ok(PermissionAction::Deny);
+        }
+
+        // Allowlist - immediately approve
+        if allowlist.is_match(resource) {
+            return Ok(PermissionAction::Allow);
+        }
+    }
 
     // 1. Check PermissionChecker first
     let action = {
@@ -796,23 +801,24 @@ impl SessionProcessor {
                             .filter(|s| !s.trim().is_empty())
                     })
             }
-                          "azure_foundry" => {
-                              let cfg = crate::Config::load().ok();
-                              self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
-                                  .await
-                                  .ok()
-                                  .flatten()
-                                  .filter(|s: &String| !s.trim().is_empty())
-                                  .or_else(|| {
-                                      cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
-                                          .and_then(|p| p.api.and_then(|a| a.base_url))
-                                  })
-                                  .or_else(|| {
-                                      std::env::var("AZURE_AI_FOUNDRY_BASE")
-                                          .ok()
-                                          .filter(|s| !s.trim().is_empty())
-                                  })
-                          }            _ => None,
+            "azure_foundry" => {
+                let cfg = crate::Config::load().ok();
+                self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|s: &String| !s.trim().is_empty())
+                    .or_else(|| {
+                        cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
+                            .and_then(|p| p.api.and_then(|a| a.base_url))
+                    })
+                    .or_else(|| {
+                        std::env::var("AZURE_AI_FOUNDRY_BASE")
+                            .ok()
+                            .filter(|s| !s.trim().is_empty())
+                    })
+            }
+            _ => None,
         };
         tracing::info!(
             provider = %model_ref.provider_id,
@@ -1060,46 +1066,58 @@ impl SessionProcessor {
             self.session_manager.get_messages(session_id)?
         };
 
-                  // Get model's context window size for potential compaction
-                  let context_window = self
-                      .provider_registry
-                      .get(&model_ref.provider_id)
-                      .and_then(|p| {
-                          p.default_models()
-                              .into_iter()
-                              .find(|m| m.id == model_ref.model_id)
-                      })
-                      .map(|m| m.context_window)
-                      .unwrap_or(128_000); // Default fallback                            
-                  // Compact history if needed to prevent context window overflow.
-                  // For small histories that fit within the window we skip the expensive
-                  // atomic-pair compaction entirely.
-                  let compacted_history = {
-                      let _scope = profiler.scope("history.compact");
-                      let max_tokens = context_window.saturating_sub(1000);
-                      let quick_total_tokens: usize = history.iter().map(|m| {
-                          let text_len: usize = m.parts.iter().map(|p| match p {
-                              MessagePart::Text { text } => text.len(),
-                              MessagePart::ToolCall { tool, state, .. } => {
-                                  tool.len()
-                                      + state.output.as_ref().and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0)
-                                      + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                              }
-                              MessagePart::Image { .. } => 1000,
-                              MessagePart::Reasoning { text } => text.len(),
-                          }).sum();
-                          text_len / 4 + 10
-                      }).sum();
-                      if quick_total_tokens <= max_tokens {
-                          history.to_vec()
-                      } else {
-                          compact_history_with_atomic_tool_calls(
-                              &history,
-                              context_window,
-                              8192, // Default max output tokens
-                          )
-                      }
-                  };
+        // Get model's context window size for potential compaction
+        let context_window = self
+            .provider_registry
+            .get(&model_ref.provider_id)
+            .and_then(|p| {
+                p.default_models()
+                    .into_iter()
+                    .find(|m| m.id == model_ref.model_id)
+            })
+            .map(|m| m.context_window)
+            .unwrap_or(128_000); // Default fallback                            
+        // Compact history if needed to prevent context window overflow.
+        // For small histories that fit within the window we skip the expensive
+        // atomic-pair compaction entirely.
+        let compacted_history = {
+            let _scope = profiler.scope("history.compact");
+            let max_tokens = context_window.saturating_sub(1000);
+            let quick_total_tokens: usize = history
+                .iter()
+                .map(|m| {
+                    let text_len: usize = m
+                        .parts
+                        .iter()
+                        .map(|p| match p {
+                            MessagePart::Text { text } => text.len(),
+                            MessagePart::ToolCall { tool, state, .. } => {
+                                tool.len()
+                                    + state
+                                        .output
+                                        .as_ref()
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.len())
+                                        .unwrap_or(0)
+                                    + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                            }
+                            MessagePart::Image { .. } => 1000,
+                            MessagePart::Reasoning { text } => text.len(),
+                        })
+                        .sum();
+                    text_len / 4 + 10
+                })
+                .sum();
+            if quick_total_tokens <= max_tokens {
+                history.to_vec()
+            } else {
+                compact_history_with_atomic_tool_calls(
+                    &history,
+                    context_window,
+                    8192, // Default max output tokens
+                )
+            }
+        };
         let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.
         // Note: history already contains the user message we just stored,
@@ -1197,18 +1215,18 @@ impl SessionProcessor {
         let max_steps = agent.max_steps.unwrap_or(500) as usize;
         // Reset step counter for this session so warnings are relative to this run.
         self.event_bus.set_step(session_id, 0);
-                  // Single-step agents (e.g. "chat") don't use tools — omit definitions
-                  // so providers aren't confused by unused tool schemas.
-                  let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> =
-                      if max_steps <= 1 {
-                          std::sync::Arc::new(Vec::new())
-                      } else {
-                          self.get_cached_tool_definitions()
-                      };        let mut assistant_parts: Vec<MessagePart> = Vec::new();
-                  let mut agent_switch_requested = false;
-                  let mut task_complete_requested = false;
-                  let mut task_completeness_nudged = false;
-                  let mut last_interim_hash: Option<u64> = None;
+        // Single-step agents (e.g. "chat") don't use tools — omit definitions
+        // so providers aren't confused by unused tool schemas.
+        let tool_definitions: std::sync::Arc<Vec<ToolDefinition>> = if max_steps <= 1 {
+            std::sync::Arc::new(Vec::new())
+        } else {
+            self.get_cached_tool_definitions()
+        };
+        let mut assistant_parts: Vec<MessagePart> = Vec::new();
+        let mut agent_switch_requested = false;
+        let mut task_complete_requested = false;
+        let mut task_completeness_nudged = false;
+        let mut last_interim_hash: Option<u64> = None;
         // Timing tracking for the agent loop
         let total_start = Instant::now();
         let mut cumulative_model_wait_ms: u64 = 0;
@@ -1325,13 +1343,14 @@ impl SessionProcessor {
                         }
                     }
 
-                                                                // Build request (fresh for each attempt)
-                                                                let attempt_request = ChatRequest {
-                                                                    model: model_ref.model_id.clone(),
-                                                                    messages: Arc::new(chat_messages.clone()),
-                                                                    tools: tool_definitions.clone(),
-                                                                    temperature: agent.temperature,
-                                                                    top_p: agent.top_p,                        max_tokens: None,
+                    // Build request (fresh for each attempt)
+                    let attempt_request = ChatRequest {
+                        model: model_ref.model_id.clone(),
+                        messages: Arc::new(chat_messages.clone()),
+                        tools: tool_definitions.clone(),
+                        temperature: agent.temperature,
+                        top_p: agent.top_p,
+                        max_tokens: None,
                         system: Some(system_prompt.clone()),
                         options: agent.options.clone(),
                         session_id: Some(session_id.to_string()),
@@ -1382,128 +1401,131 @@ impl SessionProcessor {
                         }
                     };
 
-                                                                let mut had_retryable_error = false;
-                                                                let mut first_stream_event_pending = true;
-                                                                let mut stream_buffer = StreamBuffer::new();                                          {
-                                              let _scope = profiler.scope("loop.llm.stream");
-                                              loop {
-                                                  let wait_started = Instant::now();
-                                                  let next_event = {
-                                                      let _scope = profiler.scope("loop.llm.wait_next_event");
-                                                      stream.next().await
-                                                  };
-                                                  if first_stream_event_pending {
-                                                      if next_event.is_some() {
-                                                          profiler.record_duration(
-                                                              "loop.llm.first_event_wait",
-                                                              wait_started.elapsed(),
-                                                          );
-                                                      }
-                                                      first_stream_event_pending = false;
-                                                  }
-                                                                                let Some(event) = next_event else {
-                                                                                    // Stream ended — flush any remaining buffered text.
-                                                                                    let text = stream_buffer.drain_text();
-                                                                                    if !text.is_empty() {
-                                                                                        self.event_bus.publish(Event::TextDelta {
-                                                                                            session_id: session_id.to_string(),
-                                                                                            text,
-                                                                                        });
-                                                                                    }
-                                                                                    let reasoning = stream_buffer.drain_reasoning();
-                                                                                    if !reasoning.is_empty() {
-                                                                                        self.event_bus.publish(Event::ReasoningDelta {
-                                                                                            session_id: session_id.to_string(),
-                                                                                            text: reasoning,
-                                                                                        });
-                                                                                    }
-                                                                                    break;
-                                                                                };                    
-                                                  match event {
-                                                      StreamEvent::TextDelta { text } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.text_delta");
-                                                          if let Some(flushed) = stream_buffer.push_text(&text) {
-                                                              self.event_bus.publish(Event::TextDelta {
-                                                                  session_id: session_id.to_string(),
-                                                                  text: flushed,
-                                                              });
-                                                              stream_buffer.reset_timer();
-                                                          }
-                                                          text_buffer.push_str(&text);
-                                                      }
-                                                      StreamEvent::ReasoningStart => {
-                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_start");
-                                                      }
-                                                      StreamEvent::ReasoningDelta { text } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_delta");
-                                                          if let Some(flushed) = stream_buffer.push_reasoning(&text) {
-                                                              self.event_bus.publish(Event::ReasoningDelta {
-                                                                  session_id: session_id.to_string(),
-                                                                  text: flushed,
-                                                              });
-                                                              stream_buffer.reset_timer();
-                                                          }
-                                                          reasoning_buffer.push_str(&text);
-                                                      }
-                                                      StreamEvent::ReasoningEnd => {
-                                                          let _scope = profiler.scope("loop.llm.handle.reasoning_end");
-                                                      }
-                                                                                        StreamEvent::ToolCallStart { id, name } => {
-                                                                                            let _scope = profiler.scope("loop.llm.handle.tool_call_start");
-                                                                                            // Flush text before tool call starts for correct sequencing.
-                                                                                            let text = stream_buffer.drain_text();
-                                                                                            if !text.is_empty() {
-                                                                                                self.event_bus.publish(Event::TextDelta {
-                                                                                                    session_id: session_id.to_string(),
-                                                                                                    text,
-                                                                                                });
-                                                                                            }
-                                                                                            let reasoning = stream_buffer.drain_reasoning();
-                                                                                            if !reasoning.is_empty() {
-                                                                                                self.event_bus.publish(Event::ReasoningDelta {
-                                                                                                    session_id: session_id.to_string(),
-                                                                                                    text: reasoning,
-                                                                                                });
-                                                                                            }
-                                                                                            stream_buffer.reset_timer();                                                          tool_calls.push(PendingToolCall {
-                                                              id,
-                                                              name,
-                                                              args_json: String::new(),
-                                                          });
-                                                      }
-                                                      StreamEvent::ToolCallDelta { id, args_json } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.tool_call_delta");
-                                                          if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
-                                                              tc.args_json.push_str(&args_json);
-                                                          }
-                                                      }
-                                                      StreamEvent::ToolCallEnd { id } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.tool_call_end");
-                                                          if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
-                                                              saw_completed_tool_call = true;
-                                                              self.event_bus.publish(Event::ToolCallArgs {
-                                                                  session_id: session_id.to_string(),
-                                                                  call_id: tc.id.clone(),
-                                                                  tool: tc.name.clone(),
-                                                                  args: tc.args_json.clone(),
-                                                              });
-                                                          }
-                                                      }
-                                                      StreamEvent::Usage {
-                                                          input_tokens,
-                                                          output_tokens,
-                                                      } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.usage");
-                                                          last_input_tokens = input_tokens;
-                                                          last_output_tokens = output_tokens;
-                                                          self.event_bus.publish(Event::TokenUsage {
-                                                              session_id: session_id.to_string(),
-                                                              input_tokens,
-                                                              output_tokens,
-                                                          });
-                                                      }
-                                                      StreamEvent::Error { message } => {
-                                                          let _scope = profiler.scope("loop.llm.handle.error");                                    debug!(
+                    let mut had_retryable_error = false;
+                    let mut first_stream_event_pending = true;
+                    let mut stream_buffer = StreamBuffer::new();
+                    {
+                        let _scope = profiler.scope("loop.llm.stream");
+                        loop {
+                            let wait_started = Instant::now();
+                            let next_event = {
+                                let _scope = profiler.scope("loop.llm.wait_next_event");
+                                stream.next().await
+                            };
+                            if first_stream_event_pending {
+                                if next_event.is_some() {
+                                    profiler.record_duration(
+                                        "loop.llm.first_event_wait",
+                                        wait_started.elapsed(),
+                                    );
+                                }
+                                first_stream_event_pending = false;
+                            }
+                            let Some(event) = next_event else {
+                                // Stream ended — flush any remaining buffered text.
+                                let text = stream_buffer.drain_text();
+                                if !text.is_empty() {
+                                    self.event_bus.publish(Event::TextDelta {
+                                        session_id: session_id.to_string(),
+                                        text,
+                                    });
+                                }
+                                let reasoning = stream_buffer.drain_reasoning();
+                                if !reasoning.is_empty() {
+                                    self.event_bus.publish(Event::ReasoningDelta {
+                                        session_id: session_id.to_string(),
+                                        text: reasoning,
+                                    });
+                                }
+                                break;
+                            };
+                            match event {
+                                StreamEvent::TextDelta { text } => {
+                                    let _scope = profiler.scope("loop.llm.handle.text_delta");
+                                    if let Some(flushed) = stream_buffer.push_text(&text) {
+                                        self.event_bus.publish(Event::TextDelta {
+                                            session_id: session_id.to_string(),
+                                            text: flushed,
+                                        });
+                                        stream_buffer.reset_timer();
+                                    }
+                                    text_buffer.push_str(&text);
+                                }
+                                StreamEvent::ReasoningStart => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_start");
+                                }
+                                StreamEvent::ReasoningDelta { text } => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_delta");
+                                    if let Some(flushed) = stream_buffer.push_reasoning(&text) {
+                                        self.event_bus.publish(Event::ReasoningDelta {
+                                            session_id: session_id.to_string(),
+                                            text: flushed,
+                                        });
+                                        stream_buffer.reset_timer();
+                                    }
+                                    reasoning_buffer.push_str(&text);
+                                }
+                                StreamEvent::ReasoningEnd => {
+                                    let _scope = profiler.scope("loop.llm.handle.reasoning_end");
+                                }
+                                StreamEvent::ToolCallStart { id, name } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_start");
+                                    // Flush text before tool call starts for correct sequencing.
+                                    let text = stream_buffer.drain_text();
+                                    if !text.is_empty() {
+                                        self.event_bus.publish(Event::TextDelta {
+                                            session_id: session_id.to_string(),
+                                            text,
+                                        });
+                                    }
+                                    let reasoning = stream_buffer.drain_reasoning();
+                                    if !reasoning.is_empty() {
+                                        self.event_bus.publish(Event::ReasoningDelta {
+                                            session_id: session_id.to_string(),
+                                            text: reasoning,
+                                        });
+                                    }
+                                    stream_buffer.reset_timer();
+                                    tool_calls.push(PendingToolCall {
+                                        id,
+                                        name,
+                                        args_json: String::new(),
+                                    });
+                                }
+                                StreamEvent::ToolCallDelta { id, args_json } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_delta");
+                                    if let Some(tc) = tool_calls.iter_mut().find(|t| t.id == id) {
+                                        tc.args_json.push_str(&args_json);
+                                    }
+                                }
+                                StreamEvent::ToolCallEnd { id } => {
+                                    let _scope = profiler.scope("loop.llm.handle.tool_call_end");
+                                    if let Some(tc) = tool_calls.iter().find(|t| t.id == id) {
+                                        saw_completed_tool_call = true;
+                                        self.event_bus.publish(Event::ToolCallArgs {
+                                            session_id: session_id.to_string(),
+                                            call_id: tc.id.clone(),
+                                            tool: tc.name.clone(),
+                                            args: tc.args_json.clone(),
+                                        });
+                                    }
+                                }
+                                StreamEvent::Usage {
+                                    input_tokens,
+                                    output_tokens,
+                                } => {
+                                    let _scope = profiler.scope("loop.llm.handle.usage");
+                                    last_input_tokens = input_tokens;
+                                    last_output_tokens = output_tokens;
+                                    self.event_bus.publish(Event::TokenUsage {
+                                        session_id: session_id.to_string(),
+                                        input_tokens,
+                                        output_tokens,
+                                    });
+                                }
+                                StreamEvent::Error { message } => {
+                                    let _scope = profiler.scope("loop.llm.handle.error");
+                                    debug!(
                                         "Stream error (attempt {}): {}",
                                         attempt + 1,
                                         redact_secrets(&message)
@@ -1629,9 +1651,9 @@ impl SessionProcessor {
                         && trimmed_text
                             .chars()
                             .all(|c| c == '.' || c == ' ' || c == '\n');
-                                          let looks_like_planning = !text_buffer.is_empty()
-                                              && !tool_definitions.is_empty()
-                                              && stall_pattern_set().is_match(&text_buffer);                    // Only nudge on early steps to avoid infinite loops.
+                    let looks_like_planning = !text_buffer.is_empty()
+                        && !tool_definitions.is_empty()
+                        && stall_pattern_set().is_match(&text_buffer); // Only nudge on early steps to avoid infinite loops.
                     // Stall responses (dots-only) are nudged for any provider; planning
                     // text nudges are limited to Ollama which commonly narrates before acting.
                     let should_nudge_stall = looks_like_stall && step <= 8;
@@ -1806,10 +1828,11 @@ impl SessionProcessor {
                             .cloned()
                             .map(|tm| tm as Arc<dyn crate::tool::TeamManagerInterface>),
                         code_index: self.code_index.get().cloned(),
-                                                  spec_manager: self.spec_manager.get().cloned(),
-                                                  active_spec_id: self.active_spec.read().await.clone(),
-                                                  config: Some(Arc::new(session_config.clone())),
-                                              };                    let tc_clone = tc.clone();
+                        spec_manager: self.spec_manager.get().cloned(),
+                        active_spec_id: self.active_spec.read().await.clone(),
+                        config: Some(Arc::new(session_config.clone())),
+                    };
+                    let tc_clone = tc.clone();
                     let registry = self.tool_registry.clone();
                     let permission_checker = self.permission_checker.clone();
                     let event_bus = self.event_bus.clone();
@@ -2230,17 +2253,18 @@ impl SessionProcessor {
                     let active_spec_id = self.active_spec.read().await.clone();
                     if let Some(ref spec_id_str) = active_spec_id {
                         if let Some(ref spec_mgr) = self.spec_manager.get() {
-                                                          if tool_calls.iter().any(|tc| {
-                                                              matches!(
-                                                                  tc.name.as_str(),
-                                                                  "write"
-                                                                      | "edit"
-                                                                      | "multiedit"
-                                                                      | "patch"
-                                                                      | "create"
-                                                                      | "append_to_file"
-                                                              )
-                                                          }) {                                if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
+                            if tool_calls.iter().any(|tc| {
+                                matches!(
+                                    tc.name.as_str(),
+                                    "write"
+                                        | "edit"
+                                        | "multiedit"
+                                        | "patch"
+                                        | "create"
+                                        | "append_to_file"
+                                )
+                            }) {
+                                if let Some(id) = ragent_specs::spec::SpecId::new(spec_id_str) {
                                     if let Ok(mut spec) = spec_mgr.read_spec(&id).await {
                                         let mut updated = false;
                                         for task in spec.tasks.iter_mut() {
@@ -2329,48 +2353,54 @@ impl SessionProcessor {
                 }
             }
 
-                          // Persist intermediate progress so that output inspectors (e.g.
-                          // the teammate output overlay) can show steps while the agent is
-                          // still running.  Fire-and-forget on a blocking thread.
-                          {
-                              let _scope = profiler.scope("storage.assistant_interim.update");
-                              // Compute a cheap content hash so we skip the blocking storage
-                              // write when the assistant_parts haven't changed since the last
-                              // interim update (e.g. while waiting for the LLM).
-                              let current_hash = {
-                                  use std::hash::{Hash, Hasher};
-                                  let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                                  for part in &assistant_parts {
-                                      std::mem::discriminant(part).hash(&mut hasher);
-                                      match part {
-                                          MessagePart::Text { text } => text.hash(&mut hasher),
-                                          MessagePart::ToolCall { tool, call_id, state } => {
-                                              tool.hash(&mut hasher);
-                                              call_id.hash(&mut hasher);
-                                              state.input.to_string().hash(&mut hasher);
-                                              if let Some(out) = &state.output {
-                                                  out.to_string().hash(&mut hasher);
-                                              }
-                                              if let Some(err) = &state.error {
-                                                  err.hash(&mut hasher);
-                                              }
-                                          }
-                                          MessagePart::Reasoning { text } => text.hash(&mut hasher),
-                                                                                      MessagePart::Image(img) => {
-                                                                                          img.mime_type.hash(&mut hasher);
-                                                                                          img.path.hash(&mut hasher);
-                                                                                      }                                      }
-                                  }
-                                  hasher.finish()
-                              };
-                              if last_interim_hash != Some(current_hash) {
-                                  let mut interim =
-                                      Message::new(session_id, Role::Assistant, assistant_parts.clone());
-                                  interim.id = assistant_msg_id.clone();
-                                  let _ = self.storage_op(move |s| s.update_message(&interim)).await;
-                                  last_interim_hash = Some(current_hash);
-                              }
-                          }        }
+            // Persist intermediate progress so that output inspectors (e.g.
+            // the teammate output overlay) can show steps while the agent is
+            // still running.  Fire-and-forget on a blocking thread.
+            {
+                let _scope = profiler.scope("storage.assistant_interim.update");
+                // Compute a cheap content hash so we skip the blocking storage
+                // write when the assistant_parts haven't changed since the last
+                // interim update (e.g. while waiting for the LLM).
+                let current_hash = {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    for part in &assistant_parts {
+                        std::mem::discriminant(part).hash(&mut hasher);
+                        match part {
+                            MessagePart::Text { text } => text.hash(&mut hasher),
+                            MessagePart::ToolCall {
+                                tool,
+                                call_id,
+                                state,
+                            } => {
+                                tool.hash(&mut hasher);
+                                call_id.hash(&mut hasher);
+                                state.input.to_string().hash(&mut hasher);
+                                if let Some(out) = &state.output {
+                                    out.to_string().hash(&mut hasher);
+                                }
+                                if let Some(err) = &state.error {
+                                    err.hash(&mut hasher);
+                                }
+                            }
+                            MessagePart::Reasoning { text } => text.hash(&mut hasher),
+                            MessagePart::Image(img) => {
+                                img.mime_type.hash(&mut hasher);
+                                img.path.hash(&mut hasher);
+                            }
+                        }
+                    }
+                    hasher.finish()
+                };
+                if last_interim_hash != Some(current_hash) {
+                    let mut interim =
+                        Message::new(session_id, Role::Assistant, assistant_parts.clone());
+                    interim.id = assistant_msg_id.clone();
+                    let _ = self.storage_op(move |s| s.update_message(&interim)).await;
+                    last_interim_hash = Some(current_hash);
+                }
+            }
+        }
 
         // 6. Final save of assistant message (update the pre-created placeholder).
         let mut assistant_msg = Message::new(session_id, Role::Assistant, assistant_parts);
@@ -2455,7 +2485,7 @@ impl SessionProcessor {
         });
 
         // Check if any instruction files were found
-        if discovery.found_files.is_empty() {
+        if discovery.all_discovered_files.is_empty() {
             return Ok(());
         }
 
@@ -2654,8 +2684,9 @@ impl SessionProcessor {
 
         // Azure Foundry: also check azure_resource_last_selection for key config
         if provider_id == "azure_foundry" {
-            if let Ok(Some(last)) =
-                self.storage_op(|s| s.get_setting("azure_resource_last_selection")).await
+            if let Ok(Some(last)) = self
+                .storage_op(|s| s.get_setting("azure_resource_last_selection"))
+                .await
             {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
                     // Direct api_key takes precedence
@@ -3007,8 +3038,7 @@ pub fn tool_result_content_for_llm(tool: &str, content: &str, metadata: Option<&
     let head = truncate_at_char_boundary(content, TOOL_RESULT_HEAD_CHARS_FOR_LLM);
     let tail = trailing_at_char_boundary(content, TOOL_RESULT_TAIL_CHARS_FOR_LLM);
     let total_chars = content.chars().count();
-    let omitted_chars = total_chars
-        .saturating_sub(head.chars().count() + tail.chars().count());
+    let omitted_chars = total_chars.saturating_sub(head.chars().count() + tail.chars().count());
 
     let line_info = metadata
         .and_then(|m| {
@@ -3044,17 +3074,20 @@ pub fn estimate_request_bytes(request: &ChatRequest) -> u64 {
         .map(|m| {
             let content_len: usize = match &m.content {
                 ChatContent::Text(t) => t.len(),
-                ChatContent::Parts(parts) => parts.iter().map(|p| match p {
-                    ContentPart::Text { text } => text.len(),
-                    ContentPart::ToolUse { id, name, input } => {
-                        id.len() + name.len() + input.to_string().len()
-                    }
-                    ContentPart::ToolResult {
-                        tool_use_id,
-                        content,
-                    } => tool_use_id.len() + content.len(),
-                    ContentPart::ImageUrl { url } => url.len(),
-                }).sum(),
+                ChatContent::Parts(parts) => parts
+                    .iter()
+                    .map(|p| match p {
+                        ContentPart::Text { text } => text.len(),
+                        ContentPart::ToolUse { id, name, input } => {
+                            id.len() + name.len() + input.to_string().len()
+                        }
+                        ContentPart::ToolResult {
+                            tool_use_id,
+                            content,
+                        } => tool_use_id.len() + content.len(),
+                        ContentPart::ImageUrl { url } => url.len(),
+                    })
+                    .sum(),
             };
             content_len + m.role.len() + 40
         })

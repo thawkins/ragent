@@ -91,12 +91,13 @@ fn copilot_premium_multiplier(model_id: &str) -> Option<f64> {
 
         _ => {
             // Fallback pattern matching for variations
-                          if (id_lower.contains("gpt-4o") && !id_lower.contains("mini"))
-                                || id_lower.contains("gpt-4.1")
-                                || id_lower.contains("gpt-5-mini")
-                                || id_lower.contains("gpt5-mini")
-                            {
-                                Some(0.0)            } else if id_lower.contains("sonnet") {
+            if (id_lower.contains("gpt-4o") && !id_lower.contains("mini"))
+                || id_lower.contains("gpt-4.1")
+                || id_lower.contains("gpt-5-mini")
+                || id_lower.contains("gpt5-mini")
+            {
+                Some(0.0)
+            } else if id_lower.contains("sonnet") {
                 Some(1.0) // Claude Sonnet models
             } else if id_lower.contains("haiku") {
                 Some(0.33) // Claude Haiku models
@@ -1745,9 +1746,9 @@ mod tests {
         let alias_request = ChatRequest {
             model: "o3-mini".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
@@ -1766,9 +1767,9 @@ mod tests {
         let invalid_request = ChatRequest {
             model: "o3-mini".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
@@ -1788,9 +1789,9 @@ mod tests {
         let mut request = ChatRequest {
             model: "o3-mini".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
@@ -1823,9 +1824,9 @@ mod tests {
         let req = ChatRequest {
             model: "o3-mini".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
@@ -1854,9 +1855,9 @@ mod tests {
         let req = ChatRequest {
             model: "gpt-4o".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,
@@ -1886,9 +1887,9 @@ mod tests {
         let req = ChatRequest {
             model: "o3-mini".to_string(),
             messages: Arc::new(vec![ChatMessage {
-                    role: "user".to_string(),
-                    content: ChatContent::Text("hello".to_string()),
-                }]),
+                role: "user".to_string(),
+                content: ChatContent::Text("hello".to_string()),
+            }]),
             tools: Arc::new(vec![]),
             temperature: None,
             top_p: None,

@@ -983,10 +983,7 @@ fn test_provider_setup_paste_text_into_key_field() {
     app.paste_text_into_provider_setup("cloud-key");
 
     match app.provider_setup.as_ref().expect("provider setup present") {
-        ProviderSetupStep::EnterKey {
-            key_field,
-            ..
-        } => {
+        ProviderSetupStep::EnterKey { key_field, .. } => {
             assert_eq!(key_field.text(), "cloud-key");
             assert_eq!(key_field.cursor(), 9);
         }
@@ -2368,7 +2365,10 @@ fn test_slash_config_show_displays_paths() {
     app.execute_slash_command("/config show");
 
     assert_eq!(app.status, "config: show");
-    assert!(!app.messages.is_empty(), "config show should create a message");
+    assert!(
+        !app.messages.is_empty(),
+        "config show should create a message"
+    );
     let text = app.messages.last().unwrap().text_content();
     assert!(
         text.contains("Application Paths"),
@@ -2401,5 +2401,8 @@ fn test_slash_config_no_args_shows_usage() {
 
     assert_eq!(app.status, "config: usage");
     let text = app.messages.last().unwrap().text_content();
-    assert!(text.contains("Usage: `/config show`"), "should show usage hint");
+    assert!(
+        text.contains("Usage: `/config show`"),
+        "should show usage hint"
+    );
 }
