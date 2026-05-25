@@ -25,6 +25,7 @@ pub mod event {
 
 pub use providers::{
     ModelInfo, Provider, ProviderInfo, ProviderRegistry, UsageInfo, anthropic::AnthropicProvider,
+    azure_resource::AzureResourceEntry, azure_resource::AzureResourceProvider,
     copilot::CopilotProvider, create_default_registry, gemini::GeminiProvider,
     generic_openai::GenericOpenAiProvider, huggingface::HuggingFaceProvider,
     ollama::OllamaProvider, ollama_cloud::OllamaCloudProvider, openai::OpenAiProvider,

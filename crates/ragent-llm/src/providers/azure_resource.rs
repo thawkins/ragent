@@ -186,6 +186,14 @@ impl AzureResourceProvider {
     pub fn with_path(path: PathBuf) -> Self {
         Self { config_path: path }
     }
+
+    /// Returns the raw parsed entries from `azureresources.json`.
+    ///
+    /// This preserves `endpoint`, `api_key`, and `api_key_env` which are
+    /// lost when converting to [`ModelInfo`] via [`Provider::default_models`].
+    pub fn entries(&self) -> Vec<AzureResourceEntry> {
+        parse_azure_resources(&self.config_path).unwrap_or_default()
+    }
 }
 
 impl Default for AzureResourceProvider {

@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.95
+## Current Version: 0.1.0-alpha.96
+
+### Changed
+- **fix for azure resource provider**
+
+## Previous: 0.1.0-alpha.95
 
 ### Changed
 - **YOLO mode fixes** — Fixed YOLO mode permission bypass logic.

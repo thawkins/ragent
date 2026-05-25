@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.96
+
+### Changed
+- **fix for azure resource provider**
+
 ## Version: 0.1.0-alpha.95
 
 ### Changed
