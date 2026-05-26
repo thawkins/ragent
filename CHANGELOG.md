@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.99
+
+### Changed
+- **updated splash screen text**
+
 ## Version: 0.1.0-alpha.98
 
 ### Added

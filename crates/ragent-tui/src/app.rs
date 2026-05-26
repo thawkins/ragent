@@ -11884,7 +11884,7 @@ Type `/swarm help` for more info.\n";
                 self.push_log_no_agent(LogLevel::Info, format!("agent notice: {}", message));
                 self.status = summary.clone();
                 // Also display in the message window for visibility
-                self.append_assistant_text(&format!("📋 **Agent Notice**\n\n{}", message));
+                self.append_assistant_text(&format!("📋 **Agent Notice**\n{}", message));
             }
             Event::AgentError {
                 ref session_id,

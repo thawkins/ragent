@@ -1,9 +1,9 @@
 # Release
 
-## Current Version: 0.1.0-alpha.98
+## Current Version: 0.1.0-alpha.99
 
-### Added
-- **Azure Resource Provider API type switch** — Added `api_type` field to `azureresources.json` entries. When set to `"anthropic"`, requests are routed to `{endpoint}/anthropic/v1/messages` using the Anthropic Messages API format with Azure-style `api-key` authentication. When set to `"openai"` or omitted, the existing OpenAI-compatible path is used.
+### Changed
+- **updated splash screen text**
 
 ## Previous: 0.1.0-alpha.97
 

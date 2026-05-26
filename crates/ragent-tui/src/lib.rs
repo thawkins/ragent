@@ -262,7 +262,7 @@ pub async fn run_tui(
                 let banner = crate::logo::LOGO.join("\n");
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
-                app.force_new_message = true;
+               // app.force_new_message = true;
                 app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 // Display the loaded configuration file(s)
                 if app.config_paths.is_empty() {
@@ -287,7 +287,7 @@ pub async fn run_tui(
                     if app.config_paths.len() > 1 {
                         paths_text = format!("\n  {paths_text}");
                     }
-                    app.append_assistant_text(&format!("\n✓ Loaded config file: `{paths_text}`"));
+                    app.append_assistant_text(&format!("\n✔ Loaded config file: `{paths_text}`"));
                 }
                 app.status = "session created".to_string();
                 terminal.draw(|frame| layout::render(frame, &mut app))?;
@@ -425,7 +425,7 @@ pub async fn run_tui(
     app.backfill_model_ctx_window();
 
     // -- Startup complete --
-    app.append_assistant_text("\n\n✅ **Ready**");
+    app.append_assistant_text("\n✅ **Ready**");
     app.status = "ready".to_string();
     // Ensure the init exchange response starts a new message bubble
     app.force_new_message = true;

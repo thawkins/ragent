@@ -1488,7 +1488,6 @@ impl InstructionFileDiscovery {
                     "ℹ️  No local instruction files found; used global fallback.".to_string(),
                 );
             }
-            lines.push("".to_string());
             lines.push(format!(
                 "📁 Discovered {} file(s):",
                 self.all_discovered_files.len()
@@ -1519,13 +1518,14 @@ impl InstructionFileDiscovery {
                     "✅ Instructions loaded from: {} (project root takes priority)",
                     rel
                 ));
+               
             }
             if !self.used_global_fallback && self.all_discovered_files.len() > 1 {
-                lines.push("".to_string());
                 lines.push(
                     "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session (project root takes priority)."
                         .to_string(),
                 );
+                lines.push("\n".to_string());
             }
         }
         lines.join("\n")
