@@ -266,3 +266,89 @@ fn test_parse_with_thinking_config() {
     let thinking = entries[0].thinking.as_ref().unwrap();
     assert!(thinking.is_effective_enabled());
 }
+
+#[test]
+fn test_api_type_openai_accepted() {
+    let json = r#"{
+        "version": "1",
+        "resources": [
+            {
+                "id": "openai-model",
+                "name": "OpenAI Model",
+                "endpoint": "https://openai.example.com",
+                "api_key_env": "KEY",
+                "api_type": "openai"
+            }
+        ]
+    }"#;
+    let file = temp_file(json);
+    let entries = parse_azure_resources(file.path()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].api_type.as_deref(), Some("openai"));
+}
+
+#[test]
+fn test_api_type_anthropic_accepted() {
+    let json = r#"{
+        "version": "1",
+        "resources": [
+            {
+                "id": "anthropic-model",
+                "name": "Anthropic Model",
+                "endpoint": "https://anthropic.example.com",
+                "api_key_env": "KEY",
+                "api_type": "anthropic"
+            }
+        ]
+    }"#;
+    let file = temp_file(json);
+    let entries = parse_azure_resources(file.path()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].api_type.as_deref(), Some("anthropic"));
+}
+
+#[test]
+fn test_api_type_missing_defaults_to_openai() {
+    let json = r#"{
+        "version": "1",
+        "resources": [
+            {
+                "id": "default-model",
+                "name": "Default Model",
+                "endpoint": "https://default.example.com",
+                "api_key_env": "KEY"
+            }
+        ]
+    }"#;
+    let file = temp_file(json);
+    let entries = parse_azure_resources(file.path()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].api_type.as_deref(), None);
+}
+
+#[test]
+fn test_api_type_invalid_skipped_with_warning() {
+    let json = r#"{
+        "version": "1",
+        "resources": [
+            {
+                "id": "gemini-model",
+                "name": "Gemini Model",
+                "endpoint": "https://gemini.example.com",
+                "api_key_env": "KEY",
+                "api_type": "gemini"
+            },
+            {
+                "id": "valid-model",
+                "name": "Valid Model",
+                "endpoint": "https://valid.example.com",
+                "api_key_env": "KEY",
+                "api_type": "openai"
+            }
+        ]
+    }"#;
+    let file = temp_file(json);
+    let entries = parse_azure_resources(file.path()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "valid-model");
+}

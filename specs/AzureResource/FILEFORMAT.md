@@ -48,6 +48,7 @@ Each object in the `resources` array represents a single deployable Azure LLM en
 | `context_window`| integer  | No       | `128000`| Maximum tokens the model accepts in a single request. |
 | `capabilities`  | string[] | No       | *(see below)* | Explicit capability tags. When present, **only** the listed capabilities are enabled. When absent, safe defaults are applied. |
 | `thinking`      | object   | No       | `null`  | Optional [`ThinkingConfig`](#thinking-config) for reasoning models (o-series, etc.). |
+| `api_type`      | string   | No       | `"openai"` | API wire protocol: `"openai"` (default) or `"anthropic"`. When `"anthropic"`, requests are routed to `{endpoint}/anthropic/v1/messages` using the Anthropic Messages API format with Azure `api-key` auth. |
 
 ### Authentication Rules
 
@@ -129,16 +130,25 @@ During parsing, each entry is validated individually:
       "context_window": 128000,
       "capabilities": ["streaming", "vision", "tool_use"]
     },
-    {
-      "id": "minimal-endpoint",
-      "name": "Minimal Endpoint",
-      "endpoint": "https://minimal.example.com",
-      "api_key": "sk-12345"
-    }
-  ]
-}
-```
-
+          {
+            "id": "minimal-endpoint",
+            "name": "Minimal Endpoint",
+            "endpoint": "https://minimal.example.com",
+            "api_key": "sk-12345"
+          },
+          {
+            "id": "my-azure-claude",
+            "name": "My Azure Claude Sonnet",
+            "endpoint": "https://my-anthropic-resource.eastus2.services.ai.azure.com",
+            "api_key_env": "AZURE_ANTHROPIC_KEY",
+            "api_type": "anthropic",
+            "context_window": 200000,
+            "capabilities": ["streaming", "vision", "tool_use", "reasoning"],
+            "thinking": { "enabled": true, "level": "medium", "budget_tokens": 16000 }
+          }
+        ]
+      }
+      ```
 ## Mapping to Internal `ModelInfo`
 
 After validation, each [`AzureResourceEntry`](../../crates/ragent-llm/src/providers/azure_resource.rs) is converted into a [`ModelInfo`](../../crates/ragent-llm/src/providers/mod.rs) with the following fixed values:

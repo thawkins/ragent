@@ -308,13 +308,13 @@ pub async fn list_anthropic_models(
 
 /// HTTP client for the Anthropic Messages API with streaming SSE support.
 pub struct AnthropicClient {
-    api_key: String,
-    base_url: String,
-    http: reqwest::Client,
+    pub(crate) api_key: String,
+    pub(crate) base_url: String,
+    pub(crate) http: reqwest::Client,
 }
 
 impl AnthropicClient {
-    fn build_request_body(&self, request: &ChatRequest) -> Value {
+    pub(crate) fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
         for msg in request.messages.iter() {
@@ -596,7 +596,7 @@ impl LlmClient for AnthropicClient {
 ///
 /// Headers: `anthropic-ratelimit-requests-limit`, `anthropic-ratelimit-requests-remaining`,
 ///          `anthropic-ratelimit-tokens-limit`, `anthropic-ratelimit-tokens-remaining`.
-fn parse_anthropic_rate_limit_headers(
+pub(crate) fn parse_anthropic_rate_limit_headers(
     headers: &reqwest::header::HeaderMap,
 ) -> Option<crate::llm::StreamEvent> {
     let header_u64 = |name: &str| -> Option<u64> {

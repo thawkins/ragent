@@ -34,6 +34,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::llm::LlmClient;
+use crate::provider::anthropic::AnthropicClient;
 use crate::provider::azure_foundry::AzureFoundryClient;
 use crate::{ModelInfo, Provider};
 use ragent_config::{Capabilities, Cost};
@@ -62,6 +63,9 @@ pub struct AzureResourceEntry {
     /// Optional thinking / reasoning configuration.
     #[serde(default)]
     pub thinking: Option<ragent_types::ThinkingConfig>,
+    /// API type: "openai" or "anthropic". Defaults to "openai".
+    #[serde(default, rename = "api_type")]
+    pub api_type: Option<String>,
 }
 
 /// Top-level structure of `azureresources.json`.
@@ -113,23 +117,32 @@ pub fn parse_azure_resources(path: &Path) -> Result<Vec<AzureResourceEntry>> {
             tracing::warn!("Skipping Azure resource entry: missing 'endpoint'");
             continue;
         }
-        if entry.api_key.is_none() && entry.api_key_env.is_none() {
-            tracing::warn!(
-                resource_id = %entry.id,
-                "Skipping Azure resource entry: neither 'api_key' nor 'api_key_env' provided"
-            );
-            continue;
-        }
-
-        // Deduplicate IDs
-        if seen_ids.contains_key(&entry.id) {
-            tracing::warn!(
-                resource_id = %entry.id,
-                "Skipping duplicate Azure resource entry"
-            );
-            continue;
-        }
-
+                            if entry.api_key.is_none() && entry.api_key_env.is_none() {
+                                tracing::warn!(
+                                    resource_id = %entry.id,
+                                    "Skipping Azure resource entry: neither 'api_key' nor 'api_key_env' provided"
+                                );
+                                continue;
+                            }
+                  
+                            let api_type = entry.api_type.as_deref().unwrap_or("openai");
+                            if api_type != "openai" && api_type != "anthropic" {
+                                tracing::warn!(
+                                    resource_id = %entry.id,
+                                    api_type = %api_type,
+                                    "Skipping Azure resource entry: unsupported api_type"
+                                );
+                                continue;
+                            }
+                  
+                            // Deduplicate IDs
+                            if seen_ids.contains_key(&entry.id) {
+                                tracing::warn!(
+                                    resource_id = %entry.id,
+                                    "Skipping duplicate Azure resource entry"
+                                );
+                                continue;
+                            }
         seen_ids.insert(entry.id.clone(), ());
         entries.push(entry);
     }
@@ -169,30 +182,51 @@ fn resolve_config_path() -> Option<PathBuf> {
 /// malformed the provider advertises an empty catalog.
 pub struct AzureResourceProvider {
     config_path: PathBuf,
+    /// Parsed entries cached after first successful load, used for `create_client`
+    /// branching on `api_type`.
+    cached_entries: Option<Vec<AzureResourceEntry>>,
 }
 
 impl AzureResourceProvider {
     /// Creates a new provider using the default config-file resolution.
     #[must_use]
     pub fn new() -> Self {
+        let config_path = resolve_config_path()
+            .unwrap_or_else(|| PathBuf::from(".ragent").join("azureresources.json"));
+        let cached_entries = parse_azure_resources(&config_path).ok();
         Self {
-            config_path: resolve_config_path()
-                .unwrap_or_else(|| PathBuf::from(".ragent").join("azureresources.json")),
+            config_path,
+            cached_entries,
         }
     }
 
     /// Creates a new provider with an explicit config file path.
     #[must_use]
     pub fn with_path(path: PathBuf) -> Self {
-        Self { config_path: path }
+        let cached_entries = parse_azure_resources(&path).ok();
+        Self {
+            config_path: path,
+            cached_entries,
+        }
     }
 
     /// Returns the raw parsed entries from `azureresources.json`.
     ///
-    /// This preserves `endpoint`, `api_key`, and `api_key_env` which are
-    /// lost when converting to [`ModelInfo`] via [`Provider::default_models`].
+    /// This preserves `endpoint`, `api_key`, `api_key_env`, and `api_type`
+    /// which are lost when converting to [`ModelInfo`] via [`Provider::default_models`].
     pub fn entries(&self) -> Vec<AzureResourceEntry> {
-        parse_azure_resources(&self.config_path).unwrap_or_default()
+        match &self.cached_entries {
+            Some(entries) => entries.clone(),
+            None => parse_azure_resources(&self.config_path).unwrap_or_default(),
+        }
+    }
+
+    /// Look up the `api_type` for a given model id among cached entries.
+    fn api_type_for_model(&self, model_id: &str) -> Option<String> {
+        self.entries()
+            .into_iter()
+            .find(|e| e.id == model_id)
+            .and_then(|e| e.api_type)
     }
 }
 
@@ -230,18 +264,41 @@ impl Provider for AzureResourceProvider {
         &self,
         api_key: &str,
         base_url: Option<&str>,
-        _options: &HashMap<String, Value>,
+        options: &HashMap<String, Value>,
     ) -> Result<Box<dyn LlmClient>> {
         let resolved = base_url
             .unwrap_or_default()
             .trim_end_matches('/')
             .to_string();
-        let client = AzureFoundryClient::new(api_key, &resolved);
-        tracing::info!(
-            chat_endpoint = %format!("{}/openai/v1/chat/completions", resolved),
-            "Azure Resource provider connected"
-        );
-        Ok(Box::new(client))
+        // Determine api_type from options (model_id) or fallback to openai
+        let api_type = if let Some(model_id) = options.get("model_id").and_then(Value::as_str) {
+            self.api_type_for_model(model_id).unwrap_or_else(|| "openai".to_string())
+        } else {
+            "openai".to_string()
+        };
+
+        if api_type == "anthropic" {
+            let client = crate::provider::anthropic::AnthropicClient {
+                api_key: api_key.to_string(),
+                base_url: resolved.clone(),
+                http: crate::provider::http_client::create_streaming_http_client(),
+            };
+            tracing::info!(
+                chat_endpoint = %format!("{}/anthropic/v1/messages", resolved),
+                "Azure Resource (Anthropic) connected"
+            );
+            Ok(Box::new(AzureAnthropicClient {
+                inner: client,
+                api_key: api_key.to_string(),
+            }))
+        } else {
+            let client = AzureFoundryClient::new(api_key, &resolved);
+            tracing::info!(
+                chat_endpoint = %format!("{}/openai/v1/chat/completions", resolved),
+                "Azure Resource (OpenAI) connected"
+            );
+            Ok(Box::new(client))
+        }
     }
 }
 
@@ -281,5 +338,209 @@ fn entry_to_model_info(entry: AzureResourceEntry) -> ModelInfo {
         max_output: None,
         request_multiplier: None,
         thinking_config: entry.thinking,
+    }
+}
+
+/// Wrapper around [`AnthropicClient`] that overrides the auth header to use
+/// Azure-style `api-key` (instead of the standard `x-api-key`) and targets the
+/// Azure-hosted Anthropic endpoint path (`anthropic/v1/messages`).
+pub(crate) struct AzureAnthropicClient {
+    inner: AnthropicClient,
+    api_key: String,
+}
+
+#[async_trait::async_trait]
+impl LlmClient for AzureAnthropicClient {
+    async fn chat(
+        &self,
+        request: crate::llm::ChatRequest,
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>> {
+        let url = format!("{}/anthropic/v1/messages", self.inner.base_url);
+        let body = self.inner.build_request_body(&request);
+
+        let response = self
+            .inner
+            .http
+            .post(&url)
+            .header("api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(url = %url, error = %e, "Azure Anthropic chat request failed");
+            })
+            .with_context(|| format!("Failed to send request to Azure Anthropic at {url}"))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body_text = response.text().await.unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "Failed to read response body");
+                String::new()
+            });
+            tracing::warn!(
+                url = %url,
+                model = %request.model,
+                status = %status,
+                error = %body_text,
+                "Azure Anthropic API error"
+            );
+            anyhow::bail!("Azure Anthropic API error ({status}): {body_text}");
+        }
+
+        // Reuse the Anthropic SSE stream parser by delegating to the inner client.
+        // The AnthropicClient::chat method is what we want, but it hardcodes
+        // "x-api-key" and its own URL.  Instead, we inline the response handling
+        // below — but since the response format is identical, we can call the
+        // private helper logic by constructing an identical response and passing
+        // it through.
+        //
+        // Simplification: we build an identical async_stream here that mirrors
+        // AnthropicClient::chat after the HTTP response is received.
+        use futures::StreamExt;
+        use serde_json::Value;
+        use std::collections::HashMap;
+        use crate::event::FinishReason;
+        use crate::llm::StreamEvent;
+
+        let rate_limit_event = crate::provider::anthropic::parse_anthropic_rate_limit_headers(response.headers());
+        let stream = response.bytes_stream();
+
+        let event_stream = async_stream::stream! {
+            let mut buffer = String::new();
+            let mut current_event_type = String::new();
+            let mut tool_call_args: HashMap<String, String> = HashMap::new();
+
+            if let Some(ev) = rate_limit_event {
+                yield ev;
+            }
+
+            futures::pin_mut!(stream);
+
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = match chunk_result {
+                    Ok(c) => c,
+                    Err(e) => {
+                        yield StreamEvent::Error { message: e.to_string() };
+                        break;
+                    }
+                };
+
+                buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    if let Some(event_type) = line.strip_prefix("event: ") {
+                        current_event_type = event_type.trim().to_string();
+                        continue;
+                    }
+
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        let data = data.trim();
+                        if data == "[DONE]" {
+                            break;
+                        }
+
+                        let parsed: Value = match serde_json::from_str(data) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+
+                        match current_event_type.as_str() {
+                            "content_block_start" => {
+                                let content_block = &parsed["content_block"];
+                                match content_block["type"].as_str() {
+                                    Some("text") => {}
+                                    Some("thinking") => {
+                                        yield StreamEvent::ReasoningStart;
+                                    }
+                                    Some("tool_use") => {
+                                        let id = content_block["id"].as_str().unwrap_or("").to_string();
+                                        let name = content_block["name"].as_str().unwrap_or("").to_string();
+                                        tool_call_args.insert(id.clone(), String::new());
+                                        yield StreamEvent::ToolCallStart { id, name };
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            "content_block_delta" => {
+                                let delta = &parsed["delta"];
+                                match delta["type"].as_str() {
+                                    Some("text_delta") => {
+                                        if let Some(text) = delta["text"].as_str() {
+                                            yield StreamEvent::TextDelta { text: text.to_string() };
+                                        }
+                                    }
+                                    Some("thinking_delta") => {
+                                        if let Some(text) = delta["thinking"].as_str() {
+                                            yield StreamEvent::ReasoningDelta { text: text.to_string() };
+                                        }
+                                    }
+                                    Some("input_json_delta") => {
+                                        if let Some(json_str) = delta["partial_json"].as_str() {
+                                            let _idx = parsed["index"].as_u64().unwrap_or(0);
+                                            if let Some((id, _args)) = tool_call_args.iter_mut().last() {
+                                                yield StreamEvent::ToolCallDelta {
+                                                    id: id.clone(),
+                                                    args_json: json_str.to_string(),
+                                                };
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            "content_block_stop" => {
+                                let _idx = parsed["index"].as_u64().unwrap_or(0);
+                                if let Some((id, _)) = tool_call_args.iter().last() {
+                                    let id = id.clone();
+                                    if !id.is_empty() {
+                                        yield StreamEvent::ToolCallEnd { id: id.clone() };
+                                        tool_call_args.remove(&id);
+                                    }
+                                }
+                            }
+                            "message_delta" => {
+                                if let Some(usage) = parsed.get("usage") {
+                                    let output_tokens = usage["output_tokens"].as_u64().unwrap_or(0);
+                                    yield StreamEvent::Usage {
+                                        input_tokens: 0,
+                                        output_tokens,
+                                    };
+                                }
+                                if let Some(stop_reason) = parsed["delta"]["stop_reason"].as_str() {
+                                    let reason = match stop_reason {
+                                        "tool_use" => FinishReason::ToolUse,
+                                        "max_tokens" => FinishReason::Length,
+                                        _ => FinishReason::Stop,
+                                    };
+                                    yield StreamEvent::Finish { reason };
+                                }
+                            }
+                            "message_start" => {
+                                if let Some(usage) = parsed["message"].get("usage") {
+                                    let input_tokens = usage["input_tokens"].as_u64().unwrap_or(0);
+                                    yield StreamEvent::Usage {
+                                        input_tokens,
+                                        output_tokens: 0,
+                                    };
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(Box::pin(event_stream))
     }
 }

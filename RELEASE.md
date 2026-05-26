@@ -1,11 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.97
+## Current Version: 0.1.0-alpha.98
 
-### Changed
-- **add rate limiting logic**
+### Added
+- **Azure Resource Provider API type switch** — Added `api_type` field to `azureresources.json` entries. When set to `"anthropic"`, requests are routed to `{endpoint}/anthropic/v1/messages` using the Anthropic Messages API format with Azure-style `api-key` authentication. When set to `"openai"` or omitted, the existing OpenAI-compatible path is used.
 
-## Previous: 0.1.0-alpha.96
+## Previous: 0.1.0-alpha.97
 
 ### Changed
 - **YOLO mode fixes** — Fixed YOLO mode permission bypass logic.

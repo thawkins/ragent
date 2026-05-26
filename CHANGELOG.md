@@ -1,5 +1,17 @@
 # Changelog
 
+## Version: 0.1.0-alpha.98
+
+### Added
+- **Azure Resource Provider API type switch** — Added `api_type` field to `azureresources.json` entries. When set to `"anthropic"`, requests are routed to `{endpoint}/anthropic/v1/messages` using the Anthropic Messages API format with Azure-style `api-key` authentication. When set to `"openai"` or omitted, the existing OpenAI-compatible path (`{endpoint}/openai/v1/chat/completions`) is used.  
+  - New `AzureAnthropicClient` wrapper in `azure_resource.rs` reuses `AnthropicClient` body construction and SSE parsing but sends `api-key` header instead of `x-api-key`.
+  - `AzureResourceProvider::create_client` now branches on `api_type` by looking up the model ID in the cached entries.
+  - TUI `SelectAzureResource` flow now persists `azure_resource` as the provider (instead of `azure_foundry`) and stores `azure_resource_api_base` alongside `azure_resource_last_selection`.
+  - Session processor `resolve_api_key` and base-URL resolution now handle `azure_resource` provider directly.
+  - Added unit tests for parser validation (`test_api_type_openai_accepted`, `test_api_type_anthropic_accepted`, `test_api_type_missing_defaults_to_openai`, `test_api_type_invalid_skipped_with_warning`).
+  - Added integration tests for `create_client` branching (`test_azure_anthropic_create_client_branches_correctly`, `test_azure_openai_branch_unchanged`).
+  - Updated `specs/AzureResource/FILEFORMAT.md` with `api_type` documentation.
+
 ## Version: 0.1.0-alpha.97
 
 ### Changed
