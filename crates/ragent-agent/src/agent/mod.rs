@@ -1473,62 +1473,61 @@ impl InstructionFileDiscovery {
             self.working_dir.display()
         ));
 
-        if self.all_discovered_files.is_empty() {
-            lines.push("".to_string());
-            lines.push("⚠️  No instruction files found".to_string());
-            lines.push("  No instructions were loaded for this session.".to_string());
-        } else {
-            if self.used_global_fallback {
-                lines.push(format!(
-                    "  Global directory: {}",
-                    self.global_dir.as_ref().unwrap().display()
-                ));
-                lines.push("".to_string());
-                lines.push(
-                    "ℹ️  No local instruction files found; used global fallback.".to_string(),
-                );
-            }
-            lines.push(format!(
-                "📁 Discovered {} file(s):",
-                self.all_discovered_files.len()
-            ));
-            for file in &self.all_discovered_files {
-                let rel = file
-                    .strip_prefix(&self.working_dir)
-                    .unwrap_or(file)
-                    .display()
-                    .to_string();
-                let source = if self.used_global_fallback {
-                    "global"
-                } else {
-                    "local"
-                };
-                let is_loaded = self.loaded_file.as_ref() == Some(file);
-                let marker = if is_loaded { " ✅ LOADED" } else { "" };
-                lines.push(format!("   • {} ({}){}", rel, source, marker));
-            }
-            lines.push("".to_string());
-            if let Some(ref loaded) = self.loaded_file {
-                let rel = loaded
-                    .strip_prefix(&self.working_dir)
-                    .unwrap_or(loaded)
-                    .display()
-                    .to_string();
-                lines.push(format!(
-                    "✅ Instructions loaded from: {} (project root takes priority)",
-                    rel
-                ));
-            }
-            if !self.used_global_fallback && self.all_discovered_files.len() > 1 {
-                lines.push(
-                    "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session (project root takes priority)."
-                        .to_string(),
-                );
-                lines.push("\n".to_string());
-            }
-        }
-        lines.join("\n")
-    }
+                            if self.all_discovered_files.is_empty() {
+                                lines.push("".to_string());
+                                lines.push("⚠️  No instruction files found".to_string());
+                                lines.push("  No instructions were loaded for this session.".to_string());
+                            } else {
+                                if let Some(ref gdir) = self.global_dir {
+                                    lines.push(format!(
+                                        "  Global directory: {}",
+                                        gdir.display()
+                                    ));
+                                }
+                                lines.push(format!(
+                                    "📁 Discovered {} file(s):",
+                                    self.all_discovered_files.len()
+                                ));
+                                for file in &self.all_discovered_files {
+                                    let rel = file
+                                        .strip_prefix(&self.working_dir)
+                                        .unwrap_or(file)
+                                        .display()
+                                        .to_string();
+                                    let is_global = self
+                                        .global_dir
+                                        .as_ref()
+                                        .map_or(false, |gd| file.starts_with(gd));
+                                    let source = if is_global { "global" } else { "local" };
+                                    let is_loaded = self.loaded_file.as_ref() == Some(file);
+                                    let marker = if is_loaded { " ✅ LOADED" } else { "" };
+                                    lines.push(format!("   • {} ({}){}", rel, source, marker));
+                                }
+                                lines.push("".to_string());
+                                if let Some(ref loaded) = self.loaded_file {
+                                    let rel = loaded
+                                        .strip_prefix(&self.working_dir)
+                                        .unwrap_or(loaded)
+                                        .display()
+                                        .to_string();
+                                    let priority_note = if self.used_global_fallback {
+                                        "global fallback — no local root instruction file found"
+                                    } else {
+                                        "project root takes priority"
+                                    };
+                                    lines.push(format!(
+                                        "✅ Instructions loaded from: {} ({})",
+                                        rel, priority_note
+                                    ));
+                                }
+                                if self.all_discovered_files.len() > 1 {
+                                    lines.push(
+                                        "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session.".to_string(),
+                                    );
+                                    lines.push("\n".to_string());
+                                }
+                            }
+                          lines.join("\n")    }
 }
 
 /// Discover all AGENTS.md-style instruction files from the project tree
@@ -1538,12 +1537,12 @@ impl InstructionFileDiscovery {
 /// `INSTRUCTIONS.md` in the working directory. ALL discovered files are
 /// reported in the discovery info, but only ONE file's content is loaded:
 ///
-/// Priority order (local first):
+/// Priority order:
 /// 1. `AGENTS.md` in the project root (working directory itself)
 /// 2. Any other instruction file in the project root
-/// 3. The shallowest instruction file found in subdirectories
-/// 4. If no local files exist, fall back to the global directory at
-///    `~/.local/share/ragent/` and pick the first file found there
+/// 3. The global directory at `~/.local/share/ragent/` (prioritised over
+///    subdirectory files when no root file exists)
+/// 4. The shallowest instruction file found in project subdirectories
 ///
 /// Returns a string containing the loaded file's content, along with
 /// discovery information showing all found files and which one was loaded.
@@ -1598,60 +1597,53 @@ pub fn collect_agents_md_content_with_discovery(
     }
 
     // Determine which ONE file to load
-    let used_global = local_files.is_empty();
-    let loaded_file: Option<std::path::PathBuf>;
+    // Split local files into root (depth 0) and subdirectory (depth > 0)
+    let root_files: Vec<_> = local_files
+        .iter()
+        .filter(|(depth, _)| *depth == 0)
+        .cloned()
+        .collect();
+    let sub_files: Vec<_> = local_files
+        .iter()
+        .filter(|(depth, _)| *depth > 0)
+        .cloned()
+        .collect();
 
-    if !used_global {
-        // Local files exist: pick the root-most file
-        // Sort by depth (root first), then prioritize AGENTS.md
-        local_files.sort_by(|a, b| {
-            let depth_cmp = a.0.cmp(&b.0);
-            if depth_cmp != std::cmp::Ordering::Equal {
-                return depth_cmp;
-            }
-            // At same depth, prioritize AGENTS.md, then CLAUDE.md, etc.
-            let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let a_idx = AGENT_FILE_NAMES
-                .iter()
-                .position(|n| *n == a_name)
-                .unwrap_or(usize::MAX);
-            let b_idx = AGENT_FILE_NAMES
-                .iter()
-                .position(|n| *n == b_name)
-                .unwrap_or(usize::MAX);
-            a_idx.cmp(&b_idx)
-        });
-        loaded_file = local_files.first().map(|(_, p)| p.clone());
-    } else {
-        // No local files: fall back to global
-        loaded_file = global_files.first().map(|(_, p)| p.clone());
-    }
+    // Priority: project root → global → subdirectories
+    let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
+    candidates.extend(root_files);
+    candidates.extend(global_files);
+    candidates.extend(sub_files);
+
+    // Sort each priority group by name priority (AGENTS.md first, etc.)
+    candidates.sort_by(|a, b| {
+        let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let a_idx = AGENT_FILE_NAMES
+            .iter()
+            .position(|n| *n == a_name)
+            .unwrap_or(usize::MAX);
+        let b_idx = AGENT_FILE_NAMES
+            .iter()
+            .position(|n| *n == b_name)
+            .unwrap_or(usize::MAX);
+        a_idx.cmp(&b_idx)
+    });
+
+    let loaded_file = candidates.first().map(|(_, p)| p.clone());
+    let used_global = loaded_file.as_ref().map_or(false, |f| {
+        global_dir.as_ref().map_or(false, |gd| f.starts_with(gd))
+    });
 
     // Build the full discovery list (all found files for display)
     let mut all_discovered: Vec<std::path::PathBuf> = Vec::new();
-    if !used_global {
-        for (_, path) in &local_files {
-            all_discovered.push(path.clone());
-        }
-        // Also show global files as "discovered but ignored"
-        for (_, path) in &global_files {
-            all_discovered.push(path.clone());
-        }
-    } else {
-        for (_, path) in &global_files {
-            all_discovered.push(path.clone());
-        }
+    for (_, path) in &candidates {
+        all_discovered.push(path.clone());
     }
-
     let discovery = InstructionFileDiscovery {
         searched_names: AGENT_FILE_NAMES.iter().map(|s| s.to_string()).collect(),
         working_dir: working_dir.to_path_buf(),
-        global_dir: if used_global {
-            global_dir.clone()
-        } else {
-            None
-        },
+        global_dir: global_dir.clone(),
         all_discovered_files: all_discovered,
         loaded_file,
         used_global_fallback: used_global,
@@ -1706,10 +1698,8 @@ pub fn collect_agents_md_content_with_discovery(
 /// or the global directory.
 ///
 /// Searches recursively for `AGENTS.md`, `CLAUDE.md`, `.ragent.md`, and
-/// `INSTRUCTIONS.md` in the working directory. If any local files are found,
-/// they are used exclusively (sorted by directory depth, root first). If no
-/// local files exist, falls back to the global directory at
-/// `~/.local/share/ragent/`.
+/// `INSTRUCTIONS.md` in the working directory. Priority order:
+/// project root → global directory → project subdirectories.
 ///
 /// Returns a combined string listing the discovered file paths and their
 /// concatenated content.
