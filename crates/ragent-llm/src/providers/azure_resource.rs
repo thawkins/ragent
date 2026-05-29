@@ -117,32 +117,32 @@ pub fn parse_azure_resources(path: &Path) -> Result<Vec<AzureResourceEntry>> {
             tracing::warn!("Skipping Azure resource entry: missing 'endpoint'");
             continue;
         }
-                            if entry.api_key.is_none() && entry.api_key_env.is_none() {
-                                tracing::warn!(
-                                    resource_id = %entry.id,
-                                    "Skipping Azure resource entry: neither 'api_key' nor 'api_key_env' provided"
-                                );
-                                continue;
-                            }
-                  
-                            let api_type = entry.api_type.as_deref().unwrap_or("openai");
-                            if api_type != "openai" && api_type != "anthropic" {
-                                tracing::warn!(
-                                    resource_id = %entry.id,
-                                    api_type = %api_type,
-                                    "Skipping Azure resource entry: unsupported api_type"
-                                );
-                                continue;
-                            }
-                  
-                            // Deduplicate IDs
-                            if seen_ids.contains_key(&entry.id) {
-                                tracing::warn!(
-                                    resource_id = %entry.id,
-                                    "Skipping duplicate Azure resource entry"
-                                );
-                                continue;
-                            }
+        if entry.api_key.is_none() && entry.api_key_env.is_none() {
+            tracing::warn!(
+                resource_id = %entry.id,
+                "Skipping Azure resource entry: neither 'api_key' nor 'api_key_env' provided"
+            );
+            continue;
+        }
+
+        let api_type = entry.api_type.as_deref().unwrap_or("openai");
+        if api_type != "openai" && api_type != "anthropic" {
+            tracing::warn!(
+                resource_id = %entry.id,
+                api_type = %api_type,
+                "Skipping Azure resource entry: unsupported api_type"
+            );
+            continue;
+        }
+
+        // Deduplicate IDs
+        if seen_ids.contains_key(&entry.id) {
+            tracing::warn!(
+                resource_id = %entry.id,
+                "Skipping duplicate Azure resource entry"
+            );
+            continue;
+        }
         seen_ids.insert(entry.id.clone(), ());
         entries.push(entry);
     }
@@ -272,7 +272,8 @@ impl Provider for AzureResourceProvider {
             .to_string();
         // Determine api_type from options (model_id) or fallback to openai
         let api_type = if let Some(model_id) = options.get("model_id").and_then(Value::as_str) {
-            self.api_type_for_model(model_id).unwrap_or_else(|| "openai".to_string())
+            self.api_type_for_model(model_id)
+                .unwrap_or_else(|| "openai".to_string())
         } else {
             "openai".to_string()
         };
@@ -354,7 +355,8 @@ impl LlmClient for AzureAnthropicClient {
     async fn chat(
         &self,
         request: crate::llm::ChatRequest,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>> {
+    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = crate::llm::StreamEvent> + Send>>>
+    {
         let url = format!("{}/anthropic/v1/messages", self.inner.base_url);
         let body = self.inner.build_request_body(&request);
 
@@ -398,13 +400,14 @@ impl LlmClient for AzureAnthropicClient {
         //
         // Simplification: we build an identical async_stream here that mirrors
         // AnthropicClient::chat after the HTTP response is received.
+        use crate::event::FinishReason;
+        use crate::llm::StreamEvent;
         use futures::StreamExt;
         use serde_json::Value;
         use std::collections::HashMap;
-        use crate::event::FinishReason;
-        use crate::llm::StreamEvent;
 
-        let rate_limit_event = crate::provider::anthropic::parse_anthropic_rate_limit_headers(response.headers());
+        let rate_limit_event =
+            crate::provider::anthropic::parse_anthropic_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
 
         let event_stream = async_stream::stream! {

@@ -1518,7 +1518,6 @@ impl InstructionFileDiscovery {
                     "✅ Instructions loaded from: {} (project root takes priority)",
                     rel
                 ));
-               
             }
             if !self.used_global_fallback && self.all_discovered_files.len() > 1 {
                 lines.push(
@@ -1613,8 +1612,14 @@ pub fn collect_agents_md_content_with_discovery(
             // At same depth, prioritize AGENTS.md, then CLAUDE.md, etc.
             let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let a_idx = AGENT_FILE_NAMES.iter().position(|n| *n == a_name).unwrap_or(usize::MAX);
-            let b_idx = AGENT_FILE_NAMES.iter().position(|n| *n == b_name).unwrap_or(usize::MAX);
+            let a_idx = AGENT_FILE_NAMES
+                .iter()
+                .position(|n| *n == a_name)
+                .unwrap_or(usize::MAX);
+            let b_idx = AGENT_FILE_NAMES
+                .iter()
+                .position(|n| *n == b_name)
+                .unwrap_or(usize::MAX);
             a_idx.cmp(&b_idx)
         });
         loaded_file = local_files.first().map(|(_, p)| p.clone());
@@ -1642,7 +1647,11 @@ pub fn collect_agents_md_content_with_discovery(
     let discovery = InstructionFileDiscovery {
         searched_names: AGENT_FILE_NAMES.iter().map(|s| s.to_string()).collect(),
         working_dir: working_dir.to_path_buf(),
-        global_dir: if used_global { global_dir.clone() } else { None },
+        global_dir: if used_global {
+            global_dir.clone()
+        } else {
+            None
+        },
         all_discovered_files: all_discovered,
         loaded_file,
         used_global_fallback: used_global,

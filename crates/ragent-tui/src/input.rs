@@ -841,50 +841,51 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     .iter()
                     .any(|p| p.id == pid);
                 if already_configured {
-                                      if pid == "azure_resource" {
-                                              app.refresh_provider();
-                                              let provider =
-                                                  ragent_core::provider::azure_resource::AzureResourceProvider::new();
-                                              let entries = provider.entries();
-                                              if entries.is_empty() {
-                                                  app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                      entries: Vec::new(),
-                                                      selected: 0,
-                                                      error: Some(
-                                                          "No Azure resources found. Check azureresources.json."
-                                                              .to_string(),
-                                                      ),
-                                                  });
-                                              } else {
-                                                  // Try to restore last selection
-                                                  let mut selected = 0usize;
-                                                  if let Ok(Some(last)) =
-                                                      app.storage.get_setting("azure_resource_last_selection")
-                                                  {
-                                                      if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last)
-                                                      {
-                                                          if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str())
-                                                          {
-                                                              if let Some(idx) =
-                                                                  entries.iter().position(|e| e.id == last_id)
-                                                              {
-                                                                  selected = idx;
-                                                              } else {
-                                                                  let _ = app
-                                                                      .storage
-                                                                      .delete_setting("azure_resource_last_selection");
-                                                              }
-                                                          }
-                                                      }
-                                                  }
-                                                  app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                                      entries,
-                                                      selected,
-                                                      error: None,
-                                                  });
-                                              }
-                                              return;
-                                          }                    app.refresh_provider();
+                    if pid == "azure_resource" {
+                        app.refresh_provider();
+                        let provider =
+                            ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                        let entries = provider.entries();
+                        if entries.is_empty() {
+                            app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                                entries: Vec::new(),
+                                selected: 0,
+                                error: Some(
+                                    "No Azure resources found. Check azureresources.json."
+                                        .to_string(),
+                                ),
+                            });
+                        } else {
+                            // Try to restore last selection
+                            let mut selected = 0usize;
+                            if let Ok(Some(last)) =
+                                app.storage.get_setting("azure_resource_last_selection")
+                            {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last)
+                                {
+                                    if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str())
+                                    {
+                                        if let Some(idx) =
+                                            entries.iter().position(|e| e.id == last_id)
+                                        {
+                                            selected = idx;
+                                        } else {
+                                            let _ = app
+                                                .storage
+                                                .delete_setting("azure_resource_last_selection");
+                                        }
+                                    }
+                                }
+                            }
+                            app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                                entries,
+                                selected,
+                                error: None,
+                            });
+                        }
+                        return;
+                    }
+                    app.refresh_provider();
                     let models = app.models_for_provider(pid);
                     if models.is_empty() {
                         app.provider_setup = None;
@@ -958,44 +959,45 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                     }
                     // Token exchange failed or no token — start device flow
                     start_copilot_device_flow_setup(app);
-                                  } else if pid == "azure_resource" {
-                                      // Azure Resource: load entries from azureresources.json
-                                      let provider =
-                                          ragent_core::provider::azure_resource::AzureResourceProvider::new();
-                                      let entries = provider.entries();
-                                      if entries.is_empty() {
-                                          app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                              entries: Vec::new(),
-                                              selected: 0,
-                                              error: Some(
-                                                  "No Azure resources found. Check azureresources.json.".to_string(),
-                                              ),
-                                          });
-                                      } else {
-                                          // Try to restore last selection
-                                          let mut selected = 0usize;
-                                          if let Ok(Some(last)) =
-                                              app.storage.get_setting("azure_resource_last_selection")
-                                          {
-                                              if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
-                                                  if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str()) {
-                                                      if let Some(idx) = entries.iter().position(|e| e.id == last_id)
-                                                      {
-                                                          selected = idx;
-                                                      } else {
-                                                          let _ = app
-                                                              .storage
-                                                              .delete_setting("azure_resource_last_selection");
-                                                      }
-                                                  }
-                                              }
-                                          }
-                                          app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
-                                              entries,
-                                              selected,
-                                              error: None,
-                                          });
-                                      }                } else {
+                } else if pid == "azure_resource" {
+                    // Azure Resource: load entries from azureresources.json
+                    let provider =
+                        ragent_core::provider::azure_resource::AzureResourceProvider::new();
+                    let entries = provider.entries();
+                    if entries.is_empty() {
+                        app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                            entries: Vec::new(),
+                            selected: 0,
+                            error: Some(
+                                "No Azure resources found. Check azureresources.json.".to_string(),
+                            ),
+                        });
+                    } else {
+                        // Try to restore last selection
+                        let mut selected = 0usize;
+                        if let Ok(Some(last)) =
+                            app.storage.get_setting("azure_resource_last_selection")
+                        {
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
+                                if let Some(last_id) = parsed.get("id").and_then(|v| v.as_str()) {
+                                    if let Some(idx) = entries.iter().position(|e| e.id == last_id)
+                                    {
+                                        selected = idx;
+                                    } else {
+                                        let _ = app
+                                            .storage
+                                            .delete_setting("azure_resource_last_selection");
+                                    }
+                                }
+                            }
+                        }
+                        app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {
+                            entries,
+                            selected,
+                            error: None,
+                        });
+                    }
+                } else {
                     app.provider_setup = Some(ProviderSetupStep::EnterKey {
                         provider_id: pid.to_string(),
                         provider_name: pname.to_string(),
@@ -1271,41 +1273,42 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if let Some(entry) = entries.get(selected) {
-                                          // Persist selection (include api_type for re-hydration)
-                                          let payload = serde_json::json!({
-                                              "id": entry.id,
-                                              "endpoint": entry.endpoint,
-                                              "api_key": entry.api_key,
-                                              "api_key_env": entry.api_key_env,
-                                              "api_type": entry.api_type,
-                                          });
-                                          let _ = app
-                                              .storage
-                                              .set_setting("azure_resource_last_selection", &payload.to_string());
-                                          // Set active provider to azure_resource with the entry's endpoint and model id
-                                          let _ = app
-                                              .storage
-                                              .set_setting("preferred_provider", "azure_resource");
-                                          let _ = app
-                                              .storage
-                                              .set_setting("azure_resource_api_base", &entry.endpoint);
-                                          let model_value = format!("azure_resource/{}", entry.id);
-                                          let _ = app.storage.set_setting("selected_model", &model_value);
-                                          let _ = app.storage.set_setting(
-                                              "selected_model_ctx_window",
-                                              &entry.context_window.unwrap_or(128_000).to_string(),
-                                          );
-                                          app.selected_model = Some(model_value);
-                                          app.selected_model_ctx_window = Some(entry.context_window.unwrap_or(128_000));
-                                          app.configured_provider = Some(ConfiguredProvider {
-                                              id: "azure_resource".to_string(),
-                                              name: "Azure Resource (File)".to_string(),
-                                              source: ProviderSource::Database,
-                                          });
-                                          app.provider_setup = Some(ProviderSetupStep::Done {
-                                              provider_name: "Azure Resource (File)".to_string(),
-                                              model_name: Some(entry.name.clone()),
-                                          });                }
+                    // Persist selection (include api_type for re-hydration)
+                    let payload = serde_json::json!({
+                        "id": entry.id,
+                        "endpoint": entry.endpoint,
+                        "api_key": entry.api_key,
+                        "api_key_env": entry.api_key_env,
+                        "api_type": entry.api_type,
+                    });
+                    let _ = app
+                        .storage
+                        .set_setting("azure_resource_last_selection", &payload.to_string());
+                    // Set active provider to azure_resource with the entry's endpoint and model id
+                    let _ = app
+                        .storage
+                        .set_setting("preferred_provider", "azure_resource");
+                    let _ = app
+                        .storage
+                        .set_setting("azure_resource_api_base", &entry.endpoint);
+                    let model_value = format!("azure_resource/{}", entry.id);
+                    let _ = app.storage.set_setting("selected_model", &model_value);
+                    let _ = app.storage.set_setting(
+                        "selected_model_ctx_window",
+                        &entry.context_window.unwrap_or(128_000).to_string(),
+                    );
+                    app.selected_model = Some(model_value);
+                    app.selected_model_ctx_window = Some(entry.context_window.unwrap_or(128_000));
+                    app.configured_provider = Some(ConfiguredProvider {
+                        id: "azure_resource".to_string(),
+                        name: "Azure Resource (File)".to_string(),
+                        source: ProviderSource::Database,
+                    });
+                    app.provider_setup = Some(ProviderSetupStep::Done {
+                        provider_name: "Azure Resource (File)".to_string(),
+                        model_name: Some(entry.name.clone()),
+                    });
+                }
             }
             _ => {
                 app.provider_setup = Some(ProviderSetupStep::SelectAzureResource {

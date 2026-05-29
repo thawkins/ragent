@@ -86,6 +86,7 @@ impl Tool for TeamStatusTool {
                 MemberStatus::Idle => "⏸",
                 MemberStatus::PlanPending => "📋",
                 MemberStatus::Blocked => "🔒",
+                MemberStatus::Suspended => "⏸️",
                 MemberStatus::ShuttingDown => "🛑",
                 MemberStatus::Stopped => "⬛",
                 MemberStatus::Spawning => "🚀",

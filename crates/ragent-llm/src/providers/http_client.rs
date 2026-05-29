@@ -170,11 +170,7 @@ where
                 // For other client errors, don't retry
                 if status.is_client_error() {
                     let body = response.text().await.unwrap_or_default();
-                    return Err(anyhow::anyhow!(
-                        "HTTP {} (not retryable): {}",
-                        status,
-                        body
-                    ));
+                    return Err(anyhow::anyhow!("HTTP {} (not retryable): {}", status, body));
                 }
 
                 return Ok(response);
@@ -193,10 +189,7 @@ where
                 continue;
             }
             Err(e) => {
-                return Err(anyhow::anyhow!(
-                    "Request failed (not retryable): {}",
-                    e
-                ));
+                return Err(anyhow::anyhow!("Request failed (not retryable): {}", e));
             }
         }
     }

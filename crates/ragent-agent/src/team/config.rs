@@ -77,6 +77,8 @@ pub enum MemberStatus {
     PlanPending,
     /// Waiting for dependency tasks to complete before spawning.
     Blocked,
+    /// Paused by the lead; can be resumed later.
+    Suspended,
     /// Graceful shutdown in progress (awaiting `team_shutdown_ack`).
     ShuttingDown,
     /// Session has terminated.

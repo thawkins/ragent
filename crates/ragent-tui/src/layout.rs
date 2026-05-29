@@ -2177,6 +2177,7 @@ fn render_teammate_strip(frame: &mut Frame, app: &App, area: Rect) {
             MemberStatus::Spawning => ("◌", Color::Yellow),
             MemberStatus::Blocked => ("◈", Color::DarkGray),
             MemberStatus::PlanPending => ("◎", Color::Magenta),
+            MemberStatus::Suspended => ("⏸", Color::DarkGray),
             MemberStatus::ShuttingDown => ("◌", Color::Yellow),
             MemberStatus::Stopped => ("○", Color::DarkGray),
             MemberStatus::Failed => ("✗", Color::Red),

@@ -930,6 +930,78 @@ impl TeamManager {
 
     // ── Shutdown ──────────────────────────────────────────────────────────
 
+    /// Suspend (pause) a running teammate by agent ID.
+    ///
+    /// Marks the member as `Suspended` in config and pauses the mailbox poll
+    /// loop so the teammate stops receiving new messages. The agent loop
+    /// continues running but will not be woken for new mailbox messages.
+    /// Use [`resume_teammate`] to restore the teammate to active status.
+    pub async fn suspend_teammate(&self, agent_id: &str) -> Result<()> {
+        // Pause the poll loop so no new messages wake the agent.
+        let handles = self.handles.read().await;
+        if let Some(handle) = handles.get(agent_id) {
+            handle.poll_cancel.store(true, Ordering::Relaxed);
+        }
+        drop(handles);
+
+        // Mark member as Suspended in config.
+        let mut store = TeamStore::load(&self.team_dir)?;
+        if let Some(member) = store.config.member_by_id_mut(agent_id) {
+            member.status = MemberStatus::Suspended;
+        }
+        store.save()?;
+
+        self.event_bus.publish(Event::TeammateSuspended {
+            session_id: self.lead_session_id.clone(),
+            team_name: self.team_name.clone(),
+            agent_id: agent_id.to_string(),
+        });
+        tracing::info!(agent_id, "Teammate suspended");
+        Ok(())
+    }
+
+    /// Resume a previously suspended teammate by agent ID.
+    ///
+    /// Restores the member to `Idle` status and restarts mailbox polling.
+    /// Does nothing if the teammate is not currently `Suspended`.
+    pub async fn resume_teammate(&self, agent_id: &str) -> Result<()> {
+        // Check that the member is actually suspended.
+        let store = TeamStore::load(&self.team_dir)?;
+        let is_suspended = store
+            .config
+            .member_by_id(agent_id)
+            .map(|m| m.status == MemberStatus::Suspended)
+            .unwrap_or(false);
+        if !is_suspended {
+            anyhow::bail!("Teammate '{agent_id}' is not suspended");
+        }
+        drop(store);
+
+        // Re-enable the poll loop.
+        let handles = self.handles.read().await;
+        if let Some(handle) = handles.get(agent_id) {
+            handle.poll_cancel.store(false, Ordering::Relaxed);
+            // Wake the poll loop so it starts processing again.
+            handle.notify.notify_one();
+        }
+        drop(handles);
+
+        // Mark member as Idle.
+        let mut store = TeamStore::load(&self.team_dir)?;
+        if let Some(member) = store.config.member_by_id_mut(agent_id) {
+            member.status = MemberStatus::Idle;
+        }
+        store.save()?;
+
+        self.event_bus.publish(Event::TeammateResumed {
+            session_id: self.lead_session_id.clone(),
+            team_name: self.team_name.clone(),
+            agent_id: agent_id.to_string(),
+        });
+        tracing::info!(agent_id, "Teammate resumed");
+        Ok(())
+    }
+
     /// Request graceful shutdown of a teammate by agent ID.
     ///
     /// Sets the cancel flag (terminates the agent loop) and the poll cancel

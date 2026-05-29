@@ -329,6 +329,35 @@ pub enum Event {
         /// Wall-clock duration in milliseconds.
         duration_ms: u64,
     },
+    /// A sub-agent task was suspended by the user.
+    SubagentSuspended {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for the suspended task.
+        task_id: String,
+        /// Session used by the sub-agent.
+        child_session_id: String,
+    },
+    /// A sub-agent task was resumed by the user.
+    SubagentResumed {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for the resumed task.
+        task_id: String,
+        /// Session used by the sub-agent.
+        child_session_id: String,
+    },
+    /// A sub-agent task was killed by the user.
+    SubagentKilled {
+        /// Parent session that spawned the task.
+        session_id: String,
+        /// Unique identifier for the killed task.
+        task_id: String,
+        /// Session used by the sub-agent.
+        child_session_id: String,
+        /// Whether the kill was a force-kill after timeout.
+        force: bool,
+    },
     /// A sub-agent task was cancelled.
     SubagentCancelled {
         /// Parent session that spawned the task.
@@ -381,6 +410,24 @@ pub enum Event {
         agent_id: String,
         /// Error description.
         error: String,
+    },
+    /// A teammate was suspended (paused) by the lead.
+    TeammateSuspended {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the suspended teammate.
+        agent_id: String,
+    },
+    /// A previously suspended teammate was resumed by the lead.
+    TeammateResumed {
+        /// Lead session ID.
+        session_id: String,
+        /// Name of the team.
+        team_name: String,
+        /// Agent ID of the resumed teammate.
+        agent_id: String,
     },
     /// A teammate claimed a task from the shared task list.
     TeamTaskClaimed {
@@ -553,11 +600,16 @@ impl Event {
             Self::QuotaUpdate { .. } => "QuotaUpdate",
             Self::SubagentStart { .. } => "SubagentStart",
             Self::SubagentComplete { .. } => "SubagentComplete",
+            Self::SubagentSuspended { .. } => "SubagentSuspended",
+            Self::SubagentResumed { .. } => "SubagentResumed",
+            Self::SubagentKilled { .. } => "SubagentKilled",
             Self::SubagentCancelled { .. } => "SubagentCancelled",
             Self::TeammateSpawned { .. } => "TeammateSpawned",
             Self::TeammateMessage { .. } => "TeammateMessage",
             Self::TeammateIdle { .. } => "TeammateIdle",
             Self::TeammateFailed { .. } => "TeammateFailed",
+            Self::TeammateSuspended { .. } => "TeammateSuspended",
+            Self::TeammateResumed { .. } => "TeammateResumed",
             Self::TeamTaskClaimed { .. } => "TeamTaskClaimed",
             Self::TeamTaskCompleted { .. } => "TeamTaskCompleted",
             Self::TeamCleanedUp { .. } => "TeamCleanedUp",
@@ -607,11 +659,16 @@ impl Event {
             | Self::QuotaUpdate { session_id, .. }
             | Self::SubagentStart { session_id, .. }
             | Self::SubagentComplete { session_id, .. }
+            | Self::SubagentSuspended { session_id, .. }
+            | Self::SubagentResumed { session_id, .. }
+            | Self::SubagentKilled { session_id, .. }
             | Self::SubagentCancelled { session_id, .. }
             | Self::TeammateSpawned { session_id, .. }
             | Self::TeammateMessage { session_id, .. }
             | Self::TeammateIdle { session_id, .. }
             | Self::TeammateFailed { session_id, .. }
+            | Self::TeammateSuspended { session_id, .. }
+            | Self::TeammateResumed { session_id, .. }
             | Self::TeamTaskClaimed { session_id, .. }
             | Self::TeamTaskCompleted { session_id, .. }
             | Self::TeamCleanedUp { session_id, .. }

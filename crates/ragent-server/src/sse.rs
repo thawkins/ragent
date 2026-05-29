@@ -301,11 +301,16 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::QuotaUpdate { .. } => "quota_update",
         Event::SubagentStart { .. } => "subagent_start",
         Event::SubagentComplete { .. } => "subagent_complete",
+        Event::SubagentSuspended { .. } => "subagent_suspended",
+        Event::SubagentResumed { .. } => "subagent_resumed",
+        Event::SubagentKilled { .. } => "subagent_killed",
         Event::SubagentCancelled { .. } => "subagent_cancelled",
         Event::TeammateSpawned { .. } => "teammate_spawned",
         Event::TeammateMessage { .. } => "teammate_message",
         Event::TeammateIdle { .. } => "teammate_idle",
         Event::TeammateFailed { .. } => "teammate_failed",
+        Event::TeammateSuspended { .. } => "teammate_suspended",
+        Event::TeammateResumed { .. } => "teammate_resumed",
         Event::TeamTaskClaimed { .. } => "team_task_claimed",
         Event::TeamTaskCompleted { .. } => "team_task_completed",
         Event::TeamCleanedUp { .. } => "team_cleaned_up",
@@ -654,6 +659,25 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             error,
         }),
 
+        Event::TeammateSuspended {
+            session_id,
+            team_name,
+            agent_id,
+        } => to_data(&TeamAgentP {
+            session_id,
+            team_name,
+            agent_id,
+        }),
+
+        Event::TeammateResumed {
+            session_id,
+            team_name,
+            agent_id,
+        } => to_data(&TeamAgentP {
+            session_id,
+            team_name,
+            agent_id,
+        }),
         Event::TeamTaskClaimed {
             session_id,
             team_name,
@@ -770,6 +794,38 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "confidence": confidence,
             "source": source,
             "reason": reason,
+        })),
+        Event::SubagentSuspended {
+            session_id,
+            task_id,
+            child_session_id,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "child_session_id": child_session_id,
+            "event": "suspended",
+        })),
+        Event::SubagentResumed {
+            session_id,
+            task_id,
+            child_session_id,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "child_session_id": child_session_id,
+            "event": "resumed",
+        })),
+        Event::SubagentKilled {
+            session_id,
+            task_id,
+            child_session_id,
+            force,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "task_id": task_id,
+            "child_session_id": child_session_id,
+            "event": "killed",
+            "force": force,
         })),
         Event::GitLabSetupComplete { success, error } => to_data(&serde_json::json!({
             "success": success,

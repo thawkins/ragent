@@ -86,6 +86,10 @@ pub enum TaskStatus {
     Completed,
     /// Task failed with an error.
     Failed,
+    /// Task was suspended (paused) by user.
+    Suspended,
+    /// Task is being forcibly terminated.
+    Terminating,
     /// Task was cancelled before completion.
     Cancelled,
 }
@@ -96,6 +100,8 @@ impl std::fmt::Display for TaskStatus {
             Self::Running => write!(f, "running"),
             Self::Completed => write!(f, "completed"),
             Self::Failed => write!(f, "failed"),
+            Self::Suspended => write!(f, "suspended"),
+            Self::Terminating => write!(f, "terminating"),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }
@@ -154,6 +160,10 @@ pub struct TaskManager {
     tasks: Arc<RwLock<HashMap<String, TaskEntry>>>,
     /// Cancel flags for running tasks.
     cancel_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    /// Suspend flags for running tasks (true = suspended).
+    suspend_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
+    /// Kill flags for tasks being forcibly terminated.
+    kill_flags: Arc<RwLock<HashMap<String, Arc<AtomicBool>>>>,
     /// Event bus for publishing sub-agent lifecycle events.
     event_bus: Arc<EventBus>,
     /// Session processor for running sub-agent loops.
@@ -172,6 +182,8 @@ impl TaskManager {
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             cancel_flags: Arc::new(RwLock::new(HashMap::new())),
+            suspend_flags: Arc::new(RwLock::new(HashMap::new())),
+            kill_flags: Arc::new(RwLock::new(HashMap::new())),
             event_bus,
             processor,
             max_background,
@@ -528,6 +540,122 @@ impl TaskManager {
         } else {
             anyhow::bail!("Task '{task_id}' not found or already completed")
         }
+    }
+
+    /// Suspend a running task (pause its event loop without cancelling).
+    pub async fn suspend_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let mut tasks = self.tasks.write().await;
+        let entry = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
+        if entry.status != TaskStatus::Running {
+            anyhow::bail!("Task '{task_id}' is not running (status: {})", entry.status);
+        }
+        entry.status = TaskStatus::Suspended;
+        let flag = Arc::new(AtomicBool::new(true));
+        self.suspend_flags
+            .write()
+            .await
+            .insert(task_id.to_string(), flag);
+        let parent = entry.parent_session_id.clone();
+        let child = entry.child_session_id.clone();
+        drop(tasks);
+        self.event_bus.publish(Event::SubagentSuspended {
+            session_id: parent,
+            task_id: task_id.to_string(),
+            child_session_id: child,
+        });
+        tracing::info!(task_id, "Sub-agent suspended");
+        Ok(())
+    }
+
+    /// Resume a suspended task.
+    pub async fn resume_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let mut tasks = self.tasks.write().await;
+        let entry = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
+        if entry.status != TaskStatus::Suspended {
+            anyhow::bail!(
+                "Task '{task_id}' is not suspended (status: {})",
+                entry.status
+            );
+        }
+        entry.status = TaskStatus::Running;
+        self.suspend_flags.write().await.remove(task_id);
+        let parent = entry.parent_session_id.clone();
+        let child = entry.child_session_id.clone();
+        drop(tasks);
+        self.event_bus.publish(Event::SubagentResumed {
+            session_id: parent,
+            task_id: task_id.to_string(),
+            child_session_id: child,
+        });
+        tracing::info!(task_id, "Sub-agent resumed");
+        Ok(())
+    }
+
+    /// Kill a running or suspended task (forcible termination).
+    pub async fn kill_task(&self, task_id: &str) -> anyhow::Result<()> {
+        let mut tasks = self.tasks.write().await;
+        let entry = tasks
+            .get_mut(task_id)
+            .ok_or_else(|| anyhow::anyhow!("Task '{task_id}' not found"))?;
+        if matches!(
+            entry.status,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        ) {
+            anyhow::bail!("Task '{task_id}' is already finished");
+        }
+        let _was_suspended = entry.status == TaskStatus::Suspended;
+        entry.status = TaskStatus::Terminating;
+        let parent = entry.parent_session_id.clone();
+        let child = entry.child_session_id.clone();
+        drop(tasks);
+        // Set both cancel and kill flags so the agent loop exits quickly.
+        let kill_flag = Arc::new(AtomicBool::new(true));
+        self.kill_flags
+            .write()
+            .await
+            .insert(task_id.to_string(), kill_flag.clone());
+        if let Ok(flags) = self.cancel_flags.try_write() {
+            if let Some(cf) = flags.get(task_id) {
+                cf.store(true, Ordering::Relaxed);
+            }
+        }
+        self.event_bus.publish(Event::SubagentKilled {
+            session_id: parent.clone(),
+            task_id: task_id.to_string(),
+            child_session_id: child.clone(),
+            force: false,
+        });
+        tracing::info!(task_id, "Sub-agent kill requested");
+        // Force-kill escalation after 10 seconds
+        let tasks2 = self.tasks.clone();
+        let flags2 = self.cancel_flags.clone();
+        let kflags2 = self.kill_flags.clone();
+        let eb2 = self.event_bus.clone();
+        let tid = task_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            let mut t = tasks2.write().await;
+            if let Some(entry) = t.get_mut(&tid) {
+                if entry.status == TaskStatus::Terminating {
+                    entry.status = TaskStatus::Failed;
+                    entry.error = Some("Force-killed after timeout".to_string());
+                    entry.completed_at = Some(Utc::now());
+                }
+            }
+            flags2.write().await.remove(&tid);
+            kflags2.write().await.remove(&tid);
+            eb2.publish(Event::SubagentKilled {
+                session_id: parent,
+                task_id: tid,
+                child_session_id: child,
+                force: true,
+            });
+        });
+        Ok(())
     }
 
     /// Returns a snapshot of a specific task.

@@ -149,7 +149,8 @@ async fn test_azure_openai_branch_unchanged() {
             Some("https://my-resource.openai.azure.com"),
             &options,
         )
-              .await
-              .expect("create_client should succeed for openai branch");
-        
-            let _ = client;}
+        .await
+        .expect("create_client should succeed for openai branch");
+
+    let _ = client;
+}

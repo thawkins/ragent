@@ -13,7 +13,7 @@ use crate::theme::colors;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use ragent_core::task::TaskEntry;
+use ragent_core::task::{TaskEntry, TaskStatus};
 
 use crate::app::App;
 
@@ -34,12 +34,10 @@ fn short_id(id: &str) -> &str {
     &id[..8.min(id.len())]
 }
 
-/// Recursively build agent row lines for tasks whose parent is `parent_sid`.
-/// `depth` controls indentation; sub-agents appear below their spawner.
-/// `last_stack` is a slice of booleans indicating whether each ancestor at that
-/// depth was the last sibling; this lets us draw vertical continuation lines.
-/// `custom_names` is the set of custom OASF agent names; matching entries get a `[C]` badge.
-fn build_task_rows<'a>(
+/// Recursively build agent row lines with Play/Stop and Kill button columns.
+/// `button_areas` and `kill_areas` collect the column x-offsets for each row
+/// so the TUI can do mouse hit-testing later.
+fn build_task_rows_with_buttons<'a>(
     tasks_map: &std::collections::HashMap<&'a str, Vec<&'a TaskEntry>>,
     parent_sid: &str,
     depth: usize,
@@ -48,11 +46,14 @@ fn build_task_rows<'a>(
     custom_names: &std::collections::HashSet<String>,
     teammate_ids: &std::collections::HashSet<String>,
     out: &mut Vec<Line<'a>>,
+    button_areas: &mut Vec<Rect>,
+    kill_areas: &mut Vec<Rect>,
+    button_task_ids: &mut Vec<String>,
+    kill_task_ids: &mut Vec<String>,
 ) {
     let children = tasks_map.get(parent_sid).cloned().unwrap_or_default();
     for (idx, task) in children.iter().enumerate() {
         let is_last = idx + 1 == children.len();
-        // Build indent using ancestor info: use '│ ' when ancestor was not last, else two spaces
         let mut indent = String::new();
         for &ancestor_was_last in last_stack {
             if ancestor_was_last {
@@ -61,7 +62,6 @@ fn build_task_rows<'a>(
                 indent.push_str("│ ");
             }
         }
-        // Prefix for hierarchy in the name column.
         let prefix = if depth == 0 {
             "└─ "
         } else if is_last {
@@ -82,16 +82,32 @@ fn build_task_rows<'a>(
             agent_label.push_str(" [T]");
         }
         let tid = short_id(&task.id);
-        let (dot_color, name_color) = if task.background {
-            (Color::Yellow, Color::Yellow)
-        } else {
-            (Color::Cyan, Color::Cyan)
+
+        let (dot_color, name_color, status_badge) = match task.status {
+            TaskStatus::Running => (Color::Yellow, Color::Yellow, ""),
+            TaskStatus::Suspended => (Color::DarkGray, Color::DarkGray, " ⏸"),
+            TaskStatus::Terminating => (Color::Red, Color::Red, " …"),
+            _ => (Color::Cyan, Color::Cyan, ""),
         };
-        let spans = vec![
+
+        let btn_char = if task.status == TaskStatus::Suspended {
+            "▷"
+        } else {
+            "⏹"
+        };
+        let btn_fg = if task.status == TaskStatus::Suspended {
+            Color::Green
+        } else {
+            Color::Yellow
+        };
+        let btn_style = Style::default().fg(btn_fg).add_modifier(Modifier::BOLD);
+        let kill_style = Style::default().fg(Color::Red).add_modifier(Modifier::BOLD);
+
+        let mut spans = vec![
             Span::styled("◦ ", Style::default().fg(dot_color)),
             Span::styled(format!("{:<10} ", tid), Style::default().fg(colors::HINT)),
             Span::styled(
-                format!("{:<32}", agent_label),
+                format!("{:<28}", agent_label),
                 Style::default().fg(name_color),
             ),
             Span::styled(
@@ -104,11 +120,49 @@ fn build_task_rows<'a>(
             ),
             Span::styled(format!("{:>7}", steps), Style::default().fg(colors::HINT)),
         ];
+
+        if !status_badge.is_empty() {
+            spans.push(Span::styled(
+                status_badge,
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        // Only show buttons for non-terminal tasks.
+        let is_terminal = matches!(
+            task.status,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Cancelled
+        );
+        if !is_terminal {
+            spans.push(Span::styled("  ", Style::default()));
+            spans.push(Span::styled(btn_char, btn_style));
+            spans.push(Span::styled("  ", Style::default()));
+            spans.push(Span::styled("✕", kill_style));
+
+            // Compute x positions from cumulative column widths.
+            // Pre-button fixed columns: "◦ "(2) + id(11) + name(28)
+            //   + type(9) + elapsed(9) + steps(7) = 66.
+            // Status badge adds 2-3 display cols; buttons follow.
+            // Use generous click areas that work regardless of badge.
+            let btn_x: u16 = 66;
+            let kill_x: u16 = 72;
+            button_areas.push(Rect::new(btn_x, 0, 6, 1));
+            kill_areas.push(Rect::new(kill_x, 0, 4, 1));
+            button_task_ids.push(task.id.clone());
+            kill_task_ids.push(task.id.clone());
+        } else {
+            button_areas.push(Rect::default());
+            kill_areas.push(Rect::default());
+            button_task_ids.push(String::new());
+            kill_task_ids.push(String::new());
+        }
         out.push(Line::from(spans));
-        // Recurse
+
         let mut new_stack = last_stack.to_vec();
         new_stack.push(is_last);
-        build_task_rows(
+        build_task_rows_with_buttons(
             tasks_map,
             &task.child_session_id,
             depth + 1,
@@ -117,16 +171,23 @@ fn build_task_rows<'a>(
             custom_names,
             teammate_ids,
             out,
+            button_areas,
+            kill_areas,
+            button_task_ids,
+            kill_task_ids,
         );
     }
 }
 
 /// Render the active-agents subpanel into `area` (8 rows including border).
 pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
-    // Snapshot data we need so we don't keep borrowing `app`.
+    app.agent_row_button_areas.clear();
+    app.agent_row_button_task_ids.clear();
+    app.agent_row_kill_areas.clear();
+    app.agent_row_kill_task_ids.clear();
+
     let primary_session = app.session_id.clone().unwrap_or_default();
     let primary_name = app.agent_name.clone();
-    // Build a map from parent_session_id to child tasks for O(1) lookup
     let mut tasks_map: std::collections::HashMap<&str, Vec<&TaskEntry>> =
         std::collections::HashMap::new();
     for task in &app.active_tasks {
@@ -137,13 +198,11 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     }
     let primary_steps = app.event_bus.current_step(&primary_session);
 
-    // Build the set of custom agent names for badge lookup
     let custom_names: std::collections::HashSet<String> = app
         .custom_agent_defs
         .iter()
         .map(|d| d.agent_info.name.clone())
         .collect();
-    // Build the set of teammate session IDs for [T] badge lookup.
     let teammate_ids: std::collections::HashSet<String> = app
         .team_members
         .iter()
@@ -153,18 +212,18 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
 
     let mut lines: Vec<Line> = Vec::new();
 
-    // ── header ─────────────────────────────────────────────────────────────
+    // ── header (with button columns) ──────────────────────────────────────
     lines.push(Line::from(vec![Span::styled(
         format!(
-            "  {:<10} {:<32}{:<8} {:>8} {:>7}",
-            "id", "name", "type", "elapsed", "steps"
+            "  {:<10} {:<28}{:<8} {:>8} {:>7}  {:>3} {:>3}",
+            "id", "name", "type", "elapsed", "steps", "▷⏹", "✕"
         ),
         Style::default()
             .fg(colors::HINT)
             .add_modifier(Modifier::DIM),
     )]));
 
-    // ── primary agent ───────────────────────────────────────────────────────
+    // ── primary agent ─────────────────────────────────────────────────────
     let mut primary_spans = vec![
         Span::styled("● ", Style::default().fg(Color::Green)),
         Span::styled(
@@ -172,7 +231,7 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
             Style::default().fg(colors::HINT),
         ),
         Span::styled(
-            format!("{:<32}", primary_name),
+            format!("{:<28}", primary_name),
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
@@ -197,8 +256,12 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     }
     lines.push(Line::from(primary_spans));
 
-    // ── sub-agents (depth 0 = direct children of primary) ──────────────────
-    build_task_rows(
+    // ── sub-agents ─────────────────────────────────────────────────────────
+    let mut button_areas: Vec<Rect> = Vec::new();
+    let mut kill_areas: Vec<Rect> = Vec::new();
+    let mut button_task_ids: Vec<String> = Vec::new();
+    let mut kill_task_ids: Vec<String> = Vec::new();
+    build_task_rows_with_buttons(
         &tasks_map,
         &primary_session,
         0,
@@ -207,10 +270,12 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
         &custom_names,
         &teammate_ids,
         &mut lines,
+        &mut button_areas,
+        &mut kill_areas,
+        &mut button_task_ids,
+        &mut kill_task_ids,
     );
 
-    // NOTE: no text wrapping — ensures one display row per logical line
-    // so mouse clicks map 1:1 with agent list indices.
     let total_lines = lines.len() as u16;
     let paragraph = Paragraph::new(lines);
 
@@ -220,6 +285,31 @@ pub fn render_active_agents_subpanel(frame: &mut Frame, app: &mut App, area: Rec
     let scroll = app.active_agents_scroll_offset.min(max_scroll);
 
     frame.render_widget(paragraph.scroll((scroll, 0)), area);
+
+    // Store button areas shifted by scroll and area position, keeping IDs in sync.
+    let mut shifted_button_areas: Vec<Rect> = Vec::new();
+    let mut shifted_button_task_ids: Vec<String> = Vec::new();
+    for (i, r) in button_areas.iter().enumerate() {
+        let y = area.y + (i as u16 + 2).saturating_sub(scroll); // +2 for header + primary
+        if y >= area.y && y < area.y + area.height {
+            shifted_button_areas.push(Rect::new(area.x + r.x, y, r.width, 1));
+            shifted_button_task_ids.push(button_task_ids[i].clone());
+        }
+    }
+    app.agent_row_button_areas = shifted_button_areas;
+    app.agent_row_button_task_ids = shifted_button_task_ids;
+
+    let mut shifted_kill_areas: Vec<Rect> = Vec::new();
+    let mut shifted_kill_task_ids: Vec<String> = Vec::new();
+    for (i, r) in kill_areas.iter().enumerate() {
+        let y = area.y + (i as u16 + 2).saturating_sub(scroll);
+        if y >= area.y && y < area.y + area.height {
+            shifted_kill_areas.push(Rect::new(area.x + r.x, y, r.width, 1));
+            shifted_kill_task_ids.push(kill_task_ids[i].clone());
+        }
+    }
+    app.agent_row_kill_areas = shifted_kill_areas;
+    app.agent_row_kill_task_ids = shifted_kill_task_ids;
 
     if total_lines > visible {
         let mut sb_state = ScrollbarState::new(max_scroll as usize).position(scroll as usize);

@@ -43,6 +43,7 @@ fn status_label(status: &MemberStatus) -> (&'static str, Color) {
         MemberStatus::Idle => ("idle", Color::Green),
         MemberStatus::PlanPending => ("planning", Color::Magenta),
         MemberStatus::Blocked => ("blocked", colors::HINT),
+        MemberStatus::Suspended => ("suspended", Color::DarkGray),
         MemberStatus::ShuttingDown => ("stopping", Color::Yellow),
         MemberStatus::Stopped => ("stopped", colors::HINT),
         MemberStatus::Failed => ("failed", Color::Red),
@@ -54,6 +55,11 @@ fn status_label(status: &MemberStatus) -> (&'static str, Color) {
 /// Shows the active team name, the lead (current session), and all known
 /// teammates with their status, elapsed time, step count, tasks claimed/done.
 pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.team_row_button_areas.clear();
+    app.team_row_button_agent_ids.clear();
+    app.team_row_kill_areas.clear();
+    app.team_row_kill_agent_ids.clear();
+
     app.refresh_team_member_session_ids();
     let team_name = app
         .active_team
@@ -111,7 +117,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
     lines.push(Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(format!("{:<8} ", "id"), dim),
-        Span::styled(format!("{:<35} ", "name"), dim),
+        Span::styled(format!("{:<31} ", "name"), dim),
         Span::styled(format!("{:<10} ", "status"), dim),
         Span::styled(format!("{:<18} ", "model"), dim),
         Span::styled(format!("{:>7} ", "elapsed"), dim),
@@ -120,6 +126,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(format!("{:>6} ", "done"), dim),
         Span::styled(format!("{:>5} ", "sent"), dim),
         Span::styled(format!("{:>5} ", "recv"), dim),
+        Span::styled(format!(" {:>3} {:>3}", "▷⏹", "✕"), dim),
     ]));
 
     // ── lead row ─────────────────────────────────────────────────────────
@@ -140,7 +147,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("{:<35} ", app.agent_name.as_str()),
+            format!("{:<31} ", app.agent_name.as_str()),
             Style::default().fg(lead_status_color),
         ),
         Span::styled(
@@ -248,7 +255,7 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(Color::Cyan),
             ),
             Span::styled(
-                format!("{:<35} ", member.name.as_str()),
+                format!("{:<31} ", member.name.as_str()),
                 Style::default().fg(name_color).add_modifier(name_mod),
             ),
             Span::styled(
@@ -317,17 +324,47 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(if recv > 0 { Color::Cyan } else { colors::HINT }),
             ),
         ]);
-        // [T] badge — clickable hint
-        spans.push(Span::styled(
-            " [T]",
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ));
 
+        // Play/Stop and Kill buttons for non-terminal teammates.
+        let is_terminal = matches!(
+            member.status,
+            MemberStatus::ShuttingDown | MemberStatus::Stopped | MemberStatus::Failed
+        );
+        if !is_terminal {
+            let (btn_char, btn_fg) = if member.status == MemberStatus::Suspended {
+                ("▷", Color::Green)
+            } else {
+                ("⏹", Color::Yellow)
+            };
+            spans.push(Span::styled("  ", Style::default()));
+            spans.push(Span::styled(
+                btn_char,
+                Style::default().fg(btn_fg).add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled("  ", Style::default()));
+            spans.push(Span::styled(
+                "✕",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+            // Compute x positions from cumulative column widths.
+            // Pre-button columns: focus(1) + connector(2) + id(9) + name(32)
+            //   + status(11) + model(19) + elapsed(8) + steps(6)
+            //   + claimed(8) + done(7) + sent(6) + recv(6) = 115
+            // + 2 spaces before button char
+            let btn_x: u16 = 115 + 2;
+            let kill_x: u16 = btn_x + 4; // button char(2) + 2 spaces
+            app.team_row_button_areas.push(Rect::new(btn_x, 0, 4, 1));
+            app.team_row_kill_areas.push(Rect::new(kill_x, 0, 3, 1));
+            app.team_row_button_agent_ids.push(member.agent_id.clone());
+            app.team_row_kill_agent_ids.push(member.agent_id.clone());
+        } else {
+            app.team_row_button_areas.push(Rect::default());
+            app.team_row_kill_areas.push(Rect::default());
+            app.team_row_button_agent_ids.push(String::new());
+            app.team_row_kill_agent_ids.push(String::new());
+        }
         lines.push(Line::from(spans));
     }
-
     // Show a hint when no teammates yet.
     if members.is_empty() {
         lines.push(Line::from(vec![Span::styled(
@@ -362,6 +399,34 @@ pub fn render_teams_subpanel(frame: &mut Frame, app: &mut App, area: Rect) {
         .scroll((app.teams_scroll_offset, 0));
 
     frame.render_widget(paragraph, area);
+
+    // Adjust stored button areas for scroll/position, keeping IDs in sync.
+    // The Paragraph is rendered with a Block with Borders::ALL, so content
+    // starts at area.x + 1 (left border) and area.y + 1 (top border).
+    let scroll = app.teams_scroll_offset;
+    let mut shifted_button_areas: Vec<Rect> = Vec::new();
+    let mut shifted_button_agent_ids: Vec<String> = Vec::new();
+    for (i, r) in app.team_row_button_areas.iter().enumerate() {
+        let y = area.y + 1 + (i as u16 + 2).saturating_sub(scroll);
+        if y >= area.y && y < area.y + area.height && r.width > 0 {
+            shifted_button_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
+            shifted_button_agent_ids.push(app.team_row_button_agent_ids[i].clone());
+        }
+    }
+    app.team_row_button_areas = shifted_button_areas;
+    app.team_row_button_agent_ids = shifted_button_agent_ids;
+
+    let mut shifted_kill_areas: Vec<Rect> = Vec::new();
+    let mut shifted_kill_agent_ids: Vec<String> = Vec::new();
+    for (i, r) in app.team_row_kill_areas.iter().enumerate() {
+        let y = area.y + 1 + (i as u16 + 2).saturating_sub(scroll);
+        if y >= area.y && y < area.y + area.height && r.width > 0 {
+            shifted_kill_areas.push(Rect::new(area.x + 1 + r.x, y, r.width, 1));
+            shifted_kill_agent_ids.push(app.team_row_kill_agent_ids[i].clone());
+        }
+    }
+    app.team_row_kill_areas = shifted_kill_areas;
+    app.team_row_kill_agent_ids = shifted_kill_agent_ids;
 
     if app.teams_max_scroll > 0 {
         let mut scrollbar_state = ScrollbarState::new(app.teams_max_scroll as usize)

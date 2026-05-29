@@ -399,35 +399,35 @@ pub(crate) async fn check_permission_with_prompt(
     use crate::permission::PermissionAction;
     use tokio::sync::broadcast::error::RecvError;
 
-                // Short-circuit if --yes / --no-prompt flag is set
-                if auto_approve {
+    // Short-circuit if --yes / --no-prompt flag is set
+    if auto_approve {
+        return Ok(PermissionAction::Allow);
+    }
+
+    // YOLO mode bypasses interactive permission prompts for all tools
+    if ragent_config::yolo::is_enabled() {
+        return Ok(PermissionAction::Allow);
+    }
+
+    // Codeindex tools, team tools, and *_task tools are hardwired helpers and
+    // must never trigger interactive permission prompts.
+    if is_hardwired_auto_approved_tool(tool_name) {
+        return Ok(PermissionAction::Allow);
+    }
+
+    // Auto-grant file:read for paths within the working directory
+    if permission == "file:read" || permission == "read" {
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Ok(resource_path) = std::path::Path::new(resource).canonicalize() {
+                if resource_path.starts_with(&cwd) {
                     return Ok(PermissionAction::Allow);
                 }
-          
-                // YOLO mode bypasses interactive permission prompts for all tools
-                if ragent_config::yolo::is_enabled() {
-                    return Ok(PermissionAction::Allow);
-                }
-          
-                // Codeindex tools, team tools, and *_task tools are hardwired helpers and
-                // must never trigger interactive permission prompts.
-                if is_hardwired_auto_approved_tool(tool_name) {
-                    return Ok(PermissionAction::Allow);
-                }
-          
-                // Auto-grant file:read for paths within the working directory
-                if permission == "file:read" || permission == "read" {
-                    if let Ok(cwd) = std::env::current_dir() {
-                        if let Ok(resource_path) = std::path::Path::new(resource).canonicalize() {
-                            if resource_path.starts_with(&cwd) {
-                                return Ok(PermissionAction::Allow);
-                            }
-                        } else if !resource.starts_with('/') && !resource.starts_with("..") {
-                            // Relative path within project, not yet created
-                            return Ok(PermissionAction::Allow);
-                        }
-                    }
-                }
+            } else if !resource.starts_with('/') && !resource.starts_with("..") {
+                // Relative path within project, not yet created
+                return Ok(PermissionAction::Allow);
+            }
+        }
+    }
     // Check dir_lists allowlist/denylist for file operations (file:read, file:write, edit)
     if permission.starts_with("file:")
         || permission == "read"
@@ -801,46 +801,60 @@ impl SessionProcessor {
                             .filter(|s| !s.trim().is_empty())
                     })
             }
-                                        "azure_foundry" => {
-                                            let cfg = crate::Config::load().ok();
-                                            self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
-                                                .await
-                                                .ok()
-                                                .flatten()
-                                                .filter(|s: &String| !s.trim().is_empty())
-                                                .or_else(|| {
-                                                    cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
-                                                        .and_then(|p| p.api.and_then(|a| a.base_url))
-                                                })
-                                                .or_else(|| {
-                                                    std::env::var("AZURE_AI_FOUNDRY_BASE")
-                                                        .ok()
-                                                        .filter(|s| !s.trim().is_empty())
-                                                })
-                                        }
-                                        "azure_resource" => {
-                                            self.storage_op(|s| Ok(s.get_setting("azure_resource_last_selection").ok().flatten()))
-                                                .await
-                                                .ok()
-                                                .flatten()
-                                                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-                                                .and_then(|parsed| parsed.get("endpoint").and_then(|v| v.as_str()).map(String::from))
-                                                .filter(|s| !s.trim().is_empty())
-                                                                                  }
-                                                                    _ => None,
-                                                };        tracing::info!(
+            "azure_foundry" => {
+                let cfg = crate::Config::load().ok();
+                self.storage_op(|s| Ok(s.get_setting("azure_foundry_api_base").ok().flatten()))
+                    .await
+                    .ok()
+                    .flatten()
+                    .filter(|s: &String| !s.trim().is_empty())
+                    .or_else(|| {
+                        cfg.and_then(|c| c.provider.get("azure_foundry").cloned())
+                            .and_then(|p| p.api.and_then(|a| a.base_url))
+                    })
+                    .or_else(|| {
+                        std::env::var("AZURE_AI_FOUNDRY_BASE")
+                            .ok()
+                            .filter(|s| !s.trim().is_empty())
+                    })
+            }
+            "azure_resource" => self
+                .storage_op(|s| {
+                    Ok(s.get_setting("azure_resource_last_selection")
+                        .ok()
+                        .flatten())
+                })
+                .await
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|parsed| {
+                    parsed
+                        .get("endpoint")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                })
+                .filter(|s| !s.trim().is_empty()),
+            _ => None,
+        };
+        tracing::info!(
             provider = %model_ref.provider_id,
             model = %model_ref.model_id,
             endpoint = %crate::sanitize::redact_secrets(&format!("{base_url:?}")),
             "creating LLM client"
         );
-                  let client = {
-                      let _scope = profiler.scope("llm.create_client");
-                      let mut options: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
-                      options.insert("model_id".to_string(), serde_json::Value::String(model_ref.model_id.clone()));
-                      match provider
-                          .create_client(&api_key, base_url.as_deref(), &options)
-                          .await            {
+        let client = {
+            let _scope = profiler.scope("llm.create_client");
+            let mut options: std::collections::HashMap<String, serde_json::Value> =
+                std::collections::HashMap::new();
+            options.insert(
+                "model_id".to_string(),
+                serde_json::Value::String(model_ref.model_id.clone()),
+            );
+            match provider
+                .create_client(&api_key, base_url.as_deref(), &options)
+                .await
+            {
                 Ok(c) => c,
                 Err(e) => {
                     let err = e.to_string();
@@ -2340,6 +2354,8 @@ impl SessionProcessor {
                                 crate::task::TaskStatus::Completed => "completed",
                                 crate::task::TaskStatus::Failed => "failed",
                                 crate::task::TaskStatus::Cancelled => "cancelled",
+                                crate::task::TaskStatus::Suspended => "suspended",
+                                crate::task::TaskStatus::Terminating => "terminating",
                                 crate::task::TaskStatus::Running => "running", // shouldn't happen
                             };
                             let body = task
@@ -2691,11 +2707,12 @@ impl SessionProcessor {
             );
         }
 
-                  // Azure Foundry: also check azure_resource_last_selection for key config
-                  if provider_id == "azure_foundry" || provider_id == "azure_resource" {
-                      if let Ok(Some(last)) = self
-                          .storage_op(|s| s.get_setting("azure_resource_last_selection"))
-                          .await            {
+        // Azure Foundry: also check azure_resource_last_selection for key config
+        if provider_id == "azure_foundry" || provider_id == "azure_resource" {
+            if let Ok(Some(last)) = self
+                .storage_op(|s| s.get_setting("azure_resource_last_selection"))
+                .await
+            {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&last) {
                     // Direct api_key takes precedence
                     if let Some(key) = parsed.get("api_key").and_then(|v| v.as_str()) {

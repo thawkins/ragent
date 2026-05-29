@@ -94,6 +94,8 @@ impl Tool for ListTasksTool {
                         crate::task::TaskStatus::Completed => "completed",
                         crate::task::TaskStatus::Failed => "failed",
                         crate::task::TaskStatus::Cancelled => "cancelled",
+                        crate::task::TaskStatus::Suspended => "suspended",
+                        crate::task::TaskStatus::Terminating => "terminating",
                     };
                     status_str == filter
                 })
@@ -141,8 +143,9 @@ impl Tool for ListTasksTool {
                 crate::task::TaskStatus::Completed => "✅ completed",
                 crate::task::TaskStatus::Failed => "❌ failed",
                 crate::task::TaskStatus::Cancelled => "🚫 cancelled",
+                crate::task::TaskStatus::Suspended => "⏸ suspended",
+                crate::task::TaskStatus::Terminating => "💀 terminating",
             };
-
             let duration = if let Some(completed) = task.completed_at {
                 let dur = completed - task.created_at;
                 format!("{}s", dur.num_seconds())
@@ -188,6 +191,8 @@ fn format_task_detail(task: &crate::task::TaskEntry) -> String {
         crate::task::TaskStatus::Completed => "✅ Completed",
         crate::task::TaskStatus::Failed => "❌ Failed",
         crate::task::TaskStatus::Cancelled => "🚫 Cancelled",
+        crate::task::TaskStatus::Suspended => "⏸ Suspended",
+        crate::task::TaskStatus::Terminating => "💀 Terminating",
     };
 
     let duration = if let Some(completed) = task.completed_at {

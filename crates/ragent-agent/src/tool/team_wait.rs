@@ -115,6 +115,7 @@ impl Tool for TeamWaitTool {
                             | MemberStatus::Spawning
                             | MemberStatus::PlanPending
                             | MemberStatus::ShuttingDown
+                            | MemberStatus::Suspended
                     )
                 })
                 .map(|m| m.agent_id.clone())
@@ -229,6 +230,7 @@ fn summarise_store(members: &[TeamMember]) -> String {
             MemberStatus::Working => "⚙️",
             MemberStatus::Spawning => "🟡",
             MemberStatus::Blocked => "🔒",
+            MemberStatus::Suspended => "⏸️",
             MemberStatus::Failed => "❌",
             MemberStatus::PlanPending => "📋",
             MemberStatus::ShuttingDown => "🔄",

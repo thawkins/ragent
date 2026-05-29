@@ -1088,6 +1088,14 @@ pub struct App {
     pub active_agents_max_scroll: u16,
     /// Cached area of the active-agents subpanel.
     pub active_agents_area: Rect,
+    /// Per-row click targets for Play/Stop buttons in the agents dialog.
+    pub agent_row_button_areas: Vec<Rect>,
+    /// Parallel task IDs for the agent button click targets.
+    pub agent_row_button_task_ids: Vec<String>,
+    /// Per-row click targets for Kill buttons in the agents dialog.
+    pub agent_row_kill_areas: Vec<Rect>,
+    /// Parallel task IDs for the agent kill click targets.
+    pub agent_row_kill_task_ids: Vec<String>,
     /// Active scrollbar drag, if any.
     pub scrollbar_drag: Option<ScrollbarDragPane>,
     /// Active text selection, if any.
@@ -1216,6 +1224,14 @@ pub struct App {
     pub teams_scroll_offset: u16,
     /// Max scroll for the Teams panel.
     pub teams_max_scroll: u16,
+    /// Per-row click targets for Play/Stop buttons in the teams dialog.
+    pub team_row_button_areas: Vec<Rect>,
+    /// Parallel agent IDs for the team button click targets.
+    pub team_row_button_agent_ids: Vec<String>,
+    /// Per-row click targets for Kill buttons in the teams dialog.
+    pub team_row_kill_areas: Vec<Rect>,
+    /// Parallel agent IDs for the team kill click targets.
+    pub team_row_kill_agent_ids: Vec<String>,
     /// Currently focused teammate (agent_id). When set, the status
     /// bar shows a focus indicator and the input box routes messages
     /// to this teammate's mailbox instead of the lead session.

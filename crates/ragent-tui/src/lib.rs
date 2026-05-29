@@ -262,7 +262,7 @@ pub async fn run_tui(
                 let banner = crate::logo::LOGO.join("\n");
                 app.append_assistant_text(&banner);
                 app.append_assistant_text(&format!("\n  Version {}", env!("CARGO_PKG_VERSION")));
-               // app.force_new_message = true;
+                // app.force_new_message = true;
                 app.append_assistant_text(&format!("\n✔ Session created: `{}`", &session_id[..8]));
                 // Display the loaded configuration file(s)
                 if app.config_paths.is_empty() {
