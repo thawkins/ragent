@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.101
+
+### Fixed
+- fixed AGENTS.md load path
+
 ## Version: 0.1.0-alpha.100
 
 ### Added
@@ -14,6 +19,9 @@
 - **AGENTS.md discovery sorting** — Improved instruction file priority sorting with properly formatted ordering logic.
 - **Azure Resource provider refactoring** — Cleaned up `azure_resource.rs` provider implementation.
 - **HTTP client retry logic** — Updated `execute_with_retry` in `http_client.rs`.
+
+### Fixed
+- **Instruction file discovery priority bug** — `collect_agents_md_content_with_discovery()` in `agent/mod.rs` was incorrectly calculating file depth (missing `saturating_sub(1)`), causing `AGENTS.md` in the project root to have depth=1 instead of depth=0. This meant root instruction files were treated as subdirectories, and the sorting step mixed root, global, and subdirectory candidates together. Now root files are correctly identified (depth=0), each priority tier is sorted independently, and concatenated in strict order: project root → global directory → project subdirectories. Added integration test `test_root_agents_md_beats_subdirectory_agents_md` to verify the fix.
 
 ## Version: 0.1.0-alpha.99
 

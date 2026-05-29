@@ -217,3 +217,38 @@ fn test_subdirectory_fallback_when_no_root_or_global() {
         "Subdirectory file should be loaded as last resort"
     );
 }
+
+/// When both `AGENTS.md` exists in the project root and a subdirectory
+/// (e.g. `assets/config/AGENTS.md`), the root file must be loaded.
+#[test]
+fn test_root_agents_md_beats_subdirectory_agents_md() {
+    let working_dir = TempDir::new().unwrap();
+
+    // Subdirectory AGENTS.md (depth > 0)
+    let subdir = working_dir.path().join("assets").join("config");
+    fs::create_dir_all(&subdir).unwrap();
+    fs::write(subdir.join("AGENTS.md"), "Subdirectory instructions").unwrap();
+
+    // Root AGENTS.md (should win)
+    fs::write(working_dir.path().join("AGENTS.md"), "Root instructions").unwrap();
+
+    let (content, discovery) =
+        ragent_agent::agent::collect_agents_md_content_with_discovery(
+            working_dir.path(),
+        );
+
+    // The loaded file should be the root AGENTS.md
+    assert_eq!(
+        discovery.loaded_file,
+        Some(working_dir.path().join("AGENTS.md")),
+        "Root AGENTS.md should take priority over subdirectory AGENTS.md"
+    );
+    assert!(
+        content.contains("Root instructions"),
+        "Loaded content should come from root AGENTS.md, got:\n{content}"
+    );
+    assert!(
+        !content.contains("Subdirectory instructions"),
+        "Content from subdirectory file should not be loaded"
+    );
+}

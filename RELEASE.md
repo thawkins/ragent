@@ -1,6 +1,11 @@
 # Release
 
-## Current Version: 0.1.0-alpha.100
+## Current Version: 0.1.0-alpha.101
+
+### Fixed
+- fixed AGENTS.md load path
+
+## Previous: 0.1.0-alpha.100
 
 ### Added
 - **Sub-agent suspend/resume/kill lifecycle** — New `suspend_task()`, `resume_task()`, and `kill_task()` methods on the task manager. Sub-agents can now be paused, resumed, or forcibly terminated with a 10-second force-kill escalation timeout. New `TaskStatus::Suspended` and `TaskStatus::Terminating` states, plus `SubagentSuspended`, `SubagentResumed`, and `SubagentKilled` events.
