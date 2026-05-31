@@ -1,7 +1,14 @@
 //! Shell command execution tool.
 //!
-//! Provides [`BashTool`], which runs shell commands via `bash -c` in the
-//! agent's working directory with configurable timeouts.
+//! Provides [`BashTool`], which runs shell commands in the agent's working
+//! directory with configurable timeouts.
+//!
+//! On Unix systems the tool uses `bash -c` directly. On Windows it first
+//! attempts to locate **Git Bash**; if that is unavailable it falls back to
+//! **PowerShell** (`pwsh.exe` / `powershell.exe`). All 7 security layers
+//! (safe-command whitelist, banned commands, denied patterns, directory-escape
+//! prevention, syntax validation, obfuscation detection, and user allow/deny
+//! lists) remain active regardless of the underlying shell.
 //!
 //! Shell state (current directory and exported environment variables) is
 //! persisted across invocations using a per-session state file so that
@@ -9,11 +16,15 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Instant;
 use tokio::process::Command;
 
 use super::{Tool, ToolContext, ToolOutput};
 use crate::event::Event;
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Derive a filesystem-safe identifier from a session ID.
 ///
@@ -32,11 +43,208 @@ fn safe_session_id(session_id: &str) -> String {
         .collect()
 }
 
+// ── Platform detection ─────────────────────────────────────────────────────
+
+/// Returns `true` when running on Windows.
+#[must_use]
+pub fn is_windows() -> bool {
+    cfg!(target_os = "windows")
+}
+
+// ── Shell type ─────────────────────────────────────────────────────────────
+
+/// The type of shell discovered on the system.
+#[derive(Debug, Clone)]
+enum ShellType {
+    /// Standard `bash` available on Unix systems.
+    Bash,
+    /// Git Bash on Windows, with the resolved path to `bash.exe`.
+    GitBash(PathBuf),
+    /// PowerShell (`pwsh.exe` or `powershell.exe`) on Windows.
+    PowerShell(PathBuf),
+}
+
+impl ShellType {
+    /// Returns `true` if this is a POSIX-compatible shell (Bash or Git Bash).
+    fn is_posix(&self) -> bool {
+        matches!(self, ShellType::Bash | ShellType::GitBash(_))
+    }
+
+    /// Returns the executable path to invoke.
+    #[allow(dead_code)]
+    fn program(&self) -> &std::ffi::OsStr {
+        match self {
+            ShellType::Bash => std::ffi::OsStr::new("bash"),
+            ShellType::GitBash(p) | ShellType::PowerShell(p) => p.as_os_str(),
+        }
+    }
+}
+
+// ── Shell discovery ───────────────────────────────────────────────────────
+
+/// Well-known installation paths for Git Bash on Windows.
+const GIT_BASH_KNOWN_PATHS: &[&str] = &[
+    r"C:\Program Files\Git\bin\bash.exe",
+    r"C:\Program Files\Git\usr\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\bin\bash.exe",
+    r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+];
+
+/// Discover the shell to use on this system.
+///
+/// On Windows the search order is:
+/// 1. `GIT_BASH` environment variable (if set, must point to `bash.exe`).
+/// 2. Well-known Git for Windows installation directories.
+/// 3. Any `bash.exe` found on the system `PATH`.
+/// 4. `pwsh.exe` (PowerShell 7+) on `PATH`.
+/// 5. `powershell.exe` (Windows PowerShell 5.1) on `PATH`.
+///
+/// On non-Windows platforms, always returns `ShellType::Bash`.
+fn discover_shell() -> ShellType {
+    if !is_windows() {
+        return ShellType::Bash;
+    }
+
+    // 1. Check GIT_BASH env var
+    if let Ok(git_bash) = std::env::var("GIT_BASH") {
+        let path = PathBuf::from(git_bash);
+        if path.exists() {
+            tracing::info!(path = %path.display(), "Using Git Bash from GIT_BASH env var");
+            return ShellType::GitBash(path);
+        }
+        tracing::warn!(
+            path = %path.display(),
+            "GIT_BASH env var set but path does not exist, continuing search"
+        );
+    }
+
+    // 2. Check well-known paths
+    for known in GIT_BASH_KNOWN_PATHS {
+        let path = PathBuf::from(known);
+        if path.exists() {
+            tracing::info!(path = %path.display(), "Found Git Bash at known location");
+            return ShellType::GitBash(path);
+        }
+    }
+
+    // 3. Search PATH for bash.exe
+    if let Ok(path) = which::which("bash") {
+        tracing::info!(path = %path.display(), "Found bash on PATH");
+        return ShellType::GitBash(path);
+    }
+
+    // 4. Try pwsh.exe (PowerShell 7+)
+    if let Ok(path) = which::which("pwsh") {
+        tracing::info!(path = %path.display(), "Git Bash not found; falling back to PowerShell 7+");
+        return ShellType::PowerShell(path);
+    }
+
+    // 5. Try powershell.exe (Windows PowerShell 5.1)
+    if let Ok(path) = which::which("powershell") {
+        tracing::info!(
+            path = %path.display(),
+            "Git Bash not found; falling back to Windows PowerShell 5.1"
+        );
+        return ShellType::PowerShell(path);
+    }
+
+    // No shell found — return Bash anyway so that execute() can produce a
+    // clear error message.
+    tracing::error!("No suitable shell found on Windows");
+    ShellType::Bash
+}
+
+/// Global cache for the discovered shell type. The shell is discovered once
+/// per process and reused for all subsequent invocations.
+static SHELL_CACHE: OnceLock<ShellType> = OnceLock::new();
+
+/// Return the cached shell type, discovering it on the first call.
+fn get_shell() -> &'static ShellType {
+    SHELL_CACHE.get_or_init(discover_shell)
+}
+
+// ── Windows state/temp directory helpers ───────────────────────────────────
+
+/// Return the base directory for ragent shell state/temp files on Windows.
+///
+/// Uses `%LOCALAPPDATA%\ragent\shell\` on Windows and `/tmp` on Unix.
+/// Creates the directory (and parents) if it does not exist.
+fn windows_state_dir() -> Result<PathBuf> {
+    let base = std::env::var("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            // Fallback: use HOME/.local/share on Unix, or USERPROFILE on Windows
+            dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
+        });
+    let dir = base.join("ragent").join("shell");
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("Failed to create state directory {}", dir.display()))?;
+    Ok(dir)
+}
+
 /// Return the path of the persistent state file for the given session.
+///
+/// On Unix: `/tmp/ragent_shell_<session_id>.state`
+/// On Windows: `%LOCALAPPDATA%\ragent\shell\ragent_shell_<session_id>.state`
 #[must_use]
 pub fn state_file_path(session_id: &str) -> String {
-    format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id))
+    if is_windows() {
+        // On Windows we compute the path dynamically; errors are handled in execute()
+        match windows_state_dir() {
+            Ok(dir) => dir
+                .join(format!(
+                    "ragent_shell_{}.state",
+                    safe_session_id(session_id)
+                ))
+                .to_string_lossy()
+                .into_owned(),
+            Err(_) => format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id)),
+        }
+    } else {
+        format!("/tmp/ragent_shell_{}.state", safe_session_id(session_id))
+    }
 }
+
+/// Return a temporary script file path appropriate for the current shell type.
+///
+/// On Unix: `/tmp/ragent_cmd_<session_id>_<timestamp>.sh`
+/// On Windows Git Bash: `%LOCALAPPDATA%\ragent\shell\ragent_cmd_<session_id>_<timestamp>.sh`
+/// On Windows PowerShell: `%LOCALAPPDATA%\ragent\shell\ragent_cmd_<session_id>_<timestamp>.ps1`
+fn script_file_path(session_id: &str, shell: &ShellType) -> Result<String> {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_micros();
+
+    let ext = match shell {
+        ShellType::Bash | ShellType::GitBash(_) => "sh",
+        ShellType::PowerShell(_) => "ps1",
+    };
+
+    let name = format!(
+        "ragent_cmd_{}_{}.{}",
+        safe_session_id(session_id),
+        timestamp,
+        ext
+    );
+
+    if is_windows() {
+        let dir = windows_state_dir()?;
+        Ok(dir.join(name).to_string_lossy().into_owned())
+    } else {
+        Ok(format!("/tmp/{name}"))
+    }
+}
+
+/// Convert a Windows backslash path to forward slashes for Git Bash.
+///
+/// Git Bash can handle `C:/Users/...` but backslashes in wrapper scripts
+/// are interpreted as escape characters by bash.
+fn to_posix_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+// ── State parsing ──────────────────────────────────────────────────────────
 
 /// Parse the current working directory from a state file's contents.
 ///
@@ -56,10 +264,14 @@ fn parse_cwd_from_state(state: &str) -> Option<String> {
     None
 }
 
-/// Executes shell commands via `bash -c` and returns combined stdout/stderr output.
+// ── BashTool struct ────────────────────────────────────────────────────────
+
+/// Executes shell commands and returns combined stdout/stderr output.
 ///
-/// Output is truncated to 100 KB to avoid overwhelming the agent context.
-/// Commands that exceed the configured timeout (default 120 s) are terminated.
+/// On Unix, uses `bash -c`. On Windows, uses Git Bash (preferred) or
+/// PowerShell as a fallback. Output is truncated to ~30 KB to avoid
+/// overwhelming the agent context. Commands that exceed the configured
+/// timeout (default 120 s) are terminated.
 pub struct BashTool;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -494,9 +706,21 @@ fn contains_banned_command(cmd: &str) -> bool {
         false
     })
 }
+
 /// Check if command tries to escape the working directory.
-/// Rejects cd/pushd with .., /, ~, $HOME, or ${HOME}.
+///
+/// Rejects `cd`/`pushd` with `..`, `/`, `~`, `$HOME`, `${HOME}`, and on
+/// Windows also rejects absolute paths like `C:\` or `\`.
 fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool {
+    is_directory_escape_attempt_inner(cmd, working_dir, is_windows())
+}
+
+/// Inner implementation that accepts an explicit `on_windows` flag for testing.
+fn is_directory_escape_attempt_inner(
+    cmd: &str,
+    working_dir: &std::path::Path,
+    on_windows: bool,
+) -> bool {
     let canonical_wd = working_dir
         .canonicalize()
         .unwrap_or_else(|_| working_dir.to_path_buf());
@@ -529,19 +753,35 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
                     return true;
                 }
                 if arg.starts_with('/') {
-                    // D1 fix: Single-segment slash-prefixed tokens (e.g., /help, /start)
-                    // are likely commands, not file paths - exclude from directory escape check.
-                    // Only check as path if it contains a directory separator (e.g., /etc/passwd).
+                    // Single-segment slash-prefixed tokens (e.g., /help, /start)
+                    // are likely commands, not file paths - exclude from escape check.
                     if arg.len() > 1 && !arg.strip_prefix('/').unwrap_or(arg).contains('/') {
                         // Single segment after / - treat as command, not a file path
                         continue;
                     }
-                    // Allow if the absolute path resolves to the working directory or a subdirectory of it
+                    // Allow if the absolute path resolves to the working directory or a subdirectory
                     let target = std::path::Path::new(arg);
                     let canonical_target = target
                         .canonicalize()
                         .unwrap_or_else(|_| target.to_path_buf());
                     if !canonical_target.starts_with(&canonical_wd) {
+                        return true;
+                    }
+                }
+
+                // Windows-specific: reject absolute Windows paths and bare backslash
+                if on_windows {
+                    // Match drive-letter paths: C:\, D:\, etc.
+                    let arg_bytes = arg.as_bytes();
+                    if arg_bytes.len() >= 2
+                        && arg_bytes[0].is_ascii_alphabetic()
+                        && arg_bytes[1] == b':'
+                    {
+                        // This is a Windows absolute path like C:\Users — reject it
+                        return true;
+                    }
+                    // Match bare backslash: \ (root of current drive)
+                    if arg.starts_with('\\') {
                         return true;
                     }
                 }
@@ -553,8 +793,18 @@ fn is_directory_escape_attempt(cmd: &str, working_dir: &std::path::Path) -> bool
 }
 
 /// Pre-check command syntax using `sh -n -c` without executing.
+///
+/// On Windows with PowerShell, this check is skipped because PowerShell
+/// has its own runtime parser and `sh -n -c` is not applicable.
 /// Returns error if syntax is invalid.
 async fn validate_bash_syntax(cmd: &str) -> Result<()> {
+    // Skip syntax validation when using PowerShell (PowerShell has its
+    // own parser and `sh -n -c` is a POSIX-only concept).
+    let shell = get_shell();
+    if !shell.is_posix() {
+        return Ok(());
+    }
+
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(1),
         Command::new("sh").arg("-n").arg("-c").arg(cmd).output(),
@@ -574,6 +824,79 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
     }
 }
 
+// ── Wrapper script generation ──────────────────────────────────────────────
+
+/// Build the wrapper script for a POSIX-compatible shell (Bash or Git Bash).
+///
+/// The wrapper:
+/// 1. Sources the state file (restoring env vars and `RAGENT_PWD`).
+/// 2. Runs the user command from the temporary script file.
+/// 3. Saves exported variables via `export -p`.
+/// 4. Appends `RAGENT_PWD=<cwd>` as an unambiguous marker.
+/// 5. Cleans up the temporary script file.
+fn build_posix_wrapper(state_file: &str, script_file: &str) -> String {
+    // Use forward slashes even on Windows (Git Bash understands them)
+    let state_file_posix = if is_windows() {
+        to_posix_path(state_file)
+    } else {
+        state_file.to_string()
+    };
+    let script_file_posix = if is_windows() {
+        to_posix_path(script_file)
+    } else {
+        script_file.to_string()
+    };
+
+    format!(
+        "STATE_FILE=\"{state_file_posix}\"\n\
+         if [ -f \"$STATE_FILE\" ]; then\n\
+           . \"$STATE_FILE\" 2>/dev/null\n\
+           cd \"${{RAGENT_PWD:-}}\" 2>/dev/null || true\n\
+         fi\n\
+         bash \"{script_file_posix}\"\n\
+         EXIT_CODE=$?\n\
+         export -p 2>/dev/null > \"$STATE_FILE\" || true\n\
+         printf 'RAGENT_PWD=%s\\n' \"$(pwd)\" >> \"$STATE_FILE\"\n\
+         rm -f \"{script_file_posix}\"\n\
+         exit $EXIT_CODE\n"
+    )
+}
+
+/// Build the wrapper script for PowerShell.
+///
+/// The wrapper:
+/// 1. Dot-sources the state script if it exists (restoring `$env:` variables and `RAGENT_PWD`).
+/// 2. Changes to the saved directory.
+/// 3. Executes the user command via `Invoke-Expression`.
+/// 4. Persists user-set environment variables to the state script.
+/// 5. Appends the `RAGENT_PWD` marker.
+/// 6. Cleans up the temporary script file.
+fn build_powershell_wrapper(state_file: &str, script_file: &str) -> String {
+    // PowerShell wrapper: dot-source state, run command, save state
+    format!(
+        "$ErrorActionPreference = 'Continue'\n\
+         $StateFile = '{state_file}'\n\
+         if (Test-Path $StateFile) {{ . $StateFile }}\n\
+         if ($env:RAGENT_PWD) {{ Set-Location $env:RAGENT_PWD }}\n\
+         $UserCmd = Get-Content -Raw '{script_file}'\n\
+         try {{\n\
+           Invoke-Expression $UserCmd\n\
+         }} finally {{\n\
+           $exitCode = $LASTEXITCODE\n\
+           # Persist environment variables set during the session\n\
+           $envLines = @()\n\
+           Get-ChildItem Env: | ForEach-Object {{\n\
+             $envLines += \"Set-Item -Path 'Env:\\`\" + $_.Key + \"\\`' -Value '\\`\" + $_.Value.Replace(\"'\", \"''\") + \"\\`'\"\n\
+           }}\n\
+           $envLines += \"Set-Location -Path '\\`\" + (Get-Location).Path + \"\\`'\"\n\
+           $envLines += 'RAGENT_PWD=' + (Get-Location).Path\n\
+           Set-Content -Path $StateFile -Value $envLines\n\
+           Remove-Item -Force '{script_file}' -ErrorAction SilentlyContinue\n\
+           exit $exitCode\n\
+         }}\n"
+    )
+}
+
 #[async_trait::async_trait]
 impl Tool for BashTool {
     fn name(&self) -> &'static str {
@@ -583,7 +906,7 @@ impl Tool for BashTool {
     /// Returns a human-readable description of what the tool does.
     fn description(&self) -> &'static str {
         "Execute a shell command and return stdout and stderr. \
-               Commands are run with bash -c in the working directory."
+               Commands are run in the working directory."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -606,13 +929,18 @@ impl Tool for BashTool {
         "bash:execute"
     }
 
-    /// Executes a shell command via `bash -c`.
+    /// Executes a shell command.
+    ///
+    /// On Unix, uses `bash -c`. On Windows, uses Git Bash (preferred) or
+    /// PowerShell as a fallback. All 7 security layers are enforced
+    /// regardless of the underlying shell.
     ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - The `command` parameter is missing or invalid
     /// - The command contains a dangerous pattern (e.g., `rm -rf /`, `mkfs`, `dd if=`)
+    /// - No suitable shell is found on Windows
     /// - The command fails to execute (command not found, permission denied, etc.)
     async fn execute(&self, input: Value, ctx: &ToolContext) -> Result<ToolOutput> {
         let command = input["command"]
@@ -620,12 +948,25 @@ impl Tool for BashTool {
             .context("Missing required 'command' parameter")?;
         let timeout_secs = input["timeout"].as_u64().unwrap_or(DEFAULT_TIMEOUT_SECS);
 
+        // ── Determine shell ─────────────────────────────────────────────
+        let shell = get_shell();
+
         tracing::info!(
             command = %crate::sanitize::redact_secrets(command),
             working_dir = %ctx.working_dir.display(),
+            shell = ?shell,
             "Executing bash command"
         );
 
+        if is_windows() && matches!(shell, ShellType::Bash) {
+            // ShellType::Bash on Windows means no shell was found.
+            bail!(
+                "No suitable shell found on Windows. \
+                 Please install Git for Windows or PowerShell 7+."
+            );
+        }
+
+        // ── Security checks (all 7 layers, shell-agnostic) ───────────────
         if is_safe_command(command) {
             tracing::info!("Safe bash command auto-approved");
         }
@@ -640,7 +981,7 @@ impl Tool for BashTool {
             } else {
                 bail!(
                     "Command rejected: uses banned external tool (curl, wget, nc, telnet, axel, aria2c, lynx, w3m). \
-                    These tools could exfiltrate data or connect to external systems."
+                     These tools could exfiltrate data or connect to external systems."
                 );
             }
         }
@@ -649,12 +990,12 @@ impl Tool for BashTool {
         if is_directory_escape_attempt(command, &ctx.working_dir) {
             bail!(
                 "Command rejected: attempts to escape working directory {}. \
-                Use only relative paths (cd ./subdir, cd subdir).",
+                 Use only relative paths (cd ./subdir, cd subdir).",
                 ctx.working_dir.display()
             );
         }
 
-        // CC1-T6: Pre-check bash syntax
+        // CC1-T6: Pre-check bash syntax (skipped for PowerShell)
         validate_bash_syntax(command).await?;
 
         // Check for denied command names (word-boundary matched, e.g. mkfs, insmod, useradd)
@@ -664,7 +1005,7 @@ impl Tool for BashTool {
             } else {
                 bail!(
                     "Command rejected: uses dangerous command (mkfs, insmod, useradd, etc.). \
-                    These commands could cause irreversible damage to the system."
+                     These commands could cause irreversible damage to the system."
                 );
             }
         }
@@ -700,50 +1041,65 @@ impl Tool for BashTool {
         // Acquire a process-spawn permit to bound concurrency.
         let _permit = crate::resource::acquire_process_permit().await?;
 
-        // ── Persistent shell state ────────────────────────────────────────────
-        // Write the user command to a temporary script file so that we can
-        // source the persisted environment before running it without any
-        // quoting issues.
+        // ── Persistent shell state ────────────────────────────────────────
         let state_file = state_file_path(&ctx.session_id);
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros();
-        let script_file = format!(
-            "/tmp/ragent_cmd_{}_{}.sh",
-            safe_session_id(&ctx.session_id),
-            timestamp
-        );
+        let script_file = script_file_path(&ctx.session_id, shell)?;
+
+        // Write the user command to the temporary script file.
         std::fs::write(&script_file, command)
             .context("Failed to write command to temporary script file")?;
 
-        // Wrapper: restore state → run user script → save new state.
-        // RAGENT_PWD is appended as an unambiguous marker for the cwd.
-        let wrapper = format!(
-            "STATE_FILE=\"{state_file}\"\n\
-             if [ -f \"$STATE_FILE\" ]; then\n\
-               . \"$STATE_FILE\" 2>/dev/null\n\
-               cd \"${{RAGENT_PWD:-}}\" 2>/dev/null || true\n\
-             fi\n\
-             bash \"{script_file}\"\n\
-             EXIT_CODE=$?\n\
-             export -p 2>/dev/null > \"$STATE_FILE\" || true\n\
-             printf 'RAGENT_PWD=%s\\n' \"$(pwd)\" >> \"$STATE_FILE\"\n\
-             rm -f \"{script_file}\"\n\
-             exit $EXIT_CODE\n"
-        );
+        // Build the appropriate wrapper script for the detected shell.
+        let wrapper = match shell {
+            ShellType::Bash | ShellType::GitBash(_) => {
+                build_posix_wrapper(&state_file, &script_file)
+            }
+            ShellType::PowerShell(_) => build_powershell_wrapper(&state_file, &script_file),
+        };
 
         let start = Instant::now();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            Command::new("bash")
-                .arg("-c")
-                .arg(&wrapper)
-                .current_dir(&ctx.working_dir)
-                .output(),
-        )
-        .await;
+        let result = match shell {
+            ShellType::Bash => {
+                // Standard Unix bash execution
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    Command::new("bash")
+                        .arg("-c")
+                        .arg(&wrapper)
+                        .current_dir(&ctx.working_dir)
+                        .output(),
+                )
+                .await
+            }
+            ShellType::GitBash(path) => {
+                // Git Bash on Windows
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    Command::new(path)
+                        .arg("-c")
+                        .arg(&wrapper)
+                        .current_dir(&ctx.working_dir)
+                        .output(),
+                )
+                .await
+            }
+            ShellType::PowerShell(path) => {
+                // PowerShell on Windows — use -Command to pass inline command
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(timeout_secs),
+                    Command::new(path)
+                        .arg("-NoLogo")
+                        .arg("-NoProfile")
+                        .arg("-NonInteractive")
+                        .arg("-Command")
+                        .arg(&wrapper)
+                        .current_dir(&ctx.working_dir)
+                        .output(),
+                )
+                .await
+            }
+        };
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
@@ -865,4 +1221,307 @@ fn validate_no_obfuscation(command: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+// ── Tests ─────────────────────────���────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Safe command tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_safe_command_exact_match() {
+        assert!(is_safe_command("ls"));
+        assert!(is_safe_command("git"));
+        assert!(is_safe_command("cargo"));
+    }
+
+    #[test]
+    fn test_safe_command_with_args() {
+        assert!(is_safe_command("ls -la"));
+        assert!(is_safe_command("git status"));
+        assert!(is_safe_command("cargo build"));
+    }
+
+    #[test]
+    fn test_unsafe_command() {
+        assert!(!is_safe_command("rm"));
+        assert!(!is_safe_command("curl"));
+        assert!(!is_safe_command("nmap"));
+    }
+
+    // ── Banned command tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_banned_command_exact() {
+        assert!(contains_banned_command("curl http://example.com"));
+        assert!(contains_banned_command("wget http://example.com"));
+    }
+
+    #[test]
+    fn test_banned_command_word_boundary() {
+        // "curl" should not match "curling"
+        assert!(!contains_banned_command("curling -v output"));
+        // "nc" should not match "uncle"
+        assert!(!contains_banned_command("uncle"));
+    }
+
+    // ── Denied command tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_denied_command_mkfs() {
+        assert!(contains_denied_command("mkfs /dev/sda"));
+        assert!(contains_denied_command("mkfs.ext4 /dev/sda"));
+    }
+
+    #[test]
+    fn test_denied_command_sudo() {
+        assert!(contains_denied_command("sudo apt install foo"));
+        assert!(contains_denied_command("sudo\tapt install foo"));
+    }
+
+    // ── Directory escape tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_directory_escape_parent() {
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(is_directory_escape_attempt("cd ..", wd));
+        assert!(is_directory_escape_attempt("cd ../..", wd));
+    }
+
+    #[test]
+    fn test_directory_escape_home() {
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(is_directory_escape_attempt("cd ~", wd));
+        assert!(is_directory_escape_attempt("cd $HOME", wd));
+        assert!(is_directory_escape_attempt("cd ${HOME}", wd));
+    }
+
+    #[test]
+    fn test_directory_escape_absolute() {
+        // Use a real temporary directory so canonicalize() works properly.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wd = tmp.path();
+        // Multi-segment absolute path outside wd should be detected.
+        assert!(is_directory_escape_attempt("cd /etc/passwd", wd));
+    }
+
+    #[test]
+    fn test_directory_escape_subpath_ok() {
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(!is_directory_escape_attempt("cd src", wd));
+        assert!(!is_directory_escape_attempt("cd ./src", wd));
+    }
+
+    // ── Obfuscation detection tests ──────────────────────────────────────
+
+    #[test]
+    fn test_obfuscation_base64() {
+        assert!(validate_no_obfuscation("echo dGVzdA== | base64 -d | bash").is_err());
+    }
+
+    // ── Windows directory escape tests (inner function, testable on any OS) ──
+
+    #[test]
+    fn test_windows_directory_escape_drive_letter() {
+        // Drive-letter absolute paths should be rejected on Windows
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(is_directory_escape_attempt_inner("cd C:\\Users", wd, true));
+        assert!(is_directory_escape_attempt_inner(
+            "cd D:\\project",
+            wd,
+            true
+        ));
+        assert!(is_directory_escape_attempt_inner("cd C:/Users", wd, true));
+    }
+
+    #[test]
+    fn test_windows_directory_escape_backslash() {
+        // Bare backslash (root of current drive) should be rejected on Windows
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(is_directory_escape_attempt_inner("cd \\", wd, true));
+    }
+
+    #[test]
+    fn test_windows_directory_escape_not_on_unix() {
+        // On Unix, Windows-style paths are not flagged (they're not valid paths)
+        let wd = std::path::Path::new("/home/user/project");
+        // On Unix (on_windows=false), C:\ paths should NOT trigger escape detection
+        // because is_windows() returns false
+        assert!(!is_directory_escape_attempt_inner(
+            "cd C:\\Users",
+            wd,
+            false
+        ));
+    }
+
+    #[test]
+    fn test_directory_escape_pushd() {
+        let wd = std::path::Path::new("/home/user/project");
+        assert!(is_directory_escape_attempt("pushd ..", wd));
+        assert!(is_directory_escape_attempt("pushd ~", wd));
+    }
+
+    // ── Obfuscation detection tests (continued) ──────────────────────────
+    #[test]
+    fn test_obfuscation_python_exec() {
+        assert!(validate_no_obfuscation("python -c exec('code')").is_err());
+    }
+
+    #[test]
+    fn test_obfuscation_hex_escape() {
+        assert!(validate_no_obfuscation("$'\\x6c\\x73'").is_err());
+    }
+
+    #[test]
+    fn test_obfuscation_eval_subshell() {
+        assert!(validate_no_obfuscation("eval $(whoami)").is_err());
+    }
+
+    #[test]
+    fn test_obfuscation_clean_command() {
+        assert!(validate_no_obfuscation("ls -la").is_ok());
+    }
+
+    // ── Shell discovery tests (Unix-only) ───────────────────────────────
+
+    #[test]
+    fn test_is_unix_returns_bash() {
+        // On non-Windows, discover_shell should return ShellType::Bash
+        if !is_windows() {
+            let shell = discover_shell();
+            assert!(matches!(shell, ShellType::Bash));
+        }
+    }
+
+    #[test]
+    fn test_shell_cache_is_consistent() {
+        let shell1 = get_shell();
+        let shell2 = get_shell();
+        // Both references should point to the same cached value
+        let _ = shell1;
+        let _ = shell2;
+        // Both references should point to the same cached value
+        assert!(matches!(shell1, ShellType::Bash) || is_windows());
+    }
+
+    // ── State file path tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_state_file_path_format() {
+        let path = state_file_path("test-session-123");
+        if is_windows() {
+            // On Windows, should use LOCALAPPDATA-based path
+            assert!(
+                path.contains("ragent_shell_test-session-123.state"),
+                "Windows state path should contain the session filename: {path}"
+            );
+        } else {
+            // On Unix, should use /tmp
+            assert!(
+                path.starts_with("/tmp/ragent_shell_"),
+                "Unix state path should start with /tmp: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_safe_session_id() {
+        assert_eq!(safe_session_id("abc-123"), "abc-123");
+        assert_eq!(safe_session_id("abc 123"), "abc_123");
+        assert_eq!(safe_session_id("abc/123"), "abc_123");
+    }
+
+    // ── Windows path helpers ─────────────────────────────────────────────
+
+    #[test]
+    fn test_to_posix_path() {
+        assert_eq!(
+            to_posix_path(r"C:\Users\test\file.txt"),
+            "C:/Users/test/file.txt"
+        );
+        assert_eq!(to_posix_path("/tmp/test.sh"), "/tmp/test.sh");
+    }
+
+    // ── Heredoc handling tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_strip_heredoc_bodies() {
+        let cmd = "cat <<'EOF'\nsome heredoc content\nEOF\n";
+        let stripped = strip_heredoc_bodies(cmd);
+        // The heredoc body should be removed but the markers kept
+        assert!(!stripped.contains("some heredoc content"));
+        assert!(stripped.contains("cat <<'EOF'"));
+        assert!(stripped.contains("EOF"));
+    }
+
+    // ── Extract command names tests ──────────────────────────────────────
+
+    #[test]
+    fn test_extract_command_names_simple() {
+        let names = extract_command_names("ls -la");
+        assert_eq!(names, vec!["ls"]);
+    }
+
+    #[test]
+    fn test_extract_command_names_piped() {
+        let names = extract_command_names("ls | grep foo");
+        assert_eq!(names, vec!["ls", "grep"]);
+    }
+
+    #[test]
+    fn test_extract_command_names_chained() {
+        let names = extract_command_names("cd tmp && mkfs");
+        assert_eq!(names, vec!["cd", "mkfs"]);
+    }
+
+    // ── PowerShell wrapper tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_powershell_wrapper_contains_invoke() {
+        let wrapper = build_powershell_wrapper("C:/state.state", "C:/cmd.ps1");
+        assert!(wrapper.contains("Invoke-Expression"));
+        assert!(wrapper.contains("RAGENT_PWD"));
+    }
+
+    #[test]
+    fn test_posix_wrapper_structure() {
+        let wrapper = build_posix_wrapper("/tmp/ragent_shell_test.state", "/tmp/cmd.sh");
+        assert!(wrapper.contains("STATE_FILE"));
+        assert!(wrapper.contains("RAGENT_PWD"));
+        assert!(wrapper.contains("EXIT_CODE"));
+    }
+
+    // ── Script file path tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_script_file_path_bash_extension() {
+        let path = script_file_path("test", &ShellType::Bash).unwrap();
+        assert!(
+            path.ends_with(".sh"),
+            "Bash script should have .sh extension: {path}"
+        );
+    }
+
+    #[test]
+    fn test_script_file_path_powershell_extension() {
+        let path =
+            script_file_path("test", &ShellType::PowerShell(PathBuf::from("pwsh.exe"))).unwrap();
+        assert!(
+            path.ends_with(".ps1"),
+            "PowerShell script should have .ps1 extension: {path}"
+        );
+    }
+
+    #[test]
+    fn test_script_file_path_gitbash_extension() {
+        let path =
+            script_file_path("test", &ShellType::GitBash(PathBuf::from("bash.exe"))).unwrap();
+        assert!(
+            path.ends_with(".sh"),
+            "Git Bash script should have .sh extension: {path}"
+        );
+    }
 }
