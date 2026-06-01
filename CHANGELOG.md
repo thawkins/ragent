@@ -1,5 +1,10 @@
 # Changelog
 
+## Version: 0.1.0-alpha.103
+
+### Fixed
+- **Bash syntax validation on Windows** — `validate_bash_syntax()` previously used a hardcoded `sh -n -c` command, which fails on Windows because `sh` is not available. Now uses the discovered shell program: `bash -n -c` on Unix, the Git Bash executable path on Windows (Git Bash), and skips validation entirely for PowerShell. This eliminates the "program not found" error when running bash commands on Windows 11.
+
 ## Version: 0.1.0-alpha.102
 
 ### Added

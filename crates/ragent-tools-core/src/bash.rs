@@ -16,6 +16,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -792,22 +793,34 @@ fn is_directory_escape_attempt_inner(
     false
 }
 
-/// Pre-check command syntax using `sh -n -c` without executing.
+/// Pre-check command syntax without executing.
 ///
-/// On Windows with PowerShell, this check is skipped because PowerShell
-/// has its own runtime parser and `sh -n -c` is not applicable.
-/// Returns error if syntax is invalid.
+/// On Unix, uses `bash -n -c`. On Windows with Git Bash, uses the discovered
+/// Git Bash executable with `-n -c`. On Windows with PowerShell, this check
+/// is skipped entirely because PowerShell has its own runtime parser.
+///
+/// Returns error if syntax is invalid or the shell program cannot be found.
 async fn validate_bash_syntax(cmd: &str) -> Result<()> {
-    // Skip syntax validation when using PowerShell (PowerShell has its
-    // own parser and `sh -n -c` is a POSIX-only concept).
     let shell = get_shell();
+
+    // Skip syntax validation when using PowerShell (PowerShell has its own
+    // parser and `-n` is a POSIX-shell-only concept).
     if !shell.is_posix() {
         return Ok(());
     }
 
+    // Use the actual discovered shell program for syntax checking rather than
+    // a hardcoded "sh" which may not exist on Windows (or may be a different
+    // shell like dash on some Linux systems).
+    let (program, args): (&OsStr, Vec<&OsStr>) = match shell {
+        ShellType::Bash => (OsStr::new("bash"), vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)]),
+        ShellType::GitBash(path) => (path.as_os_str(), vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)]),
+        ShellType::PowerShell(_) => unreachable!("PowerShell handled above"),
+    };
+
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(1),
-        Command::new("sh").arg("-n").arg("-c").arg(cmd).output(),
+        Command::new(program).args(&args).output(),
     )
     .await;
 
