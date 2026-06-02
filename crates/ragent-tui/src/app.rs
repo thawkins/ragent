@@ -9030,17 +9030,215 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                    SpecCommand::Unknown(sub)
-                        if sub == "create"
-                            || sub == "validate"
-                            || sub == "status"
-                            || sub == "task"
-                            || sub == "activate"
-                            || sub == "coverage" =>
-                    {
-                        self.status = format!("Usage: /spec {} — try /spec help", sub);
-                    }
-                    SpecCommand::Unknown(sub) => {
+                                          SpecCommand::Impl {
+                                              spec_id,
+                                              task_id,
+                                              dry_run,
+                                          } => {
+                                              use ragent_specs::{ImplOptions, SpecImplRunner};
+                                              let working_dir = std::env::current_dir().unwrap_or_default();
+                                              let specs_root = working_dir.join("specs");
+                    
+                                              // Validate spec exists
+                                              let sid_opt = ragent_specs::spec::SpecId::new(&spec_id);
+                                              if sid_opt.is_none() {
+                                                  self.status = format!("spec: invalid spec ID: {}", spec_id);
+                                                  return;
+                                              }
+                                              let sid = sid_opt.unwrap();
+                    
+                                                                                              // Check spec exists on disk and read its status
+                                                                                              let mgr = SpecManager::new(&specs_root);
+                                                                                              let rt = tokio::runtime::Handle::current();
+                                                                                              let (spec_exists, spec_status): (
+                                                                                                  bool,
+                                                                                                  Option<ragent_specs::spec::SpecStatus>,
+                                                                                              ) = tokio::task::block_in_place(|| {
+                                                                                                  rt.block_on(async {
+                                                                                                      let spec = mgr.read_spec(&sid).await;
+                                                                                                      match spec {
+                                                                                                          Ok(s) => (true, Some(s.status)),
+                                                                                                          Err(_) => (false, None),
+                                                                                                      }
+                                                                                                  })
+                                                                                              });
+                                                                                              if !spec_exists {
+                                                                                                  // List available specs with plans
+                                                                                                  let available: Vec<String> =
+                                                                                                      tokio::task::block_in_place(|| {
+                                                                                                          rt.block_on(async {
+                                                                                                              match mgr.discover_specs().await {
+                                                                                                                  Ok(specs) => specs
+                                                                                                                      .iter()
+                                                                                                                      .map(|s| format!(
+                                                                                                                          "  - {} ({})",
+                                                                                                                          s.id,
+                                                                                                                          s.status.as_str()
+                                                                                                                      ))
+                                                                                                                      .collect(),
+                                                                                                                  Err(_) => vec![],
+                                                                                                              }
+                                                                                                          })
+                                                                                                      });
+                                                                                                  let avail_str = if available.is_empty() {
+                                                                                                      "  (none found)".to_string()
+                                                                                                  } else {
+                                                                                                      available.join("\n")
+                                                                                                  };
+                                                                                                  self.append_assistant_text(&format!(
+                                                                                                      "From: /spec impl\n\n**Error:** Spec `{}` not found.\n\nAvailable specs:\n{}",
+                                                                                                      spec_id, avail_str
+                                                                                                  ));
+                                                                                                  self.status = format!("spec: spec {} not found", spec_id);
+                                                                                                  return;
+                                                                                              }
+                                              
+                                                                                              // Check if already implemented (FR-026)
+                                                if let Some(status) = spec_status {
+                                                  if matches!(
+                                                      status,
+                                                      ragent_specs::spec::SpecStatus::Implemented
+                                                          | ragent_specs::spec::SpecStatus::Verified
+                                                  ) {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /spec impl\n\n⚠️ Spec **{}** is already marked as **{}**.\n\n\
+                                                           To re-implement, first transition the spec back to `approved` or `in_progress`:\n\
+                                                           `/spec status {} approved`",
+                                                          spec_id, status.as_str(), spec_id
+                                                      ));
+                                                      self.status = format!("spec: {} is {}", spec_id, status.as_str());
+                                                      return;
+                                                  }
+                                              }
+                    
+                                              // Build options
+                                              let mut opts = ImplOptions::new();
+                                              if let Some(ref tid) = task_id {
+                                                  opts = opts.with_task(tid);
+                                              }
+                                              if dry_run {
+                                                  opts = opts.with_dry_run();
+                                              }
+                    
+                                                                                              // Create runner
+                                                                                              let runner_result: Result<SpecImplRunner, String> =
+                                                                                                  tokio::task::block_in_place(|| {
+                                                                                                      rt.block_on(async {
+                                                                                                          match SpecImplRunner::new(&spec_id, specs_root, opts).await {
+                                                                                                              Ok(r) => Ok(r),
+                                                                                                              Err(e) => Err(format!("spec impl failed: {}", e)),
+                                                                                                          }
+                                                                                                      })
+                                                                                                  });
+                                              
+                                                                                              match runner_result {
+                                                                                                  Ok(runner) => {
+                                                                                                      let is_dry_run = dry_run;
+                                                                                                      let result: Result<_, String> =
+                                                                                                          tokio::task::block_in_place(|| {
+                                                                                                              rt.block_on(async {
+                                                                                                                  match runner.run().await {
+                                                                                                                      Ok(r) => Ok(r),
+                                                                                                                      Err(e) => Err(format!("{}", e)),
+                                                                                                                  }
+                                                                                                              })
+                                                                                                          });                    
+                                                                                match result {
+                                                                                            Ok(impl_result) => {
+                                                                                                // Display summary
+                                                                                                self.append_assistant_text(&impl_result.summary);
+                                                      
+                                                                                                if is_dry_run || impl_result.prompt.is_empty() {
+                                                                                                    self.status = format!(
+                                                                                                        "spec: {} dry-run complete",
+                                                                                                        spec_id
+                                                                                                    );
+                                                                                                } else {
+                                                                                                    // Inject the execution prompt into the agent session
+                                                                                                    let session_id =
+                                                                                                        self.session_id.clone().unwrap_or_default();
+                                                      
+                                                                                                    // Use coder agent for implementation
+                                                                                                    let mut agent = self.agent_info.clone();
+                                                                                                    self.apply_selected_model_and_thinking(&mut agent);
+                                                      
+                                                                                                    let msg = Message::user_text(
+                                                                                                        &session_id,
+                                                                                                        &impl_result.prompt,
+                                                                                                    );
+                                                                                                    self.messages.push(msg);
+                                                      
+                                                                                                    let processor =
+                                                                                                        self.session_processor.clone();
+                                                                                                    let flag =
+                                                                                                        Arc::new(AtomicBool::new(false));
+                                                                                                    self.cancel_flag = Some(flag.clone());
+                                                                                                    self.is_processing = true;
+                                                                                                    self.status = format!(
+                                                                                                        "spec: implementing {} ({} tasks)",
+                                                                                                        spec_id,
+                                                                                                        impl_result.total_tasks
+                                                                                                    );
+                                                      
+                                                                                                    let event_bus = self.event_bus.clone();
+                                                                                                    let prompt = impl_result.prompt;
+                                                                                                    let sid = session_id;
+                                                                                                    tokio::spawn(async move {
+                                                                                                        if let Err(e) = processor
+                                                                                                            .process_message(
+                                                                                                                &sid,
+                                                                                                                &prompt,
+                                                                                                                &agent,
+                                                                                                                flag,
+                                                                                                            )
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            tracing::warn!(
+                                                                                                                error = %e,
+                                                                                                                "spec: implementation failed"
+                                                                                                            );
+                                                                                                            event_bus
+                                                                                                                .publish(
+                                                                                                                    ragent_core::event::Event::AgentError {
+                                                                                                                        session_id: sid,
+                                                                                                                        error: format!(
+                                                                                                                            "spec implementation failed: {}",
+                                                                                                                            e
+                                                                                                                        ),
+                                                                                                                    },
+                                                                                                                );
+                                                                                                        }
+                                                                                                    });
+                                                                                                }
+                                                                                            }                                                          Err(e) => {
+                                                              self.append_assistant_text(&format!(
+                                                                  "From: /spec impl\n\n**Error:** {}",
+                                                                  e
+                                                              ));
+                                                              self.status = format!("spec: {}", e);
+                                                          }
+                                                      }
+                                                  }
+                                                  Err(e) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /spec impl\n\n**Error:** {}",
+                                                          e
+                                                      ));
+                                                      self.status = format!("spec: {}", e);
+                                                  }
+                                              }
+                                          }
+                                          SpecCommand::Unknown(sub)
+                                              if sub == "create"
+                                                  || sub == "validate"
+                                                  || sub == "status"
+                                                  || sub == "task"
+                                                  || sub == "activate"
+                                                  || sub == "coverage"
+                                                  || sub == "impl" =>
+                                          {
+                                              self.status = format!("Usage: /spec {} — try /spec help", sub);
+                                          }                    SpecCommand::Unknown(sub) => {
                         self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");
                     }
                 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Tim Hawkins"]
-description = "LLM provider implementations for ragent (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI)"
+description = "LLM provider implementations for ragent (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock)"
 repository = "https://github.com/thawkins/ragent"
 
 [features]

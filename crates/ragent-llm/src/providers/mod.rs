@@ -6,6 +6,9 @@
 pub mod anthropic;
 pub mod azure_foundry;
 pub mod azure_resource;
+pub mod bedrock;
+pub mod bedrock_credentials;
+pub mod bedrock_sigv4;
 pub mod copilot;
 pub mod gemini;
 pub mod generic_openai;
@@ -15,6 +18,7 @@ pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
 mod thinking;
+pub mod xai;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -267,6 +271,7 @@ impl Default for ProviderRegistry {
 pub fn create_default_registry() -> ProviderRegistry {
     let mut registry = ProviderRegistry::new();
     registry.register(Box::new(anthropic::AnthropicProvider));
+    registry.register(Box::new(bedrock::BedrockProvider));
     registry.register(Box::new(azure_foundry::AzureFoundryProvider));
     registry.register(Box::new(azure_resource::AzureResourceProvider::new()));
     registry.register(Box::new(copilot::CopilotProvider::new()));
@@ -276,5 +281,6 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(generic_openai::GenericOpenAiProvider));
     registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));
     registry.register(Box::new(ollama::OllamaProvider::new()));
+    registry.register(Box::new(xai::XaiProvider));
     registry
 }

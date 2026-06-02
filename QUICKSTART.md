@@ -5,8 +5,9 @@ configuration, and common workflows.
 
 ---
 
-## Highlights (0.1.0-alpha.82)
+## Highlights (0.1.0-alpha.104)
 
+- **Amazon Bedrock support** — New provider for AWS-hosted models (Claude, Nova, Llama, Mistral) with AWS SigV4 authentication and dual API support.
 - **Azure AI Foundry support** — New provider for Microsoft Azure AI Foundry models with OpenAI-compatible endpoints.
 - **`/config show`** — Display current resolved configuration in the TUI.
 - **Image attachment support (Alt+V)**: paste images from clipboard or file URIs; pending attachments are displayed before sending.
@@ -17,7 +18,7 @@ configuration, and common workflows.
 ## Prerequisites
 
 - **Rust 1.85+** (edition 2024) — install via [rustup](https://rustup.rs)
-- An LLM provider: **Anthropic**, **OpenAI**, **Hugging Face**, or a local **Ollama** server
+- An LLM provider: **Anthropic**, **OpenAI**, **Hugging Face**, **Amazon Bedrock**, or a local **Ollama** server
 
 ## Installation
 
@@ -43,7 +44,7 @@ ragent        # launch ragent
                                # press 'p' to open the provider setup dialog```
 
 The dialog walks you through:
-1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, or Ollama)
+1. **Selecting a provider** (Anthropic, OpenAI, Google Gemini, Hugging Face, GitHub Copilot, Amazon Bedrock, or Ollama)
 2. **Entering your API key** (if required — Copilot auto-discovers, Ollama needs none)
 3. **Choosing a model** from the provider's available models
 
@@ -124,6 +125,34 @@ ollama pull llama3.2  # Pull a model
 # For a remote server, set:
 export OLLAMA_HOST="http://your-server:11434"
 ```
+
+### Option G: Amazon Bedrock (AWS Credentials)
+
+```bash
+# Set AWS credentials (or use an AWS profile)
+export AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE"
+export AWS_SECRET_ACCESS_KEY="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+export AWS_REGION="us-east-1"
+
+# Use a Bedrock model
+ragent run --model bedrock/anthropic.claude-sonnet-4-20250514-v1:0 "Hello world"
+
+# Or use a short alias
+ragent run --model bedrock/claude-sonnet-4-20250514 "Explain this code"
+
+# Or configure in ragent.json
+# {
+#   "provider": {
+#     "bedrock": {
+#       "options": { "region": "us-east-1", "profile": "my-dev-profile" }
+#     }
+#   }
+# }
+```
+
+Bedrock supports both Anthropic Claude models (via Messages API) and
+non-Anthropic models like Amazon Nova and Meta Llama (via Converse API).
+No API key is needed — authentication uses your AWS credentials.
 
 **API key resolution order:** environment variable → provider auto-discovery (Copilot) → database.
 

@@ -53,14 +53,22 @@ pub enum SpecCommand {
     },
     /// Deactivate the currently active spec.
     Deactivate,
-    /// Show requirement coverage for a spec.
-    Coverage {
-        /// Spec identifier.
-        spec_id: String,
-    },
-    /// Unknown subcommand (preserves the raw name for error messages).
-    Unknown(String),
-}
+          /// Show requirement coverage for a spec.
+          Coverage {
+              /// Spec identifier.
+              spec_id: String,
+          },
+          /// Implement a spec by executing its PLAN.md tasks in dependency order.
+          Impl {
+              /// Spec identifier.
+              spec_id: String,
+              /// Optional task ID to execute (with its transitive dependencies).
+              task_id: Option<String>,
+              /// If true, display execution plan without actually running tasks.
+              dry_run: bool,
+          },
+          /// Unknown subcommand (preserves the raw name for error messages).
+          Unknown(String),}
 
 impl SpecCommand {
     /// Parse a `/spec` argument string into a command.
@@ -143,18 +151,51 @@ impl SpecCommand {
                 }
             }
             "deactivate" => Self::Deactivate,
-            "coverage" => {
-                let spec_id = rest.trim();
-                if spec_id.is_empty() {
-                    Self::Unknown("coverage".to_string())
-                } else {
-                    Self::Coverage {
-                        spec_id: spec_id.to_string(),
-                    }
-                }
-            }
-            other => Self::Unknown(other.to_string()),
-        }
+                          "coverage" => {
+                              let spec_id = rest.trim();
+                              if spec_id.is_empty() {
+                                  Self::Unknown("coverage".to_string())
+                              } else {
+                                  Self::Coverage {
+                                      spec_id: spec_id.to_string(),
+                                  }
+                              }
+                          }
+                          "impl" | "implement" => {
+                              // Parse: /spec impl <specname> [--task <ID>] [--dry-run]
+                              // Alias: /spec implement <specname> [--task <ID>] [--dry-run]
+                              let trimmed = rest.trim();
+                              if trimmed.is_empty() {
+                                  Self::Unknown("impl".to_string())
+                              } else {
+                                  let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                                  let spec_id = parts[0].to_string();
+                                  let mut task_id = None;
+                                  let mut dry_run = false;
+                                  let mut i = 1;
+                                  while i < parts.len() {
+                                      match parts[i] {
+                                          "--task" => {
+                                              i += 1;
+                                              if let Some(tid) = parts.get(i) {
+                                                  task_id = Some(tid.to_string());
+                                              }
+                                          }
+                                          "--dry-run" => {
+                                              dry_run = true;
+                                          }
+                                          _ => {}
+                                      }
+                                      i += 1;
+                                  }
+                                  Self::Impl {
+                                      spec_id,
+                                      task_id,
+                                      dry_run,
+                                  }
+                              }
+                          }
+                          other => Self::Unknown(other.to_string()),        }
     }
 
     /// Returns `true` if this is a usage-error variant.
@@ -167,6 +208,7 @@ impl SpecCommand {
                 || s == "task"
                 || s == "activate"
                 || s == "coverage"
+                || s == "impl"
         )
     }
 
@@ -185,9 +227,9 @@ impl SpecCommand {
          | `/spec task <spec-id> [<task-id>] [<new-status>]` | required `spec-id`, optional `task-id` and `new-status` | List tasks, show a task, or update its status. |\n\
          | `/spec activate <spec-id>` | required `spec-id` | Activate a spec for context injection into agent prompts. |\n\
          | `/spec deactivate` | none | Deactivate the currently active spec. |\n\
-         | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\n\
-         Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets`"
-    }
+                    | `/spec coverage <spec-id>` | required `spec-id` | Show requirement coverage report. |\n\
+                    | `/spec impl <spec-id> [--task <ID>] [--dry-run]` | required `spec-id`, optional flags | Implement a spec by executing its PLAN.md tasks in dependency order. Use `--task` to run a single task, `--dry-run` to preview the plan. Alias: `/spec implement`. |\n\n\
+                    Example: `/spec create websocket Add a real-time collaborative editing feature using WebSockets`"    }
 
     /// Build the user-facing status string for a create operation.
     pub fn build_create_status(specname: &str) -> String {
@@ -422,6 +464,8 @@ mod tests {
         assert!(help.contains("/spec activate"));
         assert!(help.contains("/spec deactivate"));
         assert!(help.contains("/spec coverage"));
+        assert!(help.contains("/spec impl"));
+        assert!(help.contains("/spec implement"));
     }
 
     #[test]
@@ -436,10 +480,109 @@ mod tests {
         assert!(m.contains("specs/bar"));
     }
 
-    #[test]
-    fn create_prompt_contains_feature_and_files() {
-        let p = SpecCommand::build_create_prompt("qux", "quux");
-        assert!(p.contains("quux"));
-        assert!(p.contains("specs/qux/SPEC.md"));
+      #[test]
+      fn create_prompt_contains_feature_and_files() {
+          let p = SpecCommand::build_create_prompt("qux", "quux");
+          assert!(p.contains("quux"));
+          assert!(p.contains("specs/qux/SPEC.md"));
+      }
+    
+      #[test]
+      fn parse_impl_basic() {
+          assert_eq!(
+              SpecCommand::parse("impl myspec"),
+              SpecCommand::Impl {
+                  spec_id: "myspec".to_string(),
+                  task_id: None,
+                  dry_run: false,
+              }
+          );
+      }
+    
+      #[test]
+      fn parse_impl_with_task() {
+          assert_eq!(
+              SpecCommand::parse("impl myspec --task T-003"),
+              SpecCommand::Impl {
+                  spec_id: "myspec".to_string(),
+                  task_id: Some("T-003".to_string()),
+                  dry_run: false,
+              }
+          );
+      }
+    
+      #[test]
+      fn parse_impl_dry_run() {
+          assert_eq!(
+              SpecCommand::parse("impl myspec --dry-run"),
+              SpecCommand::Impl {
+                  spec_id: "myspec".to_string(),
+                  task_id: None,
+                  dry_run: true,
+              }
+          );
+      }
+    
+      #[test]
+      fn parse_impl_all_options() {
+          assert_eq!(
+              SpecCommand::parse("impl myspec --task T-005 --dry-run"),
+              SpecCommand::Impl {
+                  spec_id: "myspec".to_string(),
+                  task_id: Some("T-005".to_string()),
+                  dry_run: true,
+              }
+          );
+      }
+    
+      #[test]
+      fn parse_impl_missing_specname() {
+          assert!(matches!(
+              SpecCommand::parse("impl"),
+              SpecCommand::Unknown(s) if s == "impl"
+          ));
+      }
     }
-}
+        #[test]
+        fn parse_implement_basic() {
+            assert_eq!(
+                SpecCommand::parse("implement myspec"),
+                SpecCommand::Impl {
+                    spec_id: "myspec".to_string(),
+                    task_id: None,
+                    dry_run: false,
+                }
+            );
+        }
+
+        #[test]
+        fn parse_implement_with_task() {
+            assert_eq!(
+                SpecCommand::parse("implement myspec --task T-003"),
+                SpecCommand::Impl {
+                    spec_id: "myspec".to_string(),
+                    task_id: Some("T-003".to_string()),
+                    dry_run: false,
+                }
+            );
+        }
+
+        #[test]
+        fn parse_implement_dry_run() {
+            assert_eq!(
+                SpecCommand::parse("implement myspec --dry-run"),
+                SpecCommand::Impl {
+                    spec_id: "myspec".to_string(),
+                    task_id: None,
+                    dry_run: true,
+                }
+            );
+        }
+
+                  #[test]
+                  fn parse_implement_missing_specname() {
+                      assert!(matches!(
+                          SpecCommand::parse("implement"),
+                          SpecCommand::Unknown(s) if s == "impl"
+                      ));
+                  }

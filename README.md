@@ -13,7 +13,7 @@ It is implemented in Rust as a learning exercise for the author.
 
 - **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
   GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
-  Azure AI Foundry, and Azure Resource (File) provider
+  Azure AI Foundry, Azure Resource (File) provider, and Amazon Bedrock
   out of the box, with an extensible provider trait for adding more
 - **Comprehensive tool system** — ~111 registered tools across 15 categories:
   - **File operations** — read, write, create, edit, multiedit, patch, rm, move, copy,
@@ -280,7 +280,7 @@ The project is a Cargo workspace built from 15 focused crates:
 | `ragent-bench` | Benchmark runner shared between TUI and CLI |
 | `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-config` | Configuration types, defaults, and parsing |
-| `ragent-llm` | Provider clients and model/provider registry |
+| `ragent-llm` | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock) |
 | `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
 | `ragent-server` | Axum HTTP routes and SSE streaming |
 | `ragent-specs` | Spec lifecycle management: discovery, validation, status transitions, review, archival |
@@ -349,6 +349,7 @@ Recent highlights:
 - SPEC.md reorganized, audited, and brought up to date with actual implementation
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery
+- Amazon Bedrock provider with AWS SigV4 signing and dual API support
 - `/config show` slash command for displaying resolved configuration
 - Startup ASCII art banner with compile timestamp
 - Instruction file discovery logging

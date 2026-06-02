@@ -1596,6 +1596,7 @@ pub async fn list_copilot_models(github_token: &str) -> Result<Vec<ModelInfo>> {
 mod tests {
     use super::*;
     use crate::llm::{ChatContent, ChatMessage, ChatRequest};
+    use std::sync::Arc;
 
     #[test]
     fn test_provider_defaults() {

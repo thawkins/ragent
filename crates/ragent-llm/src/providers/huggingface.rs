@@ -937,6 +937,7 @@ fn estimate_context_from_id(model_id: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn test_provider_id_and_name() {

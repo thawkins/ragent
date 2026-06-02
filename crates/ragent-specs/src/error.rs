@@ -34,4 +34,25 @@ pub enum SpecError {
     /// A task ID or requirement ID is unknown.
     #[error("unknown id: {0}")]
     UnknownId(String),
+
+    /// A dependency cycle was detected in the task graph.
+    #[error("dependency cycle detected involving tasks: {}", task_ids.join(", "))]
+    DependencyCycle {
+        /// Task IDs involved in the cycle.
+        task_ids: Vec<String>,
+    },
+
+    /// A plan file could not be parsed.
+    #[error("plan parse error: {0}")]
+    PlanParse(String),
+
+    /// A spec is already in a terminal status and re-implementation requires
+    /// confirmation.
+    #[error("spec {spec_id} is already {status}; re-implementation requires confirmation")]
+    AlreadyImplemented {
+        /// The spec identifier.
+        spec_id: String,
+        /// The current status string.
+        status: String,
+    },
 }
