@@ -64,11 +64,7 @@ impl Tool for SpecListTool {
 
         let count = specs.len();
         for spec in &specs {
-            let title = if spec.title.len() > 28 {
-                format!("{}…", &spec.title[..27])
-            } else {
-                spec.title.clone()
-            };
+            let title = ragent_types::truncate_chars(&spec.title, 28);
             lines.push(format!(
                 "| {:<20} | {:<14} | {:<30} | {:>5.0}% |",
                 spec.id.as_str(),

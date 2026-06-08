@@ -21,8 +21,7 @@ fn test_global_fallback_when_no_local_files() {
 
     // Simulate: no local files, one global file
     let local_files: Vec<(usize, std::path::PathBuf)> = vec![];
-    let global_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(0, global_path.join("AGENTS.md"))];
+    let global_files: Vec<(usize, std::path::PathBuf)> = vec![(0, global_path.join("AGENTS.md"))];
 
     // The first candidate should be the global file
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
@@ -30,7 +29,10 @@ fn test_global_fallback_when_no_local_files() {
     candidates.extend(global_files.clone());
 
     let loaded = candidates.first().map(|(_, p)| p.clone());
-    assert!(loaded.is_some(), "Should load global file when no local files exist");
+    assert!(
+        loaded.is_some(),
+        "Should load global file when no local files exist"
+    );
     assert_eq!(
         loaded.unwrap(),
         global_path.join("AGENTS.md"),
@@ -47,14 +49,17 @@ fn test_project_root_takes_priority_over_global() {
     let global_path = global_dir.path().join("ragent");
     fs::create_dir_all(&global_path).unwrap();
     fs::write(global_path.join("AGENTS.md"), "Global instructions").unwrap();
-    fs::write(working_dir.path().join("AGENTS.md"), "Local root instructions").unwrap();
+    fs::write(
+        working_dir.path().join("AGENTS.md"),
+        "Local root instructions",
+    )
+    .unwrap();
 
     // Root file at depth 0
     let root_files: Vec<(usize, std::path::PathBuf)> =
         vec![(0, working_dir.path().join("AGENTS.md"))];
     let sub_files: Vec<(usize, std::path::PathBuf)> = vec![];
-    let global_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(0, global_path.join("AGENTS.md"))];
+    let global_files: Vec<(usize, std::path::PathBuf)> = vec![(0, global_path.join("AGENTS.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files);
@@ -87,10 +92,8 @@ fn test_global_takes_priority_over_subdirectory() {
 
     // No root files, only subdirectory and global
     let root_files: Vec<(usize, std::path::PathBuf)> = vec![];
-    let sub_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(1, subdir.join("AGENTS.md"))];
-    let global_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(0, global_path.join("AGENTS.md"))];
+    let sub_files: Vec<(usize, std::path::PathBuf)> = vec![(1, subdir.join("AGENTS.md"))];
+    let global_files: Vec<(usize, std::path::PathBuf)> = vec![(0, global_path.join("AGENTS.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files);
@@ -114,12 +117,15 @@ fn test_root_agents_md_beats_global_claude_md() {
     let global_path = global_dir.path().join("ragent");
     fs::create_dir_all(&global_path).unwrap();
     fs::write(global_path.join("CLAUDE.md"), "Global claude instructions").unwrap();
-    fs::write(working_dir.path().join("AGENTS.md"), "Local root agents instructions").unwrap();
+    fs::write(
+        working_dir.path().join("AGENTS.md"),
+        "Local root agents instructions",
+    )
+    .unwrap();
 
     let root_files: Vec<(usize, std::path::PathBuf)> =
         vec![(0, working_dir.path().join("AGENTS.md"))];
-    let global_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(0, global_path.join("CLAUDE.md"))];
+    let global_files: Vec<(usize, std::path::PathBuf)> = vec![(0, global_path.join("CLAUDE.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files);
@@ -156,10 +162,8 @@ fn test_full_priority_chain() {
         (0, root_agents.clone()),
         (0, working_dir.path().join("CLAUDE.md")),
     ];
-    let global_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(0, global_path.join("AGENTS.md"))];
-    let sub_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(1, subdir.join("AGENTS.md"))];
+    let global_files: Vec<(usize, std::path::PathBuf)> = vec![(0, global_path.join("AGENTS.md"))];
+    let sub_files: Vec<(usize, std::path::PathBuf)> = vec![(1, subdir.join("AGENTS.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files.clone());
@@ -202,8 +206,7 @@ fn test_subdirectory_fallback_when_no_root_or_global() {
     // No root files, no global, only subdirectory
     let root_files: Vec<(usize, std::path::PathBuf)> = vec![];
     let global_files: Vec<(usize, std::path::PathBuf)> = vec![];
-    let sub_files: Vec<(usize, std::path::PathBuf)> =
-        vec![(1, subdir.join("AGENTS.md"))];
+    let sub_files: Vec<(usize, std::path::PathBuf)> = vec![(1, subdir.join("AGENTS.md"))];
 
     let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
     candidates.extend(root_files);
@@ -233,9 +236,7 @@ fn test_root_agents_md_beats_subdirectory_agents_md() {
     fs::write(working_dir.path().join("AGENTS.md"), "Root instructions").unwrap();
 
     let (content, discovery) =
-        ragent_agent::agent::collect_agents_md_content_with_discovery(
-            working_dir.path(),
-        );
+        ragent_agent::agent::collect_agents_md_content_with_discovery(working_dir.path());
 
     // The loaded file should be the root AGENTS.md
     assert_eq!(

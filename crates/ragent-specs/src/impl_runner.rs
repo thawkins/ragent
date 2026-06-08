@@ -10,12 +10,11 @@
 //! - A completion summary when all tasks finish
 
 use crate::error::SpecError;
+use crate::manager::SpecManager;
 use crate::plan_parser::{
-    Effort, PlanParser, PlanTask, filter_for_resume, filter_for_task,
-    resolve_execution_order,
+    Effort, PlanParser, PlanTask, filter_for_resume, filter_for_task, resolve_execution_order,
 };
 use crate::spec::{SpecId, SpecStatus};
-use crate::manager::SpecManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -322,7 +321,10 @@ impl SpecImplRunner {
     /// Build the dry-run display (FR-013).
     fn build_dry_run_display(&self) -> String {
         let mut lines = vec![
-            format!("From: /spec impl --dry-run\n\n## Dry Run: {}\n", self.spec_name),
+            format!(
+                "From: /spec impl --dry-run\n\n## Dry Run: {}\n",
+                self.spec_name
+            ),
             format!("**Tasks to execute:** {}", self.execution_order.len()),
             String::new(),
             "| # | ID | Title | Effort | Priority | Dependencies | Status |".to_string(),

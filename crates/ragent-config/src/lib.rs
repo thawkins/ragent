@@ -8,12 +8,16 @@
 //! - YOLO mode configuration
 
 pub mod bash_lists;
+pub mod compression;
 pub mod config;
 pub mod dir_lists;
 pub mod permission;
 pub mod yolo;
 
 // Re-export commonly used types
+pub use compression::{
+    CcrConfig, CompressionConfig, CompressorConfig, RelevanceConfig, TokenizerConfig,
+};
 pub use config::{
     AgentConfig, AutoExtractConfig, Capabilities, CompactionConfig, Config, Cost,
     CrossProjectConfig, EvictionConfig, InternalLlmConfig, InternalLlmDownloadPolicy,

@@ -38,8 +38,9 @@ fn test_state(token: &str) -> AppState {
         stream_config: Default::default(),
         extraction_engine: std::sync::OnceLock::new(),
         auto_approve: false,
-        active_spec: std::sync::Mutex::new(None),
+        active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
+        cached_tool_definitions: parking_lot::RwLock::new(None),
     });
     AppState {
         event_bus,

@@ -1473,61 +1473,59 @@ impl InstructionFileDiscovery {
             self.working_dir.display()
         ));
 
-                            if self.all_discovered_files.is_empty() {
-                                lines.push("".to_string());
-                                lines.push("⚠️  No instruction files found".to_string());
-                                lines.push("  No instructions were loaded for this session.".to_string());
-                            } else {
-                                if let Some(ref gdir) = self.global_dir {
-                                    lines.push(format!(
-                                        "  Global directory: {}",
-                                        gdir.display()
-                                    ));
-                                }
-                                lines.push(format!(
-                                    "📁 Discovered {} file(s):",
-                                    self.all_discovered_files.len()
-                                ));
-                                for file in &self.all_discovered_files {
-                                    let rel = file
-                                        .strip_prefix(&self.working_dir)
-                                        .unwrap_or(file)
-                                        .display()
-                                        .to_string();
-                                    let is_global = self
-                                        .global_dir
-                                        .as_ref()
-                                        .map_or(false, |gd| file.starts_with(gd));
-                                    let source = if is_global { "global" } else { "local" };
-                                    let is_loaded = self.loaded_file.as_ref() == Some(file);
-                                    let marker = if is_loaded { " ✅ LOADED" } else { "" };
-                                    lines.push(format!("   • {} ({}){}", rel, source, marker));
-                                }
-                                lines.push("".to_string());
-                                if let Some(ref loaded) = self.loaded_file {
-                                    let rel = loaded
-                                        .strip_prefix(&self.working_dir)
-                                        .unwrap_or(loaded)
-                                        .display()
-                                        .to_string();
-                                    let priority_note = if self.used_global_fallback {
-                                        "global fallback — no local root instruction file found"
-                                    } else {
-                                        "project root takes priority"
-                                    };
-                                    lines.push(format!(
-                                        "✅ Instructions loaded from: {} ({})",
-                                        rel, priority_note
-                                    ));
-                                }
-                                if self.all_discovered_files.len() > 1 {
-                                    lines.push(
+        if self.all_discovered_files.is_empty() {
+            lines.push(String::new());
+            lines.push("⚠️  No instruction files found".to_string());
+            lines.push("  No instructions were loaded for this session.".to_string());
+        } else {
+            if let Some(ref gdir) = self.global_dir {
+                lines.push(format!("  Global directory: {}", gdir.display()));
+            }
+            lines.push(format!(
+                "📁 Discovered {} file(s):",
+                self.all_discovered_files.len()
+            ));
+            for file in &self.all_discovered_files {
+                let rel = file
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string();
+                let is_global = self
+                    .global_dir
+                    .as_ref()
+                    .map_or(false, |gd| file.starts_with(gd));
+                let source = if is_global { "global" } else { "local" };
+                let is_loaded = self.loaded_file.as_ref() == Some(file);
+                let marker = if is_loaded { " ✅ LOADED" } else { "" };
+                lines.push(format!("   • {} ({}){}", rel, source, marker));
+            }
+            lines.push(String::new());
+            if let Some(ref loaded) = self.loaded_file {
+                let rel = loaded
+                    .strip_prefix(&self.working_dir)
+                    .unwrap_or(loaded)
+                    .display()
+                    .to_string();
+                let priority_note = if self.used_global_fallback {
+                    "global fallback — no local root instruction file found"
+                } else {
+                    "project root takes priority"
+                };
+                lines.push(format!(
+                    "✅ Instructions loaded from: {} ({})",
+                    rel, priority_note
+                ));
+            }
+            if self.all_discovered_files.len() > 1 {
+                lines.push(
                                         "ℹ️  Additional instruction files were discovered but ignored: only one file is loaded per session.".to_string(),
                                     );
-                                    lines.push("\n".to_string());
-                                }
-                            }
-                          lines.join("\n")    }
+                lines.push("\n".to_string());
+            }
+        }
+        lines.join("\n")
+    }
 }
 
 /// Discover all AGENTS.md-style instruction files from the project tree
@@ -1558,87 +1556,86 @@ pub fn collect_agents_md_content_with_discovery(
         .map(|d| d.join("ragent"))
         .filter(|d| d.is_dir());
 
-          // First, collect ALL local project files (for discovery display)
-          let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
-    
-          let walk = WalkBuilder::new(working_dir)
-              .hidden(false)
-              .git_ignore(true)
-              .git_global(true)
-              .ignore(true)
-              .filter_entry(|e| e.file_name() != ".git")
-              .build();
-    
-          for entry in walk.flatten() {
-              let path = entry.path().to_path_buf();
-              if !path.is_file() {
-                  continue;
-              }
-              if let Some(name) = path.file_name().and_then(|n| n.to_str())
-                  && AGENT_FILE_NAMES.contains(&name)
-              {
-                  // Depth is 0 for files directly in working_dir, 1 for
-                  // immediate subdirectories, etc.
-                  let depth = path
-                      .strip_prefix(working_dir)
-                      .map(|rel| rel.components().count().saturating_sub(1))
-                      .unwrap_or(usize::MAX);
-                  local_files.push((depth, path));
-              }
-          }
-    
-          // Collect global files for discovery (even if local files exist)
-          let mut global_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
-          if let Some(ref global_path) = global_dir {
-              for name in AGENT_FILE_NAMES {
-                  let file_path = global_path.join(name);
-                  if file_path.is_file() {
-                      global_files.push((0, file_path));
-                  }
-              }
-          }
-    
-          // Split local files into root (depth 0) and subdirectory (depth > 0)
-          let root_files: Vec<_> = local_files
-              .iter()
-              .filter(|(depth, _)| *depth == 0)
-              .cloned()
-              .collect();
-          let sub_files: Vec<_> = local_files
-              .iter()
-              .filter(|(depth, _)| *depth > 0)
-              .cloned()
-              .collect();
-    
-          // Sort each priority tier independently by name priority (AGENTS.md
-          // first, etc.) so we never mix root/global/sub ordering.
-          let sort_by_name = |v: &mut Vec<(usize, std::path::PathBuf)>| {
-              v.sort_by(|a, b| {
-                  let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                  let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                  let a_idx = AGENT_FILE_NAMES
-                      .iter()
-                      .position(|n| *n == a_name)
-                      .unwrap_or(usize::MAX);
-                  let b_idx = AGENT_FILE_NAMES
-                      .iter()
-                      .position(|n| *n == b_name)
-                      .unwrap_or(usize::MAX);
-                  a_idx.cmp(&b_idx)
-              });
-          };
-          let mut root_files = root_files;
-          let mut global_files = global_files;
-          let mut sub_files = sub_files;
-          sort_by_name(&mut root_files);
-          sort_by_name(&mut global_files);
-          sort_by_name(&mut sub_files);
-    
-          // Priority: project root → global → subdirectories
-          let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
-          candidates.extend(root_files);
-          candidates.extend(global_files);
-          candidates.extend(sub_files);
+    // First, collect ALL local project files (for discovery display)
+    let mut local_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
+
+    let walk = WalkBuilder::new(working_dir)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .ignore(true)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build();
+
+    for entry in walk.flatten() {
+        let path = entry.path().to_path_buf();
+        if !path.is_file() {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && AGENT_FILE_NAMES.contains(&name)
+        {
+            // Depth is 0 for files directly in working_dir, 1 for
+            // immediate subdirectories, etc.
+            let depth = path
+                .strip_prefix(working_dir)
+                .map(|rel| rel.components().count().saturating_sub(1))
+                .unwrap_or(usize::MAX);
+            local_files.push((depth, path));
+        }
+    }
+
+    // Collect global files for discovery (even if local files exist)
+    let mut global_files: Vec<(usize, std::path::PathBuf)> = Vec::new();
+    if let Some(ref global_path) = global_dir {
+        for name in AGENT_FILE_NAMES {
+            let file_path = global_path.join(name);
+            if file_path.is_file() {
+                global_files.push((0, file_path));
+            }
+        }
+    }
+
+    // Split local files into root (depth 0) and subdirectory (depth > 0)
+    let root_files: Vec<_> = local_files
+        .iter()
+        .filter(|(depth, _)| *depth == 0)
+        .cloned()
+        .collect();
+    let sub_files: Vec<_> = local_files
+        .iter()
+        .filter(|(depth, _)| *depth > 0)
+        .cloned()
+        .collect();
+
+    // Sort each priority tier independently by name priority (AGENTS.md
+    // first, etc.) so we never mix root/global/sub ordering.
+    let sort_by_name = |v: &mut Vec<(usize, std::path::PathBuf)>| {
+        v.sort_by(|a, b| {
+            let a_name = a.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let b_name = b.1.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let a_idx = AGENT_FILE_NAMES
+                .iter()
+                .position(|n| *n == a_name)
+                .unwrap_or(usize::MAX);
+            let b_idx = AGENT_FILE_NAMES
+                .iter()
+                .position(|n| *n == b_name)
+                .unwrap_or(usize::MAX);
+            a_idx.cmp(&b_idx)
+        });
+    };
+    let mut root_files = root_files;
+    let mut sub_files = sub_files;
+    sort_by_name(&mut root_files);
+    sort_by_name(&mut global_files);
+    sort_by_name(&mut sub_files);
+
+    // Priority: project root → global → subdirectories
+    let mut candidates: Vec<(usize, std::path::PathBuf)> = Vec::new();
+    candidates.extend(root_files);
+    candidates.extend(global_files);
+    candidates.extend(sub_files);
     let loaded_file = candidates.first().map(|(_, p)| p.clone());
     let used_global = loaded_file.as_ref().map_or(false, |f| {
         global_dir.as_ref().map_or(false, |gd| f.starts_with(gd))

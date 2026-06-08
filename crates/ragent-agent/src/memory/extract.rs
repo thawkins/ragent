@@ -594,24 +594,14 @@ impl ExtractionEngine {
         let error_msg = failure.error.clone();
 
         // Truncate the error for readability.
-        let truncated_error = if error_msg.len() > 300 {
-            format!("{}…", &error_msg[..300])
-        } else {
-            error_msg
-        };
-
+        let truncated_error = ragent_types::truncate_bytes(&error_msg, 300);
         // Extract the command from the input.
         let command = failure
             .input
             .strip_prefix('"')
             .and_then(|s| s.strip_suffix('"'))
             .unwrap_or(&failure.input);
-        let truncated_cmd = if command.len() > 100 {
-            format!("{}…", &command[..100])
-        } else {
-            command.to_string()
-        };
-
+        let truncated_cmd = ragent_types::truncate_bytes(command, 100);
         let project_name = working_dir
             .file_name()
             .map(|n| n.to_string_lossy().to_string())

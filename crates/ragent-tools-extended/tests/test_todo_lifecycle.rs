@@ -145,6 +145,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         session_id: "test-session".to_string(),
         working_dir: std::env::current_dir().unwrap(),
         code_index: None,
+        config: None,
     }
 }
 

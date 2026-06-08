@@ -43,6 +43,10 @@ async-trait = { workspace = true }
 fs2 = { workspace = true }
 lru = { workspace = true }
 
+[features]
+default = []
+compression = ["ragent-core/compression"]
+
 [dev-dependencies]
 tempfile = "3.5"
 criterion = { workspace = true }

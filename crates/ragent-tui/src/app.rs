@@ -299,6 +299,7 @@ impl App {
     /// let agent = AgentInfo::new("general", "General-purpose agent");
     /// let app = ragent_tui::App::new(
     ///     event_bus, storage, registry, processor, agent, false,
+    ///     std::path::PathBuf::new(),
     /// );
     /// # }
     /// ```
@@ -492,6 +493,7 @@ impl App {
             cancel_flag: None,
             auto_compact_in_progress: false,
             compact_in_progress: false,
+            compress_in_progress: false,
             auto_compact_failed: false,
             pending_send_after_compact: None,
             agent_halted: false,
@@ -582,7 +584,10 @@ impl App {
             spec_manager: None,
             active_spec: None,
             config_paths: app_config.config_paths.clone(),
-        }; // end Self { ... }        // Log any warnings from custom agent loading into the log panel
+            router_enabled: false,
+            router_current_tier: None,
+        }; // end Self { ... }
+        // Log any warnings from custom agent loading into the log panel
         for diag in &all_diagnostics {
             app.push_log_no_agent(LogLevel::Warn, format!("[custom agents] {}", diag));
         }
@@ -681,6 +686,7 @@ impl App {
                 } => {
                     self.compact_in_progress = false;
                     self.auto_compact_in_progress = false;
+                    self.needs_redraw = true;
                     let mut dispatch_queued_after_completion = true;
                     match result {
                         Ok(summary) => {
@@ -948,6 +954,7 @@ impl App {
 
         self.auto_compact_in_progress = auto_triggered;
         self.compact_in_progress = true;
+        self.needs_redraw = true;
         if auto_triggered {
             self.auto_compact_failed = false;
             self.status = "compacting before send…".to_string();
@@ -1022,6 +1029,297 @@ impl App {
             "Compaction: session history replaced with summary".to_string(),
         );
         true
+    }
+
+    /// Handle the `/compress` slash command.
+    ///
+    /// Supports subcommands:
+    /// - `/compress` or `/compress default` — run default compression pipeline
+    /// - `/compress aggressive` — maximum compression with relevance filtering
+    /// - `/compress conservative` — only lossless compressors
+    /// - `/compress help` — show help text
+    /// - `/compress stats` — show compression statistics
+    fn handle_compress_command(&mut self, args: &str) {
+        let subcmd = args.trim().to_lowercase();
+        let is_empty = subcmd.is_empty();
+
+        // /compress help — show subcommand help and current config
+        if subcmd == "help" {
+            #[cfg(feature = "compression")]
+            {
+                let config = ragent_core::config::Config::load().unwrap_or_default();
+                let help = ragent_core::compression::compress_help(&config.compression);
+                self.append_assistant_text(&help);
+                self.status = "compress help".to_string();
+            }
+            #[cfg(not(feature = "compression"))]
+            {
+                self.append_assistant_text(
+                                "From: /compress help\n\n\
+                                 Compression subcommands:\n\n\
+                                 | Subcommand | Description |\n\
+                                 |---|---|\n\
+                                 | `/compress` | Run the default compression pipeline (all enabled compressors) |\n\
+                                 | `/compress aggressive` | Maximum compression with relevance filtering |\n\
+                                 | `/compress conservative` | Only apply lossless compressors |\n\
+                                 | `/compress help` | Display this help text |\n\
+                                 | `/compress stats` | Show compression statistics for the current session |\n\n\
+                                 ⚠ The `compression` feature is not compiled in. \
+                                 Rebuild with `--features compression` to enable content-aware compression.",
+                            );
+                self.status = "compress help (unavailable)".to_string();
+            }
+            return;
+        }
+
+        // /compress stats — show compression statistics for the current session
+        if subcmd == "stats" {
+            #[cfg(feature = "compression")]
+            {
+                let msg_count = self.messages.len();
+                let total_chars: usize = self
+                    .messages
+                    .iter()
+                    .map(|m| {
+                        m.parts
+                            .iter()
+                            .map(|p| match p {
+                                MessagePart::Text { text } => text.len(),
+                                MessagePart::ToolCall { tool, state, .. } => {
+                                    tool.len()
+                                        + state
+                                            .output
+                                            .as_ref()
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.len())
+                                            .unwrap_or(0)
+                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                                }
+                                MessagePart::Image { .. } => 1000,
+                                MessagePart::Reasoning { text } => text.len(),
+                            })
+                            .sum::<usize>()
+                    })
+                    .sum();
+                let est_tokens = ragent_core::compression::count_tokens(&self.messages);
+                let config = ragent_core::config::Config::load().unwrap_or_default();
+                let compression_status = if config.compression.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+
+                let mut out = String::from("From: /compress stats\n\n");
+                out.push_str(&format!("Messages: {}\n", msg_count));
+                out.push_str(&format!("Total characters: {}\n", total_chars));
+                out.push_str(&format!("Estimated tokens: {}\n", est_tokens));
+                out.push_str(&format!("Compression: {}\n", compression_status));
+                out.push_str(&format!(
+                    "Auto threshold: {:.0}%\n",
+                    config.compression.auto_threshold * 100.0
+                ));
+                out.push_str(&format!(
+                    "Compressors: json={}, diff={}, log={}, search={}, code={}, prose={}\n",
+                    config.compression.compressors.json,
+                    config.compression.compressors.diff,
+                    config.compression.compressors.log,
+                    config.compression.compressors.search,
+                    config.compression.compressors.code,
+                    config.compression.compressors.prose,
+                ));
+                out.push_str(&format!(
+                    "Relevance: {} (scorer={}, keep_top_k={})\n",
+                    if config.compression.relevance.enabled {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    config.compression.relevance.scorer,
+                    config.compression.relevance.keep_top_k,
+                ));
+                self.append_assistant_text(&out);
+                self.status = "compress stats".to_string();
+            }
+            #[cfg(not(feature = "compression"))]
+            {
+                let msg_count = self.messages.len();
+                let total_chars: usize = self
+                    .messages
+                    .iter()
+                    .map(|m| {
+                        m.parts
+                            .iter()
+                            .map(|p| match p {
+                                MessagePart::Text { text } => text.len(),
+                                MessagePart::ToolCall { tool, state, .. } => {
+                                    tool.len()
+                                        + state
+                                            .output
+                                            .as_ref()
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.len())
+                                            .unwrap_or(0)
+                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                                }
+                                MessagePart::Image { .. } => 1000,
+                                MessagePart::Reasoning { text } => text.len(),
+                            })
+                            .sum::<usize>()
+                    })
+                    .sum();
+                let est_tokens: usize = total_chars / 4 + 10 * msg_count;
+                self.append_assistant_text(&format!(
+                                "From: /compress stats\n\n\
+                                 Messages: {}\n\
+                                 Total characters: {}\n\
+                                 Estimated tokens: {} (chars/4 heuristic)\n\n\
+                                 ⚠ The `compression` feature is not compiled in. \
+                                 Token counting is approximate. Rebuild with `--features compression` \
+                                 for accurate token counting and content-aware compression.",
+                                msg_count, total_chars, est_tokens,
+                            ));
+                self.status = "compress stats (approximate)".to_string();
+            }
+            return;
+        }
+
+        // /compress, /compress default, /compress aggressive, /compress conservative
+        // Run the compression pipeline with the specified mode.
+        if self.session_id.is_none() {
+            self.status = "⚠ No active session to compress".to_string();
+            return;
+        }
+        if self.messages.is_empty() {
+            self.status = "⚠ No messages to compress".to_string();
+            return;
+        }
+
+        let mode_str = if is_empty { "default" } else { &subcmd };
+
+        #[cfg(feature = "compression")]
+        {
+            use ragent_core::compression::CompressionMode;
+            let mode = match mode_str.parse::<CompressionMode>() {
+                Ok(m) => m,
+                Err(e) => {
+                    self.append_assistant_text(&format!(
+                        "From: /compress\n⚠ Invalid mode '{}'. {}\n\n\
+                                               Available modes: default, aggressive, conservative\n\
+                                               Use /compress help for details.",
+                        mode_str, e,
+                    ));
+                    self.status = "compress: invalid mode".to_string();
+                    return;
+                }
+            };
+
+            let config = ragent_core::config::Config::load().unwrap_or_default();
+            if !config.compression.enabled {
+                self.append_assistant_text(
+                              "From: /compress\n\
+                                           ⚠ Compression is disabled in the configuration.\n\n\
+                                           To enable, set `compression.enabled = true` in ragent.json, \
+                                           or use /compact for LLM-based summarisation.",
+                          );
+                self.status = "compress: disabled".to_string();
+                return;
+            }
+
+            // Mark compression as in-progress for the status bar indicator.
+            self.compress_in_progress = true;
+            self.needs_redraw = true;
+
+            // Determine context window from the selected model.
+            let context_window = self
+                .selected_model
+                .as_deref()
+                .and_then(|s| s.split_once('/'))
+                .and_then(|(p, m)| {
+                    self.provider_registry
+                        .resolve_model(p, m)
+                        .map(|m| m.context_window)
+                })
+                .unwrap_or(128_000);
+
+            let _original_tokens = ragent_core::compression::count_tokens(&self.messages);
+
+            let result = ragent_core::compression::compress_history_with_mode(
+                &self.messages,
+                context_window,
+                8192,
+                &config.compression,
+                mode,
+            );
+
+            let stats = &result.stats;
+            let ratio = if stats.compressed_tokens > 0 {
+                format!("{:.2}x", stats.compression_ratio)
+            } else {
+                "N/A".to_string()
+            };
+
+            let mut out = format!(
+                "From: /compress {}\n\n\
+                             Compression completed.\n\n\
+                             | Metric | Value |\n\
+                             |---|---|\n\
+                             | Mode | {} |\n\
+                             | Original tokens | {} |\n\
+                             | Compressed tokens | {} |\n\
+                             | Compression ratio | {} |\n\
+                             | Messages compressed | {} |\n\
+                             | CCR entries stashed | {} |\n",
+                mode,
+                mode,
+                stats.original_tokens,
+                stats.compressed_tokens,
+                ratio,
+                stats.messages_compressed,
+                stats.ccr_entries_stashed,
+            );
+
+            if stats.compressed_tokens < stats.original_tokens {
+                let saved = stats
+                    .original_tokens
+                    .saturating_sub(stats.compressed_tokens);
+                out.push_str(&format!(
+                    "\nSaved {} tokens ({:.1}% reduction).\n",
+                    saved,
+                    (saved as f64 / stats.original_tokens as f64) * 100.0
+                ));
+            } else {
+                out.push_str(
+                    "\nNo token reduction achieved. The context may already be within limits.\n",
+                );
+            }
+
+            if result.messages.len() != self.messages.len() {
+                out.push_str(&format!(
+                    "\nMessages: {} → {}\n",
+                    self.messages.len(),
+                    result.messages.len()
+                ));
+            }
+
+            // Replace messages with compressed result.
+            self.messages = result.messages;
+            self.compress_in_progress = false;
+            self.append_assistant_text(&out);
+            self.status = format!("compress {}", mode);
+        }
+
+        #[cfg(not(feature = "compression"))]
+        {
+            self.append_assistant_text(
+                "From: /compress\n\n\
+                             ⚠ The `compression` feature is not compiled in.\n\n\
+                             Content-aware compression is unavailable. Use /compact for \
+                             LLM-based summarisation, or rebuild ragent with:\n\n\
+                             cargo build --features compression\n",
+            );
+            self.status = "compress: feature unavailable".to_string();
+            let _ = mode_str;
+        }
     }
 
     fn maybe_request_internal_session_title(&mut self, session_id: &str) {
@@ -2135,6 +2433,7 @@ impl App {
             if self.start_internal_llm_compaction(&sid, auto_triggered) {
                 self.auto_compact_in_progress = auto_triggered;
                 self.compact_in_progress = true;
+                self.needs_redraw = true;
                 if auto_triggered {
                     self.auto_compact_failed = false;
                     self.status = "compacting before send…".to_string();
@@ -2721,6 +3020,20 @@ impl App {
                     "task".to_string(),
                 ]
             }
+            "router" => {
+                vec![
+                    "on".to_string(),
+                    "off".to_string(),
+                    "status".to_string(),
+                    "tiers".to_string(),
+                    "weights".to_string(),
+                    "boundaries".to_string(),
+                    "test".to_string(),
+                    "stats".to_string(),
+                    "reload".to_string(),
+                    "help".to_string(),
+                ]
+            }
             "config" => {
                 vec!["show".to_string()]
             }
@@ -2743,6 +3056,9 @@ impl App {
             ),
             "model" => Some("[show]".to_string()),
             "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),
+            "router" => {
+                Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
+            }
             "config" => Some("[show]".to_string()),
             "thinking" => Some("[auto|off|low|medium|high]".to_string()),
             "theme" => Some("[toggle|light|dark]".to_string()),
@@ -2754,6 +3070,7 @@ impl App {
             "undo" => None,
             "redo" => None,
             "compact" => None,
+            "compress" => Some("[default|aggressive|conservative|help|stats]".to_string()),
             "halt" => None,
             "resume" => None,
             _ => Some("<arg>".to_string()),
@@ -4568,11 +4885,7 @@ impl App {
                 "----"
             ));
             for def in defs {
-                let desc = if def.description.len() > 60 {
-                    format!("{}…", &def.description[..60])
-                } else {
-                    def.description.clone()
-                };
+                let desc = ragent_types::truncate_bytes(&def.description, 60);
                 output.push_str(&format!("{:<24} {}\n", def.name, desc));
             }
             output.push_str("```\n");
@@ -5555,6 +5868,9 @@ Be concise but comprehensive. This will be injected into future agent sessions a
             },
             "compact" => {
                 let _ = self.start_compaction(false);
+            }
+            "compress" => {
+                self.handle_compress_command(args);
             }
             "cost" => {
                 let Some(output) = self.cost_summary() else {
@@ -7137,11 +7453,8 @@ Alias: `/teams ...` routes to `/team ...` (for example `/teams help`, `/teams sh
                                                     .and_then(|v| v.as_str())
                                                     .unwrap_or("-");
                                                 // Truncate long prompts for the table
-                                                let prompt_short = if prompt.len() > 80 {
-                                                    format!("{}…", &prompt[..77])
-                                                } else {
-                                                    prompt.to_string()
-                                                };
+                                                let prompt_short =
+                                                    ragent_types::truncate_bytes(prompt, 77);
                                                 output.push_str(&format!(
                                                     "| `{}` | {} | {} |\n",
                                                     tname, atype, prompt_short
@@ -9030,215 +9343,309 @@ Type `/swarm help` for more info.\n";
                             }
                         }
                     }
-                                          SpecCommand::Impl {
-                                              spec_id,
-                                              task_id,
-                                              dry_run,
-                                          } => {
-                                              use ragent_specs::{ImplOptions, SpecImplRunner};
-                                              let working_dir = std::env::current_dir().unwrap_or_default();
-                                              let specs_root = working_dir.join("specs");
-                    
-                                              // Validate spec exists
-                                              let sid_opt = ragent_specs::spec::SpecId::new(&spec_id);
-                                              if sid_opt.is_none() {
-                                                  self.status = format!("spec: invalid spec ID: {}", spec_id);
-                                                  return;
-                                              }
-                                              let sid = sid_opt.unwrap();
-                    
-                                                                                              // Check spec exists on disk and read its status
-                                                                                              let mgr = SpecManager::new(&specs_root);
-                                                                                              let rt = tokio::runtime::Handle::current();
-                                                                                              let (spec_exists, spec_status): (
-                                                                                                  bool,
-                                                                                                  Option<ragent_specs::spec::SpecStatus>,
-                                                                                              ) = tokio::task::block_in_place(|| {
-                                                                                                  rt.block_on(async {
-                                                                                                      let spec = mgr.read_spec(&sid).await;
-                                                                                                      match spec {
-                                                                                                          Ok(s) => (true, Some(s.status)),
-                                                                                                          Err(_) => (false, None),
-                                                                                                      }
-                                                                                                  })
-                                                                                              });
-                                                                                              if !spec_exists {
-                                                                                                  // List available specs with plans
-                                                                                                  let available: Vec<String> =
-                                                                                                      tokio::task::block_in_place(|| {
-                                                                                                          rt.block_on(async {
-                                                                                                              match mgr.discover_specs().await {
-                                                                                                                  Ok(specs) => specs
-                                                                                                                      .iter()
-                                                                                                                      .map(|s| format!(
-                                                                                                                          "  - {} ({})",
-                                                                                                                          s.id,
-                                                                                                                          s.status.as_str()
-                                                                                                                      ))
-                                                                                                                      .collect(),
-                                                                                                                  Err(_) => vec![],
-                                                                                                              }
-                                                                                                          })
-                                                                                                      });
-                                                                                                  let avail_str = if available.is_empty() {
-                                                                                                      "  (none found)".to_string()
-                                                                                                  } else {
-                                                                                                      available.join("\n")
-                                                                                                  };
-                                                                                                  self.append_assistant_text(&format!(
+                    SpecCommand::Impl {
+                        spec_id,
+                        task_id,
+                        dry_run,
+                    } => {
+                        use ragent_specs::{ImplOptions, SpecImplRunner};
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+
+                        // Validate spec exists
+                        let sid_opt = ragent_specs::spec::SpecId::new(&spec_id);
+                        if sid_opt.is_none() {
+                            self.status = format!("spec: invalid spec ID: {}", spec_id);
+                            return;
+                        }
+                        let sid = sid_opt.unwrap();
+
+                        // Check spec exists on disk and read its status
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+                        let (spec_exists, spec_status): (
+                            bool,
+                            Option<ragent_specs::spec::SpecStatus>,
+                        ) = tokio::task::block_in_place(|| {
+                            rt.block_on(async {
+                                let spec = mgr.read_spec(&sid).await;
+                                match spec {
+                                    Ok(s) => (true, Some(s.status)),
+                                    Err(_) => (false, None),
+                                }
+                            })
+                        });
+                        if !spec_exists {
+                            // List available specs with plans
+                            let available: Vec<String> = tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    match mgr.discover_specs().await {
+                                        Ok(specs) => specs
+                                            .iter()
+                                            .map(|s| {
+                                                format!("  - {} ({})", s.id, s.status.as_str())
+                                            })
+                                            .collect(),
+                                        Err(_) => vec![],
+                                    }
+                                })
+                            });
+                            let avail_str = if available.is_empty() {
+                                "  (none found)".to_string()
+                            } else {
+                                available.join("\n")
+                            };
+                            self.append_assistant_text(&format!(
                                                                                                       "From: /spec impl\n\n**Error:** Spec `{}` not found.\n\nAvailable specs:\n{}",
                                                                                                       spec_id, avail_str
                                                                                                   ));
-                                                                                                  self.status = format!("spec: spec {} not found", spec_id);
-                                                                                                  return;
-                                                                                              }
-                                              
-                                                                                              // Check if already implemented (FR-026)
-                                                if let Some(status) = spec_status {
-                                                  if matches!(
-                                                      status,
-                                                      ragent_specs::spec::SpecStatus::Implemented
-                                                          | ragent_specs::spec::SpecStatus::Verified
-                                                  ) {
-                                                      self.append_assistant_text(&format!(
+                            self.status = format!("spec: spec {} not found", spec_id);
+                            return;
+                        }
+
+                        // Check if already implemented (FR-026)
+                        if let Some(status) = spec_status {
+                            if matches!(
+                                status,
+                                ragent_specs::spec::SpecStatus::Implemented
+                                    | ragent_specs::spec::SpecStatus::Verified
+                            ) {
+                                self.append_assistant_text(&format!(
                                                           "From: /spec impl\n\n⚠️ Spec **{}** is already marked as **{}**.\n\n\
                                                            To re-implement, first transition the spec back to `approved` or `in_progress`:\n\
                                                            `/spec status {} approved`",
                                                           spec_id, status.as_str(), spec_id
                                                       ));
-                                                      self.status = format!("spec: {} is {}", spec_id, status.as_str());
-                                                      return;
-                                                  }
-                                              }
-                    
-                                              // Build options
-                                              let mut opts = ImplOptions::new();
-                                              if let Some(ref tid) = task_id {
-                                                  opts = opts.with_task(tid);
-                                              }
-                                              if dry_run {
-                                                  opts = opts.with_dry_run();
-                                              }
-                    
-                                                                                              // Create runner
-                                                                                              let runner_result: Result<SpecImplRunner, String> =
-                                                                                                  tokio::task::block_in_place(|| {
-                                                                                                      rt.block_on(async {
-                                                                                                          match SpecImplRunner::new(&spec_id, specs_root, opts).await {
-                                                                                                              Ok(r) => Ok(r),
-                                                                                                              Err(e) => Err(format!("spec impl failed: {}", e)),
-                                                                                                          }
-                                                                                                      })
-                                                                                                  });
-                                              
-                                                                                              match runner_result {
-                                                                                                  Ok(runner) => {
-                                                                                                      let is_dry_run = dry_run;
-                                                                                                      let result: Result<_, String> =
-                                                                                                          tokio::task::block_in_place(|| {
-                                                                                                              rt.block_on(async {
-                                                                                                                  match runner.run().await {
-                                                                                                                      Ok(r) => Ok(r),
-                                                                                                                      Err(e) => Err(format!("{}", e)),
-                                                                                                                  }
-                                                                                                              })
-                                                                                                          });                    
-                                                                                match result {
-                                                                                            Ok(impl_result) => {
-                                                                                                // Display summary
-                                                                                                self.append_assistant_text(&impl_result.summary);
-                                                      
-                                                                                                if is_dry_run || impl_result.prompt.is_empty() {
-                                                                                                    self.status = format!(
-                                                                                                        "spec: {} dry-run complete",
-                                                                                                        spec_id
-                                                                                                    );
-                                                                                                } else {
-                                                                                                    // Inject the execution prompt into the agent session
-                                                                                                    let session_id =
-                                                                                                        self.session_id.clone().unwrap_or_default();
-                                                      
-                                                                                                    // Use coder agent for implementation
-                                                                                                    let mut agent = self.agent_info.clone();
-                                                                                                    self.apply_selected_model_and_thinking(&mut agent);
-                                                      
-                                                                                                    let msg = Message::user_text(
-                                                                                                        &session_id,
-                                                                                                        &impl_result.prompt,
-                                                                                                    );
-                                                                                                    self.messages.push(msg);
-                                                      
-                                                                                                    let processor =
-                                                                                                        self.session_processor.clone();
-                                                                                                    let flag =
-                                                                                                        Arc::new(AtomicBool::new(false));
-                                                                                                    self.cancel_flag = Some(flag.clone());
-                                                                                                    self.is_processing = true;
-                                                                                                    self.status = format!(
-                                                                                                        "spec: implementing {} ({} tasks)",
-                                                                                                        spec_id,
-                                                                                                        impl_result.total_tasks
-                                                                                                    );
-                                                      
-                                                                                                    let event_bus = self.event_bus.clone();
-                                                                                                    let prompt = impl_result.prompt;
-                                                                                                    let sid = session_id;
-                                                                                                    tokio::spawn(async move {
-                                                                                                        if let Err(e) = processor
-                                                                                                            .process_message(
-                                                                                                                &sid,
-                                                                                                                &prompt,
-                                                                                                                &agent,
-                                                                                                                flag,
-                                                                                                            )
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            tracing::warn!(
-                                                                                                                error = %e,
-                                                                                                                "spec: implementation failed"
-                                                                                                            );
-                                                                                                            event_bus
-                                                                                                                .publish(
-                                                                                                                    ragent_core::event::Event::AgentError {
-                                                                                                                        session_id: sid,
-                                                                                                                        error: format!(
-                                                                                                                            "spec implementation failed: {}",
-                                                                                                                            e
-                                                                                                                        ),
-                                                                                                                    },
-                                                                                                                );
-                                                                                                        }
-                                                                                                    });
-                                                                                                }
-                                                                                            }                                                          Err(e) => {
-                                                              self.append_assistant_text(&format!(
-                                                                  "From: /spec impl\n\n**Error:** {}",
-                                                                  e
-                                                              ));
-                                                              self.status = format!("spec: {}", e);
-                                                          }
-                                                      }
-                                                  }
-                                                  Err(e) => {
-                                                      self.append_assistant_text(&format!(
-                                                          "From: /spec impl\n\n**Error:** {}",
-                                                          e
-                                                      ));
-                                                      self.status = format!("spec: {}", e);
-                                                  }
-                                              }
-                                          }
-                                          SpecCommand::Unknown(sub)
-                                              if sub == "create"
-                                                  || sub == "validate"
-                                                  || sub == "status"
-                                                  || sub == "task"
-                                                  || sub == "activate"
-                                                  || sub == "coverage"
-                                                  || sub == "impl" =>
-                                          {
-                                              self.status = format!("Usage: /spec {} — try /spec help", sub);
-                                          }                    SpecCommand::Unknown(sub) => {
+                                self.status = format!("spec: {} is {}", spec_id, status.as_str());
+                                return;
+                            }
+                        }
+
+                        // Build options
+                        let mut opts = ImplOptions::new();
+                        if let Some(ref tid) = task_id {
+                            opts = opts.with_task(tid);
+                        }
+                        if dry_run {
+                            opts = opts.with_dry_run();
+                        }
+
+                        // Create runner
+                        let runner_result: Result<SpecImplRunner, String> =
+                            tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    match SpecImplRunner::new(&spec_id, specs_root, opts).await {
+                                        Ok(r) => Ok(r),
+                                        Err(e) => Err(format!("spec impl failed: {}", e)),
+                                    }
+                                })
+                            });
+
+                        match runner_result {
+                            Ok(runner) => {
+                                let is_dry_run = dry_run;
+                                let result: Result<_, String> = tokio::task::block_in_place(|| {
+                                    rt.block_on(async {
+                                        match runner.run().await {
+                                            Ok(r) => Ok(r),
+                                            Err(e) => Err(format!("{}", e)),
+                                        }
+                                    })
+                                });
+                                match result {
+                                    Ok(impl_result) => {
+                                        // Display summary
+                                        self.append_assistant_text(&impl_result.summary);
+
+                                        if is_dry_run || impl_result.prompt.is_empty() {
+                                            self.status =
+                                                format!("spec: {} dry-run complete", spec_id);
+                                        } else {
+                                            // Inject the execution prompt into the agent session
+                                            let session_id =
+                                                self.session_id.clone().unwrap_or_default();
+
+                                            // Use coder agent for implementation
+                                            let mut agent = self.agent_info.clone();
+                                            self.apply_selected_model_and_thinking(&mut agent);
+
+                                            let msg = Message::user_text(
+                                                &session_id,
+                                                &impl_result.prompt,
+                                            );
+                                            self.messages.push(msg);
+
+                                            let processor = self.session_processor.clone();
+                                            let flag = Arc::new(AtomicBool::new(false));
+                                            self.cancel_flag = Some(flag.clone());
+                                            self.is_processing = true;
+                                            self.status = format!(
+                                                "spec: implementing {} ({} tasks)",
+                                                spec_id, impl_result.total_tasks
+                                            );
+
+                                            let event_bus = self.event_bus.clone();
+                                            let prompt = impl_result.prompt;
+                                            let sid = session_id;
+                                            tokio::spawn(async move {
+                                                if let Err(e) = processor
+                                                    .process_message(&sid, &prompt, &agent, flag)
+                                                    .await
+                                                {
+                                                    tracing::warn!(
+                                                        error = %e,
+                                                        "spec: implementation failed"
+                                                    );
+                                                    event_bus.publish(
+                                                        ragent_core::event::Event::AgentError {
+                                                            session_id: sid,
+                                                            error: format!(
+                                                                "spec implementation failed: {}",
+                                                                e
+                                                            ),
+                                                        },
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /spec impl\n\n**Error:** {}",
+                                            e
+                                        ));
+                                        self.status = format!("spec: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.append_assistant_text(&format!(
+                                    "From: /spec impl\n\n**Error:** {}",
+                                    e
+                                ));
+                                self.status = format!("spec: {}", e);
+                            }
+                        }
+                    }
+                    SpecCommand::Unknown(sub)
+                        if sub == "create"
+                            || sub == "validate"
+                            || sub == "status"
+                            || sub == "task"
+                            || sub == "activate"
+                            || sub == "coverage"
+                            || sub == "impl"
+                            || sub == "add" =>
+                    {
+                        self.status = format!("Usage: /spec {} — try /spec help", sub);
+                    }
+                    SpecCommand::Add { spec_id, feature } => {
+                        self.append_assistant_text(&SpecCommand::build_add_message(
+                            &spec_id, &feature,
+                        ));
+                        self.push_log_no_agent(
+                            crate::app::LogLevel::Info,
+                            SpecCommand::build_add_log(&spec_id, &feature),
+                        );
+
+                        let working_dir = std::env::current_dir().unwrap_or_default();
+                        let specs_root = working_dir.join("specs");
+                        let mgr = SpecManager::new(&specs_root);
+                        let rt = tokio::runtime::Handle::current();
+
+                        // Load existing spec to get content and next IDs
+                        let spec_id_owned = spec_id.clone();
+                        let feature_owned = feature.clone();
+                        let result: Result<(String, u32, u32, u32), String> =
+                            tokio::task::block_in_place(|| {
+                                rt.block_on(async {
+                                    use ragent_specs::id_scanner;
+                                    let sid = match ragent_specs::spec::SpecId::new(&spec_id_owned)
+                                    {
+                                        Some(id) => id,
+                                        None => {
+                                            return Err(format!(
+                                                "spec: invalid spec ID: {}",
+                                                spec_id_owned
+                                            ));
+                                        }
+                                    };
+                                    let spec = match mgr.read_spec(&sid).await {
+                                        Ok(s) => s,
+                                        Err(e) => {
+                                            return Err(format!(
+                                                "spec: failed to read {}: {}",
+                                                spec_id_owned, e
+                                            ));
+                                        }
+                                    };
+                                    if spec.status == ragent_specs::spec::SpecStatus::Archived {
+                                        return Err(format!(
+                                            "spec: '{}' is archived and cannot be modified",
+                                            spec_id_owned
+                                        ));
+                                    }
+                                    let next_fr = id_scanner::highest_fr(&spec.spec_md) + 1;
+                                    let next_nfr = id_scanner::highest_nfr(&spec.spec_md) + 1;
+                                    let next_task = id_scanner::highest_task(&spec.plan_md) + 1;
+                                    let prompt = SpecCommand::build_add_prompt(
+                                        &spec_id_owned,
+                                        &feature_owned,
+                                        &spec.spec_md,
+                                        &spec.plan_md,
+                                        next_fr,
+                                        next_nfr,
+                                        next_task,
+                                    );
+                                    Ok((prompt, next_fr, next_nfr, next_task))
+                                })
+                            });
+
+                        match result {
+                            Ok((prompt, _next_fr, _next_nfr, _next_task)) => {
+                                let sid = self.session_id.clone().unwrap_or_default();
+                                let explore_agent = self
+                                    .cycleable_agents
+                                    .iter()
+                                    .find(|a| a.name == "explore")
+                                    .cloned();
+                                let mut agent =
+                                    explore_agent.unwrap_or_else(|| self.agent_info.clone());
+                                self.apply_selected_model_and_thinking(&mut agent);
+                                agent.permission = ragent_core::agent::default_permissions();
+
+                                let msg = Message::user_text(&sid, &prompt);
+                                self.messages.push(msg);
+
+                                let processor = self.session_processor.clone();
+                                let flag = Arc::new(AtomicBool::new(false));
+                                self.cancel_flag = Some(flag.clone());
+                                self.is_processing = true;
+                                self.status = SpecCommand::build_add_status(&spec_id);
+
+                                let event_bus = self.event_bus.clone();
+                                tokio::spawn(async move {
+                                    if let Err(e) =
+                                        processor.process_message(&sid, &prompt, &agent, flag).await
+                                    {
+                                        tracing::warn!(error = %e, "spec: add generation failed");
+                                        event_bus.publish(ragent_core::event::Event::AgentError {
+                                            session_id: sid,
+                                            error: format!("spec add generation failed: {e}"),
+                                        });
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                self.status = format!("spec: {}", e);
+                                self.append_assistant_text(&format!(
+                                    "From: /spec add\n\n**Error:** {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    SpecCommand::Unknown(sub) => {
                         self.status = format!("Unknown /spec subcommand: {sub}. Try /spec help");
                     }
                 }
@@ -10204,6 +10611,299 @@ Type `/swarm help` for more info.\n";
                 }
             }
 
+            "router" => {
+                let rest = args.trim();
+                let sub = rest.split_whitespace().next().unwrap_or("");
+                match sub {
+                    "help" | "" => {
+                        self.append_assistant_text(
+                                                                      "From: /router\n\
+                                                                       ## /router — Model Router Management\n\n\
+                                                                       | Sub-command | Description |\n\
+                                                                       |-------------|-------------|\n\
+                                                                       | `/router on` | Enable the router (set `enabled: true`) |\n\
+                                                                       | `/router off` | Disable the router (set `enabled: false`) |\n\
+                                                                       | `/router status` | Show router state, current tier, and enabled/disabled status |\n\
+                                                                       | `/router tiers` | Display all tier mappings and their model lists |\n\
+                                                                       | `/router tier <name> set <provider>/<model>` | Set the primary model for a tier |\n\
+                                                                       | `/router tier <name> add <provider>/<model>` | Append a fallback model to a tier |\n\
+                                                                       | `/router tier <name> remove <provider>/<model>` | Remove a model from a tier's list |\n\
+                                                                       | `/router weights` | Display the 15 dimension weights |\n\
+                                                                       | `/router weights set <dimension> <value>` | Override a single dimension weight |\n\
+                                                                       | `/router weights reset` | Restore built-in default weights |\n\
+                                                                       | `/router boundaries` | Display the three tier boundary thresholds |\n\
+                                                                       | `/router boundaries set <boundary> <value>` | Set a boundary threshold (0.0–1.0) |\n\
+                                                                       | `/router test <prompt>` | Classify a prompt and show dimension scores, composite score, and selected tier |\n\
+                                                                       | `/router stats` | Display cumulative routing statistics |\n\
+                                                                       | `/router stats reset` | Zero out cumulative routing statistics |\n\
+                                                                       | `/router reload` | Reload router config from `ragent.json` |\n\
+                                                                       | `/router help` | Show this help |\n\n\
+                                                                       The router analyses every prompt using a 15-dimension weighted classifier\n\
+                                                                       and automatically selects the cheapest model that can satisfy the request.\n\
+                                                                       Tiers: SIMPLE, MEDIUM, COMPLEX, REASONING.\n\n\
+                                                                       **Prompt modifiers** — prefix your prompt to force a tier:\n\
+                                                                       - `/simple`, `/medium`, `/complex`, `/max`, `/reasoning`, `/basic`, `/cheap`, `/balanced`, `/advanced`, `/think`, `/deep`\n\
+                                                                       - `[simple]`, `[complex]`, etc.\n\
+                                                                       - `simple mode:`, `deep mode:`, etc.",
+                                                                  );
+                        self.status = "router: help".to_string();
+                    }
+                    "reload" => {
+                        // Find the config file path
+                        let cwd = std::env::current_dir().unwrap_or_default();
+                        let project_config = cwd.join(".ragent").join("ragent.json");
+                        let config_dir = dirs::config_dir()
+                            .unwrap_or_else(|| cwd.clone())
+                            .join("ragent");
+                        let global_config = config_dir.join("ragent.json");
+
+                        let config_path = if project_config.exists() {
+                            Some(project_config)
+                        } else if global_config.exists() {
+                            Some(global_config)
+                        } else {
+                            None
+                        };
+
+                        match config_path {
+                            Some(ref path) => {
+                                match std::fs::read_to_string(path) {
+                                    Ok(raw) => {
+                                        match serde_json::from_str::<serde_json::Value>(&raw) {
+                                            Ok(json) => {
+                                                let router_json = json
+                                                    .get("provider")
+                                                    .and_then(|p| p.get("router"));
+
+                                                match router_json {
+                                                    Some(rj) => {
+                                                        match serde_json::from_value::<ragent_core::provider::router_config::RouterConfig>(rj.clone()) {
+                                                                                                                                                                      Ok(router_config) => {
+                                                                                                                                                                          self.router_enabled = router_config.enabled;
+                                                                                                                                                                          self.router_current_tier = None; // reset on reload
+                                                                                                                                                                          self.append_assistant_text(&format!(
+                                                                                                                                                                              "From: /router\n✓ Router config reloaded from {}\n  enabled: {}\n  tiers: {}\n  boundaries: {:.2}/{:.2}/{:.2}",
+                                                                                                                                                                              path.display(),
+                                                                                                                                                                              router_config.enabled,
+                                                                                                                                                                              router_config.tiers.len(),
+                                                                                                                                                                              router_config.boundaries.simple_medium,
+                                                                                                                                                                              router_config.boundaries.medium_complex,
+                                                                                                                                                                              router_config.boundaries.complex_reasoning,
+                                                                                                                                                                          ));
+                                                                                                                                                                          self.push_log_no_agent(
+                                                                                                                                                                              LogLevel::Info,
+                                                                                                                                                                              format!("router reload: config reloaded from {}", path.display()),
+                                                                                                                                                                          );
+                                                                                                                                                                          self.status = "router: reloaded".to_string();
+                                                                                                                                                                      }
+                                                                                                                                                                      Err(e) => {
+                                                                                                                                                                          self.append_assistant_text(&format!(
+                                                                                                                                                                              "From: /router\n⚠ Failed to parse provider.router: {}",
+                                                                                                                                                                              e
+                                                                                                                                                                          ));
+                                                                                                                                                                          self.status = "router: reload parse error".to_string();
+                                                                                                                                                                      }
+                                                                                                                                                                  }
+                                                    }
+                                                    None => {
+                                                        self.append_assistant_text(
+                                                                                                                                                                      "From: /router\n⚠ No `provider.router` section found in ragent.json. \
+                                                                                                                                                                       Add a `router` object under `provider` to configure the router.",
+                                                                                                                                                                  );
+                                                        self.status =
+                                                            "router: no config".to_string();
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                self.append_assistant_text(&format!(
+                                                                                                                                                              "From: /router\n⚠ Failed to parse ragent.json: {}",
+                                                                                                                                                              e
+                                                                                                                                                          ));
+                                                self.status =
+                                                    "router: reload parse error".to_string();
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.append_assistant_text(&format!(
+                                            "From: /router\n⚠ Failed to read {}: {}",
+                                            path.display(),
+                                            e
+                                        ));
+                                        self.status = "router: reload read error".to_string();
+                                    }
+                                }
+                            }
+                            None => {
+                                self.append_assistant_text(
+                                                                                                                                              "From: /router\n⚠ No ragent.json found. Create `.ragent/ragent.json` with a `provider.router` section.",
+                                                                                                                                          );
+                                self.status = "router: reload failed".to_string();
+                            }
+                        }
+                    }
+                    "on" => {
+                        self.router_enabled = true;
+                        self.append_assistant_text(
+                                                                      "From: /router\n✓ Router enabled. Prompts will be classified and routed to the appropriate model.",
+                                                                  );
+                        self.status = "router: on".to_string();
+                    }
+                    "off" => {
+                        self.router_enabled = false;
+                        self.append_assistant_text(
+                                                                      "From: /router\n✓ Router disabled. All prompts will use the default model.",
+                                                                  );
+                        self.status = "router: off".to_string();
+                    }
+                    "status" => {
+                        let enabled_str = if self.router_enabled {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        };
+                        let tier_str = self.router_current_tier.as_deref().unwrap_or("none");
+                        self.append_assistant_text(&format!(
+                                                                      "From: /router\n\
+                                                                       Router status: **{}**\n\
+                                                                       Current tier: {}\n\
+                                                                       \n\
+                                                                       Use `/router tiers` to see model mappings, or `/router test <prompt>` to classify a prompt.",
+                                                                      enabled_str, tier_str,
+                                                                  ));
+                        self.status = "router: status".to_string();
+                    }
+                    "test" => {
+                        let prompt = rest.strip_prefix("test").unwrap_or("").trim();
+                        if prompt.is_empty() {
+                            self.append_assistant_text(
+                                                                          "From: /router\nUsage: `/router test <prompt>` — classify a prompt and show scores.",
+                                                                      );
+                        } else {
+                            use ragent_core::provider::router_classifier::{
+                                AttachmentInfo, PromptClassifier,
+                            };
+                            use ragent_core::provider::router_config::{
+                                BoundaryConfig, WeightConfig,
+                            };
+                            let weights = WeightConfig::default();
+                            let boundaries = BoundaryConfig::default();
+                            let result = PromptClassifier::classify(
+                                prompt,
+                                None,
+                                &weights,
+                                &boundaries,
+                                &AttachmentInfo::default(),
+                            );
+                            let mut table = String::from(
+                                "From: /router\n```\nDimension                 Score\n───────────────────────────────\n",
+                            );
+                            for i in 0..15 {
+                                let name =
+                                    ragent_core::provider::router_classifier::dimension_name(i);
+                                table.push_str(&format!(
+                                    "{:<26}{:.3}\n",
+                                    name, result.dimension_scores[i]
+                                ));
+                            }
+                            table.push_str(&format!("───────────────────────────────\n"));
+                            table.push_str(&format!(
+                                "{:<26}{:.3}\n",
+                                "composite", result.composite_score
+                            ));
+                            table.push_str(&format!("{:<26}{}\n", "tier", result.tier));
+                            if result.requires_vision {
+                                table.push_str(&format!("{:<26}{}\n", "requires_vision", "true"));
+                            }
+                            table.push_str("```\n");
+                            self.append_assistant_text(&table);
+                            self.router_current_tier = Some(result.tier.to_string());
+                            self.status = format!("router: test → {}", result.tier);
+                        }
+                    }
+                    "weights" => {
+                        use ragent_core::provider::router_config::WeightConfig;
+                        let sub2 = rest.strip_prefix("weights").unwrap_or("").trim();
+                        if sub2.is_empty() {
+                            let w = WeightConfig::default();
+                            let mut table = String::from(
+                                "From: /router\n```\nDimension                 Weight\n───────────────────────────────\n",
+                            );
+                            for i in 0..15 {
+                                let name =
+                                    ragent_core::provider::router_classifier::dimension_name(i);
+                                table.push_str(&format!(
+                                    "{:<26}{:.2}\n",
+                                    name,
+                                    w.weight_by_index(i)
+                                ));
+                            }
+                            table.push_str("```\n");
+                            self.append_assistant_text(&table);
+                            self.status = "router: weights".to_string();
+                        } else {
+                            self.append_assistant_text(
+                                                                          "From: /router\n⚠ Per-dimension weight override is not yet supported. \
+                                                                           Configure `provider.router.weights` in `ragent.json`.",
+                                                                      );
+                            self.status = "router: weights not supported".to_string();
+                        }
+                    }
+                    "boundaries" => {
+                        use ragent_core::provider::router_config::BoundaryConfig;
+                        let sub2 = rest.strip_prefix("boundaries").unwrap_or("").trim();
+                        if sub2.is_empty() {
+                            let b = BoundaryConfig::default();
+                            self.append_assistant_text(&format!(
+                                                                          "From: /router\n```\nBoundary            Threshold\n──────────────────────────\nSIMPLE → MEDIUM     {:.2}\nMEDIUM → COMPLEX    {:.2}\nCOMPLEX → REASONING {:.2}\n```",
+                                                                          b.simple_medium, b.medium_complex, b.complex_reasoning,
+                                                                      ));
+                            self.status = "router: boundaries".to_string();
+                        } else {
+                            self.append_assistant_text(
+                                                                          "From: /router\n⚠ Boundary override is not yet supported. \
+                                                                           Configure `provider.router.boundaries` in `ragent.json`.",
+                                                                      );
+                            self.status = "router: boundaries not supported".to_string();
+                        }
+                    }
+                    "tiers" => {
+                        use ragent_core::provider::router_config::{RouterConfig, Tier};
+                        let config = RouterConfig::default();
+                        let mut output = String::from(
+                            "From: /router\n```\nTier      Provider/Model                         Timeout\n─────────────────────────────────────────────────\n",
+                        );
+                        for tier in Tier::all() {
+                            let tc = config.tier_config(*tier);
+                            for (i, entry) in tc.models.iter().enumerate() {
+                                let prefix = if i == 0 {
+                                    tier.to_string()
+                                } else {
+                                    "  fallback".to_string()
+                                };
+                                let timeout = tc
+                                    .timeout_ms
+                                    .map(|ms| format!("{}ms", ms))
+                                    .unwrap_or_else(|| "default".to_string());
+                                output.push_str(&format!(
+                                    "{:<10}{}/{}  {}\n",
+                                    prefix, entry.provider, entry.model, timeout
+                                ));
+                            }
+                        }
+                        output.push_str("```\n");
+                        self.append_assistant_text(&output);
+                        self.status = "router: tiers".to_string();
+                    }
+                    _ => {
+                        self.append_assistant_text(
+                                                                      "From: /router\n⚠ Unknown subcommand. Use `/router help` for available commands.",
+                                                                  );
+                        self.status = "router: unknown".to_string();
+                    }
+                }
+            }
             _ => {
                 let working_dir = std::env::current_dir().unwrap_or_default();
                 let skill_dirs = ragent_core::config::Config::load()
@@ -11960,6 +12660,7 @@ Type `/swarm help` for more info.\n";
                 // The summary is the last assistant message in self.messages.
                 if self.compact_in_progress && *reason != FinishReason::Cancelled {
                     self.compact_in_progress = false;
+                    self.needs_redraw = true;
                     let summary_text = self
                         .messages
                         .iter()
@@ -11971,8 +12672,8 @@ Type `/swarm help` for more info.\n";
                     }
                 } else {
                     self.compact_in_progress = false;
+                    self.needs_redraw = true;
                 }
-
                 if *reason != FinishReason::Cancelled {
                     self.maybe_request_internal_session_title(session_id);
                 }
@@ -12231,9 +12932,9 @@ Type `/swarm help` for more info.\n";
                     );
                 }
                 self.compact_in_progress = false;
+                self.needs_redraw = true;
                 // Full details go to the log panel only
-                self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error));
-                // Clean summary for the status bar and chat panel
+                self.push_log_no_agent(LogLevel::Error, format!("agent error: {}", error)); // Clean summary for the status bar and chat panel
                 let summary = summarise_error(error);
                 self.status = format!("error: {}", summary);
                 self.append_assistant_text(&format!("⚠ {}", summary));

@@ -17,6 +17,7 @@ pub mod message;
 pub mod permission;
 pub mod resource;
 pub mod sanitize;
+pub mod strutil;
 pub mod thinking;
 
 // Re-export commonly used types
@@ -27,3 +28,5 @@ pub use llm::{LlmProvider, LlmResponse, ModelInfo, ProviderConfig, ToolDefinitio
 pub use message::{Message, Role};
 pub use permission::{Permission, PermissionDecision, PermissionRequest};
 pub use thinking::{ThinkingConfig, ThinkingDisplay, ThinkingLevel};
+// Re-export string utilities for convenient access
+pub use strutil::{truncate_bytes, truncate_chars};

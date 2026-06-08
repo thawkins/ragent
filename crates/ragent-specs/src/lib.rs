@@ -8,6 +8,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod id_scanner;
 pub mod impl_runner;
 pub mod io;
 pub mod manager;

@@ -188,13 +188,12 @@ impl Tool for ReadTool {
         }
 
         // If num_lines is provided without end_line, compute end_line from it.
-        if end_line.is_none() && num_lines.is_some() && start_line.is_some() {
-            end_line = Some(
-                start_line
-                    .unwrap()
-                    .saturating_add(num_lines.unwrap())
-                    .saturating_sub(1),
-            );
+        if end_line.is_none()
+            && num_lines.is_some()
+            && start_line.is_some()
+            && let (Some(start), Some(num)) = (start_line, num_lines)
+        {
+            end_line = Some(start.saturating_add(num).saturating_sub(1));
         }
 
         if let (Some(start), Some(end)) = (start_line, end_line)

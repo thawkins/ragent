@@ -512,11 +512,7 @@ fn extract_slides(content: &Value) -> Result<Vec<Value>> {
 /// Truncate a JSON value to a short string for error messages.
 fn truncate_json_for_error(v: &Value) -> String {
     let s = v.to_string();
-    if s.len() > 200 {
-        format!("{}…", &s[..200])
-    } else {
-        s
-    }
+    ragent_types::truncate_bytes(&s, 200)
 }
 
 /// Flatten an array of content elements (structured or plain) into newline-joined text.

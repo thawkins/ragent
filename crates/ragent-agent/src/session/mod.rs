@@ -10,6 +10,13 @@ pub mod profiler;
 // Re-export the compaction helper so tests can exercise it directly.
 pub use processor::compact_history_with_atomic_tool_calls;
 
+// Re-export compression types when the feature is enabled.
+#[cfg(feature = "compression")]
+pub use crate::compression::{
+    ccr_store::SharedCcrStore, pipeline::CompressionResult, pipeline::CompressionStats,
+    pipeline::compress_history, pipeline::count_tokens, pipeline::should_compress,
+};
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

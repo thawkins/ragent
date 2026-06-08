@@ -47,8 +47,9 @@ fn make_app() -> App {
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
-        active_spec: std::sync::Mutex::new(None),
+        active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
+        cached_tool_definitions: parking_lot::RwLock::new(None),
         auto_approve: false,
     });
     let agent_info =
@@ -223,7 +224,7 @@ fn test_clicking_teams_row_opens_output_view() {
     app.team_members.push(member);
     app.teams_area = Rect::new(0, 20, 80, 8);
 
-    app.handle_mouse_event(mouse_down(2, 22));
+    app.handle_mouse_event(mouse_down(2, 23));
     assert!(app.output_view.is_some());
     assert_eq!(app.selected_agent_session_id.as_deref(), Some("tm-s1"));
 }

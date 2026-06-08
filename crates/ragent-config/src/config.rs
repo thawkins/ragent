@@ -5,6 +5,7 @@
 //! `RAGENT_CONFIG_CONTENT` env. Provider, agent, MCP server, and permission
 //! settings are all configured here.
 
+use crate::compression::CompressionConfig;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -72,6 +73,13 @@ pub struct Config {
     /// Memory system configuration (blocks, structured store, retrieval).
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// Context compression configuration (Headroom integration).
+    ///
+    /// When `enabled` is `true`, the agent uses Headroom-based content-aware
+    /// compression instead of simple truncation. When `false` or absent,
+    /// the existing `compact_history_with_atomic_tool_calls` behaviour is used.
+    #[serde(default)]
+    pub compression: CompressionConfig,
     /// GitLab integration configuration.
     #[serde(default)]
     pub gitlab: GitLabIntegrationConfig,
@@ -136,7 +144,9 @@ pub struct ToolVisibilityConfig {
     pub plan: bool,
     /// Code-index tools (codeindex_search, codeindex_status, codeindex_symbols, etc.).
     /// Default `true` — codeindex tools are visible when the subsystem is enabled.
-    #[serde(default = "default_true")]
+    /// When serialised, the default value (`true`) is omitted so that code-level
+    /// default changes take effect without manual config edits.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
     pub codeindex: bool,
     #[serde(skip)]
     specified: ToolVisibilitySpecified,
@@ -213,6 +223,18 @@ impl<'de> Deserialize<'de> for ToolVisibilityConfig {
 
 const fn default_false() -> bool {
     false
+}
+
+/// Helper for `#[serde(skip_serializing_if = "is_true")]` — omits `true` booleans
+/// from serialised output so that code-level defaults take precedence.
+const fn is_true(v: &bool) -> bool {
+    *v
+}
+
+/// Helper for `#[serde(skip_serializing_if = "is_false")]` — omits `false` booleans
+/// from serialised output so that code-level defaults take precedence.
+const fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// Map a visibility switch to the list of tool names it governs.
@@ -363,7 +385,10 @@ struct CodeIndexSpecified {
 #[derive(Debug, Clone, Serialize)]
 pub struct CodeIndexConfig {
     /// Whether code indexing is enabled.
-    #[serde(default = "default_code_index_enabled")]
+    ///
+    /// Defaults to `true`. When serialised, the default value (`true`) is omitted
+    /// so that code-level default changes take effect without manual config edits.
+    #[serde(default = "default_code_index_enabled", skip_serializing_if = "is_true")]
     pub enabled: bool,
     /// Maximum file size in bytes to index (default: 1 MB).
     #[serde(default = "default_max_file_size")]
@@ -1279,7 +1304,10 @@ pub enum InternalLlmDownloadPolicy {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct InternalLlmConfig {
     /// Whether the embedded internal LLM is enabled.
-    #[serde(default = "default_internal_llm_enabled")]
+    ///
+    /// Defaults to `false`. When serialised, the default value (`false`) is omitted
+    /// so that code-level default changes take effect without manual config edits.
+    #[serde(default = "default_internal_llm_enabled", skip_serializing_if = "is_false")]
     pub enabled: bool,
     /// Backend identifier for the embedded runtime.
     #[serde(default = "default_internal_llm_backend")]

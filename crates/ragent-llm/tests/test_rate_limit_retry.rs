@@ -1,7 +1,5 @@
 //! Tests for HTTP 429 (Too Many Requests) retry logic.
 
-use std::time::{Duration, Instant};
-
 /// Test that parse_retry_after correctly parses integer seconds.
 #[test]
 fn test_parse_retry_after_seconds() {

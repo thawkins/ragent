@@ -73,6 +73,18 @@ ragent-specs = { path = "../ragent-specs" }
 default = []
 embeddings = ["ort", "tokenizers", "ndarray"]
 embedded-llm = ["ragent-llm/embedded-llm"]
+# ── Context compression (Headroom integration) ───────────────────────
+# Enables content-aware compression, CCR reversible storage, accurate
+# token counting, and relevance filtering via the headroom-core crate.
+# Requires building with: cargo build -p ragent-agent --features compression
+compression = ["dep:headroom-core"]
+# Enables ML-based content detection and text compression (magika, kompress).
+# Requires: cargo build -p ragent-agent --features compression,compression-ml
+# Note: compression-ml currently does not add additional crate features
+# because headroom-core does not yet feature-gate its ML dependencies.
+# This feature flag is reserved for future use when headroom-core adds
+# feature flags for its heavier ML dependencies (fastembed, magika).
+compression-ml = ["compression"]
 
 [dependencies.ort]
 version = "2.0.0-rc.12"
@@ -86,6 +98,11 @@ optional = true
 
 [dependencies.ndarray]
 version = "0.17"
+optional = true
+
+[dependencies.headroom-core]
+git = "https://github.com/chopratejas/headroom.git"
+tag = "v0.10.17"
 optional = true
 
 [dev-dependencies]

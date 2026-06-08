@@ -508,6 +508,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         description: "Summarise and compact the conversation history",
     },
     SlashCommandDef {
+        trigger: "compress",
+        description: "Context-aware compression: /compress [default|aggressive|conservative|help|stats]",
+    },
+    SlashCommandDef {
         trigger: "cost",
         description: "Show session token usage and estimated cost",
     },
@@ -621,7 +625,7 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     },
     SlashCommandDef {
         trigger: "spec",
-        description: "Specification management: /spec create|list|search|validate|status|task|help",
+        description: "Specification management: /spec create|add|list|search|validate|status|task|help",
     },
     SlashCommandDef {
         trigger: "autopilot",
@@ -686,6 +690,10 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
     SlashCommandDef {
         trigger: "tools",
         description: "Toggle tool visibility: /tools [office|github|gitlab|teams|agents|plan|codeindex] [on|off]",
+    },
+    SlashCommandDef {
+        trigger: "router",
+        description: "Model router management: /router on|off|status|tiers|weights|boundaries|test|stats|reload|help",
     },
 ];
 /// A single entry in the slash-command autocomplete menu.
@@ -1163,6 +1171,8 @@ pub struct App {
     /// True while any compaction run (manual or auto) is active.
     /// Used to trigger message-history replacement when the LLM finishes.
     pub compact_in_progress: bool,
+    /// True while a `/compress` compression pipeline is running.
+    pub compress_in_progress: bool,
     /// Set when an auto-compaction run returns an error.
     pub auto_compact_failed: bool,
     /// Path to the SQLite storage database.
@@ -1351,7 +1361,15 @@ pub struct App {
     pub status_history: StatusHistory,
     /// Paths of configuration files that were loaded at startup (displayed in message window).
     pub config_paths: Vec<std::path::PathBuf>,
+
+    // ── Router status (FR-044–FR-049) ────────────────────────────────────────
+    /// Whether the router provider is the active provider and routing is enabled.
+    pub router_enabled: bool,
+    /// The last tier selected by the router for the most recent request.
+    /// `None` when no request has been routed yet or the router is not active.
+    pub router_current_tier: Option<String>,
 }
+
 /// State held while waiting for the user to approve or reject a plan.
 #[derive(Debug, Clone)]
 pub struct PlanApprovalState {

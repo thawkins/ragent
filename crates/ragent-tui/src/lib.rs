@@ -153,7 +153,11 @@ const IDLE_REDRAW_INTERVAL_MS: u64 = 250;
 /// # ) -> anyhow::Result<()> {
 /// let agent = AgentInfo::new("general", "General-purpose agent");
 /// let (tx, rx) = ragent_tui::tracing_layer::tui_log_channel(512);
-/// ragent_tui::run_tui(bus, storage, registry, processor, agent, false, None, rx).await?;
+/// ragent_tui::run_tui(
+///     bus, storage, registry, processor, agent, false, None, rx,
+///     std::path::PathBuf::new(),
+///     vec![],
+/// ).await?;
 /// # Ok(())
 /// # }
 /// ```

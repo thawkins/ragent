@@ -444,7 +444,11 @@ fn build_element_sig(ctx: &Ctx, node: Node, tag: &str) -> String {
                 format!("<{tag}>")
             } else {
                 let truncated = if text.len() > 60 {
-                    format!("{}…", &text[..57])
+                    let mut end = 57;
+                    while end > 0 && !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}…", &text[..end])
                 } else {
                     text.clone()
                 };

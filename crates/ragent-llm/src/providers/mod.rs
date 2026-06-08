@@ -17,6 +17,11 @@ pub mod huggingface;
 pub mod ollama;
 pub mod ollama_cloud;
 pub mod openai;
+pub mod router;
+pub mod router_classifier;
+pub mod router_client;
+pub mod router_config;
+pub mod router_modifiers;
 mod thinking;
 pub mod xai;
 
@@ -282,5 +287,6 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(ollama_cloud::OllamaCloudProvider::new()));
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry.register(Box::new(xai::XaiProvider));
+    registry.register(Box::new(router::RouterProvider::with_defaults()));
     registry
 }

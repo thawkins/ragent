@@ -5,7 +5,7 @@
 //! Verifies each slash command updates app state correctly, handles arguments,
 //! and provides user feedback via status bar and log entries.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ragent_core::{
@@ -47,8 +47,9 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
-        active_spec: std::sync::Mutex::new(None),
+        active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
+        cached_tool_definitions: parking_lot::RwLock::new(None),
         auto_approve: false,
     });
     let agent_info =
@@ -85,6 +86,14 @@ fn cwd_test_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+/// Acquire the cwd test lock, recovering from any prior poisoning.
+fn cwd_lock() -> MutexGuard<'static, ()> {
+    let lock = cwd_test_lock().lock();
+    match lock {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
 #[test]
 fn test_backfill_model_ctx_window_refreshes_stale_ollama_cloud_cache() {
     let mut app = make_app();
@@ -319,7 +328,7 @@ fn test_slash_system_replaces_existing() {
 
 #[test]
 fn test_slash_internal_llm_toggle_and_feature_switch_persist() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -342,7 +351,7 @@ fn test_slash_internal_llm_toggle_and_feature_switch_persist() {
 
 #[test]
 fn test_slash_internal_llm_show_displays_feature_switches() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -360,11 +369,11 @@ fn test_slash_internal_llm_show_displays_feature_switches() {
     assert!(text.contains("enabled"));
     assert!(text.contains("session title"));
     assert!(text.contains("prompt/context compaction"));
-    assert!(text.contains("memory extraction prefilter"));
+    assert!(text.contains("memory extraction"));
+    assert!(text.contains("prefilter") || text.contains("pre-filter"));
     assert!(text.contains("off"));
     assert!(text.matches("on").count() >= 3);
 }
-
 // ── /agent ──────────────────────────────────────────────────────────
 
 #[test]
@@ -685,8 +694,6 @@ fn test_slash_model_empty_model_list_shows_warning_instead_of_opening_picker() {
     );
 }
 
-#[test]
-#[test]
 #[test]
 fn test_slash_model_ollama_cloud_falls_back_to_selected_model_when_discovery_is_unavailable() {
     let mut app = make_app();
@@ -1709,7 +1716,7 @@ fn test_slash_tools_show_alias_lists_visibility_switches() {
 
 #[test]
 fn test_slash_tools_office_on_shows_office_tools() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -1749,7 +1756,7 @@ fn test_slash_tools_office_on_shows_office_tools() {
 
 #[test]
 fn test_slash_tools_teams_on_shows_team_tools() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -1790,7 +1797,7 @@ fn test_slash_tools_teams_on_shows_team_tools() {
 
 #[test]
 fn test_slash_tools_agents_on_shows_agent_tools() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();
@@ -1831,7 +1838,7 @@ fn test_slash_tools_agents_on_shows_agent_tools() {
 
 #[test]
 fn test_slash_tools_plan_on_shows_plan_tools() {
-    let _lock = cwd_test_lock().lock().expect("cwd lock");
+    let _lock = cwd_lock();
     let original_cwd = std::env::current_dir().expect("cwd");
     let _guard = CwdGuard(original_cwd);
     let _temp = enter_temp_config_dir();

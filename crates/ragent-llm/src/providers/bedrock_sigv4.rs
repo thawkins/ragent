@@ -69,10 +69,8 @@ pub fn sign_request(
         ("x-amz-date".to_string(), amz_date.clone()),
     ];
 
-    if credentials.session_token.is_some() {
-        if let Some(ref token) = credentials.session_token {
-            signed_headers_map.push(("x-amz-security-token".to_string(), token.clone()));
-        }
+    if let Some(ref token) = credentials.session_token {
+        signed_headers_map.push(("x-amz-security-token".to_string(), token.clone()));
     }
 
     // Sort by lowercase header name
@@ -160,8 +158,7 @@ fn derive_signing_key(secret_key: &str, date_stamp: &str, region: &str, service:
     );
     let k_region = hmac_sha256(&k_date, region.as_bytes());
     let k_service = hmac_sha256(&k_region, service.as_bytes());
-    let k_signing = hmac_sha256(&k_service, b"aws4_request");
-    k_signing
+    hmac_sha256(&k_service, b"aws4_request")
 }
 
 /// Computes HMAC-SHA256 using the `sha2` crate directly.
@@ -182,7 +179,7 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     };
 
     // Pad key to block size
-    let mut padded_key = vec![0u8; SHA256_BLOCK_SIZE];
+    let mut padded_key = [0u8; SHA256_BLOCK_SIZE];
     padded_key[..key.len()].copy_from_slice(&key);
 
     // Inner hash: SHA-256((key XOR ipad) || data)
@@ -204,7 +201,7 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
 
     let mut outer_hasher = Sha256::new();
     outer_hasher.update(&opad_key);
-    outer_hasher.update(&inner_hash);
+    outer_hasher.update(inner_hash);
     let hmac_result = outer_hasher.finalize();
 
     hmac_result.to_vec()

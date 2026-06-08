@@ -647,18 +647,17 @@ impl LlmClient for BedrockAnthropicClient {
                                             yield StreamEvent::ReasoningDelta { text: text.to_string() };
                                         }
                                     }
-                                    Some("input_json_delta") => {
-                                        if let Some(json_str) = delta["partial_json"].as_str() {
-                                            if let Some((id, args)) = tool_call_args.iter_mut().last() {
-                                                args.push_str(json_str);
-                                                yield StreamEvent::ToolCallDelta {
-                                                    id: id.clone(),
-                                                    args_json: json_str.to_string(),
-                                                };
-                                            }
-                                        }
-                                    }
-                                    _ => {}
+                                                                          Some("input_json_delta") => {
+                                                                              if let Some(json_str) = delta["partial_json"].as_str()
+                                                                                  && let Some((id, args)) = tool_call_args.iter_mut().last()
+                                                                              {
+                                                                                  args.push_str(json_str);
+                                                                                  yield StreamEvent::ToolCallDelta {
+                                                                                      id: id.clone(),
+                                                                                      args_json: json_str.to_string(),
+                                                                                  };
+                                                                              }
+                                                                          }                                    _ => {}
                                 }
                             }
                             "content_block_stop" => {
@@ -982,33 +981,32 @@ impl LlmClient for BedrockConverseClient {
                         }
 
                         match current_event_type.as_str() {
-                            "contentBlockStart" => {
-                                if let Some(start) = parsed.get("start") {
-                                    if let Some(tool_use) = start.get("toolUse") {
-                                        active_tool_call_id = tool_use["toolUseId"].as_str().unwrap_or("").to_string();
-                                        let name = tool_use["name"].as_str().unwrap_or("").to_string();
-                                                                              yield StreamEvent::ToolCallStart {
-                                                                                      id: active_tool_call_id.clone(),
-                                                                                      name,
-                                                                                  };                                    }
-                                }
-                            }
-                            "contentBlockDelta" => {
+                                                        "contentBlockStart" => {
+                                                            if let Some(start) = parsed.get("start")
+                                                                && let Some(tool_use) = start.get("toolUse")
+                                                            {
+                                                                active_tool_call_id = tool_use["toolUseId"].as_str().unwrap_or("").to_string();
+                                                                let name = tool_use["name"].as_str().unwrap_or("").to_string();
+                                                                yield StreamEvent::ToolCallStart {
+                                                                    id: active_tool_call_id.clone(),
+                                                                    name,
+                                                                };
+                                                            }
+                                                        }                            "contentBlockDelta" => {
                                 if let Some(delta) = parsed.get("delta") {
-                                    if let Some(text_delta) = delta.get("text") {
-                                        if let Some(text) = text_delta.as_str() {
-                                            yield StreamEvent::TextDelta { text: text.to_string() };
-                                        }
+                                    if let Some(text_delta) = delta.get("text")
+                                        && let Some(text) = text_delta.as_str()
+                                    {
+                                        yield StreamEvent::TextDelta { text: text.to_string() };
                                     }
-                                    if let Some(tool_delta) = delta.get("toolUse") {
-                                        if let Some(input) = tool_delta.get("input") {
-                                            if let Some(json_str) = input.as_str() {
-                                                yield StreamEvent::ToolCallDelta {
-                                                    id: active_tool_call_id.clone(),
-                                                    args_json: json_str.to_string(),
-                                                };
-                                            }
-                                        }
+                                    if let Some(tool_delta) = delta.get("toolUse")
+                                        && let Some(input) = tool_delta.get("input")
+                                        && let Some(json_str) = input.as_str()
+                                    {
+                                        yield StreamEvent::ToolCallDelta {
+                                            id: active_tool_call_id.clone(),
+                                            args_json: json_str.to_string(),
+                                        };
                                     }
                                 }
                             }

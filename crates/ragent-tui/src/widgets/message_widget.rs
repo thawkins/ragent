@@ -143,8 +143,8 @@ pub fn make_relative_path(path: &str, cwd: &str) -> String {
 /// - 🔎 LSP/Code Intelligence: lsp_*
 /// - 📄 Document: office_*, pdf_*
 /// - 📋 GitHub: github_list_issues, github_get_issue, github_create_issue,
-///            github_comment_issue, github_close_issue, github_list_prs,
-///            github_get_pr, github_create_pr, github_merge_pr, github_review_pr
+///   github_comment_issue, github_close_issue, github_list_prs,
+///   github_get_pr, github_create_pr, github_merge_pr, github_review_pr
 /// - ✨ Utility: format, metadata, truncate, read_line_range
 pub fn tool_input_summary(tool: &str, input: &serde_json::Value, cwd: &str) -> String {
     // Resolve alias tool names to their canonical equivalents so aliases get

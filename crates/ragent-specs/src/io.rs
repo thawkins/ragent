@@ -248,7 +248,7 @@ impl SpecIo {
             if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
                 break;
             }
-            if !in_task_section || (trimmed.starts_with("|") && trimmed.contains("ID")) {
+            if !in_task_section {
                 continue;
             }
             // Parse table rows: | ID | Title | Req | Effort | Priority | Status | Dependencies |
@@ -257,6 +257,17 @@ impl SpecIo {
                 .map(|c| c.trim())
                 .filter(|c| !c.is_empty())
                 .collect();
+            // Skip header rows (contain "ID" as a cell value, not as a substring in a title)
+            // and separator rows (all dashes/colons)
+            if cells.iter().any(|c| c.eq_ignore_ascii_case("ID")) {
+                continue;
+            }
+            if cells
+                .iter()
+                .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' '))
+            {
+                continue;
+            }
             if cells.len() >= 6 {
                 let id = cells[0].to_string();
                 if id.starts_with("T-") {

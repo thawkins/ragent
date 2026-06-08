@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.104"
+version = "0.1.0-alpha.105"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -232,8 +232,10 @@ name = "ragent"
 path = "src/main.rs"
 
 [features]
-default = ["embedded-llm"]
+default = ["embedded-llm", "compression"]
 embedded-llm = ["ragent-agent/embedded-llm"]
+compression = ["ragent-agent/compression", "ragent-tui/compression"]
+compression-ml = ["ragent-agent/compression-ml"]
 
 [dependencies]
 ragent-agent = { workspace = true }

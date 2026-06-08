@@ -2467,6 +2467,59 @@ fn render_status_bar(frame: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    // ── Router indicator (FR-044–FR-049) ─────────────────────────────────────
+    let mut row2_right: Vec<Span<'_>> = Vec::new();
+    {
+        // FR-047: Show "Router:" label
+        row2_right.push(Span::styled(
+            "│ Router: ",
+            Style::default().fg(Color::DarkGray),
+        ));
+        if app.router_enabled {
+            // FR-044: Enabled indicator
+            row2_right.push(Span::styled(
+                "✓ ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            // FR-045, FR-048: Current tier with initial and color
+            if let Some(ref tier) = app.router_current_tier {
+                let (initial, tier_color) = match tier.as_str() {
+                    "SIMPLE" => ("S", Color::Green),
+                    "MEDIUM" => ("M", Color::Yellow),
+                    "COMPLEX" => ("C", Color::Cyan),
+                    "REASONING" => ("R", Color::Magenta),
+                    _ => ("?", Color::White),
+                };
+                // FR-048: Tier initial
+                row2_right.push(Span::styled(
+                    initial.to_string(),
+                    Style::default().fg(tier_color).add_modifier(Modifier::BOLD),
+                ));
+                row2_right.push(Span::raw(" "));
+            }
+        } else {
+            // FR-049: Disabled indicator
+            row2_right.push(Span::styled(
+                "✗ off ",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ));
+        }
+    }
+
+    // Calculate gap between left and right content
+    let left_len: usize = row2_left.iter().map(|s| s.content.len()).sum();
+    let right_len: usize = row2_right.iter().map(|s| s.content.len()).sum();
+    let gap = rows[1]
+        .width
+        .saturating_sub(left_len as u16 + right_len as u16);
+    let gap_span = Span::raw(" ".repeat(gap as usize));
+
+    row2_left.push(gap_span);
+    row2_left.extend(row2_right);
     let line2 = Line::from(row2_left);
     frame.render_widget(Paragraph::new(line2), rows[1]);
 }
@@ -3376,11 +3429,7 @@ fn render_mcp_discover_dialog(frame: &mut Frame, app: &App) {
         for (i, srv) in state.servers.iter().enumerate() {
             let already_enabled = enabled_ids.contains(&srv.id);
             let num = format!("{}", i + 1);
-            let name = if srv.name.len() > 38 {
-                format!("{}…", &srv.name[..37])
-            } else {
-                srv.name.clone()
-            };
+            let name = ragent_types::truncate_bytes(&srv.name, 37);
             let source = match &srv.source {
                 ragent_core::mcp::McpDiscoverySource::SystemPath => "PATH".to_string(),
                 ragent_core::mcp::McpDiscoverySource::NpmGlobal { .. } => "npm global".to_string(),

@@ -124,11 +124,7 @@ impl Tool for CodeIndexSearchTool {
                 output.push_str(&format!("   {}\n", r.signature));
             }
             if !r.doc_snippet.is_empty() {
-                let doc = if r.doc_snippet.len() > 120 {
-                    format!("{}…", &r.doc_snippet[..120])
-                } else {
-                    r.doc_snippet.clone()
-                };
+                let doc = ragent_types::truncate_bytes(&r.doc_snippet, 120);
                 output.push_str(&format!("   /// {doc}\n"));
             }
         }

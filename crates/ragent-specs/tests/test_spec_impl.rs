@@ -3,12 +3,12 @@
 //! Tests the full flow of parsing a PLAN.md, resolving execution order,
 //! and constructing implementation prompts.
 
+use ragent_specs::impl_runner::{
+    build_blocked_summary, build_cancellation_summary, build_completion_summary,
+    build_progress_update, find_dependents, parse_impl_args,
+};
 use ragent_specs::plan_parser::{Effort, PlanParser, PlanTask, Priority, resolve_execution_order};
 use ragent_specs::spec::TaskStatus;
-use ragent_specs::impl_runner::{
-    ImplOptions, build_progress_update, build_completion_summary,
-    build_cancellation_summary, build_blocked_summary, find_dependents, parse_impl_args,
-};
 
 #[test]
 fn test_full_parse_and_order() {
@@ -135,11 +135,11 @@ fn test_parse_impl_args_all_variants() {
     assert_eq!(opts.task_id.as_deref(), Some("T-003"));
 
     // Dry run
-    let (name, opts) = parse_impl_args("myspec --dry-run").unwrap();
+    let (_name, opts) = parse_impl_args("myspec --dry-run").unwrap();
     assert!(opts.dry_run);
 
     // All options
-    let (name, opts) = parse_impl_args("myspec --task T-005 --dry-run").unwrap();
+    let (_name, opts) = parse_impl_args("myspec --task T-005 --dry-run").unwrap();
     assert_eq!(opts.task_id.as_deref(), Some("T-005"));
     assert!(opts.dry_run);
 

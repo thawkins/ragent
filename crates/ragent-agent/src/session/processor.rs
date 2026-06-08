@@ -222,11 +222,7 @@ fn build_tool_reference_section(registry: &crate::tool::ToolRegistry) -> String 
     );
     for def in &defs {
         // Truncate long descriptions to keep the prompt compact.
-        let desc = if def.description.len() > 120 {
-            format!("{}…", &def.description[..120])
-        } else {
-            def.description.clone()
-        };
+        let desc = ragent_types::truncate_bytes(&def.description, 120);
         section.push_str(&format!("- `{}` — {}\n", def.name, desc));
     }
     section.push('\n');
@@ -1099,47 +1095,111 @@ impl SessionProcessor {
                     .find(|m| m.id == model_ref.model_id)
             })
             .map(|m| m.context_window)
-            .unwrap_or(128_000); // Default fallback                            
+            .unwrap_or(128_000); // Default fallback
+
         // Compact history if needed to prevent context window overflow.
-        // For small histories that fit within the window we skip the expensive
-        // atomic-pair compaction entirely.
+        // When the compression feature is enabled and the config allows it,
+        // use the Headroom compression pipeline (FR-005, FR-006).
+        // Otherwise fall back to the existing truncation-based compaction (FR-009).
         let compacted_history = {
             let _scope = profiler.scope("history.compact");
             let max_tokens = context_window.saturating_sub(1000);
-            let quick_total_tokens: usize = history
-                .iter()
-                .map(|m| {
-                    let text_len: usize = m
-                        .parts
+
+            // Try Headroom compression if the feature is enabled.
+            #[cfg(feature = "compression")]
+            let compacted_history = {
+                let compression_config = &session_config.compression;
+                if compression_config.enabled {
+                    // Use the Headroom compression pipeline for content-aware,
+                    // reversible compression (FR-005, FR-006).
+                    let result = crate::compression::pipeline::compress_history(
+                        &history,
+                        context_window,
+                        8192,
+                        compression_config,
+                    );
+                    if result.stats.original_tokens > result.stats.compressed_tokens {
+                        tracing::info!(
+                            original_tokens = result.stats.original_tokens,
+                            compressed_tokens = result.stats.compressed_tokens,
+                            compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+                            ccr_entries = result.stats.ccr_entries_stashed,
+                            messages_compressed = result.stats.messages_compressed,
+                            "Compressed history with Headroom pipeline"
+                        );
+                    }
+                    result.messages
+                } else {
+                    // Compression disabled in config — fall back to truncation (FR-009).
+                    let quick_total_tokens: usize = history
                         .iter()
-                        .map(|p| match p {
-                            MessagePart::Text { text } => text.len(),
-                            MessagePart::ToolCall { tool, state, .. } => {
-                                tool.len()
-                                    + state
-                                        .output
-                                        .as_ref()
-                                        .and_then(|v| v.as_str())
-                                        .map(|s| s.len())
-                                        .unwrap_or(0)
-                                    + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                            }
-                            MessagePart::Image { .. } => 1000,
-                            MessagePart::Reasoning { text } => text.len(),
+                        .map(|m| {
+                            let text_len: usize = m
+                                .parts
+                                .iter()
+                                .map(|p| match p {
+                                    MessagePart::Text { text } => text.len(),
+                                    MessagePart::ToolCall { tool, state, .. } => {
+                                        tool.len()
+                                            + state
+                                                .output
+                                                .as_ref()
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.len())
+                                                .unwrap_or(0)
+                                            + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                                    }
+                                    MessagePart::Image { .. } => 1000,
+                                    MessagePart::Reasoning { text } => text.len(),
+                                })
+                                .sum();
+                            text_len / 4 + 10
                         })
                         .sum();
-                    text_len / 4 + 10
-                })
-                .sum();
-            if quick_total_tokens <= max_tokens {
-                history.to_vec()
-            } else {
-                compact_history_with_atomic_tool_calls(
-                    &history,
-                    context_window,
-                    8192, // Default max output tokens
-                )
-            }
+                    if quick_total_tokens <= max_tokens {
+                        history.to_vec()
+                    } else {
+                        compact_history_with_atomic_tool_calls(&history, context_window, 8192)
+                    }
+                }
+            };
+
+            // When the compression feature is not compiled in, always use truncation.
+            #[cfg(not(feature = "compression"))]
+            let compacted_history = {
+                let quick_total_tokens: usize = history
+                    .iter()
+                    .map(|m| {
+                        let text_len: usize = m
+                            .parts
+                            .iter()
+                            .map(|p| match p {
+                                MessagePart::Text { text } => text.len(),
+                                MessagePart::ToolCall { tool, state, .. } => {
+                                    tool.len()
+                                        + state
+                                            .output
+                                            .as_ref()
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.len())
+                                            .unwrap_or(0)
+                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
+                                }
+                                MessagePart::Image { .. } => 1000,
+                                MessagePart::Reasoning { text } => text.len(),
+                            })
+                            .sum();
+                        text_len / 4 + 10
+                    })
+                    .sum();
+                if quick_total_tokens <= max_tokens {
+                    history.to_vec()
+                } else {
+                    compact_history_with_atomic_tool_calls(&history, context_window, 8192)
+                }
+            };
+
+            compacted_history
         };
         let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
         // appears in the message window.

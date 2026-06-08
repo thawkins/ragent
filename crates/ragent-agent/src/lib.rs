@@ -10,6 +10,8 @@ pub mod config {
     pub use ragent_config::config::StreamConfig;
     pub use ragent_config::*;
 }
+#[cfg(feature = "compression")]
+pub mod compression;
 pub mod error;
 pub mod event;
 pub mod file_ops;

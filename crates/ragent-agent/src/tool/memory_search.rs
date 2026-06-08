@@ -289,11 +289,7 @@ impl MemorySearchTool {
                 } else {
                     ""
                 },
-                if resolved.block.content.len() > 200 {
-                    format!("{}…", &resolved.block.content[..200])
-                } else {
-                    resolved.block.content.clone()
-                },
+                ragent_types::truncate_bytes(&resolved.block.content, 200),
             ));
         }
 

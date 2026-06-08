@@ -65,11 +65,11 @@ pub fn resolve_aws_credentials(
                 .filter(|s| !s.trim().is_empty())
         });
 
-    if let Some(profile) = profile_name {
-        if let Some(creds) = creds_from_profile(&profile, &region)? {
-            tracing::debug!(region = %region, profile = %profile, source = "aws_profile", "Resolved AWS credentials");
-            return Ok(creds);
-        }
+    if let Some(profile) = profile_name
+        && let Some(creds) = creds_from_profile(&profile, &region)?
+    {
+        tracing::debug!(region = %region, profile = %profile, source = "aws_profile", "Resolved AWS credentials");
+        return Ok(creds);
     }
 
     // 3. Try IAM instance metadata (best-effort)
@@ -104,24 +104,24 @@ pub fn resolve_aws_credentials(
 /// 4. Default `us-east-1`
 pub fn resolve_region(options: &HashMap<String, serde_json::Value>) -> String {
     // FR-006: Bedrock-specific region override
-    if let Ok(region) = std::env::var("AWS_BEDROCK_REGION") {
-        if !region.trim().is_empty() {
-            return region.trim().to_string();
-        }
+    if let Ok(region) = std::env::var("AWS_BEDROCK_REGION")
+        && !region.trim().is_empty()
+    {
+        return region.trim().to_string();
     }
 
     // FR-005: General AWS region
-    if let Ok(region) = std::env::var("AWS_REGION") {
-        if !region.trim().is_empty() {
-            return region.trim().to_string();
-        }
+    if let Ok(region) = std::env::var("AWS_REGION")
+        && !region.trim().is_empty()
+    {
+        return region.trim().to_string();
     }
 
     // FR-004: Config option
-    if let Some(region) = options.get("region").and_then(|v| v.as_str()) {
-        if !region.trim().is_empty() {
-            return region.trim().to_string();
-        }
+    if let Some(region) = options.get("region").and_then(|v| v.as_str())
+        && !region.trim().is_empty()
+    {
+        return region.trim().to_string();
     }
 
     // Default
@@ -208,10 +208,10 @@ fn creds_from_profile(profile: &str, default_region: &str) -> Result<Option<AwsC
 /// Returns the path to `~/.aws/credentials`.
 fn aws_credentials_path() -> PathBuf {
     // Respect AWS_SHARED_CREDENTIALS_FILE env var
-    if let Ok(path) = std::env::var("AWS_SHARED_CREDENTIALS_FILE") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Ok(path) = std::env::var("AWS_SHARED_CREDENTIALS_FILE")
+        && !path.trim().is_empty()
+    {
+        return PathBuf::from(path);
     }
 
     dirs::home_dir()

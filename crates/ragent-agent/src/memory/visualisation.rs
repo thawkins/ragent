@@ -242,11 +242,7 @@ pub fn generate_heatmap(storage: &Storage) -> anyhow::Result<AccessHeatmap> {
     let mut entries: Vec<AccessHeatmapEntry> = memories
         .iter()
         .map(|m| {
-            let preview = if m.content.len() > 200 {
-                format!("{}…", &m.content[..200])
-            } else {
-                m.content.clone()
-            };
+            let preview = ragent_types::truncate_bytes(&m.content, 200);
             AccessHeatmapEntry {
                 id: m.id,
                 category: m.category.clone(),

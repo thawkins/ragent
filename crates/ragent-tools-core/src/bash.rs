@@ -813,8 +813,14 @@ async fn validate_bash_syntax(cmd: &str) -> Result<()> {
     // a hardcoded "sh" which may not exist on Windows (or may be a different
     // shell like dash on some Linux systems).
     let (program, args): (&OsStr, Vec<&OsStr>) = match shell {
-        ShellType::Bash => (OsStr::new("bash"), vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)]),
-        ShellType::GitBash(path) => (path.as_os_str(), vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)]),
+        ShellType::Bash => (
+            OsStr::new("bash"),
+            vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)],
+        ),
+        ShellType::GitBash(path) => (
+            path.as_os_str(),
+            vec![OsStr::new("-n"), OsStr::new("-c"), OsStr::new(cmd)],
+        ),
         ShellType::PowerShell(_) => unreachable!("PowerShell handled above"),
     };
 

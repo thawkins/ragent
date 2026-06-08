@@ -46,8 +46,9 @@ fn make_app_with_storage(storage: Arc<Storage>) -> App {
         code_index: std::sync::OnceLock::new(),
         extraction_engine: std::sync::OnceLock::new(),
         stream_config: ragent_core::config::StreamConfig::default(),
-        active_spec: std::sync::Mutex::new(None),
+        active_spec: tokio::sync::RwLock::new(None),
         spec_manager: std::sync::OnceLock::new(),
+        cached_tool_definitions: parking_lot::RwLock::new(None),
         auto_approve: false,
     });
     let agent_info =

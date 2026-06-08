@@ -159,12 +159,7 @@ impl Tool for ListTasksTool {
                 .as_deref()
                 .or(task.error.as_deref())
                 .unwrap_or("—");
-            let summary_short = if summary.len() > 100 {
-                format!("{}…", &summary[..100])
-            } else {
-                summary.to_string()
-            };
-
+            let summary_short = ragent_types::truncate_bytes(summary, 100);
             let bg = if task.background { "yes" } else { "no" };
 
             let _ = write!(

@@ -1,19 +1,25 @@
 # Release
 
-## Current Version: 0.1.0-alpha.104
+## Current Version: 0.1.0-alpha.105
 
 ### Added
-- **Amazon Bedrock provider** — Full AWS Bedrock support with SigV4 request signing (no AWS SDK dependency), dual API clients (Anthropic Messages API for Claude models, Converse API for all other models), 9 default models, short alias mapping, ListFoundationModels discovery, and credential resolution chain (env vars → AWS profile INI → session tokens).
-- **xAI Grok provider** — New `xai.rs` provider for the xAI Grok API, registered in the default provider registry.
-- **Spec implementation commands** — `/spec impl` and `/spec implement` slash commands for spec lifecycle: generates implementation plans, tracks progress against requirements, and runs implementation tasks.
+- **Context compression pipeline** — New compression module (`ragent-agent/src/compression/`) with multi-strategy history compaction: BM25 relevance scoring, CCR (Critical Content Retention) store, aggressive/conservative/default modes, and `/compress` slash command integration.
+- **Model Router Provider** — New intelligent model routing system (`ragent-llm/src/providers/router*.rs`) with 15-dimension classifier (complexity, creativity, code, reasoning, vision, etc.), automatic model selection, and configurable routing rules.
+- **Compression config** — New `compression.rs` module in ragent-config for compression pipeline configuration.
+- **String utilities** — New `strutil.rs` module in ragent-types for shared string helpers.
+- **Spec ID scanner** — New `id_scanner.rs` in ragent-specs for extracting and tracking spec requirement/task IDs.
+- **HeadroomCompress spec** — Full specification for the compression feature in `specs/HeadroomCompress/`.
+- **ModelRouterProvider spec** — Full specification for the model router in `specs/ModelRouterProvider/`.
+- **Config defaults fix** — Added `#[serde(skip_serializing_if)]` to `code_index.enabled`, `internal_llm.enabled`, and `tool_visibility.codeindex` so auto-generated config files don't override code-level defaults.
+- **Compression indicator test** — New TUI test for compression status display.
 
 ### Changed
-- **Copilot provider improvements** — Updated copilot.rs with refinements to the GitHub Copilot provider.
-- **HuggingFace provider improvements** — Updated huggingface.rs with refinements.
-- **Provider registry** — Added Bedrock and xAI to `create_default_registry()`.
-- **Spec module expanded** — New `impl_runner.rs` and `plan_parser.rs` modules in ragent-specs.
+- **Agent system** — Refactored agent module with expanded presets and compression integration.
+- **Session processor** — Added compression integration, improved tool call handling, and spec command support.
+- **TUI** — Added `/compress` slash command, compression status bar indicator, and improved status bar layout.
+- **Spec commands** — Major refactor of spec command handling with expanded `/spec impl` and `/spec implement` support.
+- **Bedrock provider** — Refinements to credential handling and SigV4 signing.
+- **Multiple tool refinements** — Updated codeindex_search, list_tasks, memory_search, office_write, and spec_list tools.
+- **Test improvements** — Updated multiple test files for compatibility with new APIs and module structure.
 
-## Previous: 0.1.0-alpha.103
-
-### Fixed
-- **Bash syntax validation on Windows** — `validate_bash_syntax()` now uses the discovered shell program (`bash` on Unix, Git Bash executable path on Windows) instead of a hardcoded `sh -n -c` that fails on Windows. PowerShell syntax validation is still skipped (PowerShell self-validates at runtime).
+## Previous: 0.1.0-alpha.104

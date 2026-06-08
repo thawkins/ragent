@@ -165,6 +165,7 @@ fn test_ctx(storage: Arc<dyn StorageBackend>) -> ToolContext {
         event_bus: Arc::new(EventBus::new(16)),
         storage: Some(storage),
         code_index: None,
+        config: None,
     }
 }
 

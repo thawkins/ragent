@@ -148,18 +148,14 @@ impl PlanParser {
             let trimmed = line.trim();
 
             // Detect ## Tasks section
-            if trimmed.eq_ignore_ascii_case("## Tasks")
-                || trimmed.eq_ignore_ascii_case("### Tasks")
+            if trimmed.eq_ignore_ascii_case("## Tasks") || trimmed.eq_ignore_ascii_case("### Tasks")
             {
                 in_task_section = true;
                 continue;
             }
 
             // Exit task section at next ## heading (but not ###)
-            if in_task_section
-                && trimmed.starts_with("## ")
-                && !trimmed.starts_with("### ")
-            {
+            if in_task_section && trimmed.starts_with("## ") && !trimmed.starts_with("### ") {
                 break;
             }
 
@@ -190,8 +186,7 @@ impl PlanParser {
             }
             if trimmed.split('|').all(|c| {
                 let t = c.trim();
-                t.is_empty()
-                    || t.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+                t.is_empty() || t.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
             }) {
                 continue;
             }
@@ -216,10 +211,10 @@ impl PlanParser {
                 continue;
             }
 
-                          // Validate ID format T-NNN (just warn, don't skip)
-                          if !id.starts_with("T-") || !id[2..].chars().all(|c| c.is_ascii_digit()) {
-                              tracing::warn!("Non-standard task ID format: {}", id);
-                          }
+            // Validate ID format T-NNN (just warn, don't skip)
+            if !id.starts_with("T-") || !id[2..].chars().all(|c| c.is_ascii_digit()) {
+                tracing::warn!("Non-standard task ID format: {}", id);
+            }
             let title = cells.get(1).copied().unwrap_or("").to_string();
             let requirement = cells.get(2).copied().unwrap_or("").to_string();
             let effort_str = cells.get(3).copied().unwrap_or("");
@@ -321,11 +316,7 @@ pub fn resolve_execution_order(tasks: &[PlanTask]) -> Result<Vec<usize>, SpecErr
                 in_degree[i] += 1;
             } else {
                 // Unknown dependency — warn but don't fail
-                tracing::warn!(
-                    "Task {} references unknown dependency {}",
-                    task.id,
-                    dep_id
-                );
+                tracing::warn!("Task {} references unknown dependency {}", task.id, dep_id);
             }
         }
     }
@@ -358,7 +349,9 @@ pub fn resolve_execution_order(tasks: &[PlanTask]) -> Result<Vec<usize>, SpecErr
             .filter(|(i, _)| !visited.contains(i))
             .map(|(_, t)| t.id.clone())
             .collect();
-        return Err(SpecError::DependencyCycle { task_ids: cycle_ids });
+        return Err(SpecError::DependencyCycle {
+            task_ids: cycle_ids,
+        });
     }
 
     Ok(order)
@@ -574,10 +567,7 @@ mod tests {
         let order = resolve_execution_order(&tasks).unwrap();
         assert_eq!(order.len(), 3);
         // T-001 must come before T-002, T-002 before T-003
-        let _pos: HashMap<&str, usize> = order
-            .iter()
-            .map(|&i| (tasks[i].id.as_str(), i))
-            .collect();
+        let _pos: HashMap<&str, usize> = order.iter().map(|&i| (tasks[i].id.as_str(), i)).collect();
         // Not checking exact positions, just relative ordering
         let t1 = order.iter().position(|&i| tasks[i].id == "T-001").unwrap();
         let t2 = order.iter().position(|&i| tasks[i].id == "T-002").unwrap();
@@ -756,13 +746,13 @@ mod tests {
                 status: TaskStatus::Pending,
             },
         ];
-                  let order = resolve_execution_order(&tasks).unwrap();
-                  let resumed = filter_for_resume(&tasks, &order);
-                  // T-002 is included (its dep T-001 is completed)
-                  // T-003 is NOT included (its dep T-002 is still in_progress, not completed)
-                  assert_eq!(resumed.len(), 1);
-                  assert_eq!(tasks[resumed[0]].id, "T-002");
-              }
+        let order = resolve_execution_order(&tasks).unwrap();
+        let resumed = filter_for_resume(&tasks, &order);
+        // T-002 is included (its dep T-001 is completed)
+        // T-003 is NOT included (its dep T-002 is still in_progress, not completed)
+        assert_eq!(resumed.len(), 1);
+        assert_eq!(tasks[resumed[0]].id, "T-002");
+    }
     #[test]
     fn test_filter_for_resume_blocked_unblocked() {
         // T-002 was blocked because T-001 wasn't done, but now T-001 is completed

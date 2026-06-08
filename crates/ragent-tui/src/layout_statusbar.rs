@@ -362,6 +362,27 @@ fn build_line2_left(
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
 
+    // Compression / Compaction activity indicator — always visible, even in Minimal mode.
+    if app.compact_in_progress || app.compress_in_progress {
+        let label = if app.compact_in_progress && app.compress_in_progress {
+            "cmp+compress"
+        } else if app.compact_in_progress {
+            "compacting"
+        } else {
+            "compressing"
+        };
+        let short_label = match mode {
+            ResponsiveMode::Minimal => "⟳",
+            _ => label,
+        };
+        spans.push(Span::styled(
+            format!("{} ", short_label),
+            Style::default()
+                .fg(colors::WARNING)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     // Provider with health indicator
     if let Some(label) = app.provider_model_label() {
         let (icon, health_color) = match app.provider_health_status() {
@@ -563,7 +584,6 @@ fn build_line2_right(
         } else {
             (indicators::ERROR, colors::ERROR)
         };
-
         spans.push(Span::styled(
             format!("CodeIdx:{icon} "),
             Style::default().fg(color),

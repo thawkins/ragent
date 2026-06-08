@@ -154,8 +154,9 @@ fn test_detect_provider_db_keys_follow_provider_list_order() {
     assert!(
         p.id == "anthropic"
             || p.source == ProviderSource::EnvVar
-            || p.source == ProviderSource::AutoDiscovered,
-        "expected anthropic (from DB) or an env/auto-discovered provider, got: {} ({:?})",
+            || p.source == ProviderSource::AutoDiscovered
+            || p.source == ProviderSource::Database,
+        "expected anthropic (from DB) or an env/auto-discovered/file-detected provider, got: {} ({:?})",
         p.id,
         p.source
     );
