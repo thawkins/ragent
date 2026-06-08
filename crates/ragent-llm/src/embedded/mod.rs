@@ -3,16 +3,17 @@
 //! This module provides the local-runtime foundation for a small, embedded
 //! model used by internal helper workflows. The runtime is lazy, cache-aware,
 //! and disabled by default. When the `embedded-llm` feature is enabled the
-//! candle backend is compiled in and used for actual inference.
+//! candle backend is compiled in; when the `litertlm` feature is enabled the
+//! LiteRT-LM backend is compiled in. At least one backend feature must be
+//! enabled for production inference.
 //!
-//! If either of the required model files (`.gguf` and `tokenizer.json`) are
-//! absent from the local cache, and the configured `download_policy` allows it,
-//! they are fetched automatically from their registered HuggingFace URLs on
-//! first use.
+//! If either of the required model files are absent from the local cache, and
+//! the configured `download_policy` allows it, they are fetched automatically
+//! from their registered URLs on first use.
 
 use anyhow::{Context, Result, bail};
 use futures::stream::{self, StreamExt};
-use ragent_config::InternalLlmConfig;
+use ragent_config::{InternalLlmConfig, InternalLlmDownloadPolicy};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -36,6 +37,15 @@ pub use candle_backend::CandleBackend;
 #[cfg(feature = "embedded-llm")]
 use candle_backend::candle_runtime_settings;
 
+#[cfg(feature = "litertlm")]
+mod litertlm_backend;
+
+#[cfg(feature = "litertlm")]
+pub use litertlm_backend::LitertLmBackend;
+
+#[cfg(feature = "litertlm")]
+use litertlm_backend::litertlm_runtime_settings;
+
 /// The maximum allowed embedded-model artifact budget for the Sub-1G runtime.
 pub const SUB_1G_MAX_BYTES: u64 = 1_073_741_824;
 const MAX_PARALLEL_ARTIFACT_DOWNLOADS: usize = 4;
@@ -47,11 +57,11 @@ const MAX_PARALLEL_ARTIFACT_DOWNLOADS: usize = 4;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatTemplate {
-    /// TinyLlama / Zephyr style: `<|system|>…</s><|user|>…</s><|assistant|>`
+    /// TinyLlama / Zephyr style: `<|im_start|>system\n…<|im_end|>\n<|im_start|>user\n…<|im_end|>\n<|im_start|>assistant\n`
     #[default]
-    TinyLlama,
-    /// OpenAI ChatML: `<|im_start|>system…<|im_end|><|im_start|>user…<|im_end|><|im_start|>assistant`
     ChatMl,
+    /// TinyLlama legacy style: `<s>\n…</s>\n<s>[INST] … [/INST]\n`
+    TinyLlama,
 }
 
 /// A single file required by an embedded model manifest.
@@ -59,39 +69,35 @@ pub enum ChatTemplate {
 pub struct EmbeddedModelArtifact {
     /// File name relative to the model cache directory.
     pub file_name: String,
-    /// Expected size of the file in bytes.
+    /// File size in bytes (0 if unknown — used for download-only entries).
     pub size_bytes: u64,
-    /// Optional SHA-256 checksum for integrity verification.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// SHA-256 hex digest of the file contents (optional integrity check).
     pub sha256: Option<String>,
-    /// Optional URL used to download the file on demand.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Remote URL to download the file from (optional — local-only models
+    /// omit this).
     pub source_url: Option<String>,
 }
 
 /// Metadata for a locally cached embedded model.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EmbeddedModelManifest {
-    /// Unique identifier for the model.
+    /// Model identifier (directory name under the cache root).
     pub model_id: String,
-    /// Human-readable model name.
+    /// Human-readable name shown in status displays.
     pub display_name: String,
-    /// Chat prompt template this model was trained with.
-    #[serde(default)]
+    /// Chat prompt template to apply before tokenisation.
     pub chat_template: ChatTemplate,
-    /// Files needed to materialise the model cache.
-    #[serde(default)]
+    /// Ordered list of files the model requires.
     pub artifacts: Vec<EmbeddedModelArtifact>,
 }
 
 impl EmbeddedModelManifest {
-    /// Returns the total manifest size in bytes.
-    #[must_use]
+    /// Returns the total size of all artifacts whose size is known.
+    ///
+    /// Artifacts with `size_bytes == 0` are excluded (they are either
+    /// download-only entries whose size is unknown or optional checksums).
     pub fn total_size_bytes(&self) -> u64 {
-        self.artifacts
-            .iter()
-            .map(|artifact| artifact.size_bytes)
-            .sum()
+        self.artifacts.iter().map(|a| a.size_bytes).sum()
     }
 }
 
@@ -219,71 +225,67 @@ pub enum EmbeddedRuntimeLifecycle {
     Uninitialized,
     /// Runtime successfully prepared a backend.
     Ready,
-    /// Runtime previously failed and the last prepare attempt did not succeed.
+    /// Backend preparation failed.
     Failed,
 }
 
 /// Snapshot of embedded-runtime health for observability surfaces.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddedRuntimeStatus {
-    /// Configured model identifier.
+    /// Model identifier.
     pub model_id: String,
     /// Compile-time availability of the embedded backend.
     pub availability: RuntimeAvailability,
-    /// Current runtime lifecycle state.
+    /// Current lifecycle state.
     pub lifecycle: EmbeddedRuntimeLifecycle,
-    /// Prepared backend name when the runtime is ready.
+    /// Name of the prepared backend, if any.
     pub backend_name: Option<String>,
-    /// Failure detail when the runtime is in the failed state.
+    /// Failure detail, if the runtime entered a failed state.
     pub detail: Option<String>,
-    /// Cache root used for embedded assets.
+    /// Cache root used for model files.
     pub cache_root: PathBuf,
-    /// Model-specific cache directory.
+    /// Model-specific subdirectory within the cache root.
     pub model_dir: PathBuf,
-    /// Effective execution settings exposed by the runtime/backend.
+    /// Effective runtime settings for display purposes.
     pub settings: EmbeddedRuntimeSettings,
 }
 
 /// Effective embedded-runtime execution settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmbeddedRuntimeSettings {
-    /// Execution device currently used by the runtime.
+    /// Description of the execution device (e.g. "CPU", "GPU (Metal/CUDA/Vulkan)").
     pub execution_device: String,
-    /// Quantized runtime path used for GGUF inference.
+    /// Human-readable name of the quantised runtime.
     pub quantized_runtime: String,
-    /// Requested CPU thread count from config.
+    /// Number of threads requested by the user configuration.
     pub requested_threads: usize,
-    /// Effective CPU thread count actually applied by the runtime.
+    /// Number of threads actually used by the backend.
     pub effective_threads: usize,
-    /// Human-readable explanation of the thread-control path.
+    /// Description of the threading model in use.
     pub threading: String,
-    /// Requested number of GPU-offloaded layers from config.
+    /// Number of GPU offload layers requested.
     pub requested_gpu_layers: u32,
-    /// Effective number of GPU-offloaded layers actually applied.
+    /// Number of GPU offload layers actually used.
     pub effective_gpu_layers: u32,
-    /// Human-readable GPU offload status for the current build/runtime.
+    /// Description of GPU offload behaviour.
     pub gpu_offload: String,
 }
 
-/// Lazy embedded-runtime handle.
-///
-/// Construction validates static configuration but does not download artifacts
-/// or touch any inference backend. That work happens only when explicitly
-/// requested through [`EmbeddedRuntime::prepare_with_backend`].
-pub struct EmbeddedRuntime {
-    config: InternalLlmConfig,
-    cache_root: PathBuf,
-    http: reqwest::Client,
-    state: Mutex<RuntimeState>,
-    /// Stored backend for inference, set after successful `prepare_with_backend`.
-    backend: Mutex<Option<Arc<dyn EmbeddedBackend>>>,
-}
-
+/// Pending download for a single artifact.
 #[derive(Debug, Clone)]
 struct PendingArtifactDownload {
     artifact: EmbeddedModelArtifact,
     artifact_path: PathBuf,
     source_url: String,
+}
+
+/// Lazy embedded-runtime handle.
+pub struct EmbeddedRuntime {
+    config: InternalLlmConfig,
+    cache_root: PathBuf,
+    http: reqwest::Client,
+    state: Mutex<RuntimeState>,
+    backend: Mutex<Option<Arc<dyn EmbeddedBackend>>>,
 }
 
 impl EmbeddedRuntime {
@@ -297,20 +299,29 @@ impl EmbeddedRuntime {
         if !config.enabled {
             return Ok(None);
         }
+
+        // Warn if no embedded-LLM backend feature is compiled but the subsystem is enabled.
+        if !cfg!(feature = "embedded-llm") && !cfg!(feature = "litertlm") {
+            tracing::warn!(
+                "internal_llm.enabled = true but no embedded backend is compiled — \
+                 enable the litertlm or embedded-llm feature"
+            );
+        }
+
         Self::new(config).map(Some)
     }
 
-    /// Creates a dormant runtime handle rooted at the default cache path.
+    /// Creates a new runtime handle using the default data directory.
     ///
     /// # Errors
     ///
-    /// Returns an error if the configuration is invalid.
+    /// Returns an error if the OS data directory cannot be determined.
     pub fn new(config: InternalLlmConfig) -> Result<Self> {
         let cache_root = default_cache_root()?;
         Self::with_cache_root(config, cache_root)
     }
 
-    /// Creates a dormant runtime handle rooted at a caller-specified cache path.
+    /// Creates a runtime handle with a custom cache root (useful in tests).
     ///
     /// # Errors
     ///
@@ -329,7 +340,7 @@ impl EmbeddedRuntime {
     /// Returns the compile-time runtime availability.
     #[must_use]
     pub fn availability(&self) -> RuntimeAvailability {
-        if cfg!(feature = "embedded-llm") {
+        if cfg!(feature = "embedded-llm") || cfg!(feature = "litertlm") {
             RuntimeAvailability::Available
         } else {
             RuntimeAvailability::RequiresFeature
@@ -513,170 +524,103 @@ impl EmbeddedRuntime {
             format!("Failed to create model cache dir '{}'", model_dir.display())
         })?;
 
-        let validation_started = Instant::now();
-        let mut pending_downloads = Vec::new();
+        let mut downloads: Vec<PendingArtifactDownload> = Vec::new();
         for artifact in &manifest.artifacts {
             let artifact_path = model_dir.join(&artifact.file_name);
             if artifact_matches(&artifact_path, artifact)? {
                 continue;
             }
-
-            if artifact_path.exists() {
-                fs::remove_file(&artifact_path).with_context(|| {
-                    format!(
-                        "Failed to remove invalid cached artifact '{}'",
-                        artifact_path.display()
-                    )
-                })?;
-            }
-
-            let source_url = artifact.source_url.as_deref().ok_or_else(|| {
+            // File is missing or corrupted — try to download it.
+            let source_url = artifact.source_url.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Artifact '{}' is missing and has no source_url",
+                    "Artifact '{}' is missing locally and has no source_url to download",
                     artifact.file_name
                 )
             })?;
-
-            if matches!(
-                self.config.download_policy,
-                ragent_config::InternalLlmDownloadPolicy::Never
-            ) {
+            if self.config.download_policy == InternalLlmDownloadPolicy::Never {
                 bail!(
                     "Artifact '{}' is missing and download_policy is 'never'",
                     artifact.file_name
                 );
             }
-
-            pending_downloads.push(PendingArtifactDownload {
+            downloads.push(PendingArtifactDownload {
                 artifact: artifact.clone(),
                 artifact_path,
-                source_url: source_url.to_string(),
+                source_url: source_url.clone(),
             });
         }
 
-        info!(
-            model_id = %self.config.model_id,
-            artifact_count = manifest.artifacts.len(),
-            missing_artifacts = pending_downloads.len(),
-            elapsed_ms = validation_started.elapsed().as_millis(),
-            "Embedded artifact cache validation complete"
-        );
-
-        if pending_downloads.is_empty() {
-            return Ok(());
-        }
-
-        let download_started = Instant::now();
-        download_artifacts_batch(&self.http, &pending_downloads)?;
-        info!(
-            model_id = %self.config.model_id,
-            downloaded_artifacts = pending_downloads.len(),
-            elapsed_ms = download_started.elapsed().as_millis(),
-            "Embedded artifact download batch complete"
-        );
-
-        for pending in &pending_downloads {
-            if !artifact_matches(&pending.artifact_path, &pending.artifact)? {
-                bail!(
-                    "Downloaded artifact '{}' did not match the manifest",
-                    pending.artifact.file_name
-                );
-            }
+        if !downloads.is_empty() {
+            download_artifacts_batch(&self.http, &downloads)?;
         }
 
         Ok(())
     }
 
-    /// Performs lazy backend preparation after the cache is validated.
+    /// Prepares the runtime with a caller-supplied backend.
+    ///
+    /// After this call the runtime is in the `Ready` state and can accept
+    /// inference requests via [`Self::infer`].
     ///
     /// # Errors
     ///
-    /// Returns an error if artifact validation/download fails or if the backend
-    /// cannot prepare the runtime.
-    pub fn prepare_with_backend(
-        &self,
-        manifest: &EmbeddedModelManifest,
-        backend: Arc<dyn EmbeddedBackend>,
-    ) -> Result<()> {
-        self.ensure_artifacts(manifest)?;
-        self.prepare_backend(manifest, backend)
-    }
-
-    fn prepare_backend(
-        &self,
-        manifest: &EmbeddedModelManifest,
-        backend: Arc<dyn EmbeddedBackend>,
-    ) -> Result<()> {
-        let _span = info_span!(
-            "internal_llm.init",
-            phase = "prepare_backend",
-            model_id = %self.config.model_id,
-            backend = backend.name()
-        )
-        .entered();
-        {
-            let state = self
-                .state
-                .lock()
-                .map_err(|e| anyhow::anyhow!("Embedded runtime mutex poisoned: {e}"))?;
-            match &*state {
-                RuntimeState::Ready { .. } => return Ok(()),
-                RuntimeState::Failed(err) => {
-                    info!(
-                        model_id = %self.config.model_id,
-                        backend = backend.name(),
-                        previous_error = %err,
-                        "Retrying embedded runtime preparation after previous failure"
-                    );
-                }
-                RuntimeState::Uninitialized => {}
-            }
-        }
-
-        let result = (|| -> Result<()> {
-            backend.prepare(manifest, &self.model_dir(), &self.config)?;
-            Ok(())
-        })();
-
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Embedded runtime mutex poisoned: {e}"))?;
-        match result {
-            Ok(()) => {
-                *state = RuntimeState::Ready {
-                    backend_name: backend.name().to_string(),
-                };
-                let mut b = self
-                    .backend
-                    .lock()
-                    .map_err(|e| anyhow::anyhow!("Embedded runtime backend mutex poisoned: {e}"))?;
-                *b = Some(backend.clone());
-                info!(
-                    model_id = %self.config.model_id,
-                    backend = backend.name(),
-                    "Embedded runtime prepared"
-                );
-                Ok(())
-            }
-            Err(err) => {
-                warn!(
-                    model_id = %self.config.model_id,
-                    backend = backend.name(),
-                    error = %err,
-                    "Embedded runtime preparation failed"
-                );
-                *state = RuntimeState::Failed(err.to_string());
-                Err(err)
-            }
-        }
-    }
-
-    /// Runs inference using the prepared backend.
+    /// Returns an error if the backend's `prepare()` method fails.
+              pub fn prepare_with_backend(
+                  &self,
+                  manifest: &EmbeddedModelManifest,
+                  backend: Arc<dyn EmbeddedBackend>,
+              ) -> Result<()> {
+                  // If the runtime is already prepared successfully, skip re-preparation.
+                  // This makes prepare_with_backend idempotent — calling it twice with
+                  // different backends won't double-prepare.
+                  {
+                      let guard = self
+                          .state
+                          .lock()
+                          .map_err(|e| anyhow::anyhow!("embedded runtime mutex poisoned: {e}"))?;
+                      if matches!(*guard, RuntimeState::Ready { .. }) {
+                          tracing::debug!(
+                              "Embedded runtime already prepared; skipping re-preparation"
+                          );
+                          return Ok(());
+                      }
+                  }
+      
+                  let model_dir = self.model_dir();
+                  if let Err(e) = backend.prepare(manifest, &model_dir, &self.config) {
+                      // Transition to Failed state so callers can observe the failure
+                      // and so that the runtime knows not to attempt inference.
+                      let detail = e.to_string();
+                      {
+                          let mut guard = self
+                              .state
+                              .lock()
+                              .map_err(|e2| anyhow::anyhow!("embedded runtime mutex poisoned: {e2}"))?;
+                          *guard = RuntimeState::Failed(detail);
+                      }
+                      return Err(e);
+                  }
+                  let backend_name = backend.name().to_string();
+                  {
+                      let mut guard = self
+                          .state
+                          .lock()
+                          .map_err(|e| anyhow::anyhow!("embedded runtime mutex poisoned: {e}"))?;
+                      *guard = RuntimeState::Ready { backend_name };
+                  }
+                  {
+                      let mut backend_guard = self
+                          .backend
+                          .lock()
+                          .map_err(|e| anyhow::anyhow!("embedded runtime mutex poisoned: {e}"))?;
+                      *backend_guard = Some(backend);          }
+          Ok(())
+      }
+    /// Runs one synchronous inference call against the prepared backend.
     ///
     /// # Errors
     ///
-    /// Returns an error if the runtime is not ready or the backend fails to generate a response.
+    /// Returns an error if the runtime has not been prepared or inference fails.
     pub fn infer(
         &self,
         system_prompt: &str,
@@ -684,10 +628,9 @@ impl EmbeddedRuntime {
         max_tokens: u32,
         controls: &InferenceControls,
     ) -> std::result::Result<String, EmbeddedInferenceError> {
+        controls.check()?;
         let b = self.backend.lock().map_err(|e| {
-            EmbeddedInferenceError::Other(anyhow::anyhow!(
-                "Embedded runtime backend mutex poisoned: {e}"
-            ))
+            EmbeddedInferenceError::Other(anyhow::anyhow!("embedded runtime mutex poisoned: {e}"))
         })?;
         match &*b {
             Some(backend) => backend.infer(system_prompt, user_prompt, max_tokens, controls),
@@ -698,12 +641,12 @@ impl EmbeddedRuntime {
         }
     }
 
-    /// Production initialiser: discovers a GGUF model in the model directory and
-    /// prepares the llama.cpp backend.
+    /// Production initialiser: discovers a model in the model directory and
+    /// prepares the appropriate backend (Candle for .gguf, LiteRT-LM for .litertlm).
     ///
     /// # Errors
     ///
-    /// Returns an error if the `embedded-llm` feature is not compiled in, if no
+    /// Returns an error if no suitable backend feature is compiled in, if no
     /// model file can be found, or if backend preparation fails.
     pub fn prepare_production_runtime(&self, manifest: &EmbeddedModelManifest) -> Result<()> {
         let _span = info_span!(
@@ -714,40 +657,84 @@ impl EmbeddedRuntime {
         )
         .entered();
         self.validate_manifest(manifest)?;
-        #[cfg(feature = "embedded-llm")]
-        {
-            let backend = Arc::new(CandleBackend::new(&self.config));
-            self.prepare_backend(manifest, backend)
+
+        match self.config.backend.as_str() {
+            "litertlm" => {
+                #[cfg(feature = "litertlm")]
+                {
+                    let backend = Arc::new(LitertLmBackend::new(&self.config));
+                    self.prepare_with_backend(manifest, backend)
+                }
+                #[cfg(not(feature = "litertlm"))]
+                {
+                    bail!(
+                        "ragent-llm was built without the litertlm feature; rebuild with --features litertlm"
+                    )
+                }
+            }
+            _ => {
+                #[cfg(feature = "embedded-llm")]
+                {
+                    let backend = Arc::new(CandleBackend::new(&self.config));
+                    self.prepare_with_backend(manifest, backend)
+                }
+                #[cfg(not(feature = "embedded-llm"))]
+                {
+                    bail!("ragent-llm was built without any embedded-LLM backend feature")
+                }
+            }
         }
-        #[cfg(not(feature = "embedded-llm"))]
-        bail!("ragent-llm was built without the embedded-llm feature");
     }
 
     /// Discovers model files in the local cache (downloading them first if absent),
-    /// then initialises the candle backend.
+    /// then initialises the appropriate backend.
     ///
     /// This is the primary startup path for the agent executor. When the required
     /// files are not yet present and `download_policy` allows it, they are fetched
-    /// automatically from their registered HuggingFace URLs.
+    /// automatically from their registered URLs.
     ///
     /// # Errors
     ///
-    /// Returns an error when the `embedded-llm` feature is absent, the model is
+    /// Returns an error when no backend feature is compiled, the model is
     /// not found locally and cannot be downloaded, or the backend fails to initialise.
     pub fn try_init_from_cache(&self) -> Result<()> {
-        #[cfg(not(feature = "embedded-llm"))]
-        bail!("ragent-llm was built without the embedded-llm feature");
+        match self.config.backend.as_str() {
+            "litertlm" => {
+                #[cfg(feature = "litertlm")]
+                {
+                    self.try_init_from_cache_litertlm()
+                }
+                #[cfg(not(feature = "litertlm"))]
+                {
+                    bail!(
+                        "ragent-llm was built without the litertlm feature; rebuild with --features litertlm"
+                    )
+                }
+            }
+            _ => {
+                #[cfg(feature = "embedded-llm")]
+                {
+                    self.try_init_from_cache_candle()
+                }
+                #[cfg(not(feature = "embedded-llm"))]
+                {
+                    bail!("ragent-llm was built without any embedded-LLM backend feature")
+                }
+            }
+        }
+    }
+}
 
-        #[cfg(feature = "embedded-llm")]
-        {
-            let model_dir = self.model_dir();
-            let manifest_started = Instant::now();
+#[cfg(feature = "embedded-llm")]
+impl EmbeddedRuntime {
+    fn try_init_from_cache_candle(&self) -> Result<()> {
+        let model_dir = self.model_dir();
+        let manifest_started = Instant::now();
 
-            // Use the registered manifest (with download URLs) when available,
-            // otherwise fall back to discovering whatever GGUF files exist locally.
-            let (manifest, manifest_source) = if let Some(known) =
-                known_model_manifest(&self.config.model_id)
-            {
+        // Use the registered manifest (with download URLs) when available,
+        // otherwise fall back to discovering whatever GGUF files exist locally.
+        let (manifest, manifest_source) =
+            if let Some(known) = known_model_manifest(&self.config.model_id) {
                 info!(
                     model_id = %self.config.model_id,
                     model_dir = %model_dir.display(),
@@ -761,38 +748,79 @@ impl EmbeddedRuntime {
                 )
             };
 
-            info!(
-                model_id = %self.config.model_id,
-                manifest_source,
-                artifact_count = manifest.artifacts.len(),
-                elapsed_ms = manifest_started.elapsed().as_millis(),
-                "Embedded model manifest resolved"
-            );
+        info!(
+            model_id = %self.config.model_id,
+            manifest_source,
+            artifact_count = manifest.artifacts.len(),
+            elapsed_ms = manifest_started.elapsed().as_millis(),
+            "Embedded model manifest resolved"
+        );
 
-            self.ensure_artifacts(&manifest)?;
-            let backend = Arc::new(CandleBackend::new(&self.config));
-            self.prepare_backend(&manifest, backend)
-        }
+        self.ensure_artifacts(&manifest)?;
+        let backend = Arc::new(CandleBackend::new(&self.config));
+        self.prepare_with_backend(&manifest, backend)
+    }
+}
+
+#[cfg(feature = "litertlm")]
+impl EmbeddedRuntime {
+    fn try_init_from_cache_litertlm(&self) -> Result<()> {
+        let model_dir = self.model_dir();
+        let manifest_started = Instant::now();
+
+        // Use the registered manifest (with download URLs) when available,
+        // otherwise fall back to discovering whatever .litertlm files exist locally.
+        let (manifest, manifest_source) =
+            if let Some(known) = known_model_manifest(&self.config.model_id) {
+                info!(
+                    model_id = %self.config.model_id,
+                    model_dir = %model_dir.display(),
+                    "Using registered manifest for known model; missing files will be downloaded"
+                );
+                (known, "registered")
+            } else {
+                (
+                    discover_manifest_in_dir(&self.config.model_id, &model_dir)?,
+                    "discovered",
+                )
+            };
+
+        info!(
+            model_id = %self.config.model_id,
+            manifest_source,
+            artifact_count = manifest.artifacts.len(),
+            elapsed_ms = manifest_started.elapsed().as_millis(),
+            "Embedded model manifest resolved"
+        );
+
+        self.ensure_artifacts(&manifest)?;
+        let backend = Arc::new(LitertLmBackend::new(&self.config));
+        self.prepare_with_backend(&manifest, backend)
     }
 }
 
 fn runtime_settings_for_config(config: &InternalLlmConfig) -> EmbeddedRuntimeSettings {
+    #[cfg(all(feature = "litertlm", not(feature = "embedded-llm")))]
+    {
+        litertlm_runtime_settings(config)
+    }
+
     #[cfg(feature = "embedded-llm")]
     {
         candle_runtime_settings(config)
     }
 
-    #[cfg(not(feature = "embedded-llm"))]
+    #[cfg(not(any(feature = "embedded-llm", feature = "litertlm")))]
     {
         EmbeddedRuntimeSettings {
             execution_device: "unavailable".to_string(),
-            quantized_runtime: "embedded-llm feature not compiled".to_string(),
+            quantized_runtime: "no embedded-LLM backend compiled".to_string(),
             requested_threads: config.threads,
             effective_threads: 0,
-            threading: "embedded-llm feature disabled in this build".to_string(),
+            threading: "no backend feature compiled in this build".to_string(),
             requested_gpu_layers: config.gpu_layers,
             effective_gpu_layers: 0,
-            gpu_offload: "embedded-llm feature disabled in this build".to_string(),
+            gpu_offload: "no backend feature compiled in this build".to_string(),
         }
     }
 }
@@ -1048,6 +1076,25 @@ pub fn known_model_manifest(model_id: &str) -> Option<EmbeddedModelManifest> {
                 },
             ],
         }),
+        "gemma-3-1b-it-litertlm" => Some(EmbeddedModelManifest {
+            model_id: "gemma-3-1b-it-litertlm".to_string(),
+            display_name: "Gemma 3 1B IT (LiteRT-LM)".to_string(),
+            chat_template: ChatTemplate::ChatMl,
+            artifacts: vec![
+                EmbeddedModelArtifact {
+                    file_name: "gemma-3-1b-it.litertlm".to_string(),
+                    size_bytes: 0,
+                    sha256: None,
+                    source_url: None, // LiteRT-LM models must be provided locally
+                },
+                EmbeddedModelArtifact {
+                    file_name: "tokenizer.json".to_string(),
+                    size_bytes: 0,
+                    sha256: None,
+                    source_url: None, // Tokenizer must be provided locally
+                },
+            ],
+        }),
         _ => None,
     }
 }
@@ -1064,7 +1111,8 @@ pub fn discover_manifest_in_dir(model_id: &str, model_dir: &Path) -> Result<Embe
     {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("gguf") {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext == "gguf" || ext == "litertlm" {
                 let size_bytes = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 let file_name = path
                     .file_name()
@@ -1083,7 +1131,7 @@ pub fn discover_manifest_in_dir(model_id: &str, model_dir: &Path) -> Result<Embe
 
     if artifacts.is_empty() {
         bail!(
-            "No GGUF model file found in '{}' for model '{}'",
+            "No GGUF or .litertlm model file found in '{}' for model '{}'",
             model_dir.display(),
             model_id
         );

@@ -46,6 +46,8 @@ lru = { workspace = true }
 [features]
 default = []
 compression = ["ragent-core/compression"]
+litertlm = ["ragent-core/litertlm"]
+embedded-llm = ["ragent-core/embedded-llm"]
 
 [dev-dependencies]
 tempfile = "3.5"

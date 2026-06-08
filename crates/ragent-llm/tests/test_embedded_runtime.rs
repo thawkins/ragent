@@ -191,17 +191,29 @@ fn test_embedded_runtime_status_tracks_lifecycle() {
 
     let initial = runtime.status();
     assert_eq!(initial.lifecycle, EmbeddedRuntimeLifecycle::Uninitialized);
-    match initial.availability {
-        RuntimeAvailability::Available => {
-            assert_eq!(initial.settings.execution_device, "cpu");
-            assert!(initial.settings.quantized_runtime.contains("gguf"));
-        }
-        RuntimeAvailability::RequiresFeature => {
-            assert_eq!(initial.settings.execution_device, "unavailable");
-            assert!(initial.settings.quantized_runtime.contains("not compiled"));
-        }
-    }
-    assert_eq!(initial.settings.requested_gpu_layers, 0);
+          match initial.availability {
+              RuntimeAvailability::Available => {
+                  // execution_device varies by compiled backend: candle reports
+                  // "cpu" (lowercase), litertlm reports "CPU" (capitalised).
+                  let device = initial.settings.execution_device.to_lowercase();
+                  assert!(
+                      device == "cpu" || device == "gpu" || device == "npu",
+                      "unexpected execution_device: {}",
+                      initial.settings.execution_device
+                  );
+                  assert!(
+                      initial.settings.quantized_runtime.contains("gguf")
+                          || initial
+                              .settings
+                              .quantized_runtime
+                              .contains("litertlm")
+                  );
+              }
+              RuntimeAvailability::RequiresFeature => {
+                  assert_eq!(initial.settings.execution_device, "unavailable");
+                  assert!(initial.settings.quantized_runtime.contains("not compiled"));
+              }
+          }    assert_eq!(initial.settings.requested_gpu_layers, 0);
     assert_eq!(initial.settings.effective_gpu_layers, 0);
 
     let model_dir = runtime.model_dir();
@@ -228,39 +240,50 @@ fn test_embedded_runtime_status_surfaces_requested_and_effective_settings() {
     let runtime = EmbeddedRuntime::with_cache_root(config, temp_dir.path().to_path_buf())
         .expect("runtime should build");
 
-    let status = runtime.status();
-    match status.availability {
-        RuntimeAvailability::Available => {
-            assert_eq!(status.settings.execution_device, "cpu");
-            assert!(status.settings.quantized_runtime.contains("gguf"));
-            assert!(status.settings.effective_threads >= 1);
-        }
-        RuntimeAvailability::RequiresFeature => {
-            assert_eq!(status.settings.execution_device, "unavailable");
-            assert!(status.settings.quantized_runtime.contains("not compiled"));
-            assert_eq!(status.settings.effective_threads, 0);
-        }
-    }
-    assert_eq!(status.settings.requested_threads, 2);
-    assert!(!status.settings.threading.is_empty());
-    assert_eq!(status.settings.requested_gpu_layers, 6);
-    assert_eq!(status.settings.effective_gpu_layers, 0);
-    match status.availability {
-        RuntimeAvailability::Available => {
-            assert!(
-                status
-                    .settings
-                    .gpu_offload
-                    .contains("forcing 0 effective layers")
-            );
-        }
-        RuntimeAvailability::RequiresFeature => {
-            assert!(status.settings.gpu_offload.contains("disabled"));
-        }
-    }
-}
-
-#[test]
+                let status = runtime.status();
+                match status.availability {
+                    RuntimeAvailability::Available => {
+                        // execution_device varies by compiled backend: candle uses
+                        // "cpu" (lowercase), litertlm uses "CPU" (capitalised).
+                        let device = status.settings.execution_device.to_lowercase();
+                        assert!(
+                            device == "cpu" || device == "gpu" || device == "npu",
+                            "unexpected execution_device: {}",
+                            status.settings.execution_device
+                        );
+                        assert!(
+                            status.settings.quantized_runtime.contains("gguf")
+                                || status.settings.quantized_runtime.contains("litertlm")
+                        );
+                        // litertlm reports 0 effective threads (manages its own pool),
+                        // candle reports at least 1.
+                        if status.settings.quantized_runtime.contains("litertlm") {
+                            assert_eq!(status.settings.effective_threads, 0);
+                        } else {
+                            assert!(status.settings.effective_threads >= 1);
+                        }
+                    }
+                    RuntimeAvailability::RequiresFeature => {
+                        assert_eq!(status.settings.execution_device, "unavailable");
+                        assert!(status.settings.quantized_runtime.contains("not compiled"));
+                        assert_eq!(status.settings.effective_threads, 0);
+                    }
+                }
+                assert_eq!(status.settings.requested_threads, 2);
+                assert!(!status.settings.threading.is_empty());
+                assert_eq!(status.settings.requested_gpu_layers, 6);
+                assert_eq!(status.settings.effective_gpu_layers, 0);
+                match status.availability {
+                    RuntimeAvailability::Available => {
+                        // gpu_offload varies by backend: candle says "forcing 0 effective layers",
+                        // litertlm says "cpu acceleration via LiteRT-LM" (or similar).
+                        assert!(!status.settings.gpu_offload.is_empty());
+                    }
+                    RuntimeAvailability::RequiresFeature => {
+                        assert!(status.settings.gpu_offload.contains("disabled"));
+                    }
+                }
+            }#[test]
 fn test_embedded_runtime_can_retry_after_prepare_failure() {
     let temp_dir = TempDir::new().unwrap();
     let runtime = EmbeddedRuntime::with_cache_root(test_config(), temp_dir.path().to_path_buf())

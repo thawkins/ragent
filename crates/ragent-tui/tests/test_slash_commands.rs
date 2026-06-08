@@ -367,6 +367,10 @@ fn test_slash_internal_llm_show_displays_feature_switches() {
 
     let text = app.messages.last().expect("message").text_content();
     assert!(text.contains("enabled"));
+    assert!(text.contains("backend"));
+    assert!(text.contains("model"));
+    assert!(text.contains("accelerator"));
+    assert!(text.contains("compiled backends"));
     assert!(text.contains("session title"));
     assert!(text.contains("prompt/context compaction"));
     assert!(text.contains("memory extraction"));

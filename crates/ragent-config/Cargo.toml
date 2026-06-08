@@ -6,6 +6,11 @@ authors = ["Tim Hawkins"]
 license = "MIT"
 description = "Configuration system for ragent"
 
+[features]
+default = []
+litertlm = []
+embedded-llm = []
+
 [dependencies]
 ragent-types = { path = "../ragent-types" }
 serde = { version = "1", features = ["derive"] }

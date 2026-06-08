@@ -777,135 +777,150 @@ impl App {
         }
     }
 
-    fn render_internal_llm_status(&self) -> String {
-        let mut rows = vec![
-            format!(
-                "| enabled | {} |",
-                if self.internal_llm_config.enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            format!("| backend | `{}` |", self.internal_llm_config.backend),
-            format!("| model | `{}` |", self.internal_llm_config.model_id),
-            format!(
-                "| session title | {} |",
-                if self.internal_llm_config.session_title_enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            format!(
-                "| prompt/context compaction | {} |",
-                if self.internal_llm_config.prompt_context_enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            format!(
-                "| memory extraction prefilter | {} |",
-                if self.internal_llm_config.memory_extraction_enabled {
-                    "on"
-                } else {
-                    "off"
-                }
-            ),
-            format!(
-                "| chat mode | {} |",
-                if self.internal_llm_chat_panel.is_some() {
-                    "active"
-                } else {
-                    "inactive"
-                }
-            ),
-        ];
-
-        if let Some(service) = &self.internal_llm_service {
-            let snapshot = service.status_snapshot();
-            rows.push(format!("| attempts | {} |", snapshot.metrics.attempts));
-            rows.push(format!("| successes | {} |", snapshot.metrics.successes));
-            rows.push(format!("| failures | {} |", snapshot.metrics.failures));
-            rows.push(format!("| timeouts | {} |", snapshot.metrics.timeouts));
-            rows.push(format!("| fallbacks | {} |", snapshot.metrics.fallbacks));
-            if let Some(last_error) = snapshot.metrics.last_error {
-                rows.push(format!("| last error | {} |", last_error));
-            }
-            if let Some(last_fallback) = snapshot.metrics.last_fallback {
-                rows.push(format!("| last fallback | {} |", last_fallback));
-            }
-            if let Some(runtime) = snapshot.runtime {
-                rows.push(format!(
-                    "| runtime availability | `{:?}` |",
-                    runtime.availability
-                ));
-                rows.push(format!("| runtime lifecycle | `{:?}` |", runtime.lifecycle));
-                rows.push(format!(
-                    "| execution device | `{}` |",
-                    runtime.settings.execution_device
-                ));
-                rows.push(format!(
-                    "| quantized runtime | `{}` |",
-                    runtime.settings.quantized_runtime
-                ));
-                rows.push(format!(
-                    "| requested threads | {} |",
-                    runtime.settings.requested_threads
-                ));
-                rows.push(format!(
-                    "| effective threads | {} |",
-                    runtime.settings.effective_threads
-                ));
-                rows.push(format!("| threading | {} |", runtime.settings.threading));
-                rows.push(format!(
-                    "| requested gpu layers | {} |",
-                    runtime.settings.requested_gpu_layers
-                ));
-                rows.push(format!(
-                    "| effective gpu layers | {} |",
-                    runtime.settings.effective_gpu_layers
-                ));
-                rows.push(format!(
-                    "| gpu offload | {} |",
-                    runtime.settings.gpu_offload
-                ));
-                if let Some(backend_name) = runtime.backend_name {
-                    rows.push(format!("| runtime backend | `{}` |", backend_name));
-                }
-                if let Some(detail) = runtime.detail {
-                    rows.push(format!("| runtime detail | {} |", detail));
-                }
-                rows.push(format!(
-                    "| cache root | `{}` |",
-                    runtime.cache_root.display()
-                ));
-                rows.push(format!("| model dir | `{}` |", runtime.model_dir.display()));
-            }
-            if let Some(queue) = snapshot.queue {
-                rows.push("| worker model | single active decode |".to_string());
-                rows.push(format!("| worker capacity | {} |", queue.capacity));
-                rows.push(format!("| worker in flight | {} |", queue.in_flight));
-                rows.push(format!("| worker queued | {} |", queue.queued));
-                rows.push(format!(
-                    "| worker busy | {} |",
-                    if queue.worker_busy { "yes" } else { "no" }
-                ));
-            }
-        } else {
-            rows.push("| service status | unavailable |".to_string());
-            if let Some(error) = &self.internal_llm_init_error {
-                rows.push(format!("| init error | {} |", error));
-            }
-        }
-
-        format!(
-            "From: /internal-llm\n| Setting | Value |\n| --- | --- |\n{}\n",
-            rows.join("\n")
-        )
-    }
-
+          fn render_internal_llm_status(&self) -> String {
+              let mut rows = vec![
+                  format!(
+                      "| enabled | {} |",
+                      if self.internal_llm_config.enabled {
+                          "on"
+                      } else {
+                          "off"
+                      }
+                  ),
+                  format!("| backend | `{}` |", self.internal_llm_config.backend),
+                  format!("| model | `{}` |", self.internal_llm_config.model_id),
+                  format!(
+                      "| accelerator | `{}` |",
+                      self.internal_llm_config.accelerator
+                  ),
+              ];
+    
+              // Indicate which backend features are compiled in.
+              let litertlm_compiled = cfg!(feature = "litertlm");
+              let candle_compiled = cfg!(feature = "embedded-llm");
+              let feature_info = match (litertlm_compiled, candle_compiled) {
+                  (true, true) => "litertlm ✅ (default), candle ✅ (opt-in)".to_string(),
+                  (true, false) => "litertlm ✅ (default)".to_string(),
+                  (false, true) => "candle ✅ (default)".to_string(),
+                  (false, false) => "none ⚠️ (rebuild with --features litertlm)".to_string(),
+              };
+              rows.push(format!("| compiled backends | {} |", feature_info));
+    
+              rows.push(format!(
+                  "| session title | {} |",
+                  if self.internal_llm_config.session_title_enabled {
+                      "on"
+                  } else {
+                      "off"
+                  }
+              ));
+              rows.push(format!(
+                  "| prompt/context compaction | {} |",
+                  if self.internal_llm_config.prompt_context_enabled {
+                      "on"
+                  } else {
+                      "off"
+                  }
+              ));
+              rows.push(format!(
+                  "| memory extraction prefilter | {} |",
+                  if self.internal_llm_config.memory_extraction_enabled {
+                      "on"
+                  } else {
+                      "off"
+                  }
+              ));
+              rows.push(format!(
+                  "| chat mode | {} |",
+                  if self.internal_llm_chat_panel.is_some() {
+                      "active"
+                  } else {
+                      "inactive"
+                  }
+              ));
+    
+              if let Some(service) = &self.internal_llm_service {
+                  let snapshot = service.status_snapshot();
+                  rows.push(format!("| attempts | {} |", snapshot.metrics.attempts));
+                  rows.push(format!("| successes | {} |", snapshot.metrics.successes));
+                  rows.push(format!("| failures | {} |", snapshot.metrics.failures));
+                  rows.push(format!("| timeouts | {} |", snapshot.metrics.timeouts));
+                  rows.push(format!("| fallbacks | {} |", snapshot.metrics.fallbacks));
+                  if let Some(last_error) = snapshot.metrics.last_error {
+                      rows.push(format!("| last error | {} |", last_error));
+                  }
+                  if let Some(last_fallback) = snapshot.metrics.last_fallback {
+                      rows.push(format!("| last fallback | {} |", last_fallback));
+                  }
+                  if let Some(runtime) = snapshot.runtime {
+                      rows.push(format!(
+                          "| runtime availability | `{:?}` |",
+                          runtime.availability
+                      ));
+                      rows.push(format!("| runtime lifecycle | `{:?}` |", runtime.lifecycle));
+                      rows.push(format!(
+                          "| execution device | `{}` |",
+                          runtime.settings.execution_device
+                      ));
+                      rows.push(format!(
+                          "| quantized runtime | `{}` |",
+                          runtime.settings.quantized_runtime
+                      ));
+                      rows.push(format!(
+                          "| requested threads | {} |",
+                          runtime.settings.requested_threads
+                      ));
+                      rows.push(format!(
+                          "| effective threads | {} |",
+                          runtime.settings.effective_threads
+                      ));
+                      rows.push(format!("| threading | {} |", runtime.settings.threading));
+                      rows.push(format!(
+                          "| requested gpu layers | {} |",
+                          runtime.settings.requested_gpu_layers
+                      ));
+                      rows.push(format!(
+                          "| effective gpu layers | {} |",
+                          runtime.settings.effective_gpu_layers
+                      ));
+                      rows.push(format!(
+                          "| gpu offload | {} |",
+                          runtime.settings.gpu_offload
+                      ));
+                      if let Some(backend_name) = runtime.backend_name {
+                          rows.push(format!("| runtime backend | `{}` |", backend_name));
+                      }
+                      if let Some(detail) = runtime.detail {
+                          rows.push(format!("| runtime detail | {} |", detail));
+                      }
+                      rows.push(format!(
+                          "| cache root | `{}` |",
+                          runtime.cache_root.display()
+                      ));
+                      rows.push(format!("| model dir | `{}` |", runtime.model_dir.display()));
+                  }
+                  if let Some(queue) = snapshot.queue {
+                      rows.push("| worker model | single active decode |".to_string());
+                      rows.push(format!("| worker capacity | {} |", queue.capacity));
+                      rows.push(format!("| worker in flight | {} |", queue.in_flight));
+                      rows.push(format!("| worker queued | {} |", queue.queued));
+                      rows.push(format!(
+                          "| worker busy | {} |",
+                          if queue.worker_busy { "yes" } else { "no" }
+                      ));
+                  }
+              } else {
+                  rows.push("| service status | unavailable |".to_string());
+                  if let Some(error) = &self.internal_llm_init_error {
+                      rows.push(format!("| init error | {} |", error));
+                  }
+              }
+    
+              format!(
+                  "From: /internal-llm\n| Setting | Value |\n| --- | --- |\n{}\n",
+                  rows.join("\n")
+              )
+          }
     fn record_internal_llm_fallback(
         &mut self,
         task_kind: ragent_core::internal_llm::InternalLlmTaskKind,
@@ -6555,8 +6570,34 @@ Usage: /provider [show]
                     }
                     ["help"] | ["usage"] => {
                         self.append_assistant_text(
-                            "From: /internal-llm\nUsage: `/internal-llm show` | `/internal-llm on|off` | `/internal-llm chat` | `/internal-llm sessiontitle on|off` | `/internal-llm promptcontext on|off` | `/internal-llm memoryextraction on|off`.",
-                        );
+                                                  "From: /internal-llm\n\
+                                                \n\
+                                                **Usage:**\n\
+                                                `/internal-llm show` — Display current status and configuration\n\
+                                                `/internal-llm on|off` — Enable or disable the internal LLM\n\
+                                                `/internal-llm chat` — Open an interactive chat panel\n\
+                                                `/internal-llm sessiontitle on|off` — Toggle session title generation\n\
+                                                `/internal-llm promptcontext on|off` — Toggle prompt/context compaction\n\
+                                                `/internal-llm memoryextraction on|off` — Toggle memory extraction\n\
+                                                \n\
+                                                **Backends:**\n\
+                                                - `litertlm` — Google LiteRT-LM on-device inference (CPU/GPU/NPU). Enabled by default.\n\
+                                                - `candle` — Pure-Rust GGUF inference (Candle). Requires `--features embedded-llm`.\n\
+                                                \n\
+                                                **LiteRT-LM Setup:**\n\
+                                                No extra build flags required — `litertlm` is included by default.\n\
+                                                1. Convert a GGUF/SafeTensors model to `.litertlm` format:\n\
+                                                   `litertlm convert --input model.gguf --output model.litertlm`\n\
+                                                2. Place the `.litertlm` file and `tokenizer.json` in\n\
+                                                   `~/.local/share/ragent/embedded/<model_id>/`\n\
+                                                3. Set `internal_llm.backend` to `\"litertlm\"` and `internal_llm.model_id`\n\
+                                                   to the model directory name (e.g. `gemma-3-1b-it-litertlm`).\n\
+                                                \n\
+                                                **Accelerator:**\n\
+                                                Set `internal_llm.accelerator` to `\"cpu\"` (default), `\"gpu\"`, or `\"npu\"`.\n\
+                                                LiteRT-LM manages its own thread pool; the `threads` setting is ignored when\n\
+                                                using the `litertlm` backend.",
+                                              );
                         self.status = "internal-llm help".to_string();
                     }
                     ["chat"] => {
