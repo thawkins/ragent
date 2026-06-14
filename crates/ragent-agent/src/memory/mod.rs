@@ -23,7 +23,6 @@
 //! ```
 
 pub mod block;
-pub mod compact;
 pub mod cross_project;
 pub mod defaults;
 pub mod embedding;
@@ -36,11 +35,6 @@ pub mod store;
 pub mod visualisation;
 
 pub use block::{BlockScope, MemoryBlock};
-pub use compact::{
-    CompactionResult, CompactionTrigger, DedupResult, EvictionResult, FullCompactionResult,
-    apply_dedup_merge, compact_block_content, compact_blocks, deduplicate_memory,
-    evict_stale_memories, merge_content, merge_tags, run_compaction,
-};
 pub use cross_project::{
     ResolvedBlock, list_all_labels, resolve_block, search_blocks_cross_project,
 };

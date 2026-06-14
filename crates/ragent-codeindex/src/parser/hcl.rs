@@ -386,13 +386,7 @@ output "instance_ip" {
 }
 "#;
         let pf = parse_hcl(src);
-        let outputs: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Field)
-            .collect();
-        // output block + the value attribute inside
-        assert!(!outputs.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Field));
     }
 
     #[test]
@@ -404,15 +398,14 @@ locals {
 }
 "#;
         let pf = parse_hcl(src);
-        let constants: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Constant)
-            .collect();
         assert!(
-            constants.len() >= 2,
+            pf.symbols
+                .iter()
+                .filter(|s| s.kind == SymbolKind::Constant)
+                .count()
+                >= 2,
             "Expected at least 2 locals constants, got {:?}",
-            constants
+            pf.symbols
         );
     }
 
@@ -424,12 +417,7 @@ module "vpc" {
 }
 "#;
         let pf = parse_hcl(src);
-        let modules: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Module)
-            .collect();
-        assert!(!modules.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Module));
     }
 
     #[test]
@@ -440,12 +428,7 @@ provider "aws" {
 }
 "#;
         let pf = parse_hcl(src);
-        let providers: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Module)
-            .collect();
-        assert!(!providers.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Module));
     }
 
     #[test]
@@ -456,12 +439,11 @@ terraform {
 }
 "#;
         let pf = parse_hcl(src);
-        let tf_blocks: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Module && s.name.starts_with("terraform"))
-            .collect();
-        assert!(!tf_blocks.is_empty());
+        assert!(
+            pf.symbols
+                .iter()
+                .any(|s| s.kind == SymbolKind::Module && s.name.starts_with("terraform"))
+        );
     }
 
     #[test]

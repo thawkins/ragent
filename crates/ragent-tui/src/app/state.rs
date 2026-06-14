@@ -23,6 +23,7 @@ use ragent_core::provider::ProviderRegistry;
 use ragent_core::session::processor::SessionProcessor;
 use ragent_core::storage::Storage;
 use ragent_team::team::{SwarmState, TeamConfig, TeamMember};
+use serde::Serialize;
 
 use crate::theme::StatusHistory;
 
@@ -262,7 +263,13 @@ pub enum ScreenMode {
 }
 
 /// Providers that ragent can connect to.
+///
+/// Local/keyless providers are listed first so users can quickly find them,
+/// followed by cloud providers in rough priority order.
 pub const PROVIDER_LIST: &[(&str, &str)] = &[
+    ("ollama", "Ollama (Local)"),
+    ("foundry_local", "Microsoft Foundry Local"),
+    ("ollama_cloud", "Ollama Cloud"),
     ("anthropic", "Anthropic (Claude)"),
     ("openai", "OpenAI (GPT)"),
     ("gemini", "Google Gemini"),
@@ -271,12 +278,10 @@ pub const PROVIDER_LIST: &[(&str, &str)] = &[
     ("azure_foundry", "Azure AI Foundry"),
     ("azure_resource", "Azure Resource (File)"),
     ("copilot", "GitHub Copilot"),
-    ("ollama_cloud", "Ollama Cloud"),
-    ("ollama", "Ollama (Local)"),
 ];
 
 /// Entry in the model picker with full metadata for table display.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ModelPickerEntry {
     /// Model identifier (e.g. "gpt-4o").
     pub id: String,
@@ -307,6 +312,30 @@ pub struct ModelPickerEntry {
     /// For Copilot, this is the premium request multiplier from GitHub docs.
     /// For other providers, this is relative to the least expensive model.
     pub cost_multiplier: String,
+}
+
+/// Spinner state shown while a provider is fetching its model list.
+#[derive(Debug, Clone)]
+pub struct ModelLoadingState {
+    /// Provider identifier.
+    pub provider_id: String,
+    /// Human-readable provider name.
+    pub provider_name: String,
+    /// When the loading started (for spinner animation).
+    pub started_at: std::time::Instant,
+}
+
+/// Progress state shown while a provider is downloading a model.
+#[derive(Debug, Clone)]
+pub struct ModelDownloadState {
+    /// Provider identifier.
+    pub provider_id: String,
+    /// Model identifier being downloaded.
+    pub model_id: String,
+    /// Current download progress (0.0–100.0).
+    pub percent: f32,
+    /// When the download started (for elapsed time display).
+    pub started_at: std::time::Instant,
 }
 
 /// State of the interactive provider-setup dialog.
@@ -347,6 +376,13 @@ pub enum ProviderSetupStep {
         selected: usize,
         /// Optional error message (e.g. file not found).
         error: Option<String>,
+    },
+    /// Loading the model list for a provider (shows a spinner popup).
+    LoadingModels {
+        /// The provider id (e.g. "anthropic").
+        provider_id: String,
+        /// Human-readable provider display name.
+        provider_name: String,
     },
     /// Choosing which model to use from the selected provider.
     SelectModel {
@@ -998,6 +1034,10 @@ pub struct App {
     /// Latest quota usage percentage from provider rate-limit headers (0.0–100.0).
     /// `None` if the provider has not returned rate-limit information yet.
     pub quota_percent: Option<f32>,
+    /// Active provider model-list loading state, if any (spinner popup).
+    pub model_loading_state: Option<ModelLoadingState>,
+    /// Active model download state, if any (progress bar popup).
+    pub model_download_state: Option<ModelDownloadState>,
     /// Current persisted tool-family visibility switches.
     pub tool_visibility: ToolVisibilityConfig,
     /// Which screen is currently displayed.

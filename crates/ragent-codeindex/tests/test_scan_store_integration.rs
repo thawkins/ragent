@@ -4,7 +4,7 @@
 
 use ragent_codeindex::scanner::scan_directory;
 use ragent_codeindex::store::IndexStore;
-use ragent_codeindex::types::{ScanConfig, ScannedFile};
+use ragent_codeindex::types::ScanConfig;
 use std::fs;
 use tempfile::TempDir;
 
@@ -98,17 +98,22 @@ fn test_scan_language_detection() {
     let config = ScanConfig::default();
     let files = scan_directory(dir.path(), &config).unwrap();
 
-    let rs_files: Vec<&ScannedFile> = files
-        .iter()
-        .filter(|f| f.language.as_deref() == Some("rust"))
-        .collect();
-    let py_files: Vec<&ScannedFile> = files
-        .iter()
-        .filter(|f| f.language.as_deref() == Some("python"))
-        .collect();
-
-    assert_eq!(rs_files.len(), 2, "should find 2 Rust files");
-    assert_eq!(py_files.len(), 1, "should find 1 Python file");
+    assert_eq!(
+        files
+            .iter()
+            .filter(|f| f.language.as_deref() == Some("rust"))
+            .count(),
+        2,
+        "should find 2 Rust files"
+    );
+    assert_eq!(
+        files
+            .iter()
+            .filter(|f| f.language.as_deref() == Some("python"))
+            .count(),
+        1,
+        "should find 1 Python file"
+    );
 }
 
 #[test]

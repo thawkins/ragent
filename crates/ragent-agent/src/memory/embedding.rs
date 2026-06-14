@@ -286,6 +286,7 @@ mod tests {
         assert!((sim + 1.0).abs() < 1e-6);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_cosine_similarity_zero_vector() {
         let a = vec![0.0, 0.0, 0.0];
@@ -295,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_serialise_deserialise_roundtrip() {
-        let vec = vec![1.0_f32, -2.5, 3.14, 0.0, f32::MAX];
+        let vec = vec![1.0_f32, -2.5, std::f32::consts::PI, 0.0, f32::MAX];
         let blob = serialise_embedding(&vec);
         let recovered = deserialise_embedding(&blob, 5).unwrap();
         assert_eq!(vec, recovered);

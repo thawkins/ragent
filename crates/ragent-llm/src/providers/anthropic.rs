@@ -106,6 +106,18 @@ impl Provider for AnthropicProvider {
         ]
     }
 
+    /// Discover available models from Anthropic's `/v1/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("Anthropic model discovery requires ANTHROPIC_API_KEY")?;
+        let models = list_anthropic_models(&api_key, None)
+            .await
+            .with_context(|| "Anthropic model discovery failed")?;
+        Ok(models)
+    }
+
     /// Creates an [`AnthropicClient`] configured with the given API key and optional base URL.
     ///
     /// # Errors

@@ -1,7 +1,8 @@
+#![allow(missing_docs)]
 //! Benchmarks for the agent loop performance optimizations.
 //!
 //! Measures the per-step overhead of tool-definition caching, history
-//! compaction, and request byte estimation.
+//! compression, and request byte estimation.
 //!
 //! To run:
 //!     cargo bench -p ragent-agent --bench agent_loop
@@ -92,9 +93,13 @@ fn bench_chat_request_payload_bytes(c: &mut Criterion) {
     });
 }
 
-fn bench_compact_history(c: &mut Criterion) {
+#[cfg(feature = "compression")]
+fn bench_compress_history(c: &mut Criterion) {
+    use ragent_agent::compression::compress_history;
     use ragent_agent::message::{Message, MessagePart, Role};
-    use ragent_agent::session::processor::compact_history_with_atomic_tool_calls;
+    use ragent_config::compression::CompressionConfig;
+
+    let config = CompressionConfig::default();
 
     // Small history that fits in context window
     let small: Vec<Message> = (0..10)
@@ -135,20 +140,22 @@ fn bench_compact_history(c: &mut Criterion) {
         })
         .collect();
 
-    c.bench_function("compact_small_fits", |b| {
+    c.bench_function("compress_small_fits", |b| {
         b.iter(|| {
-            let result = compact_history_with_atomic_tool_calls(black_box(&small), 128_000, 8192);
+            let result = compress_history(black_box(&small), 128_000, 8192, &config);
             black_box(result);
         })
     });
 
-    c.bench_function("compact_large_exceeds", |b| {
+    c.bench_function("compress_large_exceeds", |b| {
         b.iter(|| {
-            let result = compact_history_with_atomic_tool_calls(black_box(&large), 128_000, 8192);
+            let result = compress_history(black_box(&large), 128_000, 8192, &config);
             black_box(result);
         })
     });
 }
+#[cfg(not(feature = "compression"))]
+fn bench_compress_history(_c: &mut Criterion) {}
 
 fn bench_compiled_dir_lists(c: &mut Criterion) {
     use globset::GlobSet;
@@ -197,7 +204,7 @@ criterion_group!(
     benches,
     bench_estimate_request_bytes,
     bench_chat_request_payload_bytes,
-    bench_compact_history,
+    bench_compress_history,
     bench_compiled_dir_lists,
     bench_tool_result_truncation
 );

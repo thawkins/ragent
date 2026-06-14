@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn test_tag_cloud_sorting() {
         // Test that sort_by count descending works.
-        let mut tags = vec![
+        let mut tags = [
             TagCloudEntry {
                 tag: "rust".to_string(),
                 count: 10,

@@ -48,6 +48,8 @@ regex = "1.11"
 dirs = "5.0"
 sha2 = { workspace = true }
 hex = { workspace = true }
+foundry-local-sdk = { version = "1.2.3" }
+which = "8.0.3"
 
 [dependencies.candle-core]
 version = "0.10"

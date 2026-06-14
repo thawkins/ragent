@@ -299,6 +299,16 @@ impl Provider for CopilotProvider {
         ]
     }
 
+    /// Discover available models from the Copilot `/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let token = resolve_copilot_github_token(None)
+            .context("Copilot model discovery requires a GitHub token. Configure it via `gh auth` or set GITHUB_TOKEN/GITHUB_COPILOT_TOKEN.")?;
+        let models = list_copilot_models(&token)
+            .await
+            .with_context(|| "Copilot model discovery failed")?;
+        Ok(models)
+    }
+
     /// Creates a [`CopilotClient`] configured with the given API token.
     ///
     /// The `api_key` should be a GitHub token (OAuth or fine-grained PAT).
@@ -326,6 +336,7 @@ impl Provider for CopilotProvider {
         tracing::info!(chat_endpoint = %format!("{}/chat/completions", url), models_endpoint = %format!("{}/models", url), "Copilot provider connected");
         Ok(Box::new(client))
     }
+
     /// Returns the detected Copilot plan label (e.g. `"Pro"`, `"Business"`) from
     /// the cached session token, or `None` if no session token has been exchanged yet.
     ///

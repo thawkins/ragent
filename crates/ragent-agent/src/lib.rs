@@ -14,6 +14,8 @@ pub mod config {
 pub mod compression;
 pub mod error;
 pub mod event;
+
+pub use ragent_types::event::{Event, EventBus, FinishReason};
 pub mod file_ops;
 pub mod hooks;
 pub mod id;
@@ -53,7 +55,7 @@ pub use internal_llm::{
 };
 
 pub use ragent_llm::{
-    AnthropicProvider, CopilotProvider, GeminiProvider, GenericOpenAiProvider, HuggingFaceProvider,
-    ModelInfo, OllamaCloudProvider, OllamaProvider, OpenAiProvider, Provider, ProviderInfo,
-    ProviderRegistry, UsageInfo, create_default_registry,
+    AnthropicProvider, CopilotProvider, FoundryLocalProvider, GeminiProvider,
+    GenericOpenAiProvider, HuggingFaceProvider, ModelInfo, OllamaCloudProvider, OllamaProvider,
+    OpenAiProvider, Provider, ProviderInfo, ProviderRegistry, UsageInfo, create_default_registry,
 };

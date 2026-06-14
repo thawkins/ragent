@@ -216,23 +216,9 @@ pub struct PermissionRequest {
 }
 
 /// The user's response to a [`PermissionRequest`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum PermissionDecision {
-    /// Allow this single occurrence only.
-    Once,
-    /// Allow now and for all future matching requests.
-    Always,
-    /// Deny the request.
-    Deny,
-}
+pub use ragent_types::permission::PermissionDecision;
 
 /// Evaluates permission rules against a requested permission and resource path.
-///
-/// Rules are evaluated last-match-wins. Permanent grants recorded via
-/// [`record_always`](Self::record_always) take precedence over ruleset entries.
-///
-/// Rules are indexed by permission type for O(1) lookup, improving performance
 /// when checking permissions with many rules.
 pub struct PermissionChecker {
     /// Indexed rules by permission type for efficient lookup.

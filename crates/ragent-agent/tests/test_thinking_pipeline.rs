@@ -51,11 +51,11 @@ impl LlmClient for MockClient {
 
 #[async_trait::async_trait]
 impl Provider for MockProvider {
-    fn id(&self) -> &str {
+    fn id(&self) -> &'static str {
         "ollama"
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "Mock Ollama"
     }
 

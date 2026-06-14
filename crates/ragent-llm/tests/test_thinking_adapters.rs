@@ -304,11 +304,11 @@ async fn test_ollama_sends_binary_think_field() {
 }
 
 #[tokio::test]
-async fn test_ollama_cloud_never_sends_think_field() {
-    // Ollama Cloud does not support the `think` parameter, so
-    // regardless of the request's thinking config, the body should
-    // never contain a `think` key.
-    for (thinking, _expected) in [
+async fn test_ollama_cloud_sends_think_field_when_configured() {
+    // Ollama Cloud supports the `think` parameter on its native `/api/chat`
+    // endpoint. When a thinking configuration is present in the request,
+    // the body should contain a `think` boolean key.
+    for (thinking, expected_think) in [
         (ThinkingConfig::new(ThinkingLevel::Auto), true),
         (ThinkingConfig::new(ThinkingLevel::High), true),
         (ThinkingConfig::off(), false),
@@ -320,13 +320,15 @@ async fn test_ollama_cloud_never_sends_think_field() {
             .expect("ollama cloud client");
 
         let mut request = make_request("qwen3:latest");
-        request.thinking = Some(thinking);
+        request.thinking = Some(thinking.clone());
 
         let captured = capture_body(client, request, rx).await;
         assert_eq!(captured.path, "/api/chat");
-        assert!(
-            !captured.body.as_object().unwrap().contains_key("think"),
-            "ollama_cloud must not send a `think` field: {:#?}",
+        assert_eq!(
+            captured.body.get("think").and_then(|v| v.as_bool()),
+            Some(expected_think),
+            "ollama_cloud `think` field mismatch for {:?}: {:#?}",
+            thinking,
             captured.body
         );
     }

@@ -269,6 +269,7 @@ impl Bm25Scorer {
 mod tests {
     use super::*;
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_bm25_basic_scoring() {
         let mut scorer = Bm25Scorer::new(1.2, 0.75);
@@ -309,6 +310,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_bm25_empty_query() {
         let mut scorer = Bm25Scorer::new(1.2, 0.75);
@@ -322,6 +324,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_bm25_no_matching_terms() {
         let mut scorer = Bm25Scorer::new(1.2, 0.75);
@@ -398,6 +401,7 @@ mod tests {
         assert!(scores.len() >= 2);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_bm25_finalise_required() {
         let mut scorer = Bm25Scorer::new(1.2, 0.75);

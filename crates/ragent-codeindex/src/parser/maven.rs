@@ -502,12 +502,11 @@ mod tests {
   <packaging>jar</packaging>
 </project>"#;
         let pf = parse_maven(src);
-        let projects: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Module && s.name.starts_with("project"))
-            .collect();
-        assert!(!projects.is_empty());
+        assert!(
+            pf.symbols
+                .iter()
+                .any(|s| s.kind == SymbolKind::Module && s.name.starts_with("project"))
+        );
     }
 
     #[test]
@@ -524,13 +523,9 @@ mod tests {
   </dependencies>
 </project>"#;
         let pf = parse_maven(src);
-        let dep_imports: Vec<_> = pf
-            .imports
-            .iter()
-            .filter(|i| i.kind == "dependency")
-            .collect();
-        assert_eq!(dep_imports.len(), 1);
-        assert_eq!(dep_imports[0].imported_name, "junit");
+        let mut dep_imports = pf.imports.iter().filter(|i| i.kind == "dependency");
+        assert_eq!(dep_imports.clone().count(), 1);
+        assert_eq!(dep_imports.next().unwrap().imported_name, "junit");
     }
 
     #[test]
@@ -543,8 +538,7 @@ mod tests {
   </modules>
 </project>"#;
         let pf = parse_maven(src);
-        let mod_imports: Vec<_> = pf.imports.iter().filter(|i| i.kind == "module").collect();
-        assert_eq!(mod_imports.len(), 2);
+        assert_eq!(pf.imports.iter().filter(|i| i.kind == "module").count(), 2);
     }
 
     #[test]
@@ -562,12 +556,7 @@ mod tests {
   </build>
 </project>"#;
         let pf = parse_maven(src);
-        let plugins: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.name.starts_with("plugin:"))
-            .collect();
-        assert!(!plugins.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.name.starts_with("plugin:")));
     }
 
     #[test]

@@ -19,9 +19,8 @@ pub use compression::{
     CcrConfig, CompressionConfig, CompressorConfig, RelevanceConfig, TokenizerConfig,
 };
 pub use config::{
-    AgentConfig, AutoExtractConfig, Capabilities, CompactionConfig, Config, Cost,
-    CrossProjectConfig, EvictionConfig, InternalLlmConfig, InternalLlmDownloadPolicy,
-    McpServerConfig, McpTransport, MemoryConfig, ModelConfig, ProviderConfig, ToolVisibilityConfig,
-    tool_family_names,
+    AgentConfig, AutoExtractConfig, Capabilities, Config, Cost, CrossProjectConfig,
+    InternalLlmConfig, InternalLlmDownloadPolicy, McpServerConfig, McpTransport, MemoryConfig,
+    ModelConfig, ProviderConfig, ToolVisibilityConfig, tool_family_names,
 };
 pub use permission::{PermissionAction, PermissionChecker, PermissionRule};

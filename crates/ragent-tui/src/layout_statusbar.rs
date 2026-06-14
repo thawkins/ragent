@@ -154,6 +154,7 @@ pub mod abbreviations {
             "copilot" => "CoPilot",
             "ollama" => "Oll",
             "azure_foundry" => "AzF",
+            "foundry_local" => "FndL",
             _ => name,
         }
     }

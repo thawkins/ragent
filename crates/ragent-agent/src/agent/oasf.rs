@@ -117,7 +117,7 @@ pub struct RagentAgentPayload {
     /// Defaults to `"all"` when absent.
     pub mode: Option<String>,
 
-    /// Maximum number of agentic loop iterations. Defaults to `100`.
+    /// Maximum number of agentic loop iterations. Defaults to `1024`.
     pub max_steps: Option<u32>,
 
     /// Model sampling temperature override (0.0–2.0).

@@ -886,21 +886,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         return;
                     }
                     app.refresh_provider();
-                    let models = app.models_for_provider(pid);
-                    if models.is_empty() {
-                        app.provider_setup = None;
-                        app.status = format!(
-                            "⚠ No models available for {} — check provider setup and model discovery",
-                            pname
-                        );
-                    } else {
-                        app.provider_setup = Some(ProviderSetupStep::SelectModel {
-                            provider_id: pid.to_string(),
-                            provider_name: pname.to_string(),
-                            models,
-                            selected: 0,
-                        });
-                    }
+                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                        provider_id: pid.to_string(),
+                        provider_name: pname.to_string(),
+                    });
+                    app.start_model_discovery(pid.to_string(), pname.to_string());
                 } else if pid == "ollama" {
                     // Ollama doesn't require a key — store empty and mark configured
                     let _ = app.storage.set_provider_auth(pid, "");
@@ -908,13 +898,23 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         .storage
                         .delete_setting(&format!("provider_{pid}_disabled"));
                     app.refresh_provider();
-                    let models = app.models_for_provider(pid);
-                    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
                         provider_id: pid.to_string(),
                         provider_name: pname.to_string(),
-                        models,
-                        selected: 0,
                     });
+                    app.start_model_discovery(pid.to_string(), pname.to_string());
+                } else if pid == "foundry_local" {
+                    // Microsoft Foundry Local is a local, keyless provider.
+                    let _ = app.storage.set_provider_auth(pid, "");
+                    let _ = app
+                        .storage
+                        .delete_setting(&format!("provider_{pid}_disabled"));
+                    app.refresh_provider();
+                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                        provider_id: pid.to_string(),
+                        provider_name: pname.to_string(),
+                    });
+                    app.start_model_discovery(pid.to_string(), pname.to_string());
                 } else if pid == "copilot" {
                     // Copilot: try auto-discover and verify token exchange
                     let storage = app.storage.clone();
@@ -945,13 +945,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                         app.storage.set_setting("copilot_api_base", &auth.base_url);
                                     let _ = app.storage.delete_setting("provider_copilot_disabled");
                                     app.refresh_provider();
-                                    let models = app.models_for_provider(pid);
-                                    app.provider_setup = Some(ProviderSetupStep::SelectModel {
+                                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
                                         provider_id: pid.to_string(),
                                         provider_name: pname.to_string(),
-                                        models,
-                                        selected: 0,
                                     });
+                                    app.start_model_discovery(pid.to_string(), pname.to_string());
                                     return;
                                 }
                             }
@@ -1081,13 +1079,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                         .storage
                         .delete_setting(&format!("provider_{provider_id}_disabled"));
                     app.refresh_provider();
-                    let models = app.models_for_provider(&provider_id);
-                    app.provider_setup = Some(ProviderSetupStep::SelectModel {
-                        provider_id,
-                        provider_name,
-                        models,
-                        selected: 0,
+                    app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                        provider_id: provider_id.clone(),
+                        provider_name: provider_name.clone(),
                     });
+                    app.start_model_discovery(provider_id, provider_name);
                 }
             }
             KeyCode::Tab if provider_id == "generic_openai" || provider_id == "azure_foundry" => {
@@ -1462,21 +1458,11 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                                 .map(String::from),
                         });
                     } else {
-                        let models = app.models_for_provider(&prov_id);
-                        if models.is_empty() {
-                            app.provider_setup = None;
-                            app.status = format!(
-                                "⚠ No models available for {} — check provider setup and model discovery",
-                                prov_name
-                            );
-                        } else {
-                            app.provider_setup = Some(ProviderSetupStep::SelectModel {
-                                provider_id: prov_id,
-                                provider_name: prov_name,
-                                models,
-                                selected: 0,
-                            });
-                        }
+                        app.provider_setup = Some(ProviderSetupStep::LoadingModels {
+                            provider_id: prov_id.clone(),
+                            provider_name: prov_name.clone(),
+                        });
+                        app.start_model_discovery(prov_id, prov_name);
                     }
                 } else {
                     app.provider_setup = None;
@@ -1757,9 +1743,17 @@ fn handle_provider_setup_key(app: &mut App, key: KeyEvent) {
                 });
             }
         }
+        ProviderSetupStep::LoadingModels { .. } => {
+            // Loading state is read-only; any key besides Esc just keeps it alive.
+            if key.code == KeyCode::Esc {
+                app.provider_setup = None;
+                app.model_loading_state = None;
+            } else {
+                app.provider_setup = Some(step);
+            }
+        }
     }
 }
-
 /// Starts the Copilot device flow and spawns a background polling task.
 ///
 /// On success the polling task publishes [`Event::CopilotDeviceFlowComplete`]

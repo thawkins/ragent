@@ -129,7 +129,10 @@ fn test_config_roundtrip_preserves_defaults() {
 
     assert_eq!(restored.code_index.enabled, original.code_index.enabled);
     assert_eq!(restored.internal_llm.enabled, original.internal_llm.enabled);
-    assert_eq!(restored.tool_visibility.codeindex, original.tool_visibility.codeindex);
+    assert_eq!(
+        restored.tool_visibility.codeindex,
+        original.tool_visibility.codeindex
+    );
 }
 
 #[test]

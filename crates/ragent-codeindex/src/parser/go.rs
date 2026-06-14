@@ -453,14 +453,14 @@ mod tests {
 
     #[test]
     fn test_struct_with_fields() {
-        let source = r#"
+        let source = r"
 package main
 
 type Config struct {
     Name string
     value int
 }
-"#;
+";
         let parsed = parse_go(source);
         let names: Vec<&str> = parsed.symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"Config"), "got: {names:?}");
@@ -481,13 +481,13 @@ type Config struct {
 
     #[test]
     fn test_interface() {
-        let source = r#"
+        let source = r"
 package main
 
 type Reader interface {
     Read(p []byte) (n int, err error)
 }
-"#;
+";
         let parsed = parse_go(source);
         let reader = parsed.symbols.iter().find(|s| s.name == "Reader").unwrap();
         assert_eq!(reader.kind, SymbolKind::Interface);
@@ -513,7 +513,7 @@ func (d *Dog) Bark() string {
 
     #[test]
     fn test_constants() {
-        let source = r#"
+        let source = r"
 package main
 
 const MaxSize = 1024
@@ -521,7 +521,7 @@ const (
     A = iota
     B
 )
-"#;
+";
         let parsed = parse_go(source);
         let max = parsed.symbols.iter().find(|s| s.name == "MaxSize").unwrap();
         assert_eq!(max.kind, SymbolKind::Constant);

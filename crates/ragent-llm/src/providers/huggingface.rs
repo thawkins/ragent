@@ -51,6 +51,19 @@ impl Provider for HuggingFaceProvider {
         huggingface_default_models()
     }
 
+    /// Discover available chat-completions models from HuggingFace router.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("HF_TOKEN")
+            .or_else(|_| std::env::var("HUGGINGFACE_API_KEY"))
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("HuggingFace model discovery requires HF_TOKEN or HUGGINGFACE_API_KEY")?;
+        let models = discover_models(&api_key)
+            .await
+            .with_context(|| "HuggingFace model discovery failed")?;
+        Ok(models)
+    }
+
     /// Creates an authenticated [`HuggingFaceClient`] for chat completions.
     ///
     /// # Arguments

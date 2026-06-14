@@ -199,12 +199,16 @@ pub async fn run_tui(
     let mut app = App::new(
         event_bus.clone(),
         storage,
-        provider_registry,
+        provider_registry.clone(),
         session_processor.clone(),
         agent,
         show_log,
         db_path,
     );
+
+    // Attach the event bus to providers that publish lifecycle events
+    // (e.g. Foundry Local download progress).
+    provider_registry.set_event_bus_all(Some(event_bus.clone()));
     // Pass through the config file paths loaded at startup so the TUI
     // can display them in the message window.
     app.config_paths = config_paths;

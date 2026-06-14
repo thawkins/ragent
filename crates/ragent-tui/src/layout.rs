@@ -15,15 +15,15 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
-        Table, Wrap,
+        Block, Borders, Clear, Gauge, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table, Wrap,
     },
 };
 
 use crate::layout_active_agents::render_active_agents_subpanel;
 
 use crate::theme;
-use crate::utils::{ResponsiveBreakpoint, centered_rect, is_below_minimum_size};
+use crate::utils::{ResponsiveBreakpoint, centered_rect, centered_rect_max, is_below_minimum_size};
 
 use ragent_core::message::{Message, MessagePart, Role, ToolCallStatus};
 
@@ -184,23 +184,60 @@ fn apply_selection_highlight(frame: &mut Frame, app: &App, pane: SelectionPane, 
 }
 
 fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
-    let area = centered_rect(60, 50, frame.area());
+    // Use a taller, capped dialog so longer provider/model lists fit without
+    // clipping on typical terminal sizes.  80% height up to 30 rows gives the
+    // provider picker enough room to show most entries.
+    let area = centered_rect_max(60, 80, 80, 30, frame.area());
     frame.render_widget(Clear, area);
 
     let Some(step) = app.provider_setup.as_ref() else {
         return;
     };
     match step {
-        ProviderSetupStep::SelectProvider { selected } => {
-            let mut lines: Vec<Line<'_>> = vec![
+        ProviderSetupStep::LoadingModels {
+            provider_id,
+            provider_name,
+        } => {
+            let elapsed = app
+                .model_loading_state
+                .as_ref()
+                .map_or(0, |s| s.started_at.elapsed().as_secs());
+            let spinner =
+                ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][(elapsed as usize) % 10];
+            let lines: Vec<Line<'_>> = vec![
                 Line::from(Span::styled(
-                    "Select a Provider",
+                    format!("Loading models for {}", provider_name),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
+                Line::from(Span::styled(
+                    format!("{} Fetching model list…", spinner),
+                    Style::default().fg(Color::Yellow),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Esc cancel",
+                    Style::default().fg(Color::DarkGray),
+                )),
             ];
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" {} ", provider_id))
+                .border_style(Style::default().fg(Color::Cyan));
+            let paragraph = Paragraph::new(lines)
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
+        ProviderSetupStep::SelectProvider { selected } => {
+            // Split the dialog area into header, scrollable provider list, and footer.
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Provider Setup ")
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(area);
 
             // Determine which providers have saved credentials so we can show a ✓ tick.
             let configured_ids: std::collections::HashSet<String> =
@@ -209,6 +246,8 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     .map(|p| p.id)
                     .collect();
 
+            // Build provider entry lines.
+            let mut provider_lines: Vec<Line<'_>> = Vec::with_capacity(PROVIDER_LIST.len());
             for (i, (pid, pname)) in PROVIDER_LIST.iter().enumerate() {
                 let (indicator, style) = if i == *selected {
                     (
@@ -225,28 +264,112 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                 } else {
                     ""
                 };
-                lines.push(Line::from(vec![
+                let badge = if *pid == "foundry_local" || *pid == "ollama" {
+                    " [local]"
+                } else {
+                    ""
+                };
+                provider_lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
+                    Span::styled(badge, Style::default().fg(Color::Yellow)),
                     Span::styled(tick, Style::default().fg(Color::Green)),
                 ]));
             }
 
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "↑/↓ navigate  Enter select  Esc cancel",
-                Style::default().fg(Color::DarkGray),
-            )));
+            // Fixed header and footer consume 4 inner rows (2 header + 2 footer).
+            const HEADER_ROWS: u16 = 2;
+            const FOOTER_ROWS: u16 = 2;
+            let provider_area_height = inner.height.saturating_sub(HEADER_ROWS + FOOTER_ROWS);
+            let needs_scroll = provider_lines.len() > provider_area_height as usize;
 
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Provider Setup ")
-                .border_style(Style::default().fg(Color::Cyan));
+            // Compute a scroll offset that keeps the selected provider visible.
+            let max_offset = provider_lines
+                .len()
+                .saturating_sub(provider_area_height as usize);
+            let half = (provider_area_height as usize) / 2;
+            let scroll_offset = if *selected < half {
+                0
+            } else {
+                (*selected - half).min(max_offset)
+            };
 
-            let paragraph = Paragraph::new(lines)
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(paragraph, area);
+            let visible_providers = if provider_area_height == 0 {
+                &provider_lines[..0]
+            } else {
+                let end = (scroll_offset + provider_area_height as usize).min(provider_lines.len());
+                &provider_lines[scroll_offset..end]
+            };
+
+            // Header text.
+            let header_lines = vec![
+                Line::from(Span::styled(
+                    "Select a Provider",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+
+            // Strong scrolling indicators: explicit arrows when clipped, with the
+            // current position shown, so users always know the list is scrollable.
+            let footer_lines = if needs_scroll {
+                let total = provider_lines.len();
+                let visible_start = scroll_offset + 1;
+                let visible_end = (scroll_offset + visible_providers.len()).min(total);
+                let scroll_hint = format!(
+                    "▲ {} more above — {}–{} of {} ▼ {} more below",
+                    scroll_offset,
+                    visible_start,
+                    visible_end,
+                    total,
+                    total.saturating_sub(visible_end)
+                );
+                vec![
+                    Line::from(Span::styled(
+                        "↑/↓ navigate  Enter select  Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                    Line::from(Span::styled(
+                        scroll_hint,
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                ]
+            } else {
+                vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "↑/↓ navigate  Enter select  Esc cancel",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ]
+            }; // Layout: header, provider list, footer.
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(HEADER_ROWS),
+                    Constraint::Min(0),
+                    Constraint::Length(FOOTER_ROWS),
+                ])
+                .split(inner);
+
+            frame.render_widget(Clear, area);
+            frame.render_widget(block, area);
+            frame.render_widget(
+                Paragraph::new(header_lines).alignment(Alignment::Center),
+                chunks[0],
+            );
+            frame.render_widget(
+                Paragraph::new(visible_providers.to_vec()).alignment(Alignment::Center),
+                chunks[1],
+            );
+            frame.render_widget(
+                Paragraph::new(footer_lines).alignment(Alignment::Center),
+                chunks[2],
+            );
         }
         ProviderSetupStep::EnterKey {
             provider_id,
@@ -930,13 +1053,18 @@ fn render_provider_setup_dialog(frame: &mut Frame, app: &App) {
                     ("  ", Style::default().fg(Color::White))
                 };
                 let active_marker = if is_active { " ●" } else { "" };
+                let badge = if *pid == "foundry_local" || *pid == "ollama" {
+                    " [local]"
+                } else {
+                    ""
+                };
                 lines.push(Line::from(vec![
                     Span::styled(indicator, style),
                     Span::styled(*pname, style),
+                    Span::styled(badge, Style::default().fg(Color::Yellow)),
                     Span::styled(active_marker, Style::default().fg(Color::Green)),
                 ]));
             }
-
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "↑/↓ navigate  Enter reset  Esc cancel",
@@ -1704,6 +1832,14 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         crate::panels::render_internal_llm_chat(frame, app);
     }
 
+    // Model loading / download progress popups (rendered above normal UI).
+    if app.model_loading_state.is_some() {
+        render_model_loading_popup(frame, app);
+    }
+    if app.model_download_state.is_some() {
+        render_model_download_popup(frame, app);
+    }
+
     // Render output overlay last so it always appears above Teams/Agents popups.
     if app.output_view.is_some() {
         render_output_view_overlay(frame, app);
@@ -1711,6 +1847,103 @@ fn render_chat(frame: &mut Frame, app: &mut App) {
         app.output_view_area = Rect::default();
     }
 }
+
+/// Render a small centered popup with a spinner while a provider loads its model list.
+fn render_model_loading_popup(frame: &mut Frame, app: &App) {
+    let Some(ref state) = app.model_loading_state else {
+        return;
+    };
+    let area = centered_rect(50, 20, frame.area());
+    frame.render_widget(Clear, area);
+
+    let elapsed = state.started_at.elapsed().as_secs();
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"][(elapsed as usize) % 10];
+    let lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            format!("Loading models for {}", state.provider_name),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{} Fetching model list…", spinner),
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Esc to cancel",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", state.provider_id))
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
+}
+
+/// Render a small centered popup with a progress bar while a model is downloaded.
+fn render_model_download_popup(frame: &mut Frame, app: &App) {
+    let Some(ref state) = app.model_download_state else {
+        return;
+    };
+    let area = centered_rect(50, 20, frame.area());
+    frame.render_widget(Clear, area);
+
+    let percent = state.percent.clamp(0.0, 100.0);
+    let elapsed = state.started_at.elapsed().as_secs();
+    let lines: Vec<Line<'_>> = vec![
+        Line::from(Span::styled(
+            format!("Downloading {}", shorten_middle(&state.model_id, 32)),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{:.1}% • {} elapsed", percent, format_elapsed(elapsed)),
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", state.provider_id))
+        .border_style(Style::default().fg(Color::Cyan));
+    let paragraph = Paragraph::new(lines)
+        .block(block.clone())
+        .alignment(Alignment::Center);
+    frame.render_widget(paragraph, area);
+
+    let gauge_area = {
+        let inner = block.inner(area);
+        let rows = inner.height.saturating_sub(4);
+        // Position the gauge near the bottom of the popup, leaving room for text.
+        let y = inner.y + rows.min(3);
+        let h = inner.height.saturating_sub(rows.min(3));
+        Rect::new(inner.x + 2, y, inner.width.saturating_sub(4), h.max(1))
+    };
+    let gauge = Gauge::default()
+        .block(Block::default().borders(Borders::NONE))
+        .gauge_style(Style::default().fg(Color::Green).bg(Color::DarkGray))
+        .ratio(f64::from(percent) / 100.0)
+        .label(format!("{:.0}%", percent))
+        .use_unicode(true);
+    frame.render_widget(gauge, gauge_area);
+}
+
+/// Format seconds as "M:SS" for the download popup.
+fn format_elapsed(secs: u64) -> String {
+    let m = secs / 60;
+    let s = secs % 60;
+    format!("{}:{:02}", m, s)
+}
+
 fn render_log_panel(frame: &mut Frame, app: &mut App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)

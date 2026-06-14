@@ -713,12 +713,12 @@ export class Dog {
 
     #[test]
     fn test_interface() {
-        let source = r#"
+        let source = r"
 export interface User {
     name: string;
     age: number;
 }
-"#;
+";
         let parsed = parse_ts(source);
         let user = parsed.symbols.iter().find(|s| s.name == "User").unwrap();
         assert_eq!(user.kind, SymbolKind::Interface);
@@ -743,10 +743,10 @@ export interface User {
 
     #[test]
     fn test_imports() {
-        let source = r#"
+        let source = r"
 import { useState, useEffect } from 'react';
 import axios from 'axios';
-"#;
+";
         let parsed = parse_ts(source);
         assert!(
             parsed.imports.len() >= 2,

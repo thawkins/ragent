@@ -1353,6 +1353,107 @@ fn humaneval_fixture_from_record(record: HumanEvalFullRecord) -> BenchCaseFixtur
     }
 }
 
+fn init_apps(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("apps", language, "python")?;
+    Ok(fixture(
+        "apps-sample-001",
+        "Read two integers and print their sum.",
+        "a, b = map(int, input().split())\nprint(a + b)",
+        "python",
+    ))
+}
+
+fn init_ds1000(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("ds1000", language, "python")?;
+    Ok(fixture(
+        "ds1000-sample-001",
+        "Filter a pandas DataFrame to rows where column x > 10.",
+        "df[df['x'] > 10]",
+        "python",
+    ))
+}
+
+fn init_multipl_e(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    match language {
+        "python" => Ok(fixture(
+            "multipl-e-python-sample-001",
+            "Return the maximum element in a list.",
+            "def max_in_list(items):\n    return max(items)",
+            "python",
+        )),
+        "rust" => Ok(fixture(
+            "multipl-e-rust-sample-001",
+            "Return the maximum element in a list.",
+            "fn max_in_list(items: &[i32]) -> i32 {\n    *items.iter().max().unwrap()\n}",
+            "rust",
+        )),
+        other => bail!(
+            "benchmark suite 'multipl-e' does not provide init fixtures for language '{}'; supported languages: python, rust",
+            other
+        ),
+    }
+}
+
+fn init_repobench(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("repobench", language, "python")?;
+    Ok(fixture(
+        "repobench-sample-001",
+        "Complete the masked repository function call.",
+        "repository_completion()",
+        "python",
+    ))
+}
+
+fn init_crosscodeeval(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("crosscodeeval", language, "python")?;
+    Ok(fixture(
+        "crosscodeeval-sample-001",
+        "Use cross-file context to finish the helper implementation.",
+        "return helper(value)",
+        "python",
+    ))
+}
+
+fn init_swebench_lite(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("swebench-lite", language, "diff")?;
+    Ok(fixture(
+        "swebench-lite-sample-001",
+        "Patch the repository so the failing test now passes.",
+        "diff --git a/module.py b/module.py",
+        "diff",
+    ))
+}
+
+fn init_swebench_verified(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("swebench-verified", language, "diff")?;
+    Ok(fixture(
+        "swebench-verified-sample-001",
+        "Apply a repository patch that resolves the reported issue.",
+        "diff --git a/service.py b/service.py",
+        "diff",
+    ))
+}
+
+fn init_livecodebench(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("livecodebench", language, "python")?;
+    Ok(fixture(
+        "livecodebench-sample-001",
+        "Implement the required function for this timed coding task.",
+        "def solve():\n    pass",
+        "python",
+    ))
+}
+
+fn init_bigcodebench(language: &str) -> Result<Vec<BenchCaseFixture>> {
+    require_fixture_language("bigcodebench", language, "python")?;
+    Ok(fixture(
+        "bigcodebench-sample-001",
+        "Write a complete solution for the described practical coding task.",
+        "def solution():\n    raise NotImplementedError",
+        "python",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1502,105 +1603,4 @@ mod tests {
             BenchInitMode::Sample
         );
     }
-}
-
-fn init_apps(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("apps", language, "python")?;
-    Ok(fixture(
-        "apps-sample-001",
-        "Read two integers and print their sum.",
-        "a, b = map(int, input().split())\nprint(a + b)",
-        "python",
-    ))
-}
-
-fn init_ds1000(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("ds1000", language, "python")?;
-    Ok(fixture(
-        "ds1000-sample-001",
-        "Filter a pandas DataFrame to rows where column x > 10.",
-        "df[df['x'] > 10]",
-        "python",
-    ))
-}
-
-fn init_multipl_e(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    match language {
-        "python" => Ok(fixture(
-            "multipl-e-python-sample-001",
-            "Return the maximum element in a list.",
-            "def max_in_list(items):\n    return max(items)",
-            "python",
-        )),
-        "rust" => Ok(fixture(
-            "multipl-e-rust-sample-001",
-            "Return the maximum element in a list.",
-            "fn max_in_list(items: &[i32]) -> i32 {\n    *items.iter().max().unwrap()\n}",
-            "rust",
-        )),
-        other => bail!(
-            "benchmark suite 'multipl-e' does not provide init fixtures for language '{}'; supported languages: python, rust",
-            other
-        ),
-    }
-}
-
-fn init_repobench(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("repobench", language, "python")?;
-    Ok(fixture(
-        "repobench-sample-001",
-        "Complete the masked repository function call.",
-        "repository_completion()",
-        "python",
-    ))
-}
-
-fn init_crosscodeeval(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("crosscodeeval", language, "python")?;
-    Ok(fixture(
-        "crosscodeeval-sample-001",
-        "Use cross-file context to finish the helper implementation.",
-        "return helper(value)",
-        "python",
-    ))
-}
-
-fn init_swebench_lite(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("swebench-lite", language, "diff")?;
-    Ok(fixture(
-        "swebench-lite-sample-001",
-        "Patch the repository so the failing test now passes.",
-        "diff --git a/module.py b/module.py",
-        "diff",
-    ))
-}
-
-fn init_swebench_verified(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("swebench-verified", language, "diff")?;
-    Ok(fixture(
-        "swebench-verified-sample-001",
-        "Apply a repository patch that resolves the reported issue.",
-        "diff --git a/service.py b/service.py",
-        "diff",
-    ))
-}
-
-fn init_livecodebench(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("livecodebench", language, "python")?;
-    Ok(fixture(
-        "livecodebench-sample-001",
-        "Implement the required function for this timed coding task.",
-        "def solve():\n    pass",
-        "python",
-    ))
-}
-
-fn init_bigcodebench(language: &str) -> Result<Vec<BenchCaseFixture>> {
-    require_fixture_language("bigcodebench", language, "python")?;
-    Ok(fixture(
-        "bigcodebench-sample-001",
-        "Write a complete solution for the described practical coding task.",
-        "def solution():\n    raise NotImplementedError",
-        "python",
-    ))
 }

@@ -220,7 +220,7 @@ Ragent is an AI coding agent for the terminal, built in Rust. It provides multi-
 
 ### 1.1 Key Characteristics
 
-- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Ollama, and Generic OpenAI-compatible APIs
+- **Multi-provider LLM support** — Anthropic, OpenAI, GitHub Copilot, Google Gemini, Hugging Face, Ollama, Generic OpenAI-compatible APIs, Azure AI Foundry, Azure Resource (File), Amazon Bedrock, and Microsoft Foundry Local
 - **Comprehensive tool system** — Extensive coverage across file operations, code analysis, GitHub/GitLab integration, web access, office documents, memory, teams, and more
 - **Built-in TUI** — Full-screen ratatui interface with streaming chat, slash commands, and real-time updates
 - **HTTP server** — REST + SSE API for external integrations
@@ -421,6 +421,8 @@ graph LR
 | **Google Gemini** | `gemini` | `GEMINI_API_KEY` | Streaming, tools, vision, reasoning |
 | **Azure Resource (File)** | `azure_resource` | File-based (`azureresources.json`) | Multiple Azure endpoints from a JSON catalog, per-resource auth, capability tags |
 | **Azure AI Foundry** | `azure_foundry` | `AZURE_AI_FOUNDRY_API_KEY` | OpenAI-compatible endpoints, dynamic model discovery, streaming, tools, vision, reasoning |
+| **Amazon Bedrock** | `bedrock` | AWS credentials | AWS-hosted models (Claude, Nova, Llama, Mistral), streaming, tools, vision |
+| **Microsoft Foundry Local** | `foundry_local` | No key required | Local Microsoft models (Phi-4, Phi-3.5), streaming, tools |
 
 #### Provider Features
 
@@ -684,6 +686,38 @@ ragent models --provider azure_resource
 - Each entry requires at least one of `api_key` or `api_key_env`
 - Duplicate IDs are deduplicated (first wins)
 - Invalid entries are skipped with a warning
+
+#### Microsoft Foundry Local Provider
+
+The `foundry_local` provider connects to locally-hosted Microsoft models via the official `foundry-local-sdk`. It does not require an API key and exposes a static default catalog (Phi-4, Phi-3.5 Mini, Phi-3.5 MoE) when the Foundry Local service is not running. When the service is running, dynamic model discovery via the SDK catalog is used.
+
+**Authentication:**
+- No API key required.
+
+**Configuration Example (`ragent.json`):**
+```json
+{
+  "provider": {
+    "foundry_local": {
+      "auto_start": true,
+      "device": "auto",
+      "models_path": "~/.foundry-local/models"
+    }
+  }
+}
+```
+
+**Features:**
+- **Local Inference** — Runs Microsoft models on the same machine as ragent
+- **No API Key** — Zero cloud credentials required
+- **Auto-Start Service** — Optionally starts the Foundry Local web service on first use
+- **Device Selection** — `auto`, `cpu`, `gpu`, or `npu` preference (passed to SDK where supported)
+- **Model Cache Path** — Override the default model cache directory
+
+**Model Listing:**
+```bash
+ragent models --provider foundry_local
+```
 
 ### 3.2 Tool System
 

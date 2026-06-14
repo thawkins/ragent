@@ -8,16 +8,16 @@ use tempfile::tempdir;
 
 // ── Sample sources for each language ──────────────────────────────────────────
 
-const RUST_SRC: &str = r#"
+const RUST_SRC: &str = r"
 pub struct Config { name: String, value: i32 }
 impl Config {
     pub fn new(name: &str) -> Self { Self { name: name.to_string(), value: 0 } }
     pub fn value(&self) -> i32 { self.value }
 }
 fn helper() -> bool { true }
-"#;
+";
 
-const PYTHON_SRC: &str = r#"
+const PYTHON_SRC: &str = r"
 class Config:
     def __init__(self, name: str):
         self.name = name
@@ -27,9 +27,9 @@ class Config:
 
 def helper():
     return True
-"#;
+";
 
-const TS_SRC: &str = r#"
+const TS_SRC: &str = r"
 export interface Config { name: string; value: number }
 export class ConfigImpl implements Config {
     name: string;
@@ -38,9 +38,9 @@ export class ConfigImpl implements Config {
 }
 export function helper(): boolean { return true; }
 const LIMIT = 100;
-"#;
+";
 
-const GO_SRC: &str = r#"
+const GO_SRC: &str = r"
 package main
 
 type Config struct {
@@ -53,17 +53,17 @@ func NewConfig(name string) *Config {
 }
 
 func helper() bool { return true }
-"#;
+";
 
-const C_SRC: &str = r#"
+const C_SRC: &str = r"
 #include <stdio.h>
 typedef unsigned long size_t;
 struct Config { char* name; int value; };
 int helper(void) { return 1; }
 void process(struct Config* c) { c->value++; }
-"#;
+";
 
-const CPP_SRC: &str = r#"
+const CPP_SRC: &str = r"
 #include <string>
 class Config {
 public:
@@ -74,9 +74,9 @@ private:
     int value_;
 };
 namespace util { bool helper() { return true; } }
-"#;
+";
 
-const JAVA_SRC: &str = r#"
+const JAVA_SRC: &str = r"
 package com.example;
 
 public class Config {
@@ -90,7 +90,7 @@ public class Config {
 
     public int getValue() { return value; }
 }
-"#;
+";
 
 // ── Benchmarks ────────────────────────────────────────────────────────────────
 

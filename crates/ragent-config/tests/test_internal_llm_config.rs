@@ -5,7 +5,8 @@ fn test_internal_llm_defaults_are_safe() {
     let config = Config::default();
 
     assert!(!config.internal_llm.enabled);
-    assert_eq!(config.internal_llm.backend, "embedded");
+    assert_eq!(config.internal_llm.backend, "candle");
+    assert_eq!(config.internal_llm.accelerator, "cpu");
     assert_eq!(config.internal_llm.model_id, "smollm2-360m-instruct-q4");
     assert_eq!(config.internal_llm.artifact_max_bytes, 1_073_741_824);
     assert_eq!(config.internal_llm.threads, 4);
@@ -19,6 +20,7 @@ fn test_internal_llm_defaults_are_safe() {
     );
     assert!(config.internal_llm.allows_task("session_title"));
     assert!(config.internal_llm.allows_task("chat"));
+    assert!(!config.internal_llm.allows_task("prompt_context"));
     assert!(!config.internal_llm.session_title_enabled);
     assert!(!config.internal_llm.prompt_context_enabled);
     assert!(!config.internal_llm.memory_extraction_enabled);

@@ -596,14 +596,13 @@ mod tests {
             "pattern",
             &[],
         );
-        let pattern_names: Vec<String> = result
-            .entities
-            .iter()
-            .filter(|e| e.entity_type == EntityType::Pattern)
-            .map(|e| e.name.clone())
-            .collect();
-        // Should extract "TDD pattern" and "clean architecture convention"
-        assert!(pattern_names.len() >= 1);
+        assert!(
+            result
+                .entities
+                .iter()
+                .any(|e| e.entity_type == EntityType::Pattern),
+            "should extract pattern entities"
+        );
     }
 
     #[test]

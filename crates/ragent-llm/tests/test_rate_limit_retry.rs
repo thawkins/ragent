@@ -27,9 +27,9 @@ fn test_backoff_delays() {
 /// Test that the 5th retry (index 4) also caps at 8000ms.
 #[test]
 fn test_backoff_delay_cap() {
-    let delay_ms = 500 * (1_u64 << 4.min(4)); // 4.min(4) = 4
+    let delay_ms = 500 * (1_u64 << 4); // 4.min(4) = 4
     assert_eq!(delay_ms, 8000, "Backoff should cap at 8000ms");
 
-    let delay_ms = 500 * (1_u64 << 10.min(4)); // 10.min(4) = 4
+    let delay_ms = 500 * (1_u64 << 4); // 10.min(4) = 4
     assert_eq!(delay_ms, 8000, "Backoff should still cap at 8000ms");
 }

@@ -112,11 +112,9 @@ mod tests {
                     Ok(JobEvent::JobCompleted {
                         job_id: jid,
                         success: _,
-                    }) => {
-                        if jid == job_id {
-                            got_completed = true;
-                            break;
-                        }
+                    }) if jid == job_id => {
+                        got_completed = true;
+                        break;
                     }
                     _ => {}
                 }

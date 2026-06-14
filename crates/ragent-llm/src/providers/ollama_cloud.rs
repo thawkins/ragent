@@ -10,9 +10,12 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::pin::Pin;
 
-// Ollama Cloud does not support a `think` parameter, even though local
-// Ollama's OpenAI-compatible endpoint does. We do not import any thinking
-// helpers here.
+// Ollama Cloud supports the `think` parameter on the native `/api/chat`
+// endpoint, mirroring local Ollama. We import the binary-thinking helpers
+// to populate model metadata and set the `think` flag in requests.
+use super::thinking::{
+    binary_thinking_levels_for_model, model_supports_binary_thinking, think_flag_from_request,
+};
 use crate::event::FinishReason;
 use crate::llm::{ChatContent, ChatRequest, ContentPart, LlmClient, StreamEvent, ToolDefinition};
 use crate::{ModelInfo, Provider};
@@ -40,15 +43,10 @@ impl OllamaCloudProvider {
         }
     }
 
-    async fn discover_models(&self, api_key: &str) -> Result<Vec<OllamaModelEntry>> {
-        if api_key.is_empty() {
-            bail!("Ollama Cloud requires an API key.");
-        }
-
+    async fn discover_models(&self, _api_key: &str) -> Result<Vec<OllamaModelEntry>> {
         let url = format!("{}/api/tags", self.base_url);
         let response = crate::provider::http_client::create_http_client()
             .get(&url)
-            .header("Authorization", format!("Bearer {api_key}"))
             .timeout(std::time::Duration::from_secs(10))
             .send()
             .await
@@ -74,16 +72,18 @@ impl OllamaCloudProvider {
 
     /// Fetches detailed model information via /api/show endpoint.
     /// Returns context_length and vision capability if available.
+    /// The endpoint is public for listing model metadata, so the Authorization
+    /// header is omitted when no API key is available.
     async fn show_model(&self, api_key: &str, model_name: &str) -> Option<OllamaShowResponse> {
         let url = format!("{}/api/show", self.base_url);
-        let response = crate::provider::http_client::create_http_client()
+        let mut request = crate::provider::http_client::create_http_client()
             .post(&url)
-            .header("Authorization", format!("Bearer {api_key}"))
             .json(&json!({ "model": model_name }))
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-            .ok()?;
+            .timeout(std::time::Duration::from_secs(5));
+        if !api_key.is_empty() {
+            request = request.header("Authorization", format!("Bearer {api_key}"));
+        }
+        let response = request.send().await.ok()?;
 
         if !response.status().is_success() {
             return None;
@@ -169,6 +169,27 @@ impl OllamaShowResponse {
     fn has_vision(&self) -> bool {
         self.capabilities.iter().any(|c| c == "vision")
     }
+
+    /// Checks if the model supports thinking/reasoning.
+    ///
+    /// Detects thinking support from two sources:
+    /// 1. The `capabilities` array — Ollama may include a "thinking" capability
+    ///    for models whose template contains `{{--think}}` tags.
+    /// 2. The `template` field — models with `<!-- think -->` markers in their
+    ///    Modelfile template support the `think` parameter.
+    fn has_thinking(&self) -> bool {
+        // Check the capabilities array first (structured detection).
+        if self.capabilities.iter().any(|c| c == "thinking") {
+            return true;
+        }
+        // Fallback: inspect the template for thinking markers.
+        if let Some(template) = self.extra.get("template").and_then(|v| v.as_str())
+            && (template.contains("<!-- think -->") || template.contains("{{--think}}"))
+        {
+            return true;
+        }
+        false
+    }
 }
 
 fn parse_usize_value(value: &Value) -> Option<usize> {
@@ -250,6 +271,17 @@ impl Provider for OllamaCloudProvider {
 
     fn default_models(&self) -> Vec<ModelInfo> {
         vec![]
+    }
+
+    /// Queries Ollama Cloud `/api/tags` for live model discovery.
+    /// Authentication is not required to list public models, so discovery works
+    /// even when `OLLAMA_API_KEY` is not configured.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("OLLAMA_API_KEY").unwrap_or_default();
+        let models = list_ollama_cloud_models(&api_key, Some(&self.base_url))
+            .await
+            .with_context(|| "Ollama Cloud model discovery failed")?;
+        Ok(models)
     }
 
     async fn create_client(
@@ -441,14 +473,15 @@ impl OllamaCloudClient {
             body["tools"] = json!(tool_defs);
         }
 
-        // Ollama Cloud does not support the `think` parameter.  It is not
-        // appended here even when the caller's request carries a thinking
-        // configuration, because the cloud service silently ignores or
-        // rejects it.
+        // Ollama Cloud supports the `think` boolean parameter on its
+        // native `/api/chat` endpoint, just like local Ollama.
+        if let Some(think) = think_flag_from_request(request) {
+            body["think"] = json!(think);
+        }
+
         body
     }
 }
-
 #[async_trait::async_trait]
 impl LlmClient for OllamaCloudClient {
     async fn chat(
@@ -774,9 +807,16 @@ pub async fn list_ollama_cloud_models(
 
             // Check vision capability from /api/show
             let has_vision = show_info.as_ref().is_some_and(|info| info.has_vision());
-            // Ollama Cloud does not support thinking/reasoning parameters.
-            let reasoning = false;
-            let thinking_levels = Vec::new();
+            // Check thinking capability: prefer /api/show structured detection,
+            // fall back to model-name heuristics.
+            let has_thinking = show_info.as_ref().is_some_and(|info| info.has_thinking())
+                || model_supports_binary_thinking(&model_id);
+            let reasoning = has_thinking;
+            let thinking_levels = if has_thinking {
+                binary_thinking_levels_for_model(&model_id)
+            } else {
+                Vec::new()
+            };
 
             ModelInfo {
                 id: model_id,
@@ -843,5 +883,50 @@ mod tests {
         .expect("show response should parse");
 
         assert_eq!(response.context_length(), Some(1_048_576));
+    }
+
+    #[test]
+    fn test_has_thinking_from_capabilities() {
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "capabilities": ["vision", "thinking"]
+        }))
+        .expect("show response should parse");
+
+        assert!(response.has_thinking());
+    }
+
+    #[test]
+    fn test_has_thinking_from_template_markers() {
+        // Template with <!-- think --> marker
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "template": "Some text <!-- think --> thinking block {{ .Content }}",
+            "capabilities": []
+        }))
+        .expect("show response should parse");
+
+        assert!(response.has_thinking());
+    }
+
+    #[test]
+    fn test_has_thinking_from_template_go_template() {
+        // Template with Go template {{--think}} marker
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "template": "{{--think}}\n{{ .Content }}",
+            "capabilities": []
+        }))
+        .expect("show response should parse");
+
+        assert!(response.has_thinking());
+    }
+
+    #[test]
+    fn test_has_thinking_false_when_no_indicators() {
+        let response: OllamaShowResponse = serde_json::from_value(json!({
+            "template": "{{ .Content }}",
+            "capabilities": ["vision"]
+        }))
+        .expect("show response should parse");
+
+        assert!(!response.has_thinking());
     }
 }

@@ -861,7 +861,7 @@ async fn test_git_stash_list() {
     let meta = out.metadata.expect("metadata should be present");
     let stashes: Vec<serde_json::Value> = serde_json::from_value(meta["stashes"].clone()).unwrap();
     assert!(
-        stashes.len() >= 1,
+        !stashes.is_empty(),
         "Expected at least one stash, got: {:?}",
         stashes
     );

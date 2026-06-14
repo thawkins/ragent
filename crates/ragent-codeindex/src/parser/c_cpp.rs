@@ -630,12 +630,12 @@ mod tests {
 
     #[test]
     fn test_c_struct() {
-        let source = r#"
+        let source = r"
 struct Point {
     int x;
     int y;
 };
-"#;
+";
         let parsed = parse_c(source);
         let names: Vec<&str> = parsed.symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"Point"), "got: {names:?}");
@@ -648,13 +648,13 @@ struct Point {
 
     #[test]
     fn test_c_enum() {
-        let source = r#"
+        let source = r"
 enum Color {
     RED,
     GREEN,
     BLUE
 };
-"#;
+";
         let parsed = parse_c(source);
         let color = parsed.symbols.iter().find(|s| s.name == "Color").unwrap();
         assert_eq!(color.kind, SymbolKind::Enum);
@@ -687,12 +687,12 @@ enum Color {
 
     #[test]
     fn test_cpp_class() {
-        let source = r#"
+        let source = r"
 class Dog {
 public:
     void bark();
 };
-"#;
+";
         let parsed = parse_cpp(source);
         let dog = parsed.symbols.iter().find(|s| s.name == "Dog").unwrap();
         assert_eq!(dog.kind, SymbolKind::Class);
@@ -700,11 +700,11 @@ public:
 
     #[test]
     fn test_cpp_namespace() {
-        let source = r#"
+        let source = r"
 namespace myns {
     int helper() { return 42; }
 }
-"#;
+";
         let parsed = parse_cpp(source);
         let ns = parsed.symbols.iter().find(|s| s.name == "myns").unwrap();
         assert_eq!(ns.kind, SymbolKind::Module);

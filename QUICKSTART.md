@@ -317,7 +317,6 @@ ragent config
 | `explore`    | Fast codebase exploration and search       | subagent  |
 | `title`      | Auto-generate session titles               | internal  |
 | `summary`    | Summarize conversations                    | internal  |
-| `compaction` | Compact long conversation history          | internal  |
 
 Switch agents interactively with the `/agent` slash command (opens a picker dialog),
 use `/agent <name>` for direct switching, or cycle with `Tab`/`Shift+Tab`.
@@ -376,7 +375,7 @@ cat > ~/.ragent/agents/my-agent.json << 'EOF'
     "payload": {
       "system_prompt": "You are a helpful AI agent.\nProject: {{WORKING_DIR}}\n\n{{AGENTS_MD}}",
       "mode": "primary",
-              "max_steps": 500    }
+              "max_steps": 1024    }
   }]
 }
 EOF
@@ -869,7 +868,7 @@ Type `/` in the input to open an autocomplete menu:
 |---------|-------------|
 | `/agent [name]` | Switch agent (dialog or direct) |
 | `/clear` | Clear message history |
-| `/compact` | Summarise and compact history |
+| `/compact [help]` | Summarise and compact history |
 | `/help` | Show available commands |
 | `/log` | Toggle log panel |
 | `/model` | Switch model |

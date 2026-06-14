@@ -324,9 +324,14 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::MemorySearched { .. } => "memory_searched",
         Event::MemoryCandidateExtracted { .. } => "memory_candidate_extracted",
         Event::GitLabSetupComplete { .. } => "gitlab_setup_complete",
+        Event::ServiceStartError { .. } => "service_start_error",
+        Event::ProviderLoadingStarted { .. } => "provider_loading_started",
+        Event::ProviderLoadingFinished { .. } => "provider_loading_finished",
+        Event::ModelDownloadStarted { .. } => "model_download_started",
+        Event::ModelDownloadProgress { .. } => "model_download_progress",
+        Event::ModelDownloadFinished { .. } => "model_download_finished",
     }
 }
-
 // ── Public API ───────────────────────────────────────────────────────────
 
 /// Return the SSE event-type name and serialized JSON payload for an [`Event`].
@@ -829,6 +834,70 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
         })),
         Event::GitLabSetupComplete { success, error } => to_data(&serde_json::json!({
             "success": success,
+            "error": error,
+        })),
+        Event::ServiceStartError {
+            session_id,
+            service,
+            command_path,
+            stdout,
+            stderr,
+            error,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "service": service,
+            "command_path": command_path,
+            "stdout": stdout,
+            "stderr": stderr,
+            "error": error,
+        })),
+        Event::ProviderLoadingStarted {
+            provider_id,
+            provider_name,
+        } => to_data(&serde_json::json!({
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+        })),
+        Event::ProviderLoadingFinished {
+            provider_id,
+            provider_name,
+            models,
+            error,
+        } => to_data(&serde_json::json!({
+            "provider_id": provider_id,
+            "provider_name": provider_name,
+            "models": models,
+            "error": error,
+        })),
+        Event::ModelDownloadStarted {
+            provider_id,
+            model_id,
+            session_id,
+        } => to_data(&serde_json::json!({
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "session_id": session_id,
+        })),
+        Event::ModelDownloadProgress {
+            provider_id,
+            model_id,
+            session_id,
+            percent,
+        } => to_data(&serde_json::json!({
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "session_id": session_id,
+            "percent": percent,
+        })),
+        Event::ModelDownloadFinished {
+            provider_id,
+            model_id,
+            session_id,
+            error,
+        } => to_data(&serde_json::json!({
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "session_id": session_id,
             "error": error,
         })),
     };

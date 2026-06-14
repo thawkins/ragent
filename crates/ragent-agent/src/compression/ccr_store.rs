@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_capacity_eviction() {
-        let mut store = InMemoryCcrStore::with_capacity_and_ttl(2, Duration::from_secs(300));
+        let mut store = InMemoryCcrStore::with_capacity_and_ttl(2, Duration::from_mins(5));
         store.put("key1", "payload1");
         store.put("key2", "payload2");
         store.put("key3", "payload3");

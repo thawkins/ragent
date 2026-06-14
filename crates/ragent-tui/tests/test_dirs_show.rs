@@ -17,7 +17,7 @@ fn test_get_builtin_lists_returns_expected_structure() {
     assert!(
         builtin_deny
             .iter()
-            .all(|p| p.contains("**") || p.ends_with("/")),
+            .all(|p| p.contains("**") || p.ends_with('/')),
         "All denylist patterns should be glob patterns"
     );
 }

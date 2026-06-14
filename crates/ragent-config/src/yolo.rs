@@ -29,3 +29,28 @@ pub fn toggle() -> bool {
     let was = YOLO_MODE.fetch_xor(true, Ordering::Relaxed);
     !was
 }
+
+/// Persist the requested YOLO state to the config file and update the runtime flag.
+///
+/// The current config is reloaded, the `yolo` field is updated, and the result is
+/// written back to the same source file that was loaded (project config preferred
+/// over global config). Any error during persistence is returned so callers can
+/// decide how to report it.
+pub fn persist_yolo(enabled: bool) -> anyhow::Result<()> {
+    let mut config = crate::config::Config::load().unwrap_or_default();
+    config.yolo = enabled;
+    config.save_to_source()?;
+    set_enabled(enabled);
+    Ok(())
+}
+
+/// Toggle YOLO mode, persist the new state, and return it.
+///
+/// This is the recommended path for UI toggles (`Alt+Y`, `/yolo`) because
+/// `Config::load()` syncs the runtime flag from the saved config value.  Using
+/// plain [`toggle()`] would change the flag only until the next config reload.
+pub fn toggle_persist() -> anyhow::Result<bool> {
+    let new_state = !is_enabled();
+    persist_yolo(new_state)?;
+    Ok(new_state)
+}

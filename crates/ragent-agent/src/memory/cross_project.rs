@@ -414,7 +414,7 @@ mod tests {
             search_blocks_cross_project("coding", &working_dir, &config_enabled(), &storage)
                 .unwrap();
         // Should find both the project and global blocks that contain "coding".
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
     }
 
     #[test]
@@ -433,7 +433,7 @@ mod tests {
             search_blocks_cross_project("coding", &working_dir, &config_enabled(), &storage)
                 .unwrap();
         // Should find the project block.
-        assert!(results.len() >= 1);
+        assert!(!results.is_empty());
         assert_eq!(results[0].winning_scope, BlockScope::Project);
     }
 }

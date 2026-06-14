@@ -3,7 +3,7 @@
 //! This module implements Milestone 3 from perfplan.md:
 //! - System prompt component caching
 //! - Incremental history management
-//! - Context window pre-compaction
+//! - Context window pre-compression
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -409,7 +409,7 @@ impl SessionState {
         self.thinking = thinking;
     }
 
-    /// Clear all cached state (e.g., after compaction or reset).
+    /// Clear all cached state (e.g., after compression or reset).
     pub fn clear(&mut self) {
         self.cached_chat_messages.clear();
         self.last_message_count = 0;
@@ -423,10 +423,10 @@ impl SessionState {
         self.estimated_token_count
     }
 
-    /// Check if compaction should be triggered based on token threshold.
+    /// Check if compression should be triggered based on token threshold.
     #[must_use]
-    pub fn should_compact(&self, context_window: usize) -> bool {
-        // Trigger compaction at 80% of context window to avoid emergency compaction
+    pub fn should_compress(&self, context_window: usize) -> bool {
+        // Trigger compression at 80% of context window to avoid emergency compression.
         let threshold = context_window.saturating_mul(80).saturating_div(100);
         self.estimated_token_count > threshold
     }
@@ -524,9 +524,9 @@ mod tests {
     }
 
     #[test]
-    fn test_session_state_should_compact() {
+    fn test_session_state_should_compress() {
         let state = SessionState::new("test-session");
-        assert!(!state.should_compact(100000));
+        assert!(!state.should_compress(100000));
     }
 
     #[test]

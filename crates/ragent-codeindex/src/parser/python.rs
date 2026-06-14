@@ -492,7 +492,7 @@ class Dog:
 
     #[test]
     fn test_visibility_conventions() {
-        let source = r#"
+        let source = r"
 def public_fn():
     pass
 
@@ -504,7 +504,7 @@ def __mangled_fn():
 
 def __dunder__():
     pass
-"#;
+";
         let parsed = parse_py(source);
 
         let public = parsed
@@ -538,13 +538,13 @@ def __dunder__():
 
     #[test]
     fn test_imports() {
-        let source = r#"
+        let source = r"
 import os
 import sys
 from pathlib import Path
 from typing import List, Optional
 from collections import OrderedDict as OD
-"#;
+";
         let parsed = parse_py(source);
         assert!(
             parsed.imports.len() >= 4,
@@ -602,10 +602,10 @@ regular_var = 42
 
     #[test]
     fn test_async_function() {
-        let source = r#"
+        let source = r"
 async def fetch_data(url: str) -> bytes:
     pass
-"#;
+";
         let parsed = parse_py(source);
         let func = &parsed.symbols[0];
         assert_eq!(func.name, "fetch_data");
@@ -614,13 +614,13 @@ async def fetch_data(url: str) -> bytes:
 
     #[test]
     fn test_class_inheritance() {
-        let source = r#"
+        let source = r"
 class Animal:
     pass
 
 class Dog(Animal):
     pass
-"#;
+";
         let parsed = parse_py(source);
         let dog = parsed.symbols.iter().find(|s| s.name == "Dog").unwrap();
         assert!(dog.signature.as_ref().unwrap().contains("(Animal)"));
@@ -628,12 +628,12 @@ class Dog(Animal):
 
     #[test]
     fn test_qualified_names() {
-        let source = r#"
+        let source = r"
 class Outer:
     class Inner:
         def method(self):
             pass
-"#;
+";
         let parsed = parse_py(source);
         let method = parsed.symbols.iter().find(|s| s.name == "method").unwrap();
         assert_eq!(method.qualified_name.as_deref(), Some("Outer.Inner.method"));
@@ -648,12 +648,12 @@ class Outer:
 
     #[test]
     fn test_decorator_property() {
-        let source = r#"
+        let source = r"
 class Config:
     @property
     def name(self) -> str:
         return self._name
-"#;
+";
         let parsed = parse_py(source);
         let name_fn = parsed.symbols.iter().find(|s| s.name == "name").unwrap();
         assert!(name_fn.signature.as_ref().unwrap().contains("@property"));

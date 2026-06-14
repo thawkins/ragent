@@ -812,8 +812,7 @@ impl Storage {
         Ok(())
     }
 
-    /// Deletes all messages for a session.  Used by compaction to clear the
-    /// message history before inserting a summary message.
+    /// Deletes all messages for a session.
     ///
     /// # Errors
     ///

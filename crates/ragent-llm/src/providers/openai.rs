@@ -112,19 +112,55 @@ impl Provider for OpenAiProvider {
 }
 
 /// HTTP client for the `OpenAI` Chat Completions API with streaming SSE support.
-pub(crate) struct OpenAiClient {
+pub struct OpenAiClient {
     api_key: String,
     base_url: String,
     http: reqwest::Client,
+    provider_name: String,
 }
 
 impl OpenAiClient {
-    pub(crate) fn new(api_key: &str, base_url: &str) -> Self {
+    /// Create a new OpenAI-compatible client.
+    #[must_use]
+    pub fn new(api_key: &str, base_url: &str) -> Self {
+        Self::new_with_provider(api_key, base_url, "openai")
+    }
+
+    /// Create a new OpenAI-compatible client with a custom provider label.
+    ///
+    /// The label is used only for diagnostic logging/messages.
+    #[must_use]
+    pub fn new_with_provider(api_key: &str, base_url: &str, provider_name: &str) -> Self {
         Self {
             api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
             http: crate::provider::http_client::create_streaming_http_client(),
+            provider_name: provider_name.to_string(),
         }
+    }
+
+    /// Returns the API key used by this client.
+    #[must_use]
+    pub fn api_key(&self) -> &str {
+        &self.api_key
+    }
+
+    /// Returns the base URL used by this client.
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// Returns the configured provider name for diagnostics.
+    #[must_use]
+    pub(crate) fn provider_name(&self) -> &str {
+        &self.provider_name
+    }
+
+    /// Returns the underlying HTTP client.
+    #[must_use]
+    pub(crate) fn http_client(&self) -> &reqwest::Client {
+        &self.http
     }
 
     /// Build the JSON request body for the `OpenAI` Chat Completions API.
@@ -132,7 +168,7 @@ impl OpenAiClient {
     /// # Errors
     ///
     /// This function is infallible.
-    pub(crate) fn build_request_body(&self, request: &ChatRequest) -> Value {
+    pub fn build_request_body(&self, request: &ChatRequest) -> Value {
         let mut messages = Vec::new();
 
         // Add system message if present
@@ -330,137 +366,190 @@ impl OpenAiClient {
         &self,
         response: reqwest::Response,
     ) -> Result<Pin<Box<dyn futures::Stream<Item = StreamEvent> + Send>>> {
+        let status = response.status();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
         let rate_limit_event = parse_openai_rate_limit_headers(response.headers());
         let stream = response.bytes_stream();
+        let provider_name = self.provider_name.clone();
+
+        tracing::debug!(
+            provider = %provider_name,
+            status = %status,
+            content_type = %content_type,
+            "Parsing SSE stream"
+        );
 
         let event_stream = async_stream::stream! {
-            let mut buffer = String::new();
-            let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
-            let mut tool_call_names: HashMap<u64, String> = HashMap::new();
+        let mut buffer = String::new();
+        let mut tool_call_ids: HashMap<u64, String> = HashMap::new();
+        let mut tool_call_names: HashMap<u64, String> = HashMap::new();
+        let mut yielded_event = false;
 
-            if let Some(ev) = rate_limit_event {
-                yield ev;
-            }
+        if let Some(ev) = rate_limit_event {
+            yield ev;
+            yielded_event = true;
+        }
 
-            futures::pin_mut!(stream);
+        futures::pin_mut!(stream);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = match chunk_result {
-                    Ok(c) => c,
-                    Err(e) => {
-                        yield StreamEvent::Error { message: e.to_string() };
-                        break;
-                    }
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        provider = %provider_name,
+                        status = %status,
+                        content_type = %content_type,
+                        error = %e,
+                        "SSE stream decode error"
+                    );
+                    let message = if content_type.contains("event-stream")
+                        && e.to_string().to_lowercase().contains("error decoding response body")
+                    {
+                        format!(
+                            "{} returned an empty/malformed event stream (status {}, content-type {}). \
+                            For Microsoft Foundry Local this usually means the requested model is not loaded.",
+                            provider_name, status, content_type
+                        )
+                    } else {
+                        e.to_string()
+                    };
+                    yield StreamEvent::Error { message };
+                    break;
+                }
+            };
+
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            while let Some(newline_pos) = buffer.find('\n') {
+                let line = buffer[..newline_pos].to_string();
+                buffer = buffer[newline_pos + 1..].to_string();
+
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                let data = match line.strip_prefix("data: ") {
+                    Some(d) => d.trim(),
+                    None => continue,
                 };
 
-                buffer.push_str(&String::from_utf8_lossy(&chunk));
+                if data == "[DONE]" {
+                    break;
+                }
 
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
+                let parsed: Value = match serde_json::from_str(data) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
 
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-
-                    let data = match line.strip_prefix("data: ") {
-                        Some(d) => d.trim(),
-                        None => continue,
-                    };
-
-                    if data == "[DONE]" {
-                        break;
-                    }
-
-                    let parsed: Value = match serde_json::from_str(data) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-
-                    // Handle usage info (sent with stream_options.include_usage)
-                    if let Some(usage) = parsed.get("usage")
-                        && !usage.is_null()
-                    {
-                        let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
-                        let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
-                        if input_tokens > 0 || output_tokens > 0 {
-                            yield StreamEvent::Usage { input_tokens, output_tokens };
-                        }
-                    }
-
-                    let choices = match parsed["choices"].as_array() {
-                        Some(c) => c,
-                        None => continue,
-                    };
-
-                    for choice in choices {
-                        let delta = &choice["delta"];
-
-                        // Text content
-                        if let Some(content) = delta["content"].as_str()
-                            && !content.is_empty()
-                        {
-                            yield StreamEvent::TextDelta { text: content.to_string() };
-                        }
-
-                        // Tool calls
-                        if let Some(tool_calls) = delta["tool_calls"].as_array() {
-                            for tc in tool_calls {
-                                let index = tc["index"].as_u64().unwrap_or(0);
-
-                                if let Some(id) = tc["id"].as_str() {
-                                    tool_call_ids.insert(index, id.to_string());
-                                }
-
-                                if let Some(function) = tc.get("function") {
-                                    if let Some(name) = function["name"].as_str() {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        tool_call_names.insert(index, name.to_string());
-                                        yield StreamEvent::ToolCallStart {
-                                            id: tc_id,
-                                            name: name.to_string(),
-                                        };
-                                    }
-
-                                    if let Some(args) = function["arguments"].as_str()
-                                        && !args.is_empty()
-                                    {
-                                        let tc_id = tool_call_ids.get(&index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("tc_{index}"));
-                                        yield StreamEvent::ToolCallDelta {
-                                            id: tc_id,
-                                            args_json: args.to_string(),
-                                        };
-                                    }
-                                }
-                            }
-                        }
-
-                        // Finish reason
-                        if let Some(finish_reason) = choice["finish_reason"].as_str() {
-                            // End any pending tool calls
-                            for (_idx, id) in tool_call_ids.drain() {
-                                yield StreamEvent::ToolCallEnd { id };
-                            }
-                            tool_call_names.clear();
-
-                            let reason = match finish_reason {
-                                "tool_calls" => FinishReason::ToolUse,
-                                "length" => FinishReason::Length,
-                                "content_filter" => FinishReason::ContentFilter,
-                                _ => FinishReason::Stop,
-                            };
-                            yield StreamEvent::Finish { reason };
-                        }
+                // Handle usage info (sent with stream_options.include_usage)
+                if let Some(usage) = parsed.get("usage")
+                    && !usage.is_null()
+                {
+                    let input_tokens = usage["prompt_tokens"].as_u64().unwrap_or(0);
+                    let output_tokens = usage["completion_tokens"].as_u64().unwrap_or(0);
+                    if input_tokens > 0 || output_tokens > 0 {
+                        yield StreamEvent::Usage { input_tokens, output_tokens };
                     }
                 }
-            }
-        };
 
+                let choices = match parsed["choices"].as_array() {
+                    Some(c) => c,
+                    None => continue,
+                };
+
+                for choice in choices {
+                    let delta = &choice["delta"];
+
+                                              // Text content
+                                              if let Some(content) = delta["content"].as_str()
+                                                  && !content.is_empty()
+                                              {
+                                                  yield StreamEvent::TextDelta { text: content.to_string() };
+                                                  yielded_event = true;
+                                              }
+
+                                              // Tool calls
+                                              if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                                                  for tc in tool_calls {
+                                                      let index = tc["index"].as_u64().unwrap_or(0);
+
+                                                      if let Some(id) = tc["id"].as_str() {
+                                                          tool_call_ids.insert(index, id.to_string());
+                                                      }
+
+                                                      if let Some(function) = tc.get("function") {
+                                                          if let Some(name) = function["name"].as_str() {
+                                                              let tc_id = tool_call_ids.get(&index)
+                                                                  .cloned()
+                                                                  .unwrap_or_else(|| format!("tc_{index}"));
+                                                              tool_call_names.insert(index, name.to_string());
+                                                              yield StreamEvent::ToolCallStart {
+                                                                  id: tc_id,
+                                                                  name: name.to_string(),
+                                                              };
+                                                              yielded_event = true;
+                                                          }
+
+                                                          if let Some(args) = function["arguments"].as_str()
+                                                              && !args.is_empty()
+                                                          {
+                                                              let tc_id = tool_call_ids.get(&index)
+                                                                  .cloned()
+                                                                  .unwrap_or_else(|| format!("tc_{index}"));
+                                                              yield StreamEvent::ToolCallDelta {
+                                                                  id: tc_id,
+                                                                  args_json: args.to_string(),
+                                                              };
+                                                              yielded_event = true;
+                                                          }
+                                                      }
+                                                  }
+                                              }
+
+                                              // Finish reason
+                                              if let Some(finish_reason) = choice["finish_reason"].as_str() {
+                                                  // End any pending tool calls
+                                                  for (_idx, id) in tool_call_ids.drain() {
+                                                      yield StreamEvent::ToolCallEnd { id };
+                                                  }
+                                                  tool_call_names.clear();
+
+                                                  let reason = match finish_reason {
+                                                      "tool_calls" => FinishReason::ToolUse,
+                                                      "length" => FinishReason::Length,
+                                                      "content_filter" => FinishReason::ContentFilter,
+                                                      _ => FinishReason::Stop,
+                                                  };
+                                                  yield StreamEvent::Finish { reason };
+                                                  yielded_event = true;
+                                              }
+                                          }
+                                      }
+                                  }
+
+                                  if !yielded_event {
+                                      tracing::warn!(
+                                          provider = %provider_name,
+                                          status = %status,
+                                          content_type = %content_type,
+                                          "SSE stream ended without yielding any events"
+                                      );
+                                      let message = format!(
+                                          "{} response stream ended without producing any events (status {}, content-type {}). \
+                                          For Microsoft Foundry Local this usually means the requested model is not loaded or the service returned an empty body.",
+                                          provider_name, status, content_type
+                                      );
+                                      yield StreamEvent::Error { message };
+                                  }
+                              };
         Ok(Box::pin(event_stream))
     }
 }

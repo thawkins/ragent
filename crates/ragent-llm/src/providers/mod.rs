@@ -10,6 +10,10 @@ pub mod bedrock;
 pub mod bedrock_credentials;
 pub mod bedrock_sigv4;
 pub mod copilot;
+pub mod foundry_local_client;
+pub mod foundry_local_error;
+pub mod foundry_local_provider;
+pub mod foundry_local_service;
 pub mod gemini;
 pub mod generic_openai;
 pub mod http_client;
@@ -25,9 +29,11 @@ pub mod router_modifiers;
 mod thinking;
 pub mod xai;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::config::{Capabilities, Cost};
 use crate::llm::LlmClient;
@@ -94,6 +100,23 @@ pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     /// Returns the list of models available by default from this provider.
     fn default_models(&self) -> Vec<ModelInfo>;
+    /// Configure an optional [`EventBus`] on the provider so it can publish
+    /// provider-specific lifecycle events (e.g. model download progress).
+    ///
+    /// The default implementation does nothing.
+    fn set_event_bus(&self, _event_bus: Option<Arc<ragent_types::event::EventBus>>) {}
+
+    /// Discover available models from the provider's live API, if possible.
+    ///
+    /// The default implementation returns [`Provider::default_models`].
+    /// Providers that support dynamic discovery override this to query the
+    /// remote service and return the live model list. Errors should be handled
+    /// gracefully: returning the default catalog is preferable to crashing the
+    /// TUI model picker.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        Ok(self.default_models())
+    }
+
     /// Creates an authenticated [`LlmClient`] for this provider.
     ///
     /// # Errors
@@ -167,6 +190,31 @@ impl ProviderRegistry {
     /// ```
     pub fn register(&mut self, provider: Box<dyn Provider>) {
         self.providers.insert(provider.id().to_string(), provider);
+    }
+
+    /// Attaches an [`EventBus`] to a registered provider, keyed by provider id.
+    ///
+    /// Providers that do not publish lifecycle events ignore this call.
+    /// Returns `true` if the provider was found and updated.
+    pub fn set_event_bus(
+        &self,
+        provider_id: &str,
+        event_bus: Option<Arc<ragent_types::event::EventBus>>,
+    ) -> bool {
+        if let Some(provider) = self.providers.get(provider_id) {
+            provider.set_event_bus(event_bus);
+            return true;
+        }
+        false
+    }
+
+    /// Attaches an [`EventBus`] to every registered provider.
+    ///
+    /// Providers that do not publish lifecycle events ignore this call.
+    pub fn set_event_bus_all(&self, event_bus: Option<Arc<ragent_types::event::EventBus>>) {
+        for provider in self.providers.values() {
+            provider.set_event_bus(event_bus.clone());
+        }
     }
 
     /// Returns a reference to the provider with the given `id`, if registered.
@@ -288,5 +336,6 @@ pub fn create_default_registry() -> ProviderRegistry {
     registry.register(Box::new(ollama::OllamaProvider::new()));
     registry.register(Box::new(xai::XaiProvider));
     registry.register(Box::new(router::RouterProvider::with_defaults()));
+    registry.register(Box::new(foundry_local_provider::FoundryLocalProvider::new()));
     registry
 }

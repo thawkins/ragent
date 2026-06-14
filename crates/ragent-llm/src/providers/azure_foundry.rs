@@ -89,6 +89,22 @@ impl Provider for AzureFoundryProvider {
         models
     }
 
+    /// Discover available models from the Azure AI Foundry endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("AZURE_AI_FOUNDRY_API_KEY")
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("Azure AI Foundry model discovery requires AZURE_AI_FOUNDRY_API_KEY")?;
+        let base_url = std::env::var("AZURE_AI_FOUNDRY_BASE")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_AZURE_FOUNDRY_HOST.to_string());
+        let models = discover_azure_foundry_models(&api_key, &base_url)
+            .await
+            .with_context(|| "Azure AI Foundry model discovery failed")?;
+        Ok(models)
+    }
+
     async fn create_client(
         &self,
         api_key: &str,

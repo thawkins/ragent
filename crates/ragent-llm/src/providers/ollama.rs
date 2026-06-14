@@ -205,6 +205,14 @@ impl Provider for OllamaProvider {
         }]
     }
 
+    /// Queries the Ollama `/api/tags` endpoint for live model discovery.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let models = list_ollama_models(Some(&self.base_url))
+            .await
+            .with_context(|| format!("Ollama model discovery failed for {}", self.base_url))?;
+        Ok(models)
+    }
+
     /// Creates an [`OllamaClient`] configured with the given base URL.
     ///
     /// The `api_key` parameter is accepted but ignored for local Ollama servers.

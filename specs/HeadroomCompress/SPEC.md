@@ -8,7 +8,7 @@ audit:
 ## Overview
 
 ragent's current context compression strategy is a simple truncation algorithm
-(`compact_history_with_atomic_tool_calls`) that drops the oldest messages until
+(`truncate_history_with_atomic_tool_calls`) that drops the oldest messages until
 the estimated token count falls below the context window threshold. It uses a
 rough `chars / 4` token estimation and preserves atomic tool-call pairs but does
 no content-aware compression, no relevance filtering, and no reversible storage.
@@ -92,7 +92,7 @@ accessed entries automatically, mirroring `headroom_core::ccr::DEFAULT_CAPACITY`
 and `DEFAULT_TTL`.
 
 **FR-009** When the `headroom` config section is absent or `enabled: false`,
-the system shall fall back to the existing `compact_history_with_atomic_tool_calls`
+the system shall fall back to the existing `truncate_history_with_atomic_tool_calls`
 behaviour, preserving full backward compatibility.
 
 ### Optional
@@ -266,7 +266,7 @@ conversation history of up to 200 messages on commodity hardware.
 shall not block the agent loop's tokio runtime. All Headroom calls shall
 run via `spawn_blocking` where they are CPU-intensive.
 
-**NFR-004** All existing tests for `compact_history_with_atomic_tool_calls`
+**NFR-004** All existing tests for `truncate_history_with_atomic_tool_calls`
 shall continue to pass unchanged when the `compression.enabled` config is
 `false`.
 

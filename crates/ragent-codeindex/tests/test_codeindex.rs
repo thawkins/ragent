@@ -16,7 +16,7 @@ fn create_project() -> TempDir {
 
     fs::write(
         src.join("lib.rs"),
-        r#"
+        r"
 //! Main library for the sample project.
 
 /// Application configuration loaded from disk.
@@ -37,13 +37,13 @@ pub fn parse_config(path: &str) -> Config {
 fn validate_config(config: &Config) -> bool {
     !config.name.is_empty() && config.port > 0
 }
-"#,
+",
     )
     .unwrap();
 
     fs::write(
         src.join("server.rs"),
-        r#"
+        r"
 use crate::Config;
 
 /// An HTTP server that serves requests.
@@ -79,7 +79,7 @@ pub enum LogLevel {
     Warn,
     Error,
 }
-"#,
+",
     )
     .unwrap();
 
@@ -203,8 +203,11 @@ fn test_symbols_query() {
         "should find at least parse_config and validate_config"
     );
 
-    let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"parse_config"));
+    assert!(
+        syms.iter()
+            .map(|s| s.name.as_str())
+            .any(|name| name == "parse_config")
+    );
 }
 
 #[test]

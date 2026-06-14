@@ -1673,9 +1673,10 @@ mod tests_extended {
 
     #[test]
     fn test_classify_with_custom_weights() {
-        let mut weights = WeightConfig::default();
-        // Emphasise reasoning depth heavily
-        weights.reasoning_depth = 0.5;
+        let mut weights = WeightConfig {
+            reasoning_depth: 0.5,
+            ..WeightConfig::default()
+        };
         weights.normalise();
 
         let result = PromptClassifier::classify(

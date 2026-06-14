@@ -622,7 +622,9 @@ mod tests {
 
     #[test]
     fn test_benchmark_retry_delay_stops_after_budget_is_spent() {
-        let started = Instant::now() - Duration::from_secs(BENCH_TRANSIENT_MAX_ELAPSED_SECS);
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(BENCH_TRANSIENT_MAX_ELAPSED_SECS))
+            .unwrap();
         assert_eq!(
             benchmark_retry_delay("HTTP 503 Service Unavailable", 0, started),
             None
@@ -635,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_format_retry_exhausted_error_reports_attempts_and_elapsed_time() {
-        let started = Instant::now() - Duration::from_secs(9);
+        let started = Instant::now().checked_sub(Duration::from_secs(9)).unwrap();
         let message = format_retry_exhausted_error("HTTP 503 Service Unavailable", 5, started);
         assert!(message.contains("503"));
         assert!(message.contains("5 attempt(s)"));

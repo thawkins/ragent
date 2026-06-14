@@ -428,6 +428,7 @@ fn test_run_target_all_writes_one_workbook_per_suite() {
     assert!(outcome.message.contains("swebench-lite"));
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_humaneval_adapter_emits_pass_at_k_metrics() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -471,6 +472,7 @@ fn test_humaneval_adapter_emits_pass_at_k_metrics() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_humaneval_executes_hidden_tests_for_body_only_completion() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -497,6 +499,7 @@ fn test_humaneval_executes_hidden_tests_for_body_only_completion() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_humaneval_executes_rust_native_tests() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -577,6 +580,7 @@ fn test_humaneval_executes_rust_native_tests() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_repobench_adapter_emits_exact_match_and_edit_similarity() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -610,6 +614,7 @@ fn test_repobench_adapter_emits_exact_match_and_edit_similarity() {
     assert!(edit_similarity.metric_value < 1.0);
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_run_target_no_exec_marks_mbpp_as_skipped() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -642,6 +647,7 @@ fn test_run_target_no_exec_marks_mbpp_as_skipped() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_run_target_executes_mbpp_assertions() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -671,6 +677,7 @@ fn test_run_target_executes_mbpp_assertions() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_run_target_executes_mbpp_rust_native_harness() {
     let root = tempfile::tempdir().expect("tempdir");
@@ -929,6 +936,7 @@ fn test_bigcodebench_emits_pass_at_k_and_codebleu() {
     );
 }
 
+#[allow(clippy::float_cmp)]
 #[test]
 fn test_swebench_lite_emits_resolution_metrics() {
     let root = tempfile::tempdir().expect("tempdir");

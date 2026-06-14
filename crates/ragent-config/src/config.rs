@@ -96,6 +96,9 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub hidden_tools: Vec<String>,
+    /// YOLO mode — bypass command validation and tool restrictions.
+    #[serde(default)]
+    pub yolo: bool,
     /// Paths of configuration files that were loaded during [`Config::load`].
     #[serde(skip)]
     pub config_paths: Vec<PathBuf>,
@@ -388,7 +391,10 @@ pub struct CodeIndexConfig {
     ///
     /// Defaults to `true`. When serialised, the default value (`true`) is omitted
     /// so that code-level default changes take effect without manual config edits.
-    #[serde(default = "default_code_index_enabled", skip_serializing_if = "is_true")]
+    #[serde(
+        default = "default_code_index_enabled",
+        skip_serializing_if = "is_true"
+    )]
     pub enabled: bool,
     /// Maximum file size in bytes to index (default: 1 MB).
     #[serde(default = "default_max_file_size")]
@@ -829,6 +835,9 @@ impl Config {
             config = Self::merge(config, overlay);
         }
 
+        // Sync the in-memory YOLO flag with the loaded config value.
+        crate::yolo::set_enabled(config.yolo);
+
         Ok(config)
     }
 
@@ -875,10 +884,13 @@ impl Config {
 
     /// Save the config back to a file.
     ///
-    /// Writes the current config as pretty-printed JSON. The path is
-    /// the project-local config file (`.ragent/ragent.json`) if
-    /// `prefer_project` is true and the project directory exists,
+    /// Writes the current config as pretty-printed JSON. The path is the
+    /// project-local config file (`.ragent/ragent.json`) when
+    /// `prefer_project` is true, creating the `.ragent` directory if needed;
     /// otherwise the global config file (`~/.config/ragent/ragent.json`).
+    ///
+    /// The file is only touched when the serialised JSON differs from the
+    /// existing content, avoiding unnecessary writes and timestamp churn.
     ///
     /// # Errors
     ///
@@ -886,13 +898,12 @@ impl Config {
     pub fn save(&self, prefer_project: bool) -> anyhow::Result<()> {
         let path = if prefer_project {
             let project = PathBuf::from(".ragent/ragent.json");
-            if project.parent().is_some_and(|p| p.exists()) {
-                project
-            } else {
-                dirs::config_dir()
-                    .map(|d| d.join("ragent").join("ragent.json"))
-                    .ok_or_else(|| anyhow::anyhow!("no config directory found"))?
+            // Ensure the project config directory exists so project-local saves
+            // do not silently fall back to the global file.
+            if let Some(parent) = project.parent() {
+                std::fs::create_dir_all(parent)?;
             }
+            project
         } else {
             dirs::config_dir()
                 .map(|d| d.join("ragent").join("ragent.json"))
@@ -906,8 +917,7 @@ impl Config {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
 
-        std::fs::write(&path, json)
-            .map_err(|e| anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e))
+        Self::write_config_if_changed(&path, &json)
     }
 
     /// Save the config back to its original source file.
@@ -915,6 +925,9 @@ impl Config {
     /// If a project-local config (`.ragent/ragent.json`) was loaded during
     /// [`Config::load`], this writes back to that path. Otherwise it writes
     /// to the global config file (`~/.config/ragent/ragent.json`).
+    ///
+    /// The file is only touched when the serialised JSON differs from the
+    /// existing content, avoiding unnecessary writes and timestamp churn.
     ///
     /// # Errors
     ///
@@ -941,8 +954,33 @@ impl Config {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| anyhow::anyhow!("Failed to serialise config: {}", e))?;
 
-        std::fs::write(&path, json)
-            .map_err(|e| anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e))
+        Self::write_config_if_changed(&path, &json)
+    }
+
+    /// Write `json` to `path` only if the file does not already contain the same
+    /// JSON value.
+    ///
+    /// Comparing parsed [`serde_json::Value`]s prevents spurious rewrites when
+    /// map key ordering differs between serialisations.
+    fn write_config_if_changed(path: &Path, json: &str) -> anyhow::Result<()> {
+        let changed = match std::fs::read_to_string(path) {
+            Ok(existing) => {
+                let existing_value: serde_json::Value =
+                    serde_json::from_str(&existing).unwrap_or(serde_json::Value::Null);
+                let new_value: serde_json::Value =
+                    serde_json::from_str(json).unwrap_or(serde_json::Value::Null);
+                existing_value != new_value
+            }
+            Err(_) => true,
+        };
+
+        if changed {
+            std::fs::write(path, json).map_err(|e| {
+                anyhow::anyhow!("Failed to write config file '{}': {}", path.display(), e)
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Compute the complete hidden-tool set from both legacy per-tool overrides
@@ -1121,6 +1159,9 @@ impl Config {
             base.internal_llm.memory_extraction_enabled =
                 overlay.internal_llm.memory_extraction_enabled;
         }
+        if overlay.internal_llm.specified.accelerator {
+            base.internal_llm.accelerator = overlay.internal_llm.accelerator;
+        }
 
         // tool_visibility: overlay takes precedence only for explicitly set fields
         if overlay.tool_visibility.specified.office {
@@ -1143,6 +1184,10 @@ impl Config {
         }
         if overlay.tool_visibility.specified.codeindex {
             base.tool_visibility.codeindex = overlay.tool_visibility.codeindex;
+        }
+
+        if overlay.yolo {
+            base.yolo = overlay.yolo;
         }
 
         base
@@ -1259,6 +1304,7 @@ struct InternalLlmSpecified {
     session_title_enabled: bool,
     prompt_context_enabled: bool,
     memory_extraction_enabled: bool,
+    accelerator: bool,
 }
 
 /// Download policy for embedded internal-LLM assets.
@@ -1284,7 +1330,7 @@ pub enum InternalLlmDownloadPolicy {
 /// {
 ///   "internal_llm": {
 ///     "enabled": false,
-///     "backend": "embedded",
+///     "backend": "candle",
 ///     "model_id": "smollm2-360m-instruct-q4",
 ///     "artifact_max_bytes": 1073741824,
 ///     "threads": 4,
@@ -1297,7 +1343,8 @@ pub enum InternalLlmDownloadPolicy {
 ///     "allowed_tasks": ["session_title", "summarize_tool_output"],
 ///     "session_title_enabled": false,
 ///     "prompt_context_enabled": false,
-///     "memory_extraction_enabled": false
+///     "memory_extraction_enabled": false,
+///     "accelerator": "cpu"
 ///   }
 /// }
 /// ```
@@ -1307,7 +1354,10 @@ pub struct InternalLlmConfig {
     ///
     /// Defaults to `false`. When serialised, the default value (`false`) is omitted
     /// so that code-level default changes take effect without manual config edits.
-    #[serde(default = "default_internal_llm_enabled", skip_serializing_if = "is_false")]
+    #[serde(
+        default = "default_internal_llm_enabled",
+        skip_serializing_if = "is_false"
+    )]
     pub enabled: bool,
     /// Backend identifier for the embedded runtime.
     #[serde(default = "default_internal_llm_backend")]
@@ -1358,6 +1408,14 @@ pub struct InternalLlmConfig {
     /// Whether memory extraction prefiltering may use the embedded model.
     #[serde(default = "default_internal_llm_memory_extraction_enabled")]
     pub memory_extraction_enabled: bool,
+    /// Hardware accelerator for the embedded-LLM backend.
+    ///
+    /// One of "cpu" (default), "gpu", or "npu". Ignored by the Candle backend.
+    #[serde(
+        default = "default_internal_llm_accelerator",
+        skip_serializing_if = "is_default_accelerator"
+    )]
+    pub accelerator: String,
     #[serde(skip_serializing, default)]
     specified: InternalLlmSpecified,
 }
@@ -1380,6 +1438,7 @@ impl Default for InternalLlmConfig {
             session_title_enabled: default_internal_llm_session_title_enabled(),
             prompt_context_enabled: default_internal_llm_prompt_context_enabled(),
             memory_extraction_enabled: default_internal_llm_memory_extraction_enabled(),
+            accelerator: default_internal_llm_accelerator(),
             specified: InternalLlmSpecified::default(),
         }
     }
@@ -1415,6 +1474,7 @@ impl<'de> Deserialize<'de> for InternalLlmConfig {
             session_title_enabled: Option<bool>,
             prompt_context_enabled: Option<bool>,
             memory_extraction_enabled: Option<bool>,
+            accelerator: Option<String>,
         }
 
         let raw = RawInternalLlmConfig::deserialize(deserializer)?;
@@ -1434,6 +1494,7 @@ impl<'de> Deserialize<'de> for InternalLlmConfig {
             session_title_enabled: raw.session_title_enabled.is_some(),
             prompt_context_enabled: raw.prompt_context_enabled.is_some(),
             memory_extraction_enabled: raw.memory_extraction_enabled.is_some(),
+            accelerator: raw.accelerator.is_some(),
         };
         Ok(Self {
             enabled: raw.enabled.unwrap_or_else(default_internal_llm_enabled),
@@ -1469,6 +1530,9 @@ impl<'de> Deserialize<'de> for InternalLlmConfig {
             memory_extraction_enabled: raw
                 .memory_extraction_enabled
                 .unwrap_or_else(default_internal_llm_memory_extraction_enabled),
+            accelerator: raw
+                .accelerator
+                .unwrap_or_else(default_internal_llm_accelerator),
             specified,
         })
     }
@@ -1479,7 +1543,7 @@ fn default_internal_llm_enabled() -> bool {
 }
 
 fn default_internal_llm_backend() -> String {
-    "embedded".to_string()
+    "candle".to_string()
 }
 
 fn default_internal_llm_model_id() -> String {
@@ -1516,7 +1580,6 @@ fn default_internal_llm_allowed_tasks() -> Vec<String> {
     vec![
         "session_title".to_string(),
         "summarize_tool_output".to_string(),
-        "prompt_compaction".to_string(),
         "memory_prefilter".to_string(),
         "chat".to_string(),
     ]
@@ -1532,6 +1595,14 @@ const fn default_internal_llm_prompt_context_enabled() -> bool {
 
 const fn default_internal_llm_memory_extraction_enabled() -> bool {
     false
+}
+
+fn default_internal_llm_accelerator() -> String {
+    "cpu".to_string()
+}
+
+fn is_default_accelerator(accelerator: &str) -> bool {
+    accelerator == "cpu"
 }
 
 // ── Memory configuration ─────────────────────────────────────────────────────
@@ -1580,12 +1651,6 @@ pub struct MemoryConfig {
     /// Confidence decay configuration.
     #[serde(default)]
     pub decay: DecayConfig,
-    /// Compaction configuration.
-    #[serde(default)]
-    pub compaction: CompactionConfig,
-    /// Eviction configuration.
-    #[serde(default)]
-    pub eviction: EvictionConfig,
     /// Cross-project memory sharing configuration.
     #[serde(default)]
     pub cross_project: CrossProjectConfig,
@@ -1601,22 +1666,8 @@ impl Default for MemoryConfig {
             semantic: SemanticConfig::default(),
             auto_extract: AutoExtractConfig::default(),
             decay: DecayConfig::default(),
-            compaction: CompactionConfig::default(),
-            eviction: EvictionConfig::default(),
             cross_project: CrossProjectConfig::default(),
         }
-    }
-}
-
-impl MemoryConfig {
-    /// Returns the block size limit in bytes.
-    ///
-    /// Default is 4096 bytes (4 KiB). Override in `ragent.json`:
-    /// ```json
-    /// { "memory": { "block_size_limit": 8192 } }
-    /// ```
-    pub fn block_size_limit(&self) -> usize {
-        self.compaction.block_size_limit
     }
 }
 
@@ -1848,76 +1899,6 @@ fn default_decay_factor() -> f64 {
 fn default_decay_min_confidence() -> f64 {
     0.1
 }
-/// Compaction configuration.
-///
-/// Controls when and how memory blocks and structured memories are compacted
-/// to prevent unbounded growth.
-///
-/// ```json
-/// {
-///   "memory": {
-///     "compaction": {
-///       "enabled": true,
-///       "block_size_limit": 4096,
-///       "memory_count_threshold": 500,
-///       "min_interval_hours": 24
-///     }
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompactionConfig {
-    /// Whether memory compaction is enabled.
-    ///
-    /// When `true` (default), block compaction, deduplication, and eviction
-    /// run automatically based on trigger conditions.
-    #[serde(default = "default_compaction_enabled")]
-    pub enabled: bool,
-    /// Maximum content size in bytes for a memory block.
-    ///
-    /// Blocks exceeding 90% of this limit are compacted to stay within the
-    /// configured size limit. Default: 4096 (4 KiB).
-    #[serde(default = "default_block_size_limit")]
-    pub block_size_limit: usize,
-    /// Total memory count that triggers compaction.
-    ///
-    /// When the total number of stored memories exceeds this threshold,
-    /// a compaction pass is triggered. Default: 500.
-    #[serde(default = "default_memory_count_threshold")]
-    pub memory_count_threshold: usize,
-    /// Minimum hours between automatic compaction passes.
-    ///
-    /// Prevents excessive compaction on busy sessions. Default: 24.
-    #[serde(default = "default_min_interval_hours")]
-    pub min_interval_hours: u64,
-}
-
-impl Default for CompactionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_compaction_enabled(),
-            block_size_limit: default_block_size_limit(),
-            memory_count_threshold: default_memory_count_threshold(),
-            min_interval_hours: default_min_interval_hours(),
-        }
-    }
-}
-
-fn default_compaction_enabled() -> bool {
-    true
-}
-
-fn default_block_size_limit() -> usize {
-    4096
-}
-
-fn default_memory_count_threshold() -> usize {
-    500
-}
-
-fn default_min_interval_hours() -> u64 {
-    24
-}
 
 /// Stale memory eviction configuration.
 ///
@@ -1926,58 +1907,6 @@ fn default_min_interval_hours() -> u64 {
 ///
 /// ```json
 /// {
-///   "memory": {
-///     "eviction": {
-///       "auto": false,
-///       "stale_days": 30,
-///       "min_confidence": 0.1
-///     }
-///   }
-/// }
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvictionConfig {
-    /// Whether to auto-evict stale memories without user confirmation.
-    ///
-    /// When `false` (default), stale memories are identified but not deleted
-    /// automatically. When `true`, they are deleted without confirmation.
-    #[serde(default = "default_eviction_auto")]
-    pub auto: bool,
-    /// Number of days since last access before a memory is considered stale.
-    ///
-    /// Memories older than this that have decayed below `min_confidence`
-    /// are candidates for eviction. Default: 30.
-    #[serde(default = "default_eviction_stale_days")]
-    pub stale_days: u32,
-    /// Confidence threshold below which a stale memory is evicted.
-    ///
-    /// Only memories with confidence below this value AND older than
-    /// `stale_days` are evicted. Default: 0.1.
-    #[serde(default = "default_eviction_min_confidence")]
-    pub min_confidence: f64,
-}
-
-impl Default for EvictionConfig {
-    fn default() -> Self {
-        Self {
-            auto: default_eviction_auto(),
-            stale_days: default_eviction_stale_days(),
-            min_confidence: default_eviction_min_confidence(),
-        }
-    }
-}
-
-fn default_eviction_auto() -> bool {
-    false
-}
-
-fn default_eviction_stale_days() -> u32 {
-    30
-}
-
-fn default_eviction_min_confidence() -> f64 {
-    0.1
-}
 /// Cross-project memory sharing configuration.
 ///
 /// When enabled, global memory blocks are accessible from any project,

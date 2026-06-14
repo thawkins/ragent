@@ -433,8 +433,8 @@ mod tests {
 
     #[test]
     fn test_include_use() {
-        let src = r#"include <MCAD/stepper.scad>
-use <utils.scad>"#;
+        let src = r"include <MCAD/stepper.scad>
+use <utils.scad>";
         let pf = parse_scad(src);
         assert_eq!(pf.imports.len(), 2);
         assert_eq!(pf.imports[0].kind, "include");
@@ -452,14 +452,14 @@ use <utils.scad>"#;
 
     #[test]
     fn test_nested_module() {
-        let src = r#"
+        let src = r"
 module housing() {
     difference() {
         cube(20, center=true);
         sphere(r=9);
     }
 }
-"#;
+";
         let pf = parse_scad(src);
         // housing module + references for difference, cube, sphere
         assert!(!pf.symbols.is_empty());

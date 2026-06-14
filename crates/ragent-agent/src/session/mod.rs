@@ -7,9 +7,6 @@
 pub mod processor;
 pub mod profiler;
 
-// Re-export the compaction helper so tests can exercise it directly.
-pub use processor::compact_history_with_atomic_tool_calls;
-
 // Re-export compression types when the feature is enabled.
 #[cfg(feature = "compression")]
 pub use crate::compression::{

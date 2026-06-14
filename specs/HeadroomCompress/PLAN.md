@@ -3,7 +3,7 @@
 ## Overview
 
 This plan integrates the `headroom-core` Rust crate into ragent to replace the
-naive `compact_history_with_atomic_tool_calls` truncation with content-aware,
+naive `truncate_history_with_atomic_tool_calls` truncation with content-aware,
 reversible, relevance-ranked compression. The work is broken into seven tasks
 ordered by dependency chain and risk.
 
@@ -64,7 +64,7 @@ fallback.
    `claude-sonnet-4-20250514`), select the appropriate tiktoken encoding or
    HfTokenizer config. For Anthropic models where no tiktoken encoding exists,
    use the estimating counter with the provider's advertised `context_window`.
-4. Update `SessionState::should_compact` to use accurate counts.
+4. Update `SessionState::should_compress` to use accurate counts.
 5. Update the quick-estimate loop in `processor.rs` (lines ~1105–1129) to use
    the Headroom tokenizer instead of the `text_len / 4 + 10` heuristic.
 6. Run existing `test_context_compaction` tests — they must pass unchanged
@@ -132,7 +132,7 @@ and the LLM can retrieve it on demand.
 
 **Effort:** L · **Priority:** High · **Depends on:** T-002, T-003, T-004
 
-Create the main compression pipeline that replaces `compact_history_with_atomic_tool_calls`.
+Create the main compression pipeline that replaces `truncate_history_with_atomic_tool_calls`.
 
 **Steps:**
 1. Create `crates/ragent-agent/src/compression/pipeline.rs` with a
@@ -174,7 +174,7 @@ Create the main compression pipeline that replaces `compact_history_with_atomic_
 
 **Effort:** M · **Priority:** High · **Depends on:** T-005
 
-Replace the `compact_history_with_atomic_tool_calls` call site in the session
+Replace the `truncate_history_with_atomic_tool_calls` call site in the session
 processor with the new Headroom pipeline, and update the `/compact` slash command.
 
 **Steps:**
@@ -184,13 +184,13 @@ processor with the new Headroom pipeline, and update the `/compact` slash comman
      #[cfg(feature = "compression")]
      let compacted_history = self.compression_pipeline.compress(&history, context_window, 8192)?;
      #[cfg(not(feature = "compression"))]
-     let compacted_history = compact_history_with_atomic_tool_calls(&history, context_window, 8192);
+     let compacted_history = truncate_history_with_atomic_tool_calls(&history, context_window, 8192);
      ```
    - Wire the `CcrManager` into `SessionProcessor` (passed on construction).
 2. In `crates/ragent-tui/src/app.rs`:
    - Update `/compact` handler to display compression stats (before/after tokens,
      compression ratio, content types compressed).
-3. Update `SessionState::should_compact` to use Headroom tokenizer counts.
+3. Update `SessionState::should_compress` to use Headroom tokenizer counts.
 4. Verify backward compatibility: when `compression` feature is off, behaviour
    is identical to the current implementation (NFR-004).
 

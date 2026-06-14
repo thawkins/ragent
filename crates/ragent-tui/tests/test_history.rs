@@ -381,8 +381,7 @@ async fn test_flush_history_if_due_skips_before_deadline() {
 
     // Dirty but deadline is far in the future.
     app.history_dirty = true;
-    app.history_save_deadline =
-        Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
+    app.history_save_deadline = Some(std::time::Instant::now() + std::time::Duration::from_mins(1));
 
     app.flush_history_if_due();
 

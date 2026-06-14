@@ -506,14 +506,13 @@ endmacro()
 
     #[test]
     fn test_foreach_loop() {
-        let src = r#"
+        let src = r"
 foreach(item IN ITEMS a b c)
   message(${item})
 endforeach()
-"#;
+";
         let pf = parse_cmake(src);
-        let loops: Vec<_> = pf.symbols.iter().filter(|s| s.name == "foreach").collect();
-        assert_eq!(loops.len(), 1);
+        assert_eq!(pf.symbols.iter().filter(|s| s.name == "foreach").count(), 1);
     }
 
     #[test]

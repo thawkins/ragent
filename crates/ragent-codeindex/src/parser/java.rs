@@ -542,11 +542,11 @@ public class Dog {
 
     #[test]
     fn test_interface() {
-        let source = r#"
+        let source = r"
 public interface Greeter {
     String greet(String name);
 }
-"#;
+";
         let parsed = parse_java(source);
         let greeter = parsed.symbols.iter().find(|s| s.name == "Greeter").unwrap();
         assert_eq!(greeter.kind, SymbolKind::Interface);
@@ -555,13 +555,13 @@ public interface Greeter {
 
     #[test]
     fn test_enum_with_constants() {
-        let source = r#"
+        let source = r"
 public enum Color {
     RED,
     GREEN,
     BLUE
 }
-"#;
+";
         let parsed = parse_java(source);
         let color = parsed.symbols.iter().find(|s| s.name == "Color").unwrap();
         assert_eq!(color.kind, SymbolKind::Enum);
@@ -573,14 +573,14 @@ public enum Color {
 
     #[test]
     fn test_visibility() {
-        let source = r#"
+        let source = r"
 public class Vis {
     public String pub_field;
     private int priv_field;
     protected double prot_field;
     String pkg_field;
 }
-"#;
+";
         let parsed = parse_java(source);
 
         let pub_f = parsed
@@ -600,11 +600,11 @@ public class Vis {
 
     #[test]
     fn test_imports() {
-        let source = r#"
+        let source = r"
 import java.util.List;
 import java.util.Map;
 import static java.lang.Math.PI;
-"#;
+";
         let parsed = parse_java(source);
         assert!(
             parsed.imports.len() >= 3,
@@ -630,7 +630,7 @@ import static java.lang.Math.PI;
 
     #[test]
     fn test_javadoc() {
-        let source = r#"
+        let source = r"
 /**
  * A utility class.
  */
@@ -644,7 +644,7 @@ public class Utils {
         return a + b;
     }
 }
-"#;
+";
         let parsed = parse_java(source);
         let utils = parsed.symbols.iter().find(|s| s.name == "Utils").unwrap();
         assert!(
@@ -666,13 +666,13 @@ public class Utils {
 
     #[test]
     fn test_inner_class() {
-        let source = r#"
+        let source = r"
 public class Outer {
     public class Inner {
         public void method() {}
     }
 }
-"#;
+";
         let parsed = parse_java(source);
         let inner = parsed.symbols.iter().find(|s| s.name == "Inner").unwrap();
         assert_eq!(inner.qualified_name.as_deref(), Some("Outer.Inner"));
@@ -683,13 +683,13 @@ public class Outer {
 
     #[test]
     fn test_constructor() {
-        let source = r#"
+        let source = r"
 public class Dog {
     public Dog(String name) {
         this.name = name;
     }
 }
-"#;
+";
         let parsed = parse_java(source);
         let ctor = parsed
             .symbols

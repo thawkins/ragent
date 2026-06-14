@@ -2795,7 +2795,7 @@ mod duration_tests {
         // The result summary line contains "lines read" which is fine
         // We just need to ensure there's no duration parenthetical
         assert!(
-            !(line_text.contains("(") && line_text.contains("ms") || line_text.contains("s)")),
+            !(line_text.contains('(') && line_text.contains("ms") || line_text.contains("s)")),
             "Duration should NOT be displayed when duration_ms is None. Got: {}",
             line_text
         );

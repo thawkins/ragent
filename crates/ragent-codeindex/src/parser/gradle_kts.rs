@@ -617,12 +617,7 @@ open class MyPlugin : Plugin<Project> {
 }
 "#;
         let pf = parse_kts(src);
-        let classes: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Class)
-            .collect();
-        assert!(!classes.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Class));
     }
 
     #[test]
@@ -633,12 +628,7 @@ fun customTask(project: Project) {
 }
 "#;
         let pf = parse_kts(src);
-        let funcs: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Function)
-            .collect();
-        assert!(!funcs.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Function));
     }
 
     #[test]
@@ -653,12 +643,7 @@ fun customTask(project: Project) {
     fn test_property_declaration() {
         let src = r#"val version = "1.0""#;
         let pf = parse_kts(src);
-        let consts: Vec<_> = pf
-            .symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::Constant)
-            .collect();
-        assert!(!consts.is_empty());
+        assert!(pf.symbols.iter().any(|s| s.kind == SymbolKind::Constant));
     }
 
     #[test]

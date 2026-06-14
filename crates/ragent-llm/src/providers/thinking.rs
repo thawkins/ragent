@@ -87,12 +87,21 @@ pub(crate) fn gemini_thinking_levels_for_model(model_id: &str) -> Vec<ThinkingLe
 
 /// Returns `true` when an Ollama-family model name strongly suggests binary
 /// thinking support.
+///
+/// Ollama models that support the `think` parameter include those with
+/// `{{--think}}` tags in their Modelfile template. Since we cannot inspect
+/// the template at discovery time, we match known model name patterns.
 pub(crate) fn model_supports_binary_thinking(model_id: &str) -> bool {
     let model_id = model_id.to_ascii_lowercase();
     model_id.contains("deepseek-r1")
         || model_id.contains("qwen3")
         || model_id.contains("qwq")
         || model_id.contains("reasoner")
+        || model_id.contains("kimi")
+        || model_id.contains("gemma3")
+        || model_id.contains("phi4-reasoning")
+        || model_id.contains("magistral")
+        || model_id.contains("mistral-small3")
 }
 
 /// Returns the thinking levels supported by an Ollama-family model.
@@ -431,8 +440,21 @@ mod tests {
 
     #[test]
     fn test_binary_thinking_support_heuristics() {
+        // Classic thinking models
         assert!(model_supports_binary_thinking("deepseek-r1:latest"));
         assert!(model_supports_binary_thinking("qwen3:30b"));
+        assert!(model_supports_binary_thinking("qwq:32b"));
+        assert!(model_supports_binary_thinking("reasoner:latest"));
+        // Newly recognized thinking models
+        assert!(model_supports_binary_thinking("kimi-k2.7-code"));
+        assert!(model_supports_binary_thinking("kimi:latest"));
+        assert!(model_supports_binary_thinking("gemma3:27b"));
+        assert!(model_supports_binary_thinking("phi4-reasoning:14b"));
+        assert!(model_supports_binary_thinking("magistral:latest"));
+        assert!(model_supports_binary_thinking("mistral-small3:latest"));
+        // Non-thinking models
         assert!(!model_supports_binary_thinking("llama3.2"));
+        assert!(!model_supports_binary_thinking("mistral:7b"));
+        assert!(!model_supports_binary_thinking("codellama:latest"));
     }
 }

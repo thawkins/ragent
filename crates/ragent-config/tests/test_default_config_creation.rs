@@ -161,7 +161,7 @@ fn test_does_not_create_default_when_global_config_exists() {
 
     let project_dir = temp.path().join("project");
     let project_config = project_dir.join(".ragent").join("ragent.json");
-    std::fs::create_dir_all(&project_dir.join(".ragent")).expect("mkdir project .ragent");
+    std::fs::create_dir_all(project_dir.join(".ragent")).expect("mkdir project .ragent");
 
     let original_xdg = with_temp_config_home(&temp);
     let original_cwd = std::env::current_dir().expect("cwd");

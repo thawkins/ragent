@@ -90,7 +90,7 @@ async fn test_internal_llm_service_rejects_non_allowlisted_tasks() {
 
     let err = service
         .run_internal_task(
-            InternalLlmTaskKind::PromptCompaction,
+            InternalLlmTaskKind::MemoryPrefilter,
             "keep this compact",
             InternalTaskLimits::default(),
         )
@@ -100,7 +100,7 @@ async fn test_internal_llm_service_rejects_non_allowlisted_tasks() {
     assert!(matches!(
         err,
         InternalLlmError::TaskNotAllowed {
-            task: "prompt_compaction"
+            task: "memory_prefilter"
         }
     ));
 }
@@ -217,10 +217,7 @@ async fn test_internal_llm_service_tracks_counters_and_fallbacks() {
             InternalTaskLimits::default(),
         )
         .await;
-    service.record_fallback(
-        InternalLlmTaskKind::PromptCompaction,
-        "fell back to provider compaction",
-    );
+    service.record_fallback(InternalLlmTaskKind::Chat, "fell back to provider chat");
 
     let snapshot = service.status_snapshot();
     assert_eq!(snapshot.metrics.attempts, 1);
@@ -240,7 +237,7 @@ async fn test_internal_llm_service_tracks_counters_and_fallbacks() {
             .metrics
             .last_fallback
             .unwrap_or_default()
-            .contains("provider compaction")
+            .contains("provider chat")
     );
 }
 

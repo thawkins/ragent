@@ -24,11 +24,25 @@ pub mod event {
 }
 
 pub use providers::{
-    ModelInfo, Provider, ProviderInfo, ProviderRegistry, UsageInfo, anthropic::AnthropicProvider,
-    azure_resource::AzureResourceEntry, azure_resource::AzureResourceProvider,
-    copilot::CopilotProvider, create_default_registry, gemini::GeminiProvider,
-    generic_openai::GenericOpenAiProvider, huggingface::HuggingFaceProvider,
-    ollama::OllamaProvider, ollama_cloud::OllamaCloudProvider, openai::OpenAiProvider,
+    ModelInfo, Provider, ProviderInfo, ProviderRegistry, UsageInfo,
+    anthropic::AnthropicProvider,
+    azure_resource::AzureResourceEntry,
+    azure_resource::AzureResourceProvider,
+    copilot::CopilotProvider,
+    create_default_registry,
+    foundry_local_client::FoundryLocalClient,
+    foundry_local_error::FoundryServiceError,
+    foundry_local_provider::FoundryLocalProvider,
+    foundry_local_provider::{
+        discover_foundry_local_models, foundry_local_default_models, is_foundry_local_available,
+    },
+    foundry_local_service::FoundryLocalService,
+    gemini::GeminiProvider,
+    generic_openai::GenericOpenAiProvider,
+    huggingface::HuggingFaceProvider,
+    ollama::OllamaProvider,
+    ollama_cloud::OllamaCloudProvider,
+    openai::OpenAiProvider,
 };
 
 pub use embedded::{

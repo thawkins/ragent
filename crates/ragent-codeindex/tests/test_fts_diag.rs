@@ -1,16 +1,60 @@
 //! Diagnostic tests for FTS search issues
 use std::path::Path;
 
+/// Locate the project root by walking up from the current file.
+fn project_root() -> std::path::PathBuf {
+    // `CARGO_MANIFEST_DIR` points to crates/ragent-codeindex.
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            Path::new(file!())
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf()
+        });
+    // Workspace root is two levels up from the crate manifest dir.
+    manifest_dir
+        .parent()
+        .expect("crate dir")
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
+}
+
+/// Copy a directory tree recursively.
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let dest = dst.as_ref().join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_all(&path, &dest)?;
+        } else {
+            std::fs::copy(&path, &dest)?;
+        }
+    }
+    Ok(())
+}
+
 /// Test raw FTS search on actual index
 #[test]
 fn diag_raw_fts_search() {
-    let fts_path = Path::new("/home/thawkins/Projects/ragent/.ragent/codeindex/fts");
+    let project_root = project_root();
+    let fts_path = project_root.join(".ragent/codeindex/fts");
     if !fts_path.exists() {
         eprintln!("SKIP: FTS directory not found");
         return;
     }
 
-    let fts = ragent_codeindex::search::FtsIndex::open(fts_path).unwrap();
+    // Work on a snapshot so a concurrently-running ragent process cannot lock the live index.
+    let temp = tempfile::tempdir().unwrap();
+    let snapshot_fts = temp.path().join("fts");
+    copy_dir_all(&fts_path, &snapshot_fts).expect("copy fts snapshot");
+
+    let fts = ragent_codeindex::search::FtsIndex::open(&snapshot_fts).unwrap();
     let count = fts.doc_count().unwrap();
     eprintln!("FTS doc_count: {count}");
     assert!(count > 0, "FTS should have docs");
@@ -35,16 +79,21 @@ fn diag_raw_fts_search() {
 /// Test CodeIndex search (full pipeline)
 #[test]
 fn diag_codeindex_search() {
-    let cwd = Path::new("/home/thawkins/Projects/ragent");
-    let index_dir = cwd.join(".ragent/codeindex");
-    if !index_dir.exists() {
+    let project_root = project_root();
+    let live_index_dir = project_root.join(".ragent/codeindex");
+    if !live_index_dir.exists() {
         eprintln!("SKIP: codeindex directory not found");
         return;
     }
 
+    // Work on a snapshot so a concurrently-running ragent process cannot lock the live index.
+    let temp = tempfile::tempdir().unwrap();
+    let index_dir = temp.path().join("codeindex");
+    copy_dir_all(&live_index_dir, &index_dir).expect("copy codeindex snapshot");
+
     let config = ragent_codeindex::types::CodeIndexConfig {
         enabled: true,
-        project_root: cwd.to_path_buf(),
+        project_root: project_root.to_path_buf(),
         index_dir,
         scan_config: ragent_codeindex::types::ScanConfig::default(),
     };

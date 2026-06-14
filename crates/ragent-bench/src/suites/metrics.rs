@@ -377,18 +377,21 @@ mod tests {
         assert!(near > far);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_pass_at_k_clamps_k_to_sample_count() {
         assert_eq!(pass_at_k(1, 0, 5), 0.0);
         assert_eq!(pass_at_k(1, 1, 5), 1.0);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_resolution_rate_handles_empty_attempts() {
         assert_eq!(resolution_rate(0, 0), 0.0);
         assert_eq!(resolution_rate(3, 4), 0.75);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_edit_similarity_returns_ratio() {
         let exact = edit_similarity("return helper(value)", "return helper(value)");

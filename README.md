@@ -13,7 +13,7 @@ It is implemented in Rust as a learning exercise for the author.
 
 - **Multi-provider LLM support** — Anthropic, OpenAI, Google Gemini, Hugging Face,
   GitHub Copilot, Ollama (local and cloud), Generic OpenAI-compatible endpoints,
-  Azure AI Foundry, Azure Resource (File) provider, and Amazon Bedrock
+  Azure AI Foundry, Azure Resource (File) provider, Amazon Bedrock, and Microsoft Foundry Local
   out of the box, with an extensible provider trait for adding more
 - **Comprehensive tool system** — ~111 registered tools across 15 categories:
   - **File operations** — read, write, create, edit, multiedit, patch, rm, move, copy,
@@ -68,10 +68,9 @@ It is implemented in Rust as a learning exercise for the author.
   tools; supports Rust, Python, TypeScript/JavaScript, Go, C/C++, Java, OpenSCAD,
   Terraform, CMake, Gradle, and Maven; enable/disable via `/codeindex on|off`,
   language filtering via `/codeindex lang <language>`
-- **Memory system** — three-tier system with file blocks, structured SQLite store,
-  and optional embedding-based semantic search; automatic extraction, decay,
-  compaction, and knowledge graph support
-- **Spec management** — `/spec` slash commands for creating, listing, searching,
+  - **Memory system** — three-tier system with file blocks, structured SQLite store,
+    and optional embedding-based semantic search; automatic extraction, decay,
+    compression, and knowledge graph support- **Spec management** — `/spec` slash commands for creating, listing, searching,
   validating, and tracking specification lifecycles
 - **Skills system** — loadable skill packs (bundled or custom YAML) that inject tools,
   prompts, and file context into agent sessions
@@ -280,7 +279,7 @@ The project is a Cargo workspace built from 15 focused crates:
 | `ragent-bench` | Benchmark runner shared between TUI and CLI |
 | `ragent-codeindex` | Codebase indexing: tree-sitter parsing, SQLite store, Tantivy FTS, file watcher |
 | `ragent-config` | Configuration types, defaults, and parsing |
-| `ragent-llm` | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock) |
+| `ragent-llm` | Provider clients and model/provider registry (Anthropic, OpenAI, Gemini, Ollama, HuggingFace, Copilot, Generic OpenAI, Azure AI Foundry, Azure Resource, Amazon Bedrock, Microsoft Foundry Local) |
 | `ragent-prompt_opt` | Prompt optimization templates and completer abstraction |
 | `ragent-server` | Axum HTTP routes and SSE streaming |
 | `ragent-specs` | Spec lifecycle management: discovery, validation, status transitions, review, archival |
@@ -343,9 +342,8 @@ server, memory system, teams/swarm coordination, spec management, skills system,
 and multi-layered security are functional and under active development.
 
 Recent highlights:
-- Context compaction bug fixed (`compact_history_with_atomic_tool_calls`)
-- `read` tool instructions clarified (`end_line` is absolute line number)
-- Remote push prohibitions strengthened in `AGENTS.md`
+  - Context compression pipeline added (`/compress` slash command)
+  - `read` tool instructions clarified (`end_line` is absolute line number)- Remote push prohibitions strengthened in `AGENTS.md`
 - SPEC.md reorganized, audited, and brought up to date with actual implementation
 - Azure Resource (File) provider with `azureresources.json` support
 - Azure AI Foundry provider with dynamic model discovery

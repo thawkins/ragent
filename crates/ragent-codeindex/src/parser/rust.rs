@@ -929,12 +929,12 @@ mod tests {
 
     #[test]
     fn test_struct_with_fields() {
-        let source = r#"
+        let source = r"
 pub struct Config {
     pub name: String,
     value: i32,
 }
-"#;
+";
         let parsed = parse_rust(source);
         let names: Vec<&str> = parsed.symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"Config"), "got: {names:?}");
@@ -953,13 +953,13 @@ pub struct Config {
 
     #[test]
     fn test_enum_with_variants() {
-        let source = r#"
+        let source = r"
 pub enum Color {
     Red,
     Green,
     Blue,
 }
-"#;
+";
         let parsed = parse_rust(source);
         let names: Vec<&str> = parsed.symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"Color"));
@@ -973,11 +973,11 @@ pub enum Color {
 
     #[test]
     fn test_trait_with_methods() {
-        let source = r#"
+        let source = r"
 pub trait Greet {
     fn greet(&self) -> String;
 }
-"#;
+";
         let parsed = parse_rust(source);
         let greet_trait = parsed.symbols.iter().find(|s| s.name == "Greet").unwrap();
         assert_eq!(greet_trait.kind, SymbolKind::Trait);
@@ -989,14 +989,14 @@ pub trait Greet {
 
     #[test]
     fn test_impl_block_with_methods() {
-        let source = r#"
+        let source = r"
 struct Foo;
 
 impl Foo {
     pub fn new() -> Self { Foo }
     fn helper(&self) {}
 }
-"#;
+";
         let parsed = parse_rust(source);
         let impl_sym = parsed
             .symbols
@@ -1041,10 +1041,10 @@ impl Display for Foo {
 
     #[test]
     fn test_const_and_static() {
-        let source = r#"
+        let source = r"
 pub const MAX_SIZE: usize = 1024;
 static COUNTER: i32 = 0;
-"#;
+";
         let parsed = parse_rust(source);
         let max_size = parsed
             .symbols
@@ -1060,11 +1060,11 @@ static COUNTER: i32 = 0;
 
     #[test]
     fn test_module() {
-        let source = r#"
+        let source = r"
 pub mod utils {
     pub fn helper() {}
 }
-"#;
+";
         let parsed = parse_rust(source);
         let module = parsed.symbols.iter().find(|s| s.name == "utils").unwrap();
         assert_eq!(module.kind, SymbolKind::Module);
@@ -1086,11 +1086,11 @@ pub mod utils {
 
     #[test]
     fn test_macro_definition() {
-        let source = r#"
+        let source = r"
 macro_rules! my_macro {
     () => {};
 }
-"#;
+";
         let parsed = parse_rust(source);
         let mac = parsed
             .symbols
@@ -1102,11 +1102,11 @@ macro_rules! my_macro {
 
     #[test]
     fn test_use_statements() {
-        let source = r#"
+        let source = r"
 use std::collections::HashMap;
 use std::io::{self, Write};
 use crate::config::Config as AppConfig;
-"#;
+";
         let parsed = parse_rust(source);
         assert!(
             parsed.imports.len() >= 2,
@@ -1124,7 +1124,7 @@ use crate::config::Config as AppConfig;
 
     #[test]
     fn test_test_function() {
-        let source = r#"
+        let source = r"
 #[test]
 fn test_something() {
     assert!(true);
@@ -1134,7 +1134,7 @@ fn test_something() {
 async fn test_async() {
     assert!(true);
 }
-"#;
+";
         let parsed = parse_rust(source);
         let test1 = parsed
             .symbols
@@ -1153,11 +1153,11 @@ async fn test_async() {
 
     #[test]
     fn test_doc_comments() {
-        let source = r#"
+        let source = r"
 /// This is a documented function.
 /// It does cool things.
 pub fn documented() {}
-"#;
+";
         let parsed = parse_rust(source);
         let sym = parsed
             .symbols
@@ -1186,13 +1186,13 @@ pub fn documented() {}
 
     #[test]
     fn test_qualified_names_nested() {
-        let source = r#"
+        let source = r"
 mod outer {
     mod inner {
         fn deep() {}
     }
 }
-"#;
+";
         let parsed = parse_rust(source);
         let deep = parsed.symbols.iter().find(|s| s.name == "deep").unwrap();
         assert_eq!(deep.qualified_name.as_deref(), Some("outer::inner::deep"));
@@ -1220,7 +1220,7 @@ mod outer {
 
     #[test]
     fn test_complex_real_world() {
-        let source = r#"
+        let source = r"
 //! Module documentation.
 
 use std::collections::HashMap;
@@ -1280,7 +1280,7 @@ mod tests {
         assert!(cm.store.is_empty());
     }
 }
-"#;
+";
         let parsed = parse_rust(source);
 
         // Count by kind.

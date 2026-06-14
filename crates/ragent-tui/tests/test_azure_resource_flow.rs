@@ -26,9 +26,11 @@ fn temp_azureresources_json(content: &str) -> (std::path::PathBuf, tempfile::Tem
 #[test]
 fn test_azure_resource_provider_listed() {
     use ragent_tui::app::PROVIDER_LIST;
-    let ids: Vec<&str> = PROVIDER_LIST.iter().map(|(id, _)| *id).collect();
     assert!(
-        ids.contains(&"azure_resource"),
+        PROVIDER_LIST
+            .iter()
+            .map(|(id, _)| *id)
+            .any(|id| id == "azure_resource"),
         "azure_resource should appear in PROVIDER_LIST"
     );
 }
@@ -75,7 +77,7 @@ fn test_azure_resource_stale_selection_cleanup() {
 
     // Simulate the restore logic: if the stored id is NOT in the current
     // file entries, the key should be deleted.
-    let current_ids = vec!["model-a", "model-b"];
+    let current_ids = ["model-a", "model-b"];
     let stored_id = stale["id"].as_str().unwrap();
     if !current_ids.contains(&stored_id) {
         storage

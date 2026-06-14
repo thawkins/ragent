@@ -22,7 +22,7 @@ use ragent_core::{
     mcp::{McpClient, discovery::DiscoveredMcpServer},
     message::{Message, MessagePart, Role},
     permission::PermissionRequest,
-    provider::ProviderRegistry,
+    provider::{ModelInfo, ProviderRegistry},
     session::processor::SessionProcessor,
     storage::Storage,
     tool::TeamManagerInterface,
@@ -423,6 +423,8 @@ impl App {
             stream_in_bytes: 0,
             stream_out_bytes: 0,
             quota_percent: None,
+            model_loading_state: None,
+            model_download_state: None,
             tool_visibility: app_config.tool_visibility.clone(),
             current_screen: ScreenMode::Chat,
             tip: tips::random_tip(),
@@ -777,150 +779,158 @@ impl App {
         }
     }
 
-          fn render_internal_llm_status(&self) -> String {
-              let mut rows = vec![
-                  format!(
-                      "| enabled | {} |",
-                      if self.internal_llm_config.enabled {
-                          "on"
-                      } else {
-                          "off"
-                      }
-                  ),
-                  format!("| backend | `{}` |", self.internal_llm_config.backend),
-                  format!("| model | `{}` |", self.internal_llm_config.model_id),
-                  format!(
-                      "| accelerator | `{}` |",
-                      self.internal_llm_config.accelerator
-                  ),
-              ];
-    
-              // Indicate which backend features are compiled in.
-              let litertlm_compiled = cfg!(feature = "litertlm");
-              let candle_compiled = cfg!(feature = "embedded-llm");
-              let feature_info = match (litertlm_compiled, candle_compiled) {
-                  (true, true) => "litertlm ✅ (default), candle ✅ (opt-in)".to_string(),
-                  (true, false) => "litertlm ✅ (default)".to_string(),
-                  (false, true) => "candle ✅ (default)".to_string(),
-                  (false, false) => "none ⚠️ (rebuild with --features litertlm)".to_string(),
-              };
-              rows.push(format!("| compiled backends | {} |", feature_info));
-    
-              rows.push(format!(
-                  "| session title | {} |",
-                  if self.internal_llm_config.session_title_enabled {
-                      "on"
-                  } else {
-                      "off"
-                  }
-              ));
-              rows.push(format!(
-                  "| prompt/context compaction | {} |",
-                  if self.internal_llm_config.prompt_context_enabled {
-                      "on"
-                  } else {
-                      "off"
-                  }
-              ));
-              rows.push(format!(
-                  "| memory extraction prefilter | {} |",
-                  if self.internal_llm_config.memory_extraction_enabled {
-                      "on"
-                  } else {
-                      "off"
-                  }
-              ));
-              rows.push(format!(
-                  "| chat mode | {} |",
-                  if self.internal_llm_chat_panel.is_some() {
-                      "active"
-                  } else {
-                      "inactive"
-                  }
-              ));
-    
-              if let Some(service) = &self.internal_llm_service {
-                  let snapshot = service.status_snapshot();
-                  rows.push(format!("| attempts | {} |", snapshot.metrics.attempts));
-                  rows.push(format!("| successes | {} |", snapshot.metrics.successes));
-                  rows.push(format!("| failures | {} |", snapshot.metrics.failures));
-                  rows.push(format!("| timeouts | {} |", snapshot.metrics.timeouts));
-                  rows.push(format!("| fallbacks | {} |", snapshot.metrics.fallbacks));
-                  if let Some(last_error) = snapshot.metrics.last_error {
-                      rows.push(format!("| last error | {} |", last_error));
-                  }
-                  if let Some(last_fallback) = snapshot.metrics.last_fallback {
-                      rows.push(format!("| last fallback | {} |", last_fallback));
-                  }
-                  if let Some(runtime) = snapshot.runtime {
-                      rows.push(format!(
-                          "| runtime availability | `{:?}` |",
-                          runtime.availability
-                      ));
-                      rows.push(format!("| runtime lifecycle | `{:?}` |", runtime.lifecycle));
-                      rows.push(format!(
-                          "| execution device | `{}` |",
-                          runtime.settings.execution_device
-                      ));
-                      rows.push(format!(
-                          "| quantized runtime | `{}` |",
-                          runtime.settings.quantized_runtime
-                      ));
-                      rows.push(format!(
-                          "| requested threads | {} |",
-                          runtime.settings.requested_threads
-                      ));
-                      rows.push(format!(
-                          "| effective threads | {} |",
-                          runtime.settings.effective_threads
-                      ));
-                      rows.push(format!("| threading | {} |", runtime.settings.threading));
-                      rows.push(format!(
-                          "| requested gpu layers | {} |",
-                          runtime.settings.requested_gpu_layers
-                      ));
-                      rows.push(format!(
-                          "| effective gpu layers | {} |",
-                          runtime.settings.effective_gpu_layers
-                      ));
-                      rows.push(format!(
-                          "| gpu offload | {} |",
-                          runtime.settings.gpu_offload
-                      ));
-                      if let Some(backend_name) = runtime.backend_name {
-                          rows.push(format!("| runtime backend | `{}` |", backend_name));
-                      }
-                      if let Some(detail) = runtime.detail {
-                          rows.push(format!("| runtime detail | {} |", detail));
-                      }
-                      rows.push(format!(
-                          "| cache root | `{}` |",
-                          runtime.cache_root.display()
-                      ));
-                      rows.push(format!("| model dir | `{}` |", runtime.model_dir.display()));
-                  }
-                  if let Some(queue) = snapshot.queue {
-                      rows.push("| worker model | single active decode |".to_string());
-                      rows.push(format!("| worker capacity | {} |", queue.capacity));
-                      rows.push(format!("| worker in flight | {} |", queue.in_flight));
-                      rows.push(format!("| worker queued | {} |", queue.queued));
-                      rows.push(format!(
-                          "| worker busy | {} |",
-                          if queue.worker_busy { "yes" } else { "no" }
-                      ));
-                  }
-              } else {
-                  rows.push("| service status | unavailable |".to_string());
-                  if let Some(error) = &self.internal_llm_init_error {
-                      rows.push(format!("| init error | {} |", error));
-                  }
-              }
-    
-              format!(
-                  "From: /internal-llm\n| Setting | Value |\n| --- | --- |\n{}\n",
-                  rows.join("\n")
-              )
-          }
+    fn render_internal_llm_status(&self) -> String {
+        let mut rows = vec![
+            format!(
+                "| enabled | {} |",
+                if self.internal_llm_config.enabled {
+                    "on"
+                } else {
+                    "off"
+                }
+            ),
+            format!("| backend | `{}` |", self.internal_llm_config.backend),
+            format!("| model | `{}` |", self.internal_llm_config.model_id),
+            format!(
+                "| accelerator | `{}` |",
+                self.internal_llm_config.accelerator
+            ),
+        ];
+
+        // Indicate which backend features are compiled in.
+        #[allow(unexpected_cfgs)]
+        let litertlm_compiled = cfg!(feature = "litertlm");
+        let candle_compiled = cfg!(feature = "embedded-llm");
+        let feature_info = match (litertlm_compiled, candle_compiled) {
+            (true, true) => "litertlm ✅ (default), candle ✅ (opt-in)".to_string(),
+            (true, false) => "litertlm ✅ (default)".to_string(),
+            (false, true) => "candle ✅ (default)".to_string(),
+            #[allow(unexpected_cfgs)]
+            (false, false) => {
+                if cfg!(feature = "litertlm") {
+                    "litertlm ✅ (default)".to_string()
+                } else {
+                    "candle ✅ (default)".to_string()
+                }
+            }
+        };
+        rows.push(format!("| compiled backends | {} |", feature_info));
+
+        rows.push(format!(
+            "| session title | {} |",
+            if self.internal_llm_config.session_title_enabled {
+                "on"
+            } else {
+                "off"
+            }
+        ));
+        rows.push(format!(
+            "| prompt/context compaction | {} |",
+            if self.internal_llm_config.prompt_context_enabled {
+                "on"
+            } else {
+                "off"
+            }
+        ));
+        rows.push(format!(
+            "| memory extraction prefilter | {} |",
+            if self.internal_llm_config.memory_extraction_enabled {
+                "on"
+            } else {
+                "off"
+            }
+        ));
+        rows.push(format!(
+            "| chat mode | {} |",
+            if self.internal_llm_chat_panel.is_some() {
+                "active"
+            } else {
+                "inactive"
+            }
+        ));
+
+        if let Some(service) = &self.internal_llm_service {
+            let snapshot = service.status_snapshot();
+            rows.push(format!("| attempts | {} |", snapshot.metrics.attempts));
+            rows.push(format!("| successes | {} |", snapshot.metrics.successes));
+            rows.push(format!("| failures | {} |", snapshot.metrics.failures));
+            rows.push(format!("| timeouts | {} |", snapshot.metrics.timeouts));
+            rows.push(format!("| fallbacks | {} |", snapshot.metrics.fallbacks));
+            if let Some(last_error) = snapshot.metrics.last_error {
+                rows.push(format!("| last error | {} |", last_error));
+            }
+            if let Some(last_fallback) = snapshot.metrics.last_fallback {
+                rows.push(format!("| last fallback | {} |", last_fallback));
+            }
+            if let Some(runtime) = snapshot.runtime {
+                rows.push(format!(
+                    "| runtime availability | `{:?}` |",
+                    runtime.availability
+                ));
+                rows.push(format!("| runtime lifecycle | `{:?}` |", runtime.lifecycle));
+                rows.push(format!(
+                    "| execution device | `{}` |",
+                    runtime.settings.execution_device
+                ));
+                rows.push(format!(
+                    "| quantized runtime | `{}` |",
+                    runtime.settings.quantized_runtime
+                ));
+                rows.push(format!(
+                    "| requested threads | {} |",
+                    runtime.settings.requested_threads
+                ));
+                rows.push(format!(
+                    "| effective threads | {} |",
+                    runtime.settings.effective_threads
+                ));
+                rows.push(format!("| threading | {} |", runtime.settings.threading));
+                rows.push(format!(
+                    "| requested gpu layers | {} |",
+                    runtime.settings.requested_gpu_layers
+                ));
+                rows.push(format!(
+                    "| effective gpu layers | {} |",
+                    runtime.settings.effective_gpu_layers
+                ));
+                rows.push(format!(
+                    "| gpu offload | {} |",
+                    runtime.settings.gpu_offload
+                ));
+                if let Some(backend_name) = runtime.backend_name {
+                    rows.push(format!("| runtime backend | `{}` |", backend_name));
+                }
+                if let Some(detail) = runtime.detail {
+                    rows.push(format!("| runtime detail | {} |", detail));
+                }
+                rows.push(format!(
+                    "| cache root | `{}` |",
+                    runtime.cache_root.display()
+                ));
+                rows.push(format!("| model dir | `{}` |", runtime.model_dir.display()));
+            }
+            if let Some(queue) = snapshot.queue {
+                rows.push("| worker model | single active decode |".to_string());
+                rows.push(format!("| worker capacity | {} |", queue.capacity));
+                rows.push(format!("| worker in flight | {} |", queue.in_flight));
+                rows.push(format!("| worker queued | {} |", queue.queued));
+                rows.push(format!(
+                    "| worker busy | {} |",
+                    if queue.worker_busy { "yes" } else { "no" }
+                ));
+            }
+        } else {
+            rows.push("| service status | unavailable |".to_string());
+            if let Some(error) = &self.internal_llm_init_error {
+                rows.push(format!("| init error | {} |", error));
+            }
+        }
+
+        format!(
+            "From: /internal-llm\n| Setting | Value |\n| --- | --- |\n{}\n",
+            rows.join("\n")
+        )
+    }
     fn record_internal_llm_fallback(
         &mut self,
         task_kind: ragent_core::internal_llm::InternalLlmTaskKind,
@@ -2771,6 +2781,13 @@ impl App {
                     .ok()
                     .filter(|k| !k.is_empty())
                     .map(|_| ProviderSource::EnvVar),
+                "foundry_local" => {
+                    if ragent_core::provider::foundry_local_provider::is_foundry_local_available() {
+                        Some(ProviderSource::AutoDiscovered)
+                    } else {
+                        None
+                    }
+                }
                 "azure_foundry" => std::env::var("AZURE_AI_FOUNDRY_API_KEY")
                     .ok()
                     .filter(|k| !k.is_empty())
@@ -4048,6 +4065,32 @@ impl App {
         }]
     }
 
+    /// Synchronously discover models for a provider when an async runtime is available.
+    ///
+    /// This is used by the model picker to populate the list immediately, avoiding
+    /// the "No models available" state that occurs when only async discovery is used.
+    /// Discovered models are cached in storage for subsequent lookups.
+    fn sync_discover_models(&self, provider_id: &str) -> Vec<ModelInfo> {
+        let provider = match self.provider_registry.get(provider_id) {
+            Some(p) => p,
+            None => return Vec::new(),
+        };
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(_) => return Vec::new(),
+        };
+        match tokio::task::block_in_place(|| handle.block_on(provider.discover_models())) {
+            Ok(models) => {
+                self.cache_discovered_models(provider_id, &models);
+                models
+            }
+            Err(e) => {
+                tracing::warn!(provider = %provider_id, error = %e, "Synchronous model discovery failed");
+                Vec::new()
+            }
+        }
+    }
+
     fn resolved_model_entries_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
         let default_entries = || {
             self.provider_registry
@@ -4062,7 +4105,12 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else {
-                    self.selected_model_fallback_entries(provider_id)
+                    let discovered = self.sync_discover_models(provider_id);
+                    if !discovered.is_empty() {
+                        self.picker_entries_from_models(discovered)
+                    } else {
+                        self.selected_model_fallback_entries(provider_id)
+                    }
                 }
             }
             "huggingface" => {
@@ -4070,9 +4118,42 @@ impl App {
                 if !cached.is_empty() {
                     cached
                 } else if self.provider_api_key("huggingface").is_some() {
-                    Vec::new()
+                    let discovered = self.sync_discover_models("huggingface");
+                    if !discovered.is_empty() {
+                        self.picker_entries_from_models(discovered)
+                    } else {
+                        Vec::new()
+                    }
                 } else {
                     self.hf_default_model_entries()
+                }
+            }
+            "azure_foundry" => {
+                let cached = self.cached_model_entries("azure_foundry");
+                if !cached.is_empty() {
+                    cached
+                } else if self.provider_api_key("azure_foundry").is_some() {
+                    let discovered = self.sync_discover_models("azure_foundry");
+                    if !discovered.is_empty() {
+                        self.picker_entries_from_models(discovered)
+                    } else {
+                        default_entries()
+                    }
+                } else {
+                    default_entries()
+                }
+            }
+            "anthropic" | "gemini" | "copilot" => {
+                let cached = self.cached_model_entries(provider_id);
+                if !cached.is_empty() {
+                    cached
+                } else {
+                    let discovered = self.sync_discover_models(provider_id);
+                    if !discovered.is_empty() {
+                        self.picker_entries_from_models(discovered)
+                    } else {
+                        default_entries()
+                    }
                 }
             }
             _ => {
@@ -4089,243 +4170,63 @@ impl App {
         models
     }
 
-    /// Get models available for a given provider.
+    /// Load model entries for a given provider.
+    ///
+    /// Returns cached models if available, otherwise falls back to synchronous
+    /// discovery when an async runtime is present. Providers with static defaults
+    /// (e.g. openai, foundry_local) use those defaults when discovery is
+    /// unavailable. Use [`Self::start_model_discovery`] to trigger an explicit
+    /// async reload with a spinner popup.
     pub fn models_for_provider(&self, provider_id: &str) -> Vec<ModelPickerEntry> {
-        let default_entries = || self.resolved_model_entries_for_provider(provider_id);
+        let mut models = self.resolved_model_entries_for_provider(provider_id);
+        let cached = self.cached_model_entries(provider_id);
+        if !cached.is_empty() {
+            models = cached;
+        }
 
-        let mut models: Vec<ModelPickerEntry> = match provider_id {
-            "ollama" => {
-                let cached = self.cached_model_entries("ollama");
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                    let result = tokio::task::block_in_place(|| {
-                        handle.block_on(ragent_core::provider::ollama::list_ollama_models(None))
-                    });
-                    if let Ok(fetched) = result
-                        && !fetched.is_empty()
-                    {
-                        self.cache_discovered_models("ollama", &fetched);
-                        self.picker_entries_from_models(fetched)
-                    } else if !cached.is_empty() {
-                        cached
-                    } else {
-                        self.selected_model_fallback_entries("ollama")
-                    }
-                } else {
-                    cached
-                }
-            }
-            "ollama_cloud" => {
-                let cached = self.cached_model_entries("ollama_cloud");
-                if let Some(token) = self.ollama_cloud_api_key() {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(
-                                ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
-                                    &token, None,
-                                ),
-                            )
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("ollama_cloud", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else if !cached.is_empty() {
-                            cached
-                        } else {
-                            self.selected_model_fallback_entries("ollama_cloud")
-                        }
-                    } else {
-                        cached
-                    }
-                } else if !cached.is_empty() {
-                    cached
-                } else {
-                    self.selected_model_fallback_entries("ollama_cloud")
-                }
-            }
-            "azure_foundry" => {
-                let cached = self.cached_model_entries("azure_foundry");
-                if let Some(api_key) = self.provider_api_key("azure_foundry") {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(async {
-                                let cfg = ragent_core::config::Config::load().ok();
-                                let base_url = cfg
-                                    .and_then(|c| c.provider.get("azure_foundry").cloned())
-                                    .and_then(|p| p.api.and_then(|a| a.base_url))
-                                    .or_else(|| {
-                                        self.storage
-                                            .get_setting("azure_foundry_api_base")
-                                            .ok()
-                                            .flatten()
-                                            .filter(|s| !s.is_empty())
-                                    })
-                                    .or_else(|| {
-                                        std::env::var("AZURE_AI_FOUNDRY_BASE")
-                                            .ok()
-                                            .filter(|s| !s.is_empty())
-                                    })
-                                    .unwrap_or_else(|| "https://services.ai.azure.com".to_string());
-                                ragent_core::provider::azure_foundry::discover_azure_foundry_models(
-                                    &api_key, &base_url,
-                                )
-                                .await
-                            })
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("azure_foundry", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else if !cached.is_empty() {
-                            cached
-                        } else {
-                            default_entries()
-                        }
-                    } else {
-                        cached
-                    }
-                } else if !cached.is_empty() {
-                    cached
-                } else {
-                    default_entries()
-                }
-            }
-            "anthropic" => {
-                let cached = self.cached_model_entries("anthropic");
-                if let Some(api_key) = self.provider_api_key("anthropic") {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(
-                                ragent_core::provider::anthropic::list_anthropic_models(
-                                    &api_key, None,
-                                ),
-                            )
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("anthropic", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else if !cached.is_empty() {
-                            cached
-                        } else {
-                            default_entries()
-                        }
-                    } else if !cached.is_empty() {
-                        cached
-                    } else {
-                        default_entries()
-                    }
-                } else if !cached.is_empty() {
-                    cached
-                } else {
-                    default_entries()
-                }
-            }
-            "gemini" => {
-                let cached = self.cached_model_entries("gemini");
-                if let Some(api_key) = self.provider_api_key("gemini") {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(ragent_core::provider::gemini::list_gemini_models(
-                                &api_key, None,
-                            ))
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("gemini", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else if !cached.is_empty() {
-                            cached
-                        } else {
-                            default_entries()
-                        }
-                    } else if !cached.is_empty() {
-                        cached
-                    } else {
-                        default_entries()
-                    }
-                } else if !cached.is_empty() {
-                    cached
-                } else {
-                    default_entries()
-                }
-            }
-            "copilot" => {
-                let cached = self.cached_model_entries("copilot");
-                let token = self
-                    .storage
-                    .get_provider_auth("copilot")
-                    .ok()
-                    .flatten()
-                    .filter(|k| !k.is_empty())
-                    .or_else(|| {
-                        let _storage = self.storage.clone();
-                        let db_lookup = move || -> Option<String> { None };
-                        ragent_core::provider::copilot::resolve_copilot_github_token(Some(
-                            &db_lookup,
-                        ))
-                    });
-                if let Some(token) = token {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(ragent_core::provider::copilot::list_copilot_models(
-                                &token,
-                            ))
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("copilot", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else {
-                            cached
-                        }
-                    } else {
-                        cached
-                    }
-                } else {
-                    cached
-                }
-            }
-            "huggingface" => {
-                let cached = self.cached_model_entries("huggingface");
-                if let Some(token) = self.provider_api_key("huggingface") {
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let result = tokio::task::block_in_place(|| {
-                            handle.block_on(ragent_core::provider::huggingface::discover_models(
-                                &token,
-                            ))
-                        });
-                        if let Ok(fetched) = result
-                            && !fetched.is_empty()
-                        {
-                            self.cache_discovered_models("huggingface", &fetched);
-                            self.picker_entries_from_models(fetched)
-                        } else if !cached.is_empty() {
-                            cached
-                        } else {
-                            Vec::new()
-                        }
-                    } else if !cached.is_empty() {
-                        cached
-                    } else {
-                        Vec::new()
-                    }
-                } else if !cached.is_empty() {
-                    cached
-                } else {
-                    self.hf_default_model_entries()
-                }
-            }
-            _ => default_entries(),
-        };
-        // Sort models alphabetically by name
+        if models.is_empty() {
+            return self.selected_model_fallback_entries(provider_id);
+        }
+
         models.sort_by(|a, b| a.name.cmp(&b.name));
         models
+    }
+
+    /// Start an async background discovery for the given provider.
+    ///
+    /// Publishes [`Event::ProviderLoadingStarted`] immediately and
+    /// [`Event::ProviderLoadingFinished`] when discovery completes.
+    pub fn start_model_discovery(&self, provider_id: String, provider_name: String) {
+        let registry = self.provider_registry.clone();
+        let event_bus = self.event_bus.clone();
+        event_bus.publish(Event::ProviderLoadingStarted {
+            provider_id: provider_id.clone(),
+            provider_name: provider_name.clone(),
+        });
+        tokio::spawn(async move {
+            let result = registry.get(&provider_id).map(|p| p.discover_models());
+            let (models, error) = match result {
+                Some(fut) => match fut.await {
+                    Ok(m) => (
+                        m.into_iter()
+                            .map(|model| serde_json::to_value(model).unwrap_or_default())
+                            .collect(),
+                        None,
+                    ),
+                    Err(e) => (Vec::new(), Some(format!("{e:#}"))),
+                },
+                None => (
+                    Vec::new(),
+                    Some(format!("Provider '{}' is not registered", provider_id)),
+                ),
+            };
+            event_bus.publish(Event::ProviderLoadingFinished {
+                provider_id,
+                provider_name,
+                models,
+                error,
+            });
+        });
     }
 
     /// Returns a human-readable `"provider / model"` label, or `None` if no model is selected.
@@ -8587,37 +8488,55 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                 }
             }
             "yolo" => {
-                let new_state = ragent_config::yolo::toggle();
-                let label = if new_state {
-                    "ENABLED ⚠️"
-                } else {
-                    "disabled"
-                };
-                let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
-                if new_state {
-                    output.push_str(
-                        "All command validation is now **bypassed**:\n\
-                         - Bash denied-pattern checks — **off**\n\
-                         - Dynamic context allowlist — **off**\n\
-                         - MCP config validation — **off**\n\
-                         - Obfuscation detection — **off**\n\n\
-                         ⚠️  The agent can now execute **any** command without restriction.\n\
-                         Use `/yolo` again to re-enable safety checks.\n",
-                    );
-                } else {
-                    output.push_str("All safety checks have been **re-enabled**.\n");
-                }
-                self.append_assistant_text(&output);
+                match ragent_config::yolo::toggle_persist() {
+                    Ok(new_state) => {
+                        let label = if new_state {
+                            "ENABLED ⚠️"
+                        } else {
+                            "disabled"
+                        };
+                        let mut output =
+                            format!("From: /yolo\n## YOLO mode {label}\n\n");
+                        if new_state {
+                            output.push_str(
+                                "All command validation is now **bypassed**:\n\
+                                 - Bash denied-pattern checks — **off**\n\
+                                 - Dynamic context allowlist — **off**\n\
+                                 - MCP config validation — **off**\n\
+                                 - Obfuscation detection — **off**\n\n\
+                                 ⚠️  The agent can now execute **any** command without restriction.\n\
+                                 Use `/yolo` again to re-enable safety checks.\n",
+                            );
+                        } else {
+                            output.push_str(
+                                "All safety checks have been **re-enabled**.\n",
+                            );
+                        }
+                        self.append_assistant_text(&output);
 
-                self.status = format!("YOLO mode {label}");
-                self.push_log_no_agent(
-                    if new_state {
-                        LogLevel::Warn
-                    } else {
-                        LogLevel::Info
-                    },
-                    format!("YOLO mode {label}"),
-                );
+                        self.status = format!("YOLO mode {label}");
+                        self.push_log_no_agent(
+                            if new_state {
+                                LogLevel::Warn
+                            } else {
+                                LogLevel::Info
+                            },
+                            format!("YOLO mode {label}"),
+                        );
+                    }
+                    Err(e) => {
+                        self.status =
+                            format!("⚠ failed to persist YOLO mode: {e}");
+                        self.append_assistant_text(&format!(
+                            "From: /yolo\n⚠ Failed to persist YOLO mode: {e}\n"
+                        ));
+                        self.push_log_no_agent(
+                            LogLevel::Error,
+                            format!("YOLO persist failed: {e}"),
+                        );
+                    }
+                }
+                self.needs_redraw = true;
             }
             // ── /swarm ──────────────────────────────────────────────────────
             "swarm" => {
@@ -12132,12 +12051,35 @@ Type `/swarm help` for more info.\n";
                     }
                 }
                 InputAction::ToggleYolo => {
-                    let enabled = ragent_config::yolo::toggle();
-                    self.status = if enabled {
-                        "YOLO mode enabled".to_string()
-                    } else {
-                        "YOLO mode disabled".to_string()
-                    };
+                    match ragent_config::yolo::toggle_persist() {
+                        Ok(enabled) => {
+                            self.status = if enabled {
+                                "YOLO mode enabled".to_string()
+                            } else {
+                                "YOLO mode disabled".to_string()
+                            };
+                            self.push_log_no_agent(
+                                if enabled {
+                                    LogLevel::Warn
+                                } else {
+                                    LogLevel::Info
+                                },
+                                format!(
+                                    "YOLO mode {}",
+                                    if enabled { "enabled" } else { "disabled" }
+                                ),
+                            );
+                        }
+                        Err(e) => {
+                            self.status =
+                                format!("⚠ failed to persist YOLO mode: {e}");
+                            self.push_log_no_agent(
+                                LogLevel::Error,
+                                format!("YOLO persist failed: {e}"),
+                            );
+                        }
+                    }
+                    self.needs_redraw = true;
                 }
                 InputAction::OutputViewPageUp => {
                     self.scroll_output_view_by(-5);
@@ -13457,6 +13399,141 @@ Type `/swarm help` for more info.\n";
             }
             Event::UserInput { ref session_id, .. } if self.is_current_session(session_id) => {
                 self.set_status_working("processing");
+            }
+            // ── Provider model-list loading (spinner popup) ──────────────────
+            Event::ProviderLoadingStarted {
+                ref provider_id,
+                ref provider_name,
+            } => {
+                self.model_loading_state = Some(ModelLoadingState {
+                    provider_id: provider_id.clone(),
+                    provider_name: provider_name.clone(),
+                    started_at: std::time::Instant::now(),
+                });
+            }
+            Event::ProviderLoadingFinished {
+                ref provider_id,
+                ref provider_name,
+                ref models,
+                ref error,
+            } => {
+                self.model_loading_state = None;
+                let parsed_models: Vec<ModelInfo> = models
+                    .iter()
+                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                    .collect();
+                self.cache_discovered_models(provider_id, &parsed_models);
+                if let Some(err) = error {
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("{} model discovery failed: {}", provider_name, err),
+                    );
+                    self.status = format!("{}: discovery failed", provider_name);
+                } else {
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!(
+                            "{} model discovery finished ({} models)",
+                            provider_name,
+                            parsed_models.len()
+                        ),
+                    );
+                }
+                // Advance the provider-setup dialog if it is waiting on this provider.
+                if let Some(ProviderSetupStep::LoadingModels {
+                    provider_id: ref pid,
+                    ..
+                }) = self.provider_setup
+                {
+                    if pid == provider_id {
+                        let entries = self.picker_entries_from_models(parsed_models);
+                        self.provider_setup = Some(ProviderSetupStep::SelectModel {
+                            provider_id: provider_id.clone(),
+                            provider_name: provider_name.clone(),
+                            models: entries,
+                            selected: 0,
+                        });
+                    }
+                }
+            }
+            // ── Model download progress (progress bar popup) ───────────────
+            Event::ModelDownloadStarted {
+                ref provider_id,
+                ref model_id,
+                ..
+            } => {
+                let _provider_name = self
+                    .provider_registry
+                    .get(provider_id)
+                    .map(|p| p.name().to_string())
+                    .unwrap_or_else(|| provider_id.clone());
+                self.model_download_state = Some(ModelDownloadState {
+                    provider_id: provider_id.clone(),
+                    model_id: model_id.clone(),
+                    percent: 0.0,
+                    started_at: std::time::Instant::now(),
+                });
+            }
+            Event::ModelDownloadProgress {
+                ref provider_id,
+                ref model_id,
+                percent,
+                ..
+            } => {
+                if let Some(ref mut state) = self.model_download_state {
+                    if state.provider_id == *provider_id && state.model_id == *model_id {
+                        state.percent = percent;
+                    }
+                }
+            }
+            Event::ModelDownloadFinished {
+                ref provider_id,
+                ref model_id,
+                ref session_id,
+                ref error,
+            } => {
+                self.model_download_state = None;
+                if let Some(err) = error {
+                    let display_name = self
+                        .provider_registry
+                        .get(provider_id)
+                        .map(|p| p.name().to_string())
+                        .unwrap_or_else(|| provider_id.clone());
+                    self.push_log_no_agent(
+                        LogLevel::Error,
+                        format!("Download failed for {}/{}: {}", provider_id, model_id, err),
+                    );
+                    if self.is_current_session(session_id) {
+                        self.status = format!("download failed: {}", model_id);
+                        self.append_assistant_text(&format!(
+                                        "⚠️ **Model download failed**\n\nProvider: `{}`\nModel: `{}`\nError: {}",
+                                        display_name, model_id, err
+                                    ));
+                    }
+                } else {
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!("Download finished for {}/{}", provider_id, model_id),
+                    );
+                }
+            } // ── Service start errors (e.g. Foundry Local failed to start) ────
+            Event::ServiceStartError {
+                ref session_id,
+                ref service,
+                ref command_path,
+                ref stdout,
+                ref stderr,
+                ref error,
+            } => {
+                let summary = format!(
+                    "⚠️ **{} failed to start**\n\nCommand: `{}`\nError: {}\n\nstdout:\n```\n{}\n```\n\nstderr:\n```\n{}\n```",
+                    service, command_path, error, stdout, stderr
+                );
+                self.push_log_no_agent(LogLevel::Error, summary.clone());
+                if self.is_current_session(session_id) {
+                    self.append_assistant_text(&summary);
+                    self.status = format!("{} failed to start", service);
+                }
             }
             _ => {}
         }

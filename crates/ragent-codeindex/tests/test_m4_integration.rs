@@ -22,12 +22,12 @@ fn create_project() -> TempDir {
 
     fs::write(
         src.join("lib.rs"),
-        r#"
+        r"
 /// Sample function for testing.
 pub fn sample_function() -> u32 {
     42
 }
-"#,
+",
     )
     .unwrap();
 
@@ -129,7 +129,7 @@ fn test_watcher_ignores_git_dir() {
 
     fs::write(git_dir.join("HEAD"), "ref: refs/heads/main").unwrap();
 
-    match rx.recv_timeout(Duration::from_millis(1000)) {
+    match rx.recv_timeout(Duration::from_secs(1)) {
         Err(mpsc::RecvTimeoutError::Timeout) => {} // Expected
         Ok(ev) => panic!("should not receive .git events, got: {ev:?}"),
         Err(e) => panic!("unexpected channel error: {e}"),
@@ -413,7 +413,7 @@ fn test_rename_event_via_worker() {
     // "Rename" by creating a new file and deleting the old one.
     fs::write(
         dir.path().join("src/renamed.rs"),
-        r#"pub fn sample_function() -> u32 { 42 }"#,
+        r"pub fn sample_function() -> u32 { 42 }",
     )
     .unwrap();
 

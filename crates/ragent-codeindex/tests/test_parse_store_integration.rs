@@ -75,7 +75,7 @@ fn test_greet() {
     // A file with a trait and enum
     fs::write(
         root.join("src/types.rs"),
-        r#"
+        r"
 /// Severity levels for log messages.
 pub enum Severity {
     Info,
@@ -95,7 +95,7 @@ pub mod inner {
         true
     }
 }
-"#,
+",
     )
     .unwrap();
 
@@ -151,11 +151,16 @@ fn test_full_pipeline_scan_parse_store() {
     let (store, indexed_files) = index_project(&dir);
 
     // We should have indexed 3 Rust files
-    let rust_files: Vec<_> = indexed_files
-        .iter()
-        .filter(|(p, _)| p.ends_with(".rs"))
-        .collect();
-    assert_eq!(rust_files.len(), 3, "should index 3 Rust files");
+    assert_eq!(
+        indexed_files
+            .iter()
+            .filter(
+                |(p, _)| std::path::Path::new(p).extension().and_then(|e| e.to_str()) == Some("rs")
+            )
+            .count(),
+        3,
+        "should index 3 Rust files"
+    );
 
     // Should have extracted a meaningful number of symbols
     let total = store.symbol_count().unwrap();

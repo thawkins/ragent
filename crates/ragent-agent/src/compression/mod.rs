@@ -1,14 +1,13 @@
 //! Context-aware compression using the Headroom crate ecosystem.
 //!
 //! This module provides content-aware, reversible compression for conversation
-//! history, replacing the naive `compact_history_with_atomic_tool_calls`
-//! truncation with intelligent compression that preserves the most relevant
-//! parts of every message.
+//! history, replacing the legacy truncation fallback with intelligent
+//! compression that preserves the most relevant parts of every message.
 //!
 //! # Feature flag
 //!
 //! This entire module is gated behind the `compression` Cargo feature flag.
-//! When disabled, the agent falls back to the existing compaction logic.
+//! When disabled, no automatic context reduction is performed.
 //!
 //! # Architecture
 //!

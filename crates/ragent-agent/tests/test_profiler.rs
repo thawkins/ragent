@@ -1,5 +1,7 @@
 //! Tests for the agent-loop profiler.
 
+#![allow(clippy::float_cmp)] // integer millisecond values are represented exactly
+
 use std::sync::Arc;
 
 use ragent_agent::session::profiler::AgentLoopProfiler;

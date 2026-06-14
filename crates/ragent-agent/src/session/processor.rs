@@ -831,6 +831,11 @@ impl SessionProcessor {
                         .map(String::from)
                 })
                 .filter(|s| !s.trim().is_empty()),
+            "foundry_local" => {
+                // Foundry Local options (auto_start, device, models_path) are read from
+                // ragent.json and merged into the create_client options below.
+                None
+            }
             _ => None,
         };
         tracing::info!(
@@ -847,12 +852,41 @@ impl SessionProcessor {
                 "model_id".to_string(),
                 serde_json::Value::String(model_ref.model_id.clone()),
             );
+
+            // Merge provider-specific config options (e.g. foundry_local auto_start/device/models_path).
+            if let Ok(cfg) = crate::Config::load() {
+                if let Some(provider_cfg) = cfg.provider.get(&model_ref.provider_id) {
+                    if let Some(auto_start) = provider_cfg.options.get("auto_start") {
+                        options.insert("auto_start".to_string(), auto_start.clone());
+                    }
+                    if let Some(device) = provider_cfg.options.get("device") {
+                        options.insert("device".to_string(), device.clone());
+                    }
+                    if let Some(models_path) = provider_cfg.options.get("models_path") {
+                        options.insert("models_path".to_string(), models_path.clone());
+                    }
+                }
+            }
+
             match provider
                 .create_client(&api_key, base_url.as_deref(), &options)
                 .await
             {
                 Ok(c) => c,
                 Err(e) => {
+                    // Check if the error is a FoundryServiceError — if so, also
+                    // publish a ServiceStartError event so the TUI can show a
+                    // detailed dialog with the command path and captured output.
+                    if let Some(fse) = e.downcast_ref::<ragent_llm::provider::foundry_local_error::FoundryServiceError>() {
+                        self.event_bus.publish(Event::ServiceStartError {
+                            session_id: session_id.to_string(),
+                            service: "Foundry Local".to_string(),
+                            command_path: fse.command_path.clone(),
+                            stdout: fse.stdout.clone(),
+                            stderr: fse.stderr.clone(),
+                            error: fse.error.clone(),
+                        });
+                    }
                     let err = e.to_string();
                     publish_error(&self.event_bus, session_id, &user_msg.id, &err);
                     return Err(e);
@@ -1079,13 +1113,17 @@ impl SessionProcessor {
             }
         }
 
-        // 4. Build chat messages from history with context window awareness
+        // 4. Build chat messages from history with context window awareness.
+        //    The Headroom compression pipeline is the only automatic context-
+        //    reduction path; the legacy truncation-based compaction fallback
+        //    has been removed. When compression is not compiled in, history is
+        //    passed through unchanged.
         let history = {
             let _scope = profiler.scope("history.load");
             self.session_manager.get_messages(session_id)?
         };
 
-        // Get model's context window size for potential compaction
+        #[cfg(feature = "compression")]
         let context_window = self
             .provider_registry
             .get(&model_ref.provider_id)
@@ -1095,115 +1133,37 @@ impl SessionProcessor {
                     .find(|m| m.id == model_ref.model_id)
             })
             .map(|m| m.context_window)
-            .unwrap_or(128_000); // Default fallback
+            .unwrap_or(128_000);
 
-        // Compact history if needed to prevent context window overflow.
-        // When the compression feature is enabled and the config allows it,
-        // use the Headroom compression pipeline (FR-005, FR-006).
-        // Otherwise fall back to the existing truncation-based compaction (FR-009).
-        let compacted_history = {
-            let _scope = profiler.scope("history.compact");
-            let max_tokens = context_window.saturating_sub(1000);
-
-            // Try Headroom compression if the feature is enabled.
-            #[cfg(feature = "compression")]
-            let compacted_history = {
-                let compression_config = &session_config.compression;
-                if compression_config.enabled {
-                    // Use the Headroom compression pipeline for content-aware,
-                    // reversible compression (FR-005, FR-006).
-                    let result = crate::compression::pipeline::compress_history(
-                        &history,
-                        context_window,
-                        8192,
-                        compression_config,
+        #[cfg(feature = "compression")]
+        let history = {
+            let compression_config = &session_config.compression;
+            if compression_config.enabled {
+                let _scope = profiler.scope("history.compress");
+                let result = crate::compression::pipeline::compress_history(
+                    &history,
+                    context_window,
+                    8192,
+                    compression_config,
+                );
+                if result.stats.original_tokens > result.stats.compressed_tokens {
+                    tracing::info!(
+                        original_tokens = result.stats.original_tokens,
+                        compressed_tokens = result.stats.compressed_tokens,
+                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+                        ccr_entries = result.stats.ccr_entries_stashed,
+                        messages_compressed = result.stats.messages_compressed,
+                        "Compressed history with Headroom pipeline"
                     );
-                    if result.stats.original_tokens > result.stats.compressed_tokens {
-                        tracing::info!(
-                            original_tokens = result.stats.original_tokens,
-                            compressed_tokens = result.stats.compressed_tokens,
-                            compression_ratio = format!("{:.2}", result.stats.compression_ratio),
-                            ccr_entries = result.stats.ccr_entries_stashed,
-                            messages_compressed = result.stats.messages_compressed,
-                            "Compressed history with Headroom pipeline"
-                        );
-                    }
-                    result.messages
-                } else {
-                    // Compression disabled in config — fall back to truncation (FR-009).
-                    let quick_total_tokens: usize = history
-                        .iter()
-                        .map(|m| {
-                            let text_len: usize = m
-                                .parts
-                                .iter()
-                                .map(|p| match p {
-                                    MessagePart::Text { text } => text.len(),
-                                    MessagePart::ToolCall { tool, state, .. } => {
-                                        tool.len()
-                                            + state
-                                                .output
-                                                .as_ref()
-                                                .and_then(|v| v.as_str())
-                                                .map(|s| s.len())
-                                                .unwrap_or(0)
-                                            + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                                    }
-                                    MessagePart::Image { .. } => 1000,
-                                    MessagePart::Reasoning { text } => text.len(),
-                                })
-                                .sum();
-                            text_len / 4 + 10
-                        })
-                        .sum();
-                    if quick_total_tokens <= max_tokens {
-                        history.to_vec()
-                    } else {
-                        compact_history_with_atomic_tool_calls(&history, context_window, 8192)
-                    }
                 }
-            };
-
-            // When the compression feature is not compiled in, always use truncation.
-            #[cfg(not(feature = "compression"))]
-            let compacted_history = {
-                let quick_total_tokens: usize = history
-                    .iter()
-                    .map(|m| {
-                        let text_len: usize = m
-                            .parts
-                            .iter()
-                            .map(|p| match p {
-                                MessagePart::Text { text } => text.len(),
-                                MessagePart::ToolCall { tool, state, .. } => {
-                                    tool.len()
-                                        + state
-                                            .output
-                                            .as_ref()
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.len())
-                                            .unwrap_or(0)
-                                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                                }
-                                MessagePart::Image { .. } => 1000,
-                                MessagePart::Reasoning { text } => text.len(),
-                            })
-                            .sum();
-                        text_len / 4 + 10
-                    })
-                    .sum();
-                if quick_total_tokens <= max_tokens {
-                    history.to_vec()
-                } else {
-                    compact_history_with_atomic_tool_calls(&history, context_window, 8192)
-                }
-            };
-
-            compacted_history
+                result.messages
+            } else {
+                history
+            }
         };
-        let mut chat_messages = history_to_chat_messages(&compacted_history).await; // 4b. AGENTS.md init exchange — on the first message of a session,        // prompt the model to acknowledge project guidelines so its output
-        // appears in the message window.
-        // Note: history already contains the user message we just stored,
+        // When the compression feature is not compiled in, no context reduction
+        // is performed. Build with `--features compression` to enable it.
+        let mut chat_messages = history_to_chat_messages(&history).await; // Note: history already contains the user message we just stored,
         // so we check for the absence of any assistant messages instead.
         // The init exchange is display-only: it streams to the TUI but is
         // NOT added to chat_messages so the actual LLM call isn't confused.
@@ -1295,7 +1255,7 @@ impl SessionProcessor {
         }
 
         // 5. Agent loop
-        let max_steps = agent.max_steps.unwrap_or(500) as usize;
+        let max_steps = agent.max_steps.unwrap_or(1024) as usize;
         // Reset step counter for this session so warnings are relative to this run.
         self.event_bus.set_step(session_id, 0);
         // Single-step agents (e.g. "chat") don't use tools — omit definitions
@@ -1391,6 +1351,33 @@ impl SessionProcessor {
             let max_retries = self.stream_config.max_retries;
             let backoff_secs = self.stream_config.retry_backoff_secs;
             let llm_request_start = std::time::Instant::now();
+
+            // Re-check the context window before every LLM call. The payload
+            // grows each turn with assistant tool uses and tool results, so a
+            // one-time compression at the start of the run is not enough to
+            // prevent the model's context window from overflowing (FR-005).
+            #[cfg(feature = "compression")]
+            if session_config.compression.enabled {
+                let _scope = profiler.scope("history.compress");
+                let result = crate::compression::pipeline::compress_chat_messages(
+                    &chat_messages,
+                    context_window,
+                    8192,
+                    &session_config.compression,
+                );
+                if result.stats.original_tokens > result.stats.compressed_tokens {
+                    tracing::info!(
+                        original_tokens = result.stats.original_tokens,
+                        compressed_tokens = result.stats.compressed_tokens,
+                        compression_ratio = format!("{:.2}", result.stats.compression_ratio),
+                        ccr_entries = result.stats.ccr_entries_stashed,
+                        messages_compressed = result.stats.messages_compressed,
+                        "Compressed chat messages with Headroom pipeline"
+                    );
+                }
+                chat_messages = result.chat_messages;
+            }
+
             let mut text_buffer = String::new();
             let mut reasoning_buffer = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
@@ -1486,6 +1473,7 @@ impl SessionProcessor {
 
                     let mut had_retryable_error = false;
                     let mut first_stream_event_pending = true;
+                    let mut fatal_stream_error: Option<String> = None;
                     let mut stream_buffer = StreamBuffer::new();
                     {
                         let _scope = profiler.scope("loop.llm.stream");
@@ -1641,10 +1629,15 @@ impl SessionProcessor {
                                             ),
                                         });
                                     } else {
+                                        // Fatal stream error: there is no point
+                                        // continuing the agent loop, because the
+                                        // model never produced a Finish or any
+                                        // usable output.
                                         self.event_bus.publish(Event::AgentError {
                                             session_id: session_id.to_string(),
-                                            error: message,
+                                            error: message.clone(),
                                         });
+                                        fatal_stream_error = Some(message);
                                     }
                                 }
                                 StreamEvent::RateLimit {
@@ -1670,6 +1663,22 @@ impl SessionProcessor {
                     if had_retryable_error {
                         continue 'retry;
                     }
+
+                    if let Some(error) = fatal_stream_error {
+                        let error_message = error.clone();
+                        crate::hooks::fire_hooks(
+                            &parsed_hook_configs,
+                            crate::hooks::HookTrigger::OnError,
+                            &working_dir,
+                            &[("RAGENT_ERROR", &error_message)],
+                        );
+                        bail!(
+                            "LLM stream failed (attempt {}): {}",
+                            attempt + 1,
+                            error_message
+                        );
+                    }
+
                     break;
                 }
             }
@@ -2745,6 +2754,11 @@ impl SessionProcessor {
             return Ok(std::env::var("OLLAMA_API_KEY").unwrap_or_default());
         }
 
+        // Foundry Local does not require an API key — it's a local service
+        if provider_id == "foundry_local" {
+            return Ok(String::new());
+        }
+
         // Copilot: prefer DB-stored device flow token (works for token
         // exchange), then fall back to env var → IDE → gh CLI discovery.
         if provider_id == "copilot" {
@@ -2948,137 +2962,6 @@ async fn history_to_chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
     chat_messages
 }
 
-/// Compacts message history to fit within a context window while ensuring
-/// tool call atomicity - tool calls and their results are never split across
-/// compaction boundaries.
-///
-/// This function trims messages from the beginning (oldest first) until the
-/// estimated token count is below the threshold. It ensures that when a
-/// message containing tool calls is retained, the corresponding tool result
-/// messages are also retained, preventing incomplete tool call pairs.
-pub fn compact_history_with_atomic_tool_calls(
-    messages: &[Message],
-    context_window: usize,
-    _max_output_tokens: usize,
-) -> Vec<Message> {
-    if messages.is_empty() {
-        return Vec::new();
-    }
-
-    // Rough token estimation: ~4 chars per token on average
-    const CHARS_PER_TOKEN: usize = 4;
-
-    // Calculate estimated tokens for a message
-    let estimate_tokens = |msg: &Message| -> usize {
-        let text_len: usize = msg
-            .parts
-            .iter()
-            .map(|p| match p {
-                MessagePart::Text { text } => text.len(),
-                MessagePart::ToolCall { tool, state, .. } => {
-                    tool.len()
-                        + state
-                            .output
-                            .as_ref()
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.len())
-                            .unwrap_or(0)
-                        + state.error.as_ref().map(|s| s.len()).unwrap_or(0)
-                }
-                MessagePart::Image { .. } => 1000, // Rough estimate for image
-                MessagePart::Reasoning { text } => text.len(),
-            })
-            .sum();
-        text_len / CHARS_PER_TOKEN + 10 // Base overhead per message
-    };
-
-    // Build a map of tool call IDs to their result indices
-    let mut tool_call_indices: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
-    for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Role::Assistant {
-            for part in &msg.parts {
-                if let MessagePart::ToolCall { call_id, .. } = part {
-                    tool_call_indices.insert(call_id.clone(), idx);
-                }
-            }
-        }
-    }
-
-    // Calculate total estimated tokens
-    let total_tokens: usize = messages.iter().map(estimate_tokens).sum();
-    let max_tokens = context_window.saturating_sub(1000); // Leave headroom
-
-    if total_tokens <= max_tokens {
-        return messages.to_vec();
-    }
-
-    // Build prefix sums of token counts for O(1) range queries
-    let mut prefix: Vec<usize> = Vec::with_capacity(messages.len() + 1);
-    prefix.push(0);
-    for msg in messages {
-        prefix.push(prefix.last().unwrap() + estimate_tokens(msg));
-    }
-
-    // Identify atomic groups: each tool call in an assistant message + the
-    // corresponding user message that carries the result.
-    let mut protected: Vec<bool> = vec![false; messages.len()];
-    for (idx, msg) in messages.iter().enumerate() {
-        if msg.role == Role::Assistant {
-            let has_tool_calls = msg
-                .parts
-                .iter()
-                .any(|p| matches!(p, MessagePart::ToolCall { .. }));
-            if has_tool_calls {
-                protected[idx] = true; // The assistant call
-                if idx + 1 < messages.len() {
-                    protected[idx + 1] = true; // The user result that follows
-                }
-            }
-        }
-    }
-
-    // Find the largest suffix (keep from `cut` to end) that stays under the
-    // token budget.  We try `cut` values from oldest → newest so that we
-    // drop as much as necessary while keeping the most recent context.
-    let mut best_cut = messages.len(); // Start with 0 messages kept
-    for cut in 0..messages.len() {
-        // Count how many protected messages we would drop in [cut, end)
-        let dropped_protected = &protected[cut..messages.len()]
-            .iter()
-            .filter(|&&p| p)
-            .count();
-        if *dropped_protected > 0 {
-            continue; // Can't cut here without splitting a tool call pair
-        }
-
-        let suffix_tokens = prefix[messages.len()] - prefix[cut];
-        if suffix_tokens <= max_tokens {
-            best_cut = cut;
-            break; // First valid cut from the left = drops the most
-        }
-    }
-
-    // If no valid cut found (even 1 message is over budget), keep just the last message
-    if best_cut == messages.len() {
-        best_cut = messages.len().saturating_sub(1);
-    }
-
-    let trimmed: Vec<Message> = messages[best_cut..].to_vec();
-    let final_tokens: usize = trimmed.iter().map(estimate_tokens).sum();
-
-    tracing::debug!(
-        original_count = messages.len(),
-        trimmed_count = trimmed.len(),
-        original_tokens = total_tokens,
-        final_tokens = final_tokens,
-        cut_at = best_cut,
-        "Compacted message history"
-    );
-
-    trimmed
-}
-
 fn truncate_at_char_boundary(text: &str, max_chars: usize) -> &str {
     if text.chars().count() <= max_chars {
         return text;
@@ -3230,6 +3113,14 @@ pub(crate) fn is_permanent_llm_api_error(error_msg: &str) -> bool {
         || lower.contains("model_not_supported")
         || lower.contains("access denied for model")
         || lower.contains("invalid or expired api token")
+        || lower.contains("not known to microsoft foundry local")
+        || lower.contains("could not prepare model")
+        || lower.contains("model is not loaded")
+        || lower.contains("is not loaded")
+        || lower.contains("please load the model")
+        || lower.contains("no models loaded")
+        || lower.contains("empty/malformed event stream")
+        || lower.contains("response stream ended without producing any events")
     {
         return true;
     }
@@ -3247,6 +3138,19 @@ pub(crate) fn is_permanent_llm_api_error(error_msg: &str) -> bool {
 /// conditions.
 fn is_retryable_stream_error(message: &str) -> bool {
     let lower = message.to_lowercase();
+
+    // These Foundry Local-specific diagnostics indicate the model is not loaded,
+    // the service returned an empty body, or inference crashed (e.g. OOM).
+    // They are not transient and should not be retried.
+    if lower.contains("empty/malformed event stream")
+        || lower.contains("response stream ended without producing any events")
+        || lower.contains("model is not loaded")
+        || lower.contains("is not loaded")
+        || lower.contains("no models loaded")
+    {
+        return false;
+    }
+
     lower.contains("stall")
         || lower.contains("error decoding response body")
         || lower.contains("connection reset")

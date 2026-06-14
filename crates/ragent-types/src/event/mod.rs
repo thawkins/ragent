@@ -180,12 +180,90 @@ pub enum Event {
         /// Human-readable summary of what was accomplished.
         summary: String,
     },
+    /// A recoverable notice occurred in the agent loop.
+    AgentNotice {
+        /// Session in which the notice occurred.
+        session_id: String,
+        /// Human-readable notice description.
+        message: String,
+    },
     /// An unrecoverable error occurred in the agentic loop.
     AgentError {
         /// Session in which the error occurred.
         session_id: String,
         /// Human-readable error description.
         error: String,
+    },
+    /// A service (e.g. Foundry Local) failed to start within the timeout.
+    ///
+    /// Carries structured diagnostics so the TUI can show a detailed error
+    /// dialog with the command path and captured output.
+    ServiceStartError {
+        /// Session in which the error occurred.
+        session_id: String,
+        /// Name of the service (e.g. `"Foundry Local"`).
+        service: String,
+        /// Full path of the command that was run.
+        command_path: String,
+        /// Captured standard output from the command.
+        stdout: String,
+        /// Captured standard error from the command.
+        stderr: String,
+        /// Human-readable summary of the failure.
+        error: String,
+    },
+    // ── Provider model-list loading (TUI spinner) ────────────────────────
+    /// The TUI has started loading the model list for a provider.
+    ProviderLoadingStarted {
+        /// Provider identifier (e.g. `"foundry_local"`).
+        provider_id: String,
+        /// Human-readable provider name.
+        provider_name: String,
+    },
+    /// The TUI finished loading the model list for a provider.
+    ProviderLoadingFinished {
+        /// Provider identifier.
+        provider_id: String,
+        /// Human-readable provider name.
+        provider_name: String,
+        /// Models discovered, serialized as JSON values.
+        /// Empty when discovery failed or returned no models.
+        models: Vec<serde_json::Value>,
+        /// Error message if model discovery failed.
+        error: Option<String>,
+    },
+
+    // ── Model download progress (e.g. Foundry Local) ─────────────────────
+    /// A local provider started downloading a model.
+    ModelDownloadStarted {
+        /// Provider identifier.
+        provider_id: String,
+        /// Model identifier being downloaded.
+        model_id: String,
+        /// Session that triggered the download.
+        session_id: String,
+    },
+    /// Progress update while a local provider downloads a model.
+    ModelDownloadProgress {
+        /// Provider identifier.
+        provider_id: String,
+        /// Model identifier being downloaded.
+        model_id: String,
+        /// Session that triggered the download.
+        session_id: String,
+        /// Download progress from 0.0 to 100.0.
+        percent: f32,
+    },
+    /// A local provider finished downloading a model.
+    ModelDownloadFinished {
+        /// Provider identifier.
+        provider_id: String,
+        /// Model identifier that was downloaded.
+        model_id: String,
+        /// Session that triggered the download.
+        session_id: String,
+        /// Error message if the download failed.
+        error: Option<String>,
     },
     /// An MCP server's connection status changed.
     McpStatusChanged {
@@ -575,7 +653,9 @@ impl Event {
             Self::AgentSwitchRequested { .. } => "AgentSwitchRequested",
             Self::AgentRestoreRequested { .. } => "AgentRestoreRequested",
             Self::TaskCompleted { .. } => "TaskCompleted",
+            Self::AgentNotice { .. } => "AgentNotice",
             Self::AgentError { .. } => "AgentError",
+            Self::ServiceStartError { .. } => "ServiceStartError",
             Self::McpStatusChanged { .. } => "McpStatusChanged",
             Self::TokenUsage { .. } => "TokenUsage",
             Self::RequestStarted { .. } => "RequestStarted",
@@ -610,6 +690,11 @@ impl Event {
             Self::MemoryForgotten { .. } => "MemoryForgotten",
             Self::MemorySearched { .. } => "MemorySearched",
             Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
+            Self::ProviderLoadingStarted { .. } => "ProviderLoadingStarted",
+            Self::ProviderLoadingFinished { .. } => "ProviderLoadingFinished",
+            Self::ModelDownloadStarted { .. } => "ModelDownloadStarted",
+            Self::ModelDownloadProgress { .. } => "ModelDownloadProgress",
+            Self::ModelDownloadFinished { .. } => "ModelDownloadFinished",
         }
     }
 
@@ -636,7 +721,9 @@ impl Event {
             | Self::AgentSwitchRequested { session_id, .. }
             | Self::AgentRestoreRequested { session_id, .. }
             | Self::TaskCompleted { session_id, .. }
+            | Self::AgentNotice { session_id, .. }
             | Self::AgentError { session_id, .. }
+            | Self::ServiceStartError { session_id, .. }
             | Self::TokenUsage { session_id, .. }
             | Self::RequestStarted { session_id, .. }
             | Self::ToolsSent { session_id, .. }
@@ -671,13 +758,16 @@ impl Event {
             | Self::MemoryRecalled { session_id, .. }
             | Self::MemoryForgotten { session_id, .. }
             | Self::MemorySearched { session_id, .. }
-            | Self::MemoryCandidateExtracted { session_id, .. } => Some(session_id.as_str()),
+            | Self::MemoryCandidateExtracted { session_id, .. }
+            | Self::ModelDownloadStarted { session_id, .. }
+            | Self::ModelDownloadProgress { session_id, .. }
+            | Self::ModelDownloadFinished { session_id, .. } => Some(session_id.as_str()),
+            Self::ProviderLoadingStarted { .. } | Self::ProviderLoadingFinished { .. } => None,
         }
     }
 }
 
 impl EventBus {
-    /// Creates a new event bus with the given channel capacity.
     ///
     /// # Examples
     ///

@@ -727,15 +727,8 @@ async fn main() -> Result<()> {
                         std::env::var("OLLAMA_API_KEY")
                             .ok()
                             .filter(|k| !k.is_empty())
-                    });
-                let Some(api_key) = api_key else {
-                    writeln!(
-                        stdout,
-                        "No Ollama Cloud API key found. Run `ragent auth ollama_cloud <key>` \
-                         or set OLLAMA_API_KEY."
-                    )?;
-                    return Ok(());
-                };
+                    })
+                    .unwrap_or_default();
 
                 match ragent_core::provider::ollama_cloud::list_ollama_cloud_models(
                     &api_key,
@@ -750,6 +743,13 @@ async fn main() -> Result<()> {
                         writeln!(stdout, "ollama_cloud models:")?;
                         for m in &models {
                             writeln!(stdout, "  ollama_cloud/{:<28} {}", m.id, m.name)?;
+                        }
+                        if api_key.is_empty() {
+                            writeln!(
+                                stdout,
+                                "\nNote: Chat requires an API key. Run `ragent auth \
+                                 ollama_cloud <key>` or set OLLAMA_API_KEY."
+                            )?;
                         }
                     }
                     Err(e) => {

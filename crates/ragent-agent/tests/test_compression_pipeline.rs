@@ -1,120 +1,11 @@
-//! Integration tests and backward-compatibility validation for the compression system.
+//! Integration tests for the compression system.
 //!
 //! Tests cover:
-//! - NFR-004: Performance and backward compatibility
-//! - FR-009: Fallback to existing compaction when compression is disabled
+//! - CompressionConfig parsing and defaults
 //! - CompressionMode parsing and mode behaviour
 //! - compress_help output format
 //! - compress_history_with_mode with each mode
-
-use ragent_agent::message::{Message, MessagePart, Role};
-use ragent_agent::session::compact_history_with_atomic_tool_calls;
-
-fn make_text_message(role: Role, text: &str) -> Message {
-    Message::new(
-        "test-session",
-        role,
-        vec![MessagePart::Text {
-            text: text.to_string(),
-        }],
-    )
-}
-
-fn make_tool_call_message(tool: &str, call_id: &str, output: &str) -> Message {
-    use ragent_agent::message::{ToolCallState, ToolCallStatus};
-    use serde_json::json;
-    Message::new(
-        "test-session",
-        Role::Assistant,
-        vec![MessagePart::ToolCall {
-            tool: tool.to_string(),
-            call_id: call_id.to_string(),
-            state: ToolCallState {
-                status: ToolCallStatus::Completed,
-                input: json!({"path": "/tmp/test"}),
-                output: Some(json!(output)),
-                error: None,
-                duration_ms: Some(42),
-            },
-        }],
-    )
-}
-
-// ── Backward compatibility tests (FR-009, NFR-004) ─────────────────────────
-//
-// These tests verify that the existing truncation-based compaction still works
-// correctly when the compression feature is disabled or when compression
-// config is set to enabled=false.
-
-#[test]
-fn test_backward_compat_compact_no_trim_needed() {
-    // NFR-004: The existing compaction path must continue to work.
-    let messages = vec![
-        make_text_message(Role::User, "Hello"),
-        make_text_message(Role::Assistant, "Hi there"),
-    ];
-    let compacted = compact_history_with_atomic_tool_calls(&messages, 128_000, 8192);
-    assert_eq!(compacted.len(), 2, "Should not trim when under budget");
-}
-
-#[test]
-fn test_backward_compat_compact_trims_oldest() {
-    // FR-009: Fallback compaction must preserve recent messages.
-    let large_text = "a".repeat(1000);
-    let mut messages = Vec::new();
-    for i in 0..10 {
-        messages.push(make_text_message(
-            if i % 2 == 0 {
-                Role::User
-            } else {
-                Role::Assistant
-            },
-            &large_text,
-        ));
-    }
-    let compacted = compact_history_with_atomic_tool_calls(&messages, 1500, 8192);
-    assert!(
-        compacted.len() < messages.len(),
-        "Should trim messages when over budget"
-    );
-}
-
-#[test]
-fn test_backward_compat_compact_preserves_tool_calls() {
-    // FR-009: Tool-call pairs must be preserved during fallback compaction.
-    let large_text = "x".repeat(500);
-    let mut messages = Vec::new();
-    for _ in 0..5 {
-        messages.push(make_text_message(Role::User, &large_text));
-        messages.push(make_tool_call_message("bash", "call-1", &large_text));
-    }
-    let compacted = compact_history_with_atomic_tool_calls(&messages, 1500, 8192);
-    // Tool call pairs should be preserved (or the whole pair dropped).
-    for msg in &compacted {
-        if msg
-            .parts
-            .iter()
-            .any(|p| matches!(p, MessagePart::ToolCall { .. }))
-        {
-            // If a tool call is present, its corresponding result should also be present
-            // or both should have been dropped together.
-        }
-    }
-}
-
-#[test]
-fn test_backward_compat_compact_empty_history() {
-    let messages: Vec<Message> = vec![];
-    let compacted = compact_history_with_atomic_tool_calls(&messages, 128_000, 8192);
-    assert_eq!(compacted.len(), 0, "Empty history should remain empty");
-}
-
-#[test]
-fn test_backward_compat_compact_single_message() {
-    let messages = vec![make_text_message(Role::User, "Hello world")];
-    let compacted = compact_history_with_atomic_tool_calls(&messages, 100, 8192);
-    assert_eq!(compacted.len(), 1, "Single message should be preserved");
-}
+//! - Token counting helpers
 
 // ── Compression config backward compatibility (NFR-004) ─────────────────────
 
@@ -451,14 +342,16 @@ mod compression_feature_tests {
         assert_eq!(tokens, 0, "Empty history should have zero tokens");
     }
 
-    // ── Compression disabled fallback (NFR-004, FR-009) ──────────────────
+    // ── Compression disabled pass-through ───────────────────────────────
 
     #[test]
-    fn test_compress_history_disabled_falls_back() {
-        // When compression config is disabled, the system should use
-        // the same truncation path as compact_history_with_atomic_tool_calls.
-        let mut config = CompressionConfig::default();
-        config.enabled = false;
+    fn test_compress_history_disabled_passes_through() {
+        // When compression config is disabled, compress_history returns the
+        // history unchanged because truncation is no longer used as a fallback.
+        let config = CompressionConfig {
+            enabled: false,
+            ..CompressionConfig::default()
+        };
 
         let large_text = "a".repeat(1000);
         let messages: Vec<Message> = (0..10)
@@ -474,14 +367,8 @@ mod compression_feature_tests {
             })
             .collect();
 
-        // When enabled=false, compress_history should fall back to truncation.
-        // The session processor handles this check before calling compress_history,
-        // so this test verifies the expected behaviour is documented.
-        // (The actual fallback is in session/processor.rs, not in compress_history itself.)
-        // Here we verify that compress_history still works when called,
-        // even if the caller decides not to use it.
         let result = compress_history(&messages, 128_000, 8192, &config);
-        // With enabled=false config but under threshold, messages pass through
+        // With enabled=false, messages pass through unchanged.
         assert_eq!(result.messages.len(), messages.len());
     }
 }

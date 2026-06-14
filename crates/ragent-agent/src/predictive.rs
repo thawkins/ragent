@@ -448,7 +448,7 @@ mod tests {
         );
 
         // Missing path
-        assert!(executor.validate_tool_args("read", r#"{}"#).is_err());
+        assert!(executor.validate_tool_args("read", r"{}").is_err());
 
         // Partial JSON during streaming
         assert!(executor.validate_tool_args("read", r#"{"path":"#).is_ok());

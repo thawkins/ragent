@@ -168,6 +168,19 @@ impl Provider for GeminiProvider {
         gemini_default_models("gemini")
     }
 
+    /// Discover available models from Gemini's `/v1beta/models` endpoint.
+    async fn discover_models(&self) -> Result<Vec<ModelInfo>> {
+        let api_key = std::env::var("GOOGLE_API_KEY")
+            .or_else(|_| std::env::var("GEMINI_API_KEY"))
+            .ok()
+            .filter(|k| !k.is_empty())
+            .context("Gemini model discovery requires GOOGLE_API_KEY or GEMINI_API_KEY")?;
+        let models = list_gemini_models(&api_key, None)
+            .await
+            .with_context(|| "Gemini model discovery failed")?;
+        Ok(models)
+    }
+
     /// Creates a [`GeminiClient`] configured with the given API key and optional base URL.
     ///
     /// # Errors

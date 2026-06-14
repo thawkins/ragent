@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0-alpha.105"
+version = "0.1.0-alpha.106"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/thawkins/ragent"
@@ -112,6 +112,7 @@ unsafe_code = "deny"
 [workspace.dependencies]
 # ── Internal crates ───────────────────────────────────────────────────────
 ragent-agent = { path = "crates/ragent-agent" }
+ragent-llm = { path = "crates/ragent-llm" }
 ragent-server = { path = "crates/ragent-server" }
 ragent-tui = { path = "crates/ragent-tui" }
 
@@ -233,12 +234,13 @@ path = "src/main.rs"
 
 [features]
 default = ["embedded-llm", "compression"]
-embedded-llm = ["ragent-agent/embedded-llm"]
+embedded-llm = ["ragent-llm/embedded-llm"]
 compression = ["ragent-agent/compression", "ragent-tui/compression"]
 compression-ml = ["ragent-agent/compression-ml"]
 
 [dependencies]
 ragent-agent = { workspace = true }
+ragent-llm = { workspace = true }
 ragent-server = { workspace = true }
 ragent-tui = { workspace = true }
 ragent-specs = { workspace = true }

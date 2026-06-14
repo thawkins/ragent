@@ -1,12 +1,12 @@
 //! Headroom compression pipeline wrapper.
 //!
 //! This module wraps the `headroom_core` compression facilities for use in
-//! ragent's session processor. It provides content-aware compression that
-//! replaces the naive `compact_history_with_atomic_tool_calls` truncation.
+//! ragent's session processor. It provides content-aware compression for
+//! conversation history.
 //!
 //! # Pipeline architecture
 //!
-//! The pipeline follows the Compress-Cache-Retrieve (CCR) model:
+//! The compression pipeline follows the Compress-Cache-Retrieve (CCR) model:
 //!
 //! 1. **Token counting** — Accurately estimate tokens using Headroom's tokenizer.
 //! 2. **Threshold check** — Skip compression if under the configured threshold.
@@ -19,8 +19,6 @@
 //!    - **Prose** → pass through unchanged (or truncate if very long)
 //! 5. **CCR stashing** — Store original content under a BLAKE3 hash key and
 //!    insert `<<ccr:HASH>>` markers in the compressed output.
-//! 6. **Fallback** — If compression doesn't bring us under budget, fall back
-//!    to the existing truncation-based compaction.
 //!
 //! # Protected messages (FR-017)
 //!
@@ -28,9 +26,10 @@
 //! they pass through unchanged to preserve instruction fidelity.
 //!
 //! This entire module is only compiled when the `compression` Cargo feature
-//! is enabled. When disabled, the agent falls back to the existing compaction
-//! logic in `session::processor`.
+//! is enabled. When disabled, no automatic context reduction is performed.
 
+use crate::message::{ImageData, Message, MessagePart, Role, ToolCallState, ToolCallStatus};
+use chrono::Utc;
 use ragent_config::compression::CompressionConfig;
 use tracing::{debug, info};
 
@@ -38,8 +37,6 @@ use headroom_core::tokenizer::Tokenizer;
 use headroom_core::transforms::DiffCompressor;
 
 use crate::compression::ccr_store::CcrStoreHandle;
-use crate::message::{Message, MessagePart, Role};
-use crate::session::compact_history_with_atomic_tool_calls;
 
 // ── Content type detection ──────────────────────────────────────────────────
 
@@ -179,7 +176,7 @@ pub fn count_tokens_text(text: &str) -> usize {
     estimator.count_text(text)
 }
 
-/// Check whether the estimated token count exceeds the compaction threshold.
+/// Check whether the estimated token count exceeds the compression threshold.
 ///
 /// Returns `true` when the estimated tokens exceed `threshold_fraction` of
 /// `context_window`.
@@ -227,6 +224,217 @@ impl CompressionStats {
             ccr_entries_stashed: 0,
             messages_compressed: 0,
         }
+    }
+}
+
+/// Result of compressing a provider-facing chat-message payload.
+///
+/// Mirrors [`CompressionResult`] but carries [`crate::llm::ChatMessage`]s so
+/// the agent loop can replace its request payload directly.
+#[derive(Debug, Clone)]
+pub struct ChatCompressionResult {
+    /// Compressed chat messages ready for the LLM request.
+    pub chat_messages: Vec<crate::llm::ChatMessage>,
+    /// Token statistics for the compression run.
+    pub stats: CompressionStats,
+}
+
+// ── Chat message round-trip helpers ───────────────────────────────────────────
+
+/// Convert provider-facing [`ChatMessage`]s into the internal [`Message`]
+/// representation used by the Headroom pipeline.
+///
+/// This round-trip lets us reuse the content-aware compressors on the actual
+/// request payload, including tool-use/tool-result pairs that only exist as
+/// [`ContentPart`]s. Stray tool results without a matching tool use are kept as
+/// text so their token cost is preserved.
+fn chat_messages_to_messages(chat_messages: &[crate::llm::ChatMessage]) -> Vec<Message> {
+    use crate::llm::{ChatContent, ContentPart};
+
+    let mut messages: Vec<Message> = Vec::new();
+    let now = Utc::now();
+    for msg in chat_messages {
+        let role = if msg.role == "assistant" {
+            Role::Assistant
+        } else {
+            Role::User
+        };
+        let mut parts: Vec<MessagePart> = Vec::new();
+        match &msg.content {
+            ChatContent::Text(text) => {
+                parts.push(MessagePart::Text { text: text.clone() });
+            }
+            ChatContent::Parts(content_parts) => {
+                for part in content_parts {
+                    match part {
+                        ContentPart::Text { text } => {
+                            parts.push(MessagePart::Text { text: text.clone() });
+                        }
+                        ContentPart::ToolUse { id, name, input } => {
+                            parts.push(MessagePart::ToolCall {
+                                tool: name.clone(),
+                                call_id: id.clone(),
+                                state: ToolCallState {
+                                    status: ToolCallStatus::Completed,
+                                    input: input.clone(),
+                                    output: None,
+                                    error: None,
+                                    duration_ms: None,
+                                },
+                            });
+                        }
+                        ContentPart::ToolResult {
+                            tool_use_id,
+                            content,
+                        } => {
+                            // Pair with the most recent assistant ToolUse that
+                            // has not yet received a result.
+                            let mut paired = false;
+                            for prev in messages.iter_mut().rev() {
+                                if prev.role != Role::Assistant {
+                                    break;
+                                }
+                                for p in &mut prev.parts {
+                                    if let MessagePart::ToolCall { call_id, state, .. } = p {
+                                        if call_id == tool_use_id && state.output.is_none() {
+                                            state.output =
+                                                Some(serde_json::Value::String(content.clone()));
+                                            paired = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if paired {
+                                    break;
+                                }
+                            }
+                            if !paired {
+                                parts.push(MessagePart::Text {
+                                    text: format!("[tool result {tool_use_id}]: {content}"),
+                                });
+                            }
+                        }
+                        ContentPart::ImageUrl { url } => {
+                            parts.push(MessagePart::Image(Box::new(ImageData {
+                                mime_type: "image/png".to_string(),
+                                path: std::path::PathBuf::from(url),
+                            })));
+                        }
+                    }
+                }
+            }
+        }
+        messages.push(Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: "compression".to_string(),
+            role,
+            parts,
+            created_at: now,
+            updated_at: now,
+        });
+    }
+    messages
+}
+
+/// Convert internal [`Message`]s back to provider-facing [`ChatMessage`]s.
+///
+/// Synchronous counterpart to `history_to_chat_messages` in the session
+/// processor. Each assistant [`MessagePart::ToolCall`] produces an assistant
+/// `ToolUse` part and a following user `ToolResult` part so the LLM API sees
+/// the required pairs.
+fn messages_to_chat_messages(messages: &[Message]) -> Vec<crate::llm::ChatMessage> {
+    use crate::llm::{ChatContent, ChatMessage as LlmChatMessage, ContentPart};
+
+    let mut chat_messages: Vec<LlmChatMessage> = Vec::new();
+    for msg in messages {
+        let role = match msg.role {
+            Role::User => "user".to_string(),
+            Role::Assistant => "assistant".to_string(),
+        };
+        let mut parts: Vec<ContentPart> = Vec::new();
+        let mut tool_results: Vec<ContentPart> = Vec::new();
+        for part in &msg.parts {
+            match part {
+                MessagePart::Text { text } => {
+                    parts.push(ContentPart::Text { text: text.clone() });
+                }
+                MessagePart::Reasoning { text } => {
+                    parts.push(ContentPart::Text {
+                        text: format!("[reasoning]: {text}"),
+                    });
+                }
+                MessagePart::Image(img) => {
+                    parts.push(ContentPart::ImageUrl {
+                        url: img.path.to_string_lossy().to_string(),
+                    });
+                }
+                MessagePart::ToolCall {
+                    tool,
+                    call_id,
+                    state,
+                } => {
+                    parts.push(ContentPart::ToolUse {
+                        id: call_id.clone(),
+                        name: tool.clone(),
+                        input: state.input.clone(),
+                    });
+                    let result_text = state
+                        .output
+                        .as_ref()
+                        .and_then(|v| v.as_str().map(std::string::ToString::to_string))
+                        .unwrap_or_default();
+                    let content = if result_text.is_empty() {
+                        state.error.clone().unwrap_or_default()
+                    } else {
+                        result_text
+                    };
+                    tool_results.push(ContentPart::ToolResult {
+                        tool_use_id: call_id.clone(),
+                        content,
+                    });
+                }
+            }
+        }
+        let content = if parts.len() == 1 {
+            if let Some(ContentPart::Text { text }) = parts.first() {
+                ChatContent::Text(text.clone())
+            } else {
+                ChatContent::Parts(parts)
+            }
+        } else {
+            ChatContent::Parts(parts)
+        };
+        chat_messages.push(LlmChatMessage { role, content });
+        if !tool_results.is_empty() && msg.role == Role::Assistant {
+            chat_messages.push(LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Parts(tool_results),
+            });
+        }
+    }
+    chat_messages
+}
+
+/// Run the Headroom compression pipeline on provider-facing chat messages.
+///
+/// This is the per-iteration entry point used by the agent loop. It round-trips
+/// [`ChatMessage`]s through the internal [`Message`] representation so the
+/// existing content-aware compressors can be reused on the actual request
+/// payload.
+///
+/// Returns the original messages unchanged when token usage is below the
+/// configured threshold.
+pub fn compress_chat_messages(
+    chat_messages: &[crate::llm::ChatMessage],
+    context_window: usize,
+    max_output_tokens: usize,
+    config: &CompressionConfig,
+) -> ChatCompressionResult {
+    let messages = chat_messages_to_messages(chat_messages);
+    let result = compress_history(&messages, context_window, max_output_tokens, config);
+    ChatCompressionResult {
+        chat_messages: messages_to_chat_messages(&result.messages),
+        stats: result.stats,
     }
 }
 
@@ -605,7 +813,7 @@ fn find_protected_messages(messages: &[Message]) -> Vec<usize> {
 pub fn compress_history(
     history: &[Message],
     context_window: usize,
-    max_output_tokens: usize,
+    _max_output_tokens: usize,
     config: &CompressionConfig,
 ) -> CompressionResult {
     let original_tokens = count_tokens(history);
@@ -739,64 +947,34 @@ pub fn compress_history(
 
     let compressed_tokens = count_tokens(&compressed_messages);
 
-    // If compression didn't reduce enough, fall back to truncation.
-    if compressed_tokens > threshold {
-        info!(
-            compressed_tokens,
-            threshold, "Compression didn't reduce enough, falling back to truncation"
-        );
-        let fallback = compact_history_with_atomic_tool_calls(
-            &compressed_messages,
-            context_window,
-            max_output_tokens,
-        );
-        let fallback_tokens = count_tokens(&fallback);
+    info!(
+        original_tokens,
+        compressed_tokens,
+        ccr_entries = total_ccr_entries,
+        messages_compressed,
+        ratio = if compressed_tokens > 0 {
+            format!("{:.2}", original_tokens as f64 / compressed_tokens as f64)
+        } else {
+            "N/A".to_string()
+        },
+        "Compression pipeline completed"
+    );
 
-        CompressionResult {
-            messages: fallback,
-            stats: CompressionStats {
-                original_tokens,
-                compressed_tokens: fallback_tokens,
-                compression_ratio: if fallback_tokens > 0 {
-                    original_tokens as f64 / fallback_tokens as f64
-                } else {
-                    1.0
-                },
-                ccr_entries_stashed: total_ccr_entries,
-                messages_compressed,
-            },
-        }
-    } else {
-        info!(
+    CompressionResult {
+        messages: compressed_messages,
+        stats: CompressionStats {
             original_tokens,
             compressed_tokens,
-            ccr_entries = total_ccr_entries,
-            messages_compressed,
-            ratio = if compressed_tokens > 0 {
-                format!("{:.2}", original_tokens as f64 / compressed_tokens as f64)
+            compression_ratio: if compressed_tokens > 0 {
+                original_tokens as f64 / compressed_tokens as f64
             } else {
-                "N/A".to_string()
+                1.0
             },
-            "Compression pipeline completed"
-        );
-
-        CompressionResult {
-            messages: compressed_messages,
-            stats: CompressionStats {
-                original_tokens,
-                compressed_tokens,
-                compression_ratio: if compressed_tokens > 0 {
-                    original_tokens as f64 / compressed_tokens as f64
-                } else {
-                    1.0
-                },
-                ccr_entries_stashed: total_ccr_entries,
-                messages_compressed,
-            },
-        }
+            ccr_entries_stashed: total_ccr_entries,
+            messages_compressed,
+        },
     }
 }
-
 /// Run the Headroom compression pipeline with a specific compression mode.
 ///
 /// This is the mode-aware entry point for the `/compress` slash command.
@@ -1184,6 +1362,131 @@ mod tests {
             compressed.contains("more results"),
             "Should indicate omitted results"
         );
+    }
+
+    #[test]
+    fn test_chat_messages_round_trip_preserves_text_and_tool_pair() {
+        use crate::llm::{ChatContent, ChatMessage as LlmChatMessage, ContentPart};
+        use serde_json::json;
+
+        let chat_messages = vec![
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("What is 2+2?".to_string()),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Parts(vec![
+                    ContentPart::Text {
+                        text: "I will calculate that.".to_string(),
+                    },
+                    ContentPart::ToolUse {
+                        id: "call_1".to_string(),
+                        name: "calculator".to_string(),
+                        input: json!({"expression": "2+2"}),
+                    },
+                ]),
+            },
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Parts(vec![ContentPart::ToolResult {
+                    tool_use_id: "call_1".to_string(),
+                    content: "4".to_string(),
+                }]),
+            },
+        ];
+
+        let messages = chat_messages_to_messages(&chat_messages);
+        assert_eq!(messages.len(), 3);
+        // ToolUse/ToolResult should be paired into a single assistant ToolCall.
+        assert_eq!(messages[1].parts.len(), 2);
+        assert!(
+            matches!(&messages[1].parts[1], MessagePart::ToolCall { state, .. }
+            if state.output.as_ref().and_then(|v| v.as_str()) == Some("4"))
+        );
+
+        let round_tripped = messages_to_chat_messages(&messages);
+        assert_eq!(round_tripped.len(), 4);
+        assert_eq!(round_tripped[0].role, "user");
+        assert_eq!(round_tripped[1].role, "assistant");
+        assert_eq!(round_tripped[2].role, "user");
+        assert_eq!(round_tripped[3].role, "user");
+    }
+
+    #[test]
+    fn test_compress_chat_messages_under_threshold_passes_through() {
+        use crate::llm::{ChatContent, ChatMessage as LlmChatMessage};
+
+        let chat_messages = vec![LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("Short question".to_string()),
+        }];
+        let config = CompressionConfig::default();
+        let result = compress_chat_messages(&chat_messages, 128_000, 8192, &config);
+        assert_eq!(result.chat_messages.len(), chat_messages.len());
+        assert_eq!(result.stats.original_tokens, result.stats.compressed_tokens);
+    }
+
+    #[test]
+    fn test_compress_chat_messages_over_threshold_triggers_compression() {
+        use crate::llm::{ChatContent, ChatMessage as LlmChatMessage};
+
+        let long_text = "x ".repeat(50_000);
+        let chat_messages = vec![
+            LlmChatMessage {
+                role: "user".to_string(),
+                content: ChatContent::Text("Start".to_string()),
+            },
+            LlmChatMessage {
+                role: "assistant".to_string(),
+                content: ChatContent::Text(long_text.clone()),
+            },
+        ];
+        let config = CompressionConfig::default();
+        let result = compress_chat_messages(&chat_messages, 1_000, 512, &config);
+        assert!(
+            result.stats.compressed_tokens < result.stats.original_tokens,
+            "Long assistant content should be compressed"
+        );
+        assert!(!result.chat_messages.is_empty());
+    }
+
+    #[test]
+    fn test_stray_tool_result_kept_as_text() {
+        use crate::llm::{ChatContent, ChatMessage as LlmChatMessage, ContentPart};
+
+        let chat_messages = vec![LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Parts(vec![ContentPart::ToolResult {
+                tool_use_id: "orphan".to_string(),
+                content: "lost result".to_string(),
+            }]),
+        }];
+        let messages = chat_messages_to_messages(&chat_messages);
+        assert_eq!(messages.len(), 1);
+        assert!(matches!(&messages[0].parts[0], MessagePart::Text { text }
+            if text.contains("lost result")));
+    }
+
+    #[test]
+    fn test_image_url_round_trip() {
+        use crate::llm::{ChatContent, ChatMessage as LlmChatMessage, ContentPart};
+
+        let chat_messages = vec![LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Parts(vec![ContentPart::ImageUrl {
+                url: "data:image/png;base64,ABC".to_string(),
+            }]),
+        }];
+        let messages = chat_messages_to_messages(&chat_messages);
+        assert!(matches!(&messages[0].parts[0], MessagePart::Image(img)
+            if img.path.to_string_lossy() == "data:image/png;base64,ABC"));
+        let round_tripped = messages_to_chat_messages(&messages);
+        assert!(matches!(
+            &round_tripped[0].content,
+            ChatContent::Parts(parts)
+            if matches!(parts.first(), Some(ContentPart::ImageUrl { url }) if url == "data:image/png;base64,ABC")
+        ));
     }
 
     #[test]

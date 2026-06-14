@@ -53,6 +53,7 @@ fn test_state(token: &str) -> AppState {
     }
 }
 
+#[allow(dead_code)]
 /// Add auth header to a request builder.
 fn add_auth(req: axum::http::request::Builder, token: &str) -> axum::http::request::Builder {
     req.header("Authorization", format!("Bearer {}", token))

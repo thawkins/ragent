@@ -242,11 +242,12 @@ mod tests {
         assert!(
             StructuredMemory::validate_tags(&["valid-tag".to_string(), "v2".to_string()]).is_ok()
         );
-        assert!(StructuredMemory::validate_tags(&["".to_string()]).is_err());
+        assert!(StructuredMemory::validate_tags(&[String::new()]).is_err());
         assert!(StructuredMemory::validate_tags(&["NotValid".to_string()]).is_err());
         assert!(StructuredMemory::validate_tags(&["bad_tag".to_string()]).is_err());
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_structured_memory_new() {
         let mem = StructuredMemory::new("Use Result<T, E>", "pattern");
@@ -256,6 +257,7 @@ mod tests {
         assert!(mem.tags.is_empty());
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_structured_memory_builder() {
         let mem = StructuredMemory::new("Test content", "fact")
@@ -271,6 +273,7 @@ mod tests {
         assert_eq!(mem.tags, vec!["rust"]);
     }
 
+    #[allow(clippy::float_cmp)]
     #[test]
     fn test_confidence_clamped() {
         let mem = StructuredMemory::new("test", "fact").with_confidence(2.0);
