@@ -1,5 +1,13 @@
 # Changelog
 
+## Version: 0.1.0-alpha.107
+
+### Fixed
+- **Compression pipeline threshold gating** — Added `should_compress` and `should_compress_chat_messages` checks before invoking the full compression pipeline, preventing unnecessary overhead and unconditional UI events when the conversation is well within the context window. The initial-history compression and per-iteration compression now both gate on the configured `auto_threshold` (default 0.80) before running. Added 2 new unit tests for the chat-messages threshold helper.
+
+### Changed
+- **Workspace version** — Bumped to `0.1.0-alpha.107`.
+
 ## Version: 0.1.0-alpha.106
 
 ### Added

@@ -438,6 +438,21 @@ pub fn compress_chat_messages(
     }
 }
 
+/// Check whether provider-facing [`ChatMessage`]s exceed the compression threshold.
+///
+/// This is a lightweight check that mirrors the threshold logic inside
+/// [`compress_history`], allowing callers to avoid the overhead (and the
+/// unconditional UI events) of invoking the full pipeline when compression is
+/// not needed.
+pub fn should_compress_chat_messages(
+    chat_messages: &[crate::llm::ChatMessage],
+    context_window: usize,
+    threshold_fraction: f64,
+) -> bool {
+    let messages = chat_messages_to_messages(chat_messages);
+    should_compress(&messages, context_window, threshold_fraction)
+}
+
 /// Compression mode for the `/compress` slash command (FR-012).
 ///
 /// Controls how aggressively the compression pipeline processes conversation
@@ -1572,4 +1587,37 @@ mod tests {
         let original = ccr.retrieve(&key);
         assert_eq!(original.as_deref(), Some(long_code.as_str()));
     }
+}
+
+#[test]
+fn test_should_compress_chat_messages_under_threshold() {
+    use crate::llm::{ChatContent, ChatMessage as LlmChatMessage};
+
+    let chat_messages = vec![LlmChatMessage {
+        role: "user".to_string(),
+        content: ChatContent::Text("Short question".to_string()),
+    }];
+    assert!(!should_compress_chat_messages(
+        &chat_messages,
+        128_000,
+        0.80
+    ));
+}
+
+#[test]
+fn test_should_compress_chat_messages_over_threshold() {
+    use crate::llm::{ChatContent, ChatMessage as LlmChatMessage};
+
+    let long_text = "x ".repeat(50_000);
+    let chat_messages = vec![
+        LlmChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text("Start".to_string()),
+        },
+        LlmChatMessage {
+            role: "assistant".to_string(),
+            content: ChatContent::Text(long_text.clone()),
+        },
+    ];
+    assert!(should_compress_chat_messages(&chat_messages, 1_000, 0.80));
 }

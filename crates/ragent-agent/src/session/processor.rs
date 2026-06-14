@@ -1138,7 +1138,13 @@ impl SessionProcessor {
         #[cfg(feature = "compression")]
         let history = {
             let compression_config = &session_config.compression;
-            if compression_config.enabled {
+            if compression_config.enabled
+                && crate::compression::pipeline::should_compress(
+                    &history,
+                    context_window,
+                    compression_config.auto_threshold,
+                )
+            {
                 let _scope = profiler.scope("history.compress");
                 let result = crate::compression::pipeline::compress_history(
                     &history,
@@ -1357,6 +1363,12 @@ impl SessionProcessor {
             // one-time compression at the start of the run is not enough to
             // prevent the model's context window from overflowing (FR-005).
             #[cfg(feature = "compression")]
+            if session_config.compression.enabled
+                && crate::compression::pipeline::should_compress_chat_messages(
+                    &chat_messages,
+                    context_window,
+                    session_config.compression.auto_threshold,
+                )
             {
                 let _scope = profiler.scope("history.compress");
                 self.event_bus.publish(Event::CompressionStarted {
@@ -1402,7 +1414,6 @@ impl SessionProcessor {
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
             let mut last_input_tokens: u64 = 0;
             let mut last_output_tokens: u64 = 0;
-
             {
                 let _scope = profiler.scope("loop.llm.total");
                 'retry: for attempt in 0..=max_retries {
