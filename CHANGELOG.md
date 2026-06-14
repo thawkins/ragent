@@ -4,9 +4,15 @@
 
 ### Added
 - **Microsoft Foundry Local provider integration** — Added first-class support for Microsoft Foundry Local as a local LLM provider, including provider setup dialog visibility, `[local]` badge rendering, status-bar abbreviation, health checks, and configuration option merging (`auto_start`, `device`, `models_path`).
+- **Headroom compression lifecycle events** — New `Event::CompressionStarted` and `Event::CompressionFinished` events are published by the session processor and consumed by the TUI and SSE stream. They carry `original_tokens`, `compressed_tokens`, `compression_ratio`, and `did_compress` so observers can show live progress and update context-window displays immediately.
 
 ### Changed
 - **Workspace version** — Bumped to `0.1.0-alpha.106`.
+- **Per-iteration compression visibility** — The agent loop now publishes `CompressionStarted`/`CompressionFinished` around every automatic Headroom compression run. The TUI sets `compress_in_progress` while the pipeline is active, so the existing status-bar "compressing" indicator actually appears during automatic compression, and the `ctx:` display is refreshed with the post-compression token count as soon as the run completes.
+- **SSE event coverage** — `ragent-server` now serializes `compression_started` and `compression_finished` SSE events.
+
+### Fixed
+- **Context window display lag after compression** — `last_input_tokens` was only updated when the provider returned token usage, so the status-bar context percentage stayed at the pre-compression value until the LLM response arrived. The TUI now updates `last_input_tokens` directly from `CompressionFinished`, keeping the `ctx:` display in sync with the actual request size.
 
 ## Version: 0.1.0-alpha.105
 

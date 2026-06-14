@@ -90,3 +90,58 @@ fn test_request_started_resets_inbound_and_sets_outbound_bytes() {
     assert_eq!(app.stream_out_bytes, 4096);
     assert_eq!(app.stream_in_bytes, 5);
 }
+
+#[test]
+fn test_compression_finished_updates_last_input_tokens_and_status() {
+    let mut app = make_app();
+    app.session_id = Some("session-1".to_string());
+    app.last_input_tokens = 90_000;
+
+    app.handle_event(Event::CompressionStarted {
+        session_id: "session-1".to_string(),
+    });
+    assert!(app.compress_in_progress);
+    assert_eq!(app.status, "compressing context...");
+    assert!(app.needs_redraw);
+
+    app.handle_event(Event::CompressionFinished {
+        session_id: "session-1".to_string(),
+        original_tokens: 90_000,
+        compressed_tokens: 45_000,
+        compression_ratio: 2.0,
+        did_compress: true,
+    });
+    assert!(!app.compress_in_progress);
+    assert_eq!(app.last_input_tokens, 45_000);
+    assert!(app.status.contains("saved 45000 tokens"));
+    assert!(app.needs_redraw);
+}
+
+#[test]
+fn test_compression_finished_no_change_updates_status() {
+    let mut app = make_app();
+    app.session_id = Some("session-1".to_string());
+    app.last_input_tokens = 1_000;
+
+    app.handle_event(Event::CompressionFinished {
+        session_id: "session-1".to_string(),
+        original_tokens: 1_000,
+        compressed_tokens: 1_000,
+        compression_ratio: 1.0,
+        did_compress: false,
+    });
+    assert!(!app.compress_in_progress);
+    assert_eq!(app.last_input_tokens, 1_000);
+    assert!(app.status.contains("compress: no change"));
+}
+
+#[test]
+fn test_compression_events_ignored_for_other_session() {
+    let mut app = make_app();
+    app.session_id = Some("session-1".to_string());
+
+    app.handle_event(Event::CompressionStarted {
+        session_id: "session-2".to_string(),
+    });
+    assert!(!app.compress_in_progress);
+}

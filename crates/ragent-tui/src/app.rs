@@ -8495,8 +8495,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         } else {
                             "disabled"
                         };
-                        let mut output =
-                            format!("From: /yolo\n## YOLO mode {label}\n\n");
+                        let mut output = format!("From: /yolo\n## YOLO mode {label}\n\n");
                         if new_state {
                             output.push_str(
                                 "All command validation is now **bypassed**:\n\
@@ -8508,9 +8507,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                                  Use `/yolo` again to re-enable safety checks.\n",
                             );
                         } else {
-                            output.push_str(
-                                "All safety checks have been **re-enabled**.\n",
-                            );
+                            output.push_str("All safety checks have been **re-enabled**.\n");
                         }
                         self.append_assistant_text(&output);
 
@@ -8525,8 +8522,7 @@ Changes are persisted immediately to `.ragent/ragent.json` and take effect at on
                         );
                     }
                     Err(e) => {
-                        self.status =
-                            format!("⚠ failed to persist YOLO mode: {e}");
+                        self.status = format!("⚠ failed to persist YOLO mode: {e}");
                         self.append_assistant_text(&format!(
                             "From: /yolo\n⚠ Failed to persist YOLO mode: {e}\n"
                         ));
@@ -12071,8 +12067,7 @@ Type `/swarm help` for more info.\n";
                             );
                         }
                         Err(e) => {
-                            self.status =
-                                format!("⚠ failed to persist YOLO mode: {e}");
+                            self.status = format!("⚠ failed to persist YOLO mode: {e}");
                             self.push_log_no_agent(
                                 LogLevel::Error,
                                 format!("YOLO persist failed: {e}"),
@@ -12497,6 +12492,50 @@ Type `/swarm help` for more info.\n";
             } if self.is_current_session(session_id) => {
                 self.stream_in_bytes += text.len() as u64;
                 self.append_reasoning_text(text);
+            }
+            Event::CompressionStarted { ref session_id } if self.is_current_session(session_id) => {
+                self.compress_in_progress = true;
+                self.status = "compressing context...".to_string();
+                self.needs_redraw = true;
+                self.push_log_no_agent(LogLevel::Info, "Context compression started".to_string());
+            }
+            Event::CompressionFinished {
+                ref session_id,
+                original_tokens,
+                compressed_tokens,
+                compression_ratio,
+                did_compress,
+            } if self.is_current_session(session_id) => {
+                self.compress_in_progress = false;
+                self.last_input_tokens = compressed_tokens as u64;
+                self.needs_redraw = true;
+                if did_compress {
+                    let saved = original_tokens.saturating_sub(compressed_tokens);
+                    self.status = format!(
+                        "compress: saved {} tokens ({:.0}%)",
+                        saved,
+                        (1.0 - 1.0 / compression_ratio) * 100.0
+                    );
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!(
+                            "Context compression finished: {} → {} tokens ({:.2}x ratio, saved {})",
+                            original_tokens, compressed_tokens, compression_ratio, saved
+                        ),
+                    );
+                } else {
+                    self.status = format!(
+                        "compress: no change ({} tokens, {:.0}% threshold)",
+                        original_tokens, 80.0
+                    );
+                    self.push_log_no_agent(
+                        LogLevel::Info,
+                        format!(
+                            "Context compression finished: no change ({} tokens)",
+                            original_tokens
+                        ),
+                    );
+                }
             }
             Event::RequestStarted {
                 ref session_id,

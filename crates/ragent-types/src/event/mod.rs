@@ -212,6 +212,25 @@ pub enum Event {
         /// Human-readable summary of the failure.
         error: String,
     },
+    /// A context compression pipeline has started for a session.
+    CompressionStarted {
+        /// Session being compressed.
+        session_id: String,
+    },
+    /// A context compression pipeline has finished for a session.
+    CompressionFinished {
+        /// Session that was compressed.
+        session_id: String,
+        /// Number of tokens before compression.
+        original_tokens: usize,
+        /// Number of tokens after compression.
+        compressed_tokens: usize,
+        /// Compression ratio (original / compressed). 1.0 = no reduction.
+        compression_ratio: f64,
+        /// True when compression actually reduced token count.
+        did_compress: bool,
+    },
+
     // ── Provider model-list loading (TUI spinner) ────────────────────────
     /// The TUI has started loading the model list for a provider.
     ProviderLoadingStarted {
@@ -690,6 +709,8 @@ impl Event {
             Self::MemoryForgotten { .. } => "MemoryForgotten",
             Self::MemorySearched { .. } => "MemorySearched",
             Self::MemoryCandidateExtracted { .. } => "MemoryCandidateExtracted",
+            Self::CompressionStarted { .. } => "CompressionStarted",
+            Self::CompressionFinished { .. } => "CompressionFinished",
             Self::ProviderLoadingStarted { .. } => "ProviderLoadingStarted",
             Self::ProviderLoadingFinished { .. } => "ProviderLoadingFinished",
             Self::ModelDownloadStarted { .. } => "ModelDownloadStarted",
@@ -762,6 +783,8 @@ impl Event {
             | Self::ModelDownloadStarted { session_id, .. }
             | Self::ModelDownloadProgress { session_id, .. }
             | Self::ModelDownloadFinished { session_id, .. } => Some(session_id.as_str()),
+            Self::CompressionStarted { session_id, .. }
+            | Self::CompressionFinished { session_id, .. } => Some(session_id.as_str()),
             Self::ProviderLoadingStarted { .. } | Self::ProviderLoadingFinished { .. } => None,
         }
     }

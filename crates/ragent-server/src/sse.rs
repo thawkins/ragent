@@ -330,6 +330,8 @@ const fn event_type_name(event: &Event) -> &'static str {
         Event::ModelDownloadStarted { .. } => "model_download_started",
         Event::ModelDownloadProgress { .. } => "model_download_progress",
         Event::ModelDownloadFinished { .. } => "model_download_finished",
+        Event::CompressionStarted { .. } => "compression_started",
+        Event::CompressionFinished { .. } => "compression_finished",
     }
 }
 // ── Public API ───────────────────────────────────────────────────────────
@@ -900,10 +902,25 @@ pub fn event_to_parts(event: &Event) -> (&'static str, String) {
             "session_id": session_id,
             "error": error,
         })),
+        Event::CompressionStarted { session_id } => {
+            to_data(&serde_json::json!({"session_id": session_id}))
+        }
+        Event::CompressionFinished {
+            session_id,
+            original_tokens,
+            compressed_tokens,
+            compression_ratio,
+            did_compress,
+        } => to_data(&serde_json::json!({
+            "session_id": session_id,
+            "original_tokens": original_tokens,
+            "compressed_tokens": compressed_tokens,
+            "compression_ratio": compression_ratio,
+            "did_compress": did_compress,
+        })),
     };
     (name, data)
 }
-
 /// Convert a `ragent_core` [`Event`] into an Axum [`SseEvent`].
 ///
 /// Payloads are serialized directly from typed structs — no intermediate

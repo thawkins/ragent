@@ -1357,15 +1357,19 @@ impl SessionProcessor {
             // one-time compression at the start of the run is not enough to
             // prevent the model's context window from overflowing (FR-005).
             #[cfg(feature = "compression")]
-            if session_config.compression.enabled {
+            {
                 let _scope = profiler.scope("history.compress");
+                self.event_bus.publish(Event::CompressionStarted {
+                    session_id: session_id.to_string(),
+                });
                 let result = crate::compression::pipeline::compress_chat_messages(
                     &chat_messages,
                     context_window,
                     8192,
                     &session_config.compression,
                 );
-                if result.stats.original_tokens > result.stats.compressed_tokens {
+                let did_compress = result.stats.original_tokens > result.stats.compressed_tokens;
+                if did_compress {
                     tracing::info!(
                         original_tokens = result.stats.original_tokens,
                         compressed_tokens = result.stats.compressed_tokens,
@@ -1374,10 +1378,25 @@ impl SessionProcessor {
                         messages_compressed = result.stats.messages_compressed,
                         "Compressed chat messages with Headroom pipeline"
                     );
+                } else {
+                    tracing::debug!(
+                        original_tokens = result.stats.original_tokens,
+                        compressed_tokens = result.stats.compressed_tokens,
+                        threshold = (context_window as f64
+                            * session_config.compression.auto_threshold)
+                            as usize,
+                        "Context compression run completed without reduction"
+                    );
                 }
+                self.event_bus.publish(Event::CompressionFinished {
+                    session_id: session_id.to_string(),
+                    original_tokens: result.stats.original_tokens,
+                    compressed_tokens: result.stats.compressed_tokens,
+                    compression_ratio: result.stats.compression_ratio,
+                    did_compress,
+                });
                 chat_messages = result.chat_messages;
             }
-
             let mut text_buffer = String::new();
             let mut reasoning_buffer = String::new();
             let mut tool_calls: Vec<PendingToolCall> = Vec::new();
