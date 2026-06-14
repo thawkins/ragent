@@ -5,6 +5,8 @@
 //! and output validation so future call sites do not interact with the raw
 //! embedded runtime directly.
 
+mod foundry_executor;
+
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -461,21 +463,36 @@ impl InternalLlmService {
 
     /// Build a service from config when the subsystem is enabled.
     ///
+    /// When `config.backend` is `"candle"` (or `"embedded"`), the service uses
+    /// the local Candle-based [`EmbeddedRuntimeExecutor`].  When the backend
+    /// is `"foundry"` or `"foundry_local"`, the service routes requests
+    /// through Microsoft Foundry Local via [`FoundryLocalExecutor`].
+    ///
     /// # Errors
     ///
-    /// Returns an error if the embedded runtime cannot be initialised.
+    /// Returns an error if the configured runtime cannot be initialised.
     pub fn from_config(config: InternalLlmConfig) -> anyhow::Result<Option<Self>> {
         if !config.enabled {
             return Ok(None);
         }
 
-        let runtime = EmbeddedRuntime::from_config(config.clone())?.ok_or_else(|| {
-            anyhow::anyhow!("internal LLM config was enabled but no runtime was created")
-        })?;
-        let executor = Arc::new(EmbeddedRuntimeExecutor::new(
-            Arc::new(runtime),
-            config.max_parallel_requests,
-        ));
+        let backend = config.backend.to_lowercase();
+        let executor: Arc<dyn InternalLlmExecutor> = if backend == "foundry"
+            || backend == "foundry_local"
+        {
+            let auto_start = true; // Match the default Foundry Local provider behaviour.
+            Arc::new(foundry_executor::FoundryLocalExecutor::new(auto_start))
+        } else {
+            // Default: candle / embedded backend.
+            let runtime = EmbeddedRuntime::from_config(config.clone())?.ok_or_else(|| {
+                anyhow::anyhow!("internal LLM config was enabled but no runtime was created")
+            })?;
+            Arc::new(EmbeddedRuntimeExecutor::new(
+                Arc::new(runtime),
+                config.max_parallel_requests,
+            ))
+        };
+
         Ok(Some(Self::with_executor(config, executor)))
     }
 

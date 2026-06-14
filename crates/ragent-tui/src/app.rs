@@ -797,24 +797,15 @@ impl App {
             ),
         ];
 
-        // Indicate which backend features are compiled in.
-        #[allow(unexpected_cfgs)]
-        let litertlm_compiled = cfg!(feature = "litertlm");
-        let candle_compiled = cfg!(feature = "embedded-llm");
-        let feature_info = match (litertlm_compiled, candle_compiled) {
-            (true, true) => "litertlm ✅ (default), candle ✅ (opt-in)".to_string(),
-            (true, false) => "litertlm ✅ (default)".to_string(),
-            (false, true) => "candle ✅ (default)".to_string(),
-            #[allow(unexpected_cfgs)]
-            (false, false) => {
-                if cfg!(feature = "litertlm") {
-                    "litertlm ✅ (default)".to_string()
-                } else {
-                    "candle ✅ (default)".to_string()
-                }
-            }
-        };
-        rows.push(format!("| compiled backends | {} |", feature_info));
+                  // Indicate which backend features are compiled in.
+                  let candle_compiled = cfg!(feature = "embedded-llm");
+                  let foundry_available = ragent_core::provider::foundry_local_provider::is_foundry_local_available();
+                  let feature_info = match (foundry_available, candle_compiled) {
+                      (true, true) => "foundry ✅, candle ✅".to_string(),
+                      (true, false) => "foundry ✅".to_string(),
+                      (false, true) => "candle ✅".to_string(),
+                      (false, false) => "none ⚠️ (install Foundry Local or rebuild with --features embedded-llm)".to_string(),
+                  };        rows.push(format!("| compiled backends | {} |", feature_info));
 
         rows.push(format!(
             "| session title | {} |",
@@ -3009,17 +3000,18 @@ impl App {
                 "codeindex".to_string(),
                 "help".to_string(),
             ],
-            "internal-llm" => vec![
-                "show".to_string(),
-                "on".to_string(),
-                "off".to_string(),
-                "help".to_string(),
-                "chat".to_string(),
-                "sessiontitle".to_string(),
-                "promptcontext".to_string(),
-                "memoryextraction".to_string(),
-            ],
-            "theme" => {
+                          "internal-llm" => vec![
+                              "show".to_string(),
+                              "on".to_string(),
+                              "off".to_string(),
+                              "help".to_string(),
+                              "chat".to_string(),
+                              "foundry".to_string(),
+                              "embedded".to_string(),
+                              "sessiontitle".to_string(),
+                              "promptcontext".to_string(),
+                              "memoryextraction".to_string(),
+                          ],            "theme" => {
                 vec![
                     "toggle".to_string(),
                     "light".to_string(),
@@ -3082,11 +3074,10 @@ impl App {
             "tools" => Some(
                 "[show|help|office|github|gitlab|teams|agents|plan|codeindex] [on|off]".to_string(),
             ),
-            "internal-llm" => Some(
-                "[show|help|on|off|chat|sessiontitle|promptcontext|memoryextraction] [on|off]"
-                    .to_string(),
-            ),
-            "model" => Some("[show]".to_string()),
+                          "internal-llm" => Some(
+                              "[show|help|on|off|chat|foundry|embedded|sessiontitle|promptcontext|memoryextraction] [on|off]"
+                                  .to_string(),
+                          ),            "model" => Some("[show]".to_string()),
             "spec" => Some("[create|list|search|validate|status|task|help]".to_string()),
             "router" => {
                 Some("[on|off|status|tiers|weights|boundaries|test|stats|reload|help]".to_string())
@@ -6469,39 +6460,30 @@ Usage: /provider [show]
                         self.append_assistant_text(&self.render_internal_llm_status());
                         self.status = "internal-llm".to_string();
                     }
-                    ["help"] | ["usage"] => {
-                        self.append_assistant_text(
-                                                  "From: /internal-llm\n\
-                                                \n\
-                                                **Usage:**\n\
-                                                `/internal-llm show` — Display current status and configuration\n\
-                                                `/internal-llm on|off` — Enable or disable the internal LLM\n\
-                                                `/internal-llm chat` — Open an interactive chat panel\n\
-                                                `/internal-llm sessiontitle on|off` — Toggle session title generation\n\
-                                                `/internal-llm promptcontext on|off` — Toggle prompt/context compaction\n\
-                                                `/internal-llm memoryextraction on|off` — Toggle memory extraction\n\
-                                                \n\
-                                                **Backends:**\n\
-                                                - `litertlm` — Google LiteRT-LM on-device inference (CPU/GPU/NPU). Enabled by default.\n\
-                                                - `candle` — Pure-Rust GGUF inference (Candle). Requires `--features embedded-llm`.\n\
-                                                \n\
-                                                **LiteRT-LM Setup:**\n\
-                                                No extra build flags required — `litertlm` is included by default.\n\
-                                                1. Convert a GGUF/SafeTensors model to `.litertlm` format:\n\
-                                                   `litertlm convert --input model.gguf --output model.litertlm`\n\
-                                                2. Place the `.litertlm` file and `tokenizer.json` in\n\
-                                                   `~/.local/share/ragent/embedded/<model_id>/`\n\
-                                                3. Set `internal_llm.backend` to `\"litertlm\"` and `internal_llm.model_id`\n\
-                                                   to the model directory name (e.g. `gemma-3-1b-it-litertlm`).\n\
-                                                \n\
-                                                **Accelerator:**\n\
-                                                Set `internal_llm.accelerator` to `\"cpu\"` (default), `\"gpu\"`, or `\"npu\"`.\n\
-                                                LiteRT-LM manages its own thread pool; the `threads` setting is ignored when\n\
-                                                using the `litertlm` backend.",
-                                              );
-                        self.status = "internal-llm help".to_string();
-                    }
-                    ["chat"] => {
+                                          ["help"] | ["usage"] => {
+                                              self.append_assistant_text(
+                                                                        "From: /internal-llm\n\
+                                                                      \n\
+                                                                      **Usage:**\n\
+                                                                      `/internal-llm show` — Display current status and configuration\n\
+                                                                      `/internal-llm on|off` — Enable or disable the internal LLM\n\
+                                                                      `/internal-llm chat` — Open an interactive chat panel\n\
+                                                                      `/internal-llm foundry` — Switch to Microsoft Foundry Local backend\n\
+                                                                      `/internal-llm embedded` — Switch to Candle embedded backend\n\
+                                                                      `/internal-llm sessiontitle on|off` — Toggle session title generation\n\
+                                                                      `/internal-llm promptcontext on|off` — Toggle prompt/context compaction\n\
+                                                                      `/internal-llm memoryextraction on|off` — Toggle memory extraction\n\
+                                                                      \n\
+                                                                      **Backends:**\n\
+                                                                      - `foundry` — Microsoft Foundry Local (OpenAI-compatible endpoint).\n\
+                                                                        Auto-discovers the local service URL and routes requests via HTTP.\n\
+                                                                      - `candle` — Pure-Rust GGUF inference (Candle). Requires `--features embedded-llm`.\n\
+                                                                      \n\
+                                                                      **Accelerator:**\n\
+                                                                      Set `internal_llm.accelerator` to `\"cpu\"` (default), `\"gpu\"`, or `\"npu\"`.",
+                                                                    );
+                                              self.status = "internal-llm help".to_string();
+                                          }                    ["chat"] => {
                         if !self.internal_llm_config.enabled {
                             self.append_assistant_text(
                                 "From: /internal-llm\n⚠ Enable the internal LLM before opening the chat panel.",
@@ -6526,34 +6508,89 @@ Usage: /provider [show]
                             self.status = "internal-llm chat".to_string();
                         }
                     }
-                    ["on"] | ["enable"] | ["off"] | ["disable"] => {
-                        let enabled = matches!(parts[0], "on" | "enable");
-                        let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
-                        cfg.internal_llm.enabled = enabled;
-                        self.sync_internal_llm_from_config(&cfg);
-                        match cfg.save_to_source() {
-                            Ok(()) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n✅ Internal LLM is now **{}**.",
-                                    if enabled { "on" } else { "off" }
-                                ));
-                                self.status =
-                                    format!("internal-llm: {}", if enabled { "on" } else { "off" });
-                            }
-                            Err(error) => {
-                                self.append_assistant_text(&format!(
-                                    "From: /internal-llm\n⚠ Internal LLM changed to **{}**, but saving config failed: {}",
-                                    if enabled { "on" } else { "off" },
-                                    error
-                                ));
-                                self.status = format!(
-                                    "internal-llm: {} (unsaved)",
-                                    if enabled { "on" } else { "off" }
-                                );
-                            }
-                        }
-                    }
-                    ["sessiontitle"] | ["promptcontext"] | ["memoryextraction"] => {
+                                          ["on"] | ["enable"] | ["off"] | ["disable"] => {
+                                              let enabled = matches!(parts[0], "on" | "enable");
+                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                                              cfg.internal_llm.enabled = enabled;
+                                              self.sync_internal_llm_from_config(&cfg);
+                                              match cfg.save_to_source() {
+                                                  Ok(()) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n✅ Internal LLM is now **{}**.",
+                                                          if enabled { "on" } else { "off" }
+                                                      ));
+                                                      self.status =
+                                                          format!("internal-llm: {}", if enabled { "on" } else { "off" });
+                                                  }
+                                                  Err(error) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n⚠ Internal LLM changed to **{}**, but saving config failed: {}",
+                                                          if enabled { "on" } else { "off" },
+                                                          error
+                                                      ));
+                                                      self.status = format!(
+                                                          "internal-llm: {} (unsaved)",
+                                                          if enabled { "on" } else { "off" }
+                                                      );
+                                                  }
+                                              }
+                                          }
+                                          ["foundry"] | ["foundry_local"] => {
+                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                                              cfg.internal_llm.backend = "foundry".to_string();
+                                              // Set a Foundry Local appropriate default model if the
+                                              // current model_id looks like a candle-embedded model.
+                                              let current = &cfg.internal_llm.model_id;
+                                              let foundry_default = "phi-4";
+                                              if current.contains("smollm") || current.contains("qwen") {
+                                                  cfg.internal_llm.model_id = foundry_default.to_string();
+                                              }
+                                              self.sync_internal_llm_from_config(&cfg);
+                                              match cfg.save_to_source() {
+                                                  Ok(()) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n✅ Backend switched to **foundry** (model: `{}`).",
+                                                          cfg.internal_llm.model_id,
+                                                      ));
+                                                      self.status = "internal-llm: foundry".to_string();
+                                                  }
+                                                  Err(error) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n⚠ Backend switched to **foundry**, but saving config failed: {}",
+                                                          error
+                                                      ));
+                                                      self.status = "internal-llm: foundry (unsaved)".to_string();
+                                                  }
+                                              }
+                                          }
+                                          ["embedded"] | ["candle"] => {
+                                              let mut cfg = ragent_core::config::Config::load().unwrap_or_default();
+                                              cfg.internal_llm.backend = "candle".to_string();
+                                              // Set a candle-appropriate default model if the current
+                                              // model_id looks like a Foundry Local model.
+                                              let current = &cfg.internal_llm.model_id;
+                                              let candle_default = "smollm2-360m-instruct-q4";
+                                              if !current.contains("smollm") && !current.contains("qwen") {
+                                                  cfg.internal_llm.model_id = candle_default.to_string();
+                                              }
+                                              self.sync_internal_llm_from_config(&cfg);
+                                              match cfg.save_to_source() {
+                                                  Ok(()) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n✅ Backend switched to **candle** (model: `{}`).",
+                                                          cfg.internal_llm.model_id,
+                                                      ));
+                                                      self.status = "internal-llm: embedded".to_string();
+                                                  }
+                                                  Err(error) => {
+                                                      self.append_assistant_text(&format!(
+                                                          "From: /internal-llm\n⚠ Backend switched to **candle**, but saving config failed: {}",
+                                                          error
+                                                      ));
+                                                      self.status = "internal-llm: embedded (unsaved)".to_string();
+                                                  }
+                                              }
+                                          }                    ["sessiontitle"] | ["promptcontext"] | ["memoryextraction"] => {
                         let (label, enabled) = match parts[0] {
                             "sessiontitle" => (
                                 "session title",
@@ -6603,7 +6640,7 @@ Usage: /provider [show]
                             }
                             _ => {
                                 self.append_assistant_text(
-                                    "From: /internal-llm\n⚠ Invalid switch. Use `sessiontitle`, `promptcontext`, or `memoryextraction`.",
+                                    "From: /internal-llm\n⚠ Invalid switch. Use `sessiontitle`, `promptcontext`, `memoryextraction`, `foundry`, or `embedded`.",
                                 );
                                 self.status = "internal-llm error".to_string();
                                 return;
@@ -6636,13 +6673,12 @@ Usage: /provider [show]
                             }
                         }
                     }
-                    _ => {
-                        self.append_assistant_text(
-                            "From: /internal-llm\n⚠ Usage: `/internal-llm show|help|on|off|chat|sessiontitle on|off|promptcontext on|off|memoryextraction on|off`.",
-                        );
-                        self.status = "internal-llm error".to_string();
-                    }
-                }
+                                          _ => {
+                                              self.append_assistant_text(
+                                                  "From: /internal-llm\n⚠ Usage: `/internal-llm show|help|on|off|chat|foundry|embedded|sessiontitle on|off|promptcontext on|off|memoryextraction on|off`.",
+                                              );
+                                              self.status = "internal-llm error".to_string();
+                                          }                }
             }
             "skills" => {
                 let working_dir = std::env::current_dir().unwrap_or_default();

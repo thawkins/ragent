@@ -703,10 +703,9 @@ pub const SLASH_COMMANDS: &[SlashCommandDef] = &[
         trigger: "init",
         description: "Analyse the project and write a summary to .ragent/memory/PROJECT_ANALYSIS.md",
     },
-    SlashCommandDef {
-        trigger: "internal-llm",
-        description: "Manage the embedded internal LLM: /internal-llm show|on|off|chat|sessiontitle|promptcontext|memoryextraction",
-    },
+          SlashCommandDef {
+              trigger: "internal-llm",
+              description: "Manage the embedded internal LLM: /internal-llm show|on|off|chat|foundry|embedded|sessiontitle|promptcontext|memoryextraction",    },
     SlashCommandDef {
         trigger: "codeindex",
         description: "Manage codebase index: /codeindex on|off|show|lang|reindex|help",
